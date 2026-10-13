@@ -1,0 +1,13 @@
+package main
+
+import "fmt"
+
+fn double(string s) int {
+    int n = try s.toInt()
+    return n * 2
+}
+
+fn main([]string args) error {
+    fmt.println(double("21").string())
+    return null
+}

@@ -1,0 +1,10 @@
+package main
+
+import "fmt"
+import "fs"
+
+fn main([]string args) error {
+    fs.write("notes.txt", "hello")
+    fmt.println("saved")
+    return null
+}

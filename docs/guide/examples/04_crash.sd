@@ -1,0 +1,11 @@
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    []int scores = []int{90, 85, 70}
+    defer fmt.println("deferred calls still run")
+    fmt.println("third: " + scores[2].string())
+    fmt.println("fourth: " + scores[3].string())
+    return null
+}

@@ -1,0 +1,72 @@
+package main
+
+import "fmt"
+
+type Shape enum {
+    Circle(float radius)
+    Rect(float w, float h)
+    Dot
+}
+
+fn area(Shape s) float {
+    switch (s) {
+    case Shape.Circle(float r):
+        return 3.0 * r * r
+    case Shape.Rect(float w, float h):
+        return w * h
+    case Shape.Dot:
+        return 0.0
+    }
+}
+
+fn (Shape s) name() string {
+    switch (s) {
+    case Shape.Circle(float r):
+        return "circle of radius " + r.string()
+    case Shape.Rect(float w, float h):
+        return w.string() + " by " + h.string() + " rectangle"
+    case Shape.Dot:
+        return "dot"
+    }
+}
+
+// An enum is a good way to return one of several outcomes.
+type Lookup enum {
+    Found(int value)
+    Missing
+    Ambiguous([]string candidates)
+}
+
+fn find(string key) Lookup {
+    switch (key) {
+    case "one":
+        return Lookup.Found(1)
+    case "t":
+        return Lookup.Ambiguous([]string{"two", "three"})
+    default:
+        return Lookup.Missing
+    }
+}
+
+fn main([]string args) error {
+    []Shape shapes = []Shape{Shape.Circle(1.0), Shape.Rect(2.0, 3.5), Shape.Dot}
+    for (int i = 0; i < shapes.len(); i++) {
+        fmt.println(shapes[i].name() + ": " + area(shapes[i]).string())
+    }
+
+    []string keys = []string{"one", "t", "zzz"}
+    for (int i = 0; i < keys.len(); i++) {
+        switch (find(keys[i])) {
+        case Lookup.Found(int v):
+            fmt.println(keys[i] + " = " + v.string())
+        case Lookup.Missing:
+            fmt.println(keys[i] + " is missing")
+        case Lookup.Ambiguous([]string c):
+            fmt.println(keys[i] + " could be " + c.join(" or "))
+        }
+    }
+
+    // Enum values compare by case and data.
+    fmt.println((Shape.Dot == Shape.Dot).string() + " " + (Shape.Circle(1.0) == Shape.Circle(2.0)).string())
+    return null
+}

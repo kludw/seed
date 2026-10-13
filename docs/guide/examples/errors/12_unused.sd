@@ -1,0 +1,10 @@
+package main
+
+import "fmt"
+import "os"
+
+fn main([]string args) error {
+    int count = 3
+    fmt.println("hello")
+    return null
+}

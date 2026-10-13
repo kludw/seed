@@ -1,0 +1,4 @@
+04_unchecked_value.sd:7:17: error: n is read before err is checked; when err is not null, n is null
+    7 |     fmt.println(n.string())
+      |                 ^
+    hint: check err != null first (and return or handle it), or use try

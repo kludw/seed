@@ -1,0 +1,59 @@
+package main
+
+import "fmt"
+
+type Point struct {
+    int x
+    int y
+}
+
+type Player struct {
+    string name
+    Point pos
+    []string items
+}
+
+// A plain method reads its receiver.
+fn (Point p) string() string {
+    return "(" + p.x.string() + ", " + p.y.string() + ")"
+}
+
+// A plain method can return a changed copy.
+fn (Point p) moved(int dx, int dy) Point {
+    return Point{x: p.x + dx, y: p.y + dy}
+}
+
+// A mut method changes the variable it is called on.
+fn (Point p) mut move(int dx, int dy) {
+    p.x = p.x + dx
+    p.y = p.y + dy
+}
+
+fn (Player p) mut pickUp(string item) {
+    p.items.push(item)
+}
+
+fn main([]string args) error {
+    Point a = Point{x: 1, y: 2}
+    Point b = a.moved(10, 0)
+    fmt.println(a.string() + " " + b.string())
+
+    a.move(1, 1)
+    fmt.println(a.string())
+
+    Player hero = Player{name: "Ada", pos: a, items: []string{}}
+    hero.pickUp("lamp")
+    hero.pos.move(0, 5)
+    hero.pos.x = 0
+    fmt.println(hero.name + " at " + hero.pos.string() + " with " + hero.items.join(", "))
+
+    // Mut methods work on any part of a local variable.
+    []Player team = []Player{hero, Player{name: "Bo", pos: b, items: []string{}}}
+    team[1].pickUp("rope")
+    team[1].pos.move(-1, -1)
+    fmt.println(team[1].name + " at " + team[1].pos.string() + " with " + team[1].items.join(", "))
+
+    // Structs compare by contents.
+    fmt.println((Point{x: 1, y: 1} == Point{x: 1, y: 1}).string())
+    return null
+}

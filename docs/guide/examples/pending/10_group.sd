@@ -1,0 +1,34 @@
+// Sums the halves of a list in two goroutines.
+package main
+
+import "fmt"
+
+fn sum([]int xs, chan int out) error {
+    int total = 0
+    for (int i = 0; i < xs.len(); i++) {
+        total = total + xs[i]
+    }
+    out.send(total)
+    return null
+}
+
+fn main([]string args) error {
+    []int numbers = []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
+    chan int partials = chan int(2)
+    error err = group {
+        spawn sum(numbers.slice(0, 5), partials)
+        spawn sum(numbers.slice(5, 10), partials)
+    }
+    if (err != null) {
+        return err
+    }
+    int total = 0
+    for (int i = 0; i < 2; i++) {
+        int? part = partials.receive()
+        if (part != null) {
+            total = total + part
+        }
+    }
+    fmt.println("total: " + total.string())
+    return null
+}

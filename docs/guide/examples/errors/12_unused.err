@@ -1,0 +1,8 @@
+12_unused.sd:4:1: error: "os" is imported but not used
+    4 | import "os"
+      | ^
+    hint: remove the import
+12_unused.sd:7:9: error: count is declared but never used
+    7 |     int count = 3
+      |         ^
+    hint: remove it, or use _ where a value must be discarded

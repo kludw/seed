@@ -1,0 +1,51 @@
+package main
+
+import "errors"
+import "fmt"
+
+fn parsePort(string text) (int, error) {
+    int n = try text.toInt()
+    if (n < 1 || n > 65535) {
+        return null, errors.new("port out of range: " + text)
+    }
+    return n, null
+}
+
+// The same function written without try.
+fn parsePortLong(string text) (int, error) {
+    int n, error err = text.toInt()
+    if (err != null) {
+        return null, err
+    }
+    if (n < 1 || n > 65535) {
+        return null, errors.new("port out of range: " + text)
+    }
+    return n, null
+}
+
+fn parseAll([]string items) ([]int, error) {
+    []int ports = []int{}
+    for (int i = 0; i < items.len(); i++) {
+        ports.push(try parsePort(items[i]))
+    }
+    return ports, null
+}
+
+fn report([]string items) {
+    []int ports, error err = parseAll(items)
+    if (err != null) {
+        fmt.println("error: " + err.message())
+        return
+    }
+    fmt.println("ok: " + ports.len().string() + " ports")
+}
+
+fn main([]string args) error {
+    report([]string{"80", "443"})
+    report([]string{"80", "99999"})
+    report([]string{"80", "http"})
+
+    int port = try parsePortLong("8080")
+    fmt.println(port.string())
+    return null
+}

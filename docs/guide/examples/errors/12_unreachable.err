@@ -1,0 +1,4 @@
+12_unreachable.sd:11:5: error: unreachable code
+   11 |     fmt.println("done")
+      |     ^
+    hint: the statement before it always returns, breaks, continues or exits

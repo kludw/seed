@@ -1,0 +1,12 @@
+package main
+
+import "fmt"
+
+fn shout(string? name) string {
+    return name.toUpper()
+}
+
+fn main([]string args) error {
+    fmt.println(shout("ann"))
+    return null
+}

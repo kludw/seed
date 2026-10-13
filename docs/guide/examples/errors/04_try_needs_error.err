@@ -1,0 +1,4 @@
+04_try_needs_error.sd:6:13: error: try can only be used in a function whose last result is error
+    6 |     int n = try s.toInt()
+      |             ^
+    hint: handle the error here instead: T v, error err = ...

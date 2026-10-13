@@ -1,0 +1,17 @@
+package main
+
+import "fmt"
+
+fn sign(int n) string {
+    if (n < 0) {
+        return "negative"
+    } else {
+        return "not negative"
+    }
+    fmt.println("done")
+}
+
+fn main([]string args) error {
+    fmt.println(sign(3))
+    return null
+}

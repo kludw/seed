@@ -1,0 +1,61 @@
+// Package cart keeps the items of a shopping cart and prices them.
+package cart
+
+import "errors"
+
+pub type Item struct {
+    pub string name
+    pub int cents
+    pub int quantity
+}
+
+// Fields without pub can only be used inside package cart, so other
+// packages must call newCart() instead of writing a Cart{...} literal.
+pub type Cart struct {
+    []Item items
+    int discountPercent
+}
+
+pub fn newCart() Cart {
+    return Cart{items: []Item{}, discountPercent: 0}
+}
+
+pub fn (Cart c) mut add(Item item) error {
+    if (item.quantity < 1) {
+        return errors.new("cart.add: " + item.name + ": quantity must be at least 1")
+    }
+    c.items.push(item)
+    return null
+}
+
+pub fn (Cart c) mut setDiscount(int percent) {
+    c.discountPercent = clamp(percent, 0, 100)
+}
+
+pub fn (Cart c) total() int {
+    int sum = subtotal(c.items)
+    return sum - sum * c.discountPercent / 100
+}
+
+pub fn (Cart c) count() int {
+    return c.items.len()
+}
+
+// Private helpers: not visible outside package cart.
+fn subtotal([]Item items) int {
+    int sum = 0
+    for (int i = 0; i < items.len(); i++) {
+        sum = sum + items[i].cents * items[i].quantity
+    }
+    return sum
+}
+
+fn clamp(int x, int lo, int hi) int {
+    if (x < lo) {
+        return lo
+    }
+    if (x > hi) {
+        return hi
+    }
+    return x
+}

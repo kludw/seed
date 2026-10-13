@@ -1,0 +1,32 @@
+// When one goroutine fails, the group stops the others and returns the error.
+package main
+
+import "errors"
+import "fmt"
+
+fn listen(chan string messages) error {
+    defer fmt.println("listener: cleaning up")
+    for (;;) {
+        string? m = messages.receive() // stopped here
+        if (m == null) {
+            return null
+        }
+    }
+}
+
+fn check() error {
+    return errors.new("checker: disk is full")
+}
+
+fn main([]string args) error {
+    chan string messages = chan string(0)
+    error err = group {
+        spawn listen(messages)
+        spawn check()
+    }
+    if (err != null) {
+        fmt.println("group failed: " + err.message())
+    }
+    fmt.println("main carries on")
+    return null
+}

@@ -1,0 +1,9 @@
+package main
+import "fmt"
+fn main([]string args) error {
+  int x=1+2
+    if (x>2) { fmt.println("big") } else { fmt.println("small") }
+  []int xs = []int{1, 2,
+     3}
+  fmt.println(xs.len().string())
+  return null }

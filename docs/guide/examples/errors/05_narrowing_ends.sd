@@ -1,0 +1,13 @@
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    string? name = "ann"
+    if (name != null) {
+        fmt.println(name.toUpper())
+        name = null
+        fmt.println(name.toUpper())
+    }
+    return null
+}

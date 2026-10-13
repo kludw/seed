@@ -1,0 +1,10 @@
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    map[string]int stock = map[string]int{"apples": 3}
+    int apples = stock["apples"]
+    fmt.println(apples.string())
+    return null
+}

@@ -1,0 +1,2 @@
+messy.sd:2: not formatted
+    hint: run: seed fmt messy.sd

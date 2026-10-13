@@ -1,0 +1,13 @@
+package main
+
+import "fmt"
+
+fn addDefaults([]string tags) []string {
+    tags.push("new")
+    return tags
+}
+
+fn main([]string args) error {
+    fmt.println(addDefaults([]string{"red"}).join(", "))
+    return null
+}

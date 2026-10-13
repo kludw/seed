@@ -1,0 +1,73 @@
+// Several borrowers and books that refer to each other. Instead of pointers,
+// one Library owns everything and the parts refer to each other by index.
+package main
+
+import "errors"
+import "fmt"
+
+type Book struct {
+    string title
+    int? borrower // an index into Library.members
+}
+
+type Member struct {
+    string name
+    []int books // indexes into Library.books
+}
+
+type Library struct {
+    []Book books
+    []Member members
+}
+
+fn newLibrary() Library {
+    return Library{books: []Book{}, members: []Member{}}
+}
+
+fn (Library lib) mut addBook(string title) int {
+    lib.books.push(Book{title: title, borrower: null})
+    return lib.books.len() - 1
+}
+
+fn (Library lib) mut join(string name) int {
+    lib.members.push(Member{name: name, books: []int{}})
+    return lib.members.len() - 1
+}
+
+fn (Library lib) mut lend(int book, int member) error {
+    int? holder = lib.books[book].borrower
+    if (holder != null) {
+        return errors.new(lib.books[book].title + " is already lent to " + lib.members[holder].name)
+    }
+    lib.books[book].borrower = member
+    lib.members[member].books.push(book)
+    return null
+}
+
+fn (Library lib) report() {
+    for (int i = 0; i < lib.members.len(); i++) {
+        Member m = lib.members[i]
+        string line = m.name + " has " + m.books.len().string() + " book(s)"
+        for (int j = 0; j < m.books.len(); j++) {
+            line = line + ", " + lib.books[m.books[j]].title
+        }
+        fmt.println(line)
+    }
+}
+
+fn main([]string args) error {
+    Library lib = newLibrary()
+    int dune = lib.addBook("Dune")
+    int emma = lib.addBook("Emma")
+    int ann = lib.join("Ann")
+    int bob = lib.join("Bob")
+
+    try lib.lend(dune, ann)
+    try lib.lend(emma, ann)
+    error err = lib.lend(dune, bob)
+    if (err != null) {
+        fmt.println("cannot lend: " + err.message())
+    }
+    lib.report()
+    return null
+}

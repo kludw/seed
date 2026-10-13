@@ -1,0 +1,26 @@
+// select waits on several channel operations at once, sends included.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    chan int jobs = chan int(3)
+    chan string replies = chan string(2)
+    replies.send("a")
+    replies.send("b")
+    int sent = 0
+    int received = 0
+    for (int next = 1; sent < 3 || received < 2; ) {
+        select {
+        case jobs.send(next):
+            sent++
+            next++
+        case string? r = replies.receive():
+            if (r != null) {
+                received++
+            }
+        }
+    }
+    fmt.println("sent " + sent.string() + " jobs, received " + received.string() + " replies")
+    return null
+}

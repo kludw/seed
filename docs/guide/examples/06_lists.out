@@ -1,0 +1,14 @@
+push: [5, 3, 8, 1]
+insert: [9, 5, 3, 8, 1]
+remove: [9, 3, 8, 1]
+set: [7, 3, 8, 1]
+popped 1
+pop: [7, 3, 8]
+len 3, contains 8: true
+8 is at 2
+index of 42 is null: true
+slice(1, 3): [3, 8]
+reverse: [8, 3, 7]
+sort: [3, 7, 8]
+apple fig pear
+pop on empty is null: true

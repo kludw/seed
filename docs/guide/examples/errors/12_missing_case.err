@@ -1,0 +1,4 @@
+12_missing_case.sd:12:5: error: switch over Light does not handle case Light.Yellow
+   12 |     switch (l) {
+      |     ^
+    hint: add a case for it; a switch over an enum must list every case

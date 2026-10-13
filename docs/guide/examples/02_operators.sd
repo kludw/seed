@@ -1,0 +1,30 @@
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    // Integer division truncates toward zero.
+    fmt.println((7 / 2).string() + " " + (-7 / 2).string() + " " + (7 % 3).string())
+
+    // int never overflows: it grows as needed.
+    int big = 1
+    for (int i = 0; i < 100; i++) {
+        big = big * 2
+    }
+    fmt.println(big.string())
+
+    // No implicit conversions: convert explicitly.
+    int n = 3
+    float half = float(n) / 2.0
+    fmt.println(half.string() + " " + int(2.9).string())
+
+    // Bitwise operators work on int and byte.
+    fmt.println((0xf0 | 0x0f).string() + " " + (1 << 10).string())
+
+    // Strings compare byte by byte.
+    fmt.println(("apple" < "banana").string() + " " + ("a" + "b" == "ab").string())
+
+    bool ok = n > 0 && !(n == 5)
+    fmt.println(ok.string())
+    return null
+}

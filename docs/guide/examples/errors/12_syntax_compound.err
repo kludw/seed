@@ -1,0 +1,4 @@
+12_syntax_compound.sd:7:7: error: there is no compound assignment operator +=
+    7 |     n += 2
+      |       ^
+    hint: write it out: x = x + y

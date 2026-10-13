@@ -1,0 +1,88 @@
+package main
+
+import "fmt"
+
+type Person struct {
+    string name
+    int age
+}
+
+fn byAge(Person a, Person b) bool {
+    return a.age < b.age
+}
+
+fn byName(Person a, Person b) bool {
+    return a.name < b.name
+}
+
+fn names([]Person people) string {
+    []string out = []string{}
+    for (int i = 0; i < people.len(); i++) {
+        out.push(people[i].name)
+    }
+    return out.join(" ")
+}
+
+// A function value is passed like any other value.
+fn applyAll([]int xs, fn(int) int f) []int {
+    []int out = []int{}
+    for (int i = 0; i < xs.len(); i++) {
+        out.push(f(xs[i]))
+    }
+    return out
+}
+
+fn square(int x) int {
+    return x * x
+}
+
+fn negate(int x) int {
+    return -x
+}
+
+// A struct field can hold a function, and is called directly.
+type Command struct {
+    string name
+    fn(int, int) int run
+}
+
+fn add(int a, int b) int {
+    return a + b
+}
+
+fn sub(int a, int b) int {
+    return a - b
+}
+
+fn main([]string args) error {
+    []Person people = []Person{
+        Person{name: "Cy", age: 25},
+        Person{name: "Ann", age: 29},
+        Person{name: "Bo", age: 35},
+    }
+    people.sortBy(byAge)
+    fmt.println(names(people))
+    people.sortBy(byName)
+    fmt.println(names(people))
+
+    []int squares = applyAll([]int{1, 2, 3}, square)
+    []int negated = applyAll(squares, negate)
+    fmt.println(squares[2].string() + " " + negated[2].string())
+
+    []Command commands = []Command{Command{name: "add", run: add}, Command{name: "sub", run: sub}}
+    for (int i = 0; i < commands.len(); i++) {
+        fmt.println(commands[i].name + " 7 2 = " + commands[i].run(7, 2).string())
+    }
+
+    // A nullable function type needs parentheses.
+    (fn(int) int)? hook = null
+    if (args.len() > 5) {
+        hook = square
+    }
+    if (hook != null) {
+        fmt.println(hook(3).string())
+    } else {
+        fmt.println("no hook")
+    }
+    return null
+}

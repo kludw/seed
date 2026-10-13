@@ -1,0 +1,13 @@
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    int total = 0
+    for (int i = 0; i < 3; i++) {
+        int total = i * 2
+        fmt.println(total.string())
+    }
+    fmt.println(total.string())
+    return null
+}

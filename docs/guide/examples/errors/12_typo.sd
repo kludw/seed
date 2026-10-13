@@ -1,0 +1,14 @@
+package main
+
+import "fmt"
+
+type User struct {
+    string name
+    int age
+}
+
+fn main([]string args) error {
+    User u = User{name: "Ann", age: 30}
+    fmt.println(u.nmae)
+    return null
+}
