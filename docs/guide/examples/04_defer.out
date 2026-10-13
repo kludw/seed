@@ -1,0 +1,9 @@
+start
+finished
+  undo second
+  undo first
+start
+failing early
+  undo second
+  undo first
+0 1

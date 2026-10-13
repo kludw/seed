@@ -1,0 +1,46 @@
+package main
+
+import "fmt"
+
+// xs is a read-only copy of the caller's list.
+fn withZero([]int xs) []int {
+    []int out = xs
+    out.push(0)
+    return out
+}
+
+fn main([]string args) error {
+    []int a = []int{1, 2, 3}
+    []int b = a
+    b.push(4)
+    b[0] = 100
+    fmt.println("a has " + a.len().string() + ", a[0] = " + a[0].string())
+    fmt.println("b has " + b.len().string() + ", b[0] = " + b[0].string())
+
+    []int c = withZero(a)
+    fmt.println("a has " + a.len().string() + ", c has " + c.len().string())
+
+    // Lists inside lists are values too.
+    [][]int grid = [][]int{[]int{0, 0}, []int{0, 0}}
+    []int row = grid[0]
+    row[1] = 5
+    fmt.println(grid[0][1].string() + " " + row[1].string())
+    grid[1][1] = 7
+    fmt.println(grid[1][1].string())
+
+    // To change a list stored in a map: take it out, change it, put it back.
+    map[string][]string groups = map[string][]string{"red": []string{"apple"}}
+    []string? reds = groups["red"]
+    if (reds != null) {
+        reds.push("cherry")
+        groups["red"] = reds
+    }
+    []string? after = groups["red"]
+    if (after != null) {
+        fmt.println(after.join(", "))
+    }
+
+    // Lists and maps compare by contents.
+    fmt.println(([]int{1, 2} == []int{1, 2}).string())
+    return null
+}

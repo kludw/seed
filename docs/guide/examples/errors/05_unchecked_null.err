@@ -1,0 +1,4 @@
+05_unchecked_null.sd:6:12: error: name is nullable (string?)
+    6 |     return name.toUpper()
+      |            ^
+    hint: check name != null before calling toUpper()

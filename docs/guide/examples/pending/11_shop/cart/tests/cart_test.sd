@@ -1,0 +1,31 @@
+// Tests belong to the package they test, so they can use private names.
+package cart
+
+test "total multiplies price by quantity" {
+    Cart c = newCart()
+    try c.add(Item{name: "pen", cents: 150, quantity: 2})
+    try c.add(Item{name: "pad", cents: 300, quantity: 1})
+    assert(c.total() == 600)
+}
+
+test "discount is applied and clamped" {
+    Cart c = newCart()
+    try c.add(Item{name: "pen", cents: 1000, quantity: 1})
+    c.setDiscount(25)
+    assert(c.total() == 750)
+    c.setDiscount(250)
+    assert(c.total() == 0)
+}
+
+test "zero quantity is rejected" {
+    Cart c = newCart()
+    error err = c.add(Item{name: "pen", cents: 150, quantity: 0})
+    assert(err != null)
+    assert(c.count() == 0)
+}
+
+test "clamp keeps values in range" {
+    assert(clamp(-5, 0, 10) == 0)
+    assert(clamp(5, 0, 10) == 5)
+    assert(clamp(50, 0, 10) == 10)
+}

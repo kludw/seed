@@ -1,0 +1,8 @@
+12_implements.sd:13:12: error: method Dog.name(bool) string does not match Named.name() string
+   13 | fn (Dog d) name(bool loud) string {
+      |            ^
+    hint: Dog declares implements Named, so the signatures must be the same
+12_implements.sd:21:15: error: cannot use the value (type Dog) as Named to initialize n: Dog does not declare that it implements Named
+   21 |     Named n = Dog{label: "rex"}
+      |               ^
+    hint: add  implements Named  to the declaration of Dog

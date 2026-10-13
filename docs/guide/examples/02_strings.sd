@@ -1,0 +1,37 @@
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    string s = "  Hello, Seed!  "
+    string t = s.trim()
+    fmt.println("[" + t + "]")
+    fmt.println(t.len().string() + " bytes")
+    fmt.println(t.toUpper() + " " + t.toLower())
+    fmt.println(t.slice(0, 5))
+    fmt.println(t.contains("Seed").string() + " " + t.startsWith("Hell").string())
+    fmt.println(t.replace("Seed", "world"))
+
+    int? comma = t.index(",")
+    if (comma != null) {
+        fmt.println("comma at " + comma.string())
+    }
+
+    []string parts = "a,b,c".split(",")
+    fmt.println(parts.join(" + "))
+
+    // s[i] is a byte; byte.string() gives its number.
+    fmt.println(t[0].string())
+    fmt.println(string([]byte{t[0], t[1]}))
+
+    // len() counts bytes, chars() splits into UTF-8 characters.
+    string word = "naïve"
+    fmt.println(word.len().string() + " bytes, " + word.chars().len().string() + " chars")
+
+    int n, error err = "123".toInt()
+    if (err != null) {
+        return err
+    }
+    fmt.println((n + 1).string())
+    return null
+}

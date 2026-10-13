@@ -1,0 +1,19 @@
+package main
+
+import "errors"
+import "fmt"
+
+fn checkAge(int age) error {
+    if (age < 0) {
+        return errors.new("age cannot be negative: " + age.string())
+    }
+    return null
+}
+
+fn main([]string args) error {
+    fmt.println("checking")
+    try checkAge(30)
+    try checkAge(-4)
+    fmt.println("all good")
+    return null
+}

@@ -1,0 +1,4 @@
+07_mut_on_param.sd:6:5: error: cannot call the mut method push() on tags: parameters are read-only
+    6 |     tags.push("new")
+      |     ^
+    hint: copy it into a local variable first, or make the method mut

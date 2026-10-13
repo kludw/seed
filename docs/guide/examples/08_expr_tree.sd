@@ -1,0 +1,58 @@
+// An expression tree as an enum whose cases hold other expressions.
+package main
+
+import "fmt"
+
+type Expr enum {
+    Num(int value)
+    Neg(Expr inner)
+    Add([]Expr terms)
+    Mul(Expr left, Expr right)
+}
+
+fn eval(Expr e) int {
+    switch (e) {
+    case Expr.Num(int value):
+        return value
+    case Expr.Neg(Expr inner):
+        return -eval(inner)
+    case Expr.Add([]Expr terms):
+        int sum = 0
+        for (int i = 0; i < terms.len(); i++) {
+            sum = sum + eval(terms[i])
+        }
+        return sum
+    case Expr.Mul(Expr left, Expr right):
+        return eval(left) * eval(right)
+    }
+}
+
+fn show(Expr e) string {
+    switch (e) {
+    case Expr.Num(int value):
+        return value.string()
+    case Expr.Neg(Expr inner):
+        return "-" + show(inner)
+    case Expr.Add([]Expr terms):
+        []string parts = []string{}
+        for (int i = 0; i < terms.len(); i++) {
+            parts.push(show(terms[i]))
+        }
+        return "(" + parts.join(" + ") + ")"
+    case Expr.Mul(Expr left, Expr right):
+        return show(left) + " * " + show(right)
+    }
+}
+
+// Rewrites a tree into a new one: values never change in place.
+fn double(Expr e) Expr {
+    return Expr.Mul(Expr.Num(2), e)
+}
+
+fn main([]string args) error {
+    Expr e = Expr.Add([]Expr{Expr.Num(1), Expr.Neg(Expr.Num(5)), Expr.Mul(Expr.Num(3), Expr.Num(4))})
+    fmt.println(show(e) + " = " + eval(e).string())
+    Expr d = double(e)
+    fmt.println(show(d) + " = " + eval(d).string())
+    return null
+}

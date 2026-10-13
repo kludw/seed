@@ -1,0 +1,8 @@
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    fmt.println("Hello, world!")
+    return null
+}

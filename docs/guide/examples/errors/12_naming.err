@@ -1,0 +1,4 @@
+12_naming.sd:5:11: error: the constant MAX_SIZE must be written in camelCase
+    5 | const int MAX_SIZE = 10
+      |           ^
+    hint: rename it to maxSize

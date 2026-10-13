@@ -1,0 +1,38 @@
+package main
+
+import "fmt"
+
+type Account struct {
+    string owner
+    int balance
+}
+
+fn (Account a) mut deposit(int amount) {
+    a.balance = a.balance + amount
+}
+
+// Parameters are read-only, so this returns the new value instead.
+fn withInterest(Account a, int percent) Account {
+    Account out = a
+    out.deposit(a.balance * percent / 100)
+    return out
+}
+
+fn main([]string args) error {
+    Account mine = Account{owner: "kam", balance: 100}
+    Account copy = mine
+    copy.deposit(50)
+    fmt.println(mine.balance.string() + " " + copy.balance.string())
+
+    mine = withInterest(mine, 10)
+    fmt.println(mine.balance.string())
+
+    []Account all = []Account{mine}
+    Account first = all[0]
+    first.deposit(1000)
+    fmt.println(all[0].balance.string() + " " + first.balance.string())
+
+    all[0].deposit(1)
+    fmt.println(all[0].balance.string())
+    return null
+}

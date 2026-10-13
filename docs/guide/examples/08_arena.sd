@@ -1,0 +1,55 @@
+// A tree stored in an arena: every node lives in one list, and nodes refer
+// to each other by index. A node can know its parent, and the tree can be
+// changed in place.
+package main
+
+import "fmt"
+
+type Node struct {
+    string name
+    int parent // -1 for the root
+    []int children
+}
+
+type Tree struct {
+    []Node nodes
+}
+
+fn newTree(string rootName) Tree {
+    return Tree{nodes: []Node{Node{name: rootName, parent: -1, children: []int{}}}}
+}
+
+fn (Tree t) mut add(int parent, string name) int {
+    t.nodes.push(Node{name: name, parent: parent, children: []int{}})
+    int id = t.nodes.len() - 1
+    t.nodes[parent].children.push(id)
+    return id
+}
+
+fn (Tree t) path(int id) string {
+    string p = t.nodes[id].name
+    for (int at = t.nodes[id].parent; at != -1; at = t.nodes[at].parent) {
+        p = t.nodes[at].name + "/" + p
+    }
+    return p
+}
+
+fn (Tree t) print(int id, string indent) {
+    fmt.println(indent + t.nodes[id].name)
+    []int kids = t.nodes[id].children
+    for (int i = 0; i < kids.len(); i++) {
+        t.print(kids[i], indent + "  ")
+    }
+}
+
+fn main([]string args) error {
+    Tree t = newTree("home")
+    int docs = t.add(0, "docs")
+    int pics = t.add(0, "pictures")
+    int notes = t.add(docs, "notes.txt")
+    _ = t.add(pics, "cat.png")
+    t.nodes[notes].name = "todo.txt"
+    t.print(0, "")
+    fmt.println(t.path(notes))
+    return null
+}

@@ -1,0 +1,62 @@
+package main
+
+import "errors"
+import "fmt"
+
+fn add(int a, int b) int {
+    return a + b
+}
+
+// Several results are listed in parentheses.
+fn minMax([]int xs) (int, int) {
+    int lo = xs[0]
+    int hi = xs[0]
+    for (int i = 1; i < xs.len(); i++) {
+        if (xs[i] < lo) {
+            lo = xs[i]
+        }
+        if (xs[i] > hi) {
+            hi = xs[i]
+        }
+    }
+    return lo, hi
+}
+
+// No variadic functions: take a list instead.
+fn sum([]int xs) int {
+    int total = 0
+    for (int i = 0; i < xs.len(); i++) {
+        total = total + xs[i]
+    }
+    return total
+}
+
+fn divide(int a, int b) (int, error) {
+    if (b == 0) {
+        return null, errors.new("divide by zero")
+    }
+    return a / b, null
+}
+
+fn main([]string args) error {
+    fmt.println(add(2, 3).string())
+
+    int lo, int hi = minMax([]int{4, 8, 1, 9})
+    fmt.println(lo.string() + ".." + hi.string())
+    fmt.println(sum([]int{1, 2, 3}).string())
+
+    int q, error err = divide(10, 2)
+    if (err != null) {
+        return err
+    }
+    fmt.println("10 / 2 = " + q.string())
+
+    // A name without a type in front is an existing variable.
+    q, err = divide(1, 0)
+    if (err != null) {
+        fmt.println("failed: " + err.message())
+    } else {
+        fmt.println(q.string())
+    }
+    return null
+}

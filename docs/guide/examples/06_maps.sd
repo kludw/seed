@@ -1,0 +1,38 @@
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    map[string]int counts = map[string]int{}
+    []string words = "the cat saw the dog and the cat ran".split(" ")
+    for (int i = 0; i < words.len(); i++) {
+        int? seen = counts[words[i]]
+        if (seen == null) {
+            counts[words[i]] = 1
+        } else {
+            counts[words[i]] = seen + 1
+        }
+    }
+
+    // keys() is in insertion order, so this output is always the same.
+    []string keys = counts.keys()
+    for (int i = 0; i < keys.len(); i++) {
+        int? n = counts[keys[i]]
+        if (n != null) {
+            fmt.println(keys[i] + " " + n.string())
+        }
+    }
+
+    counts.delete("the")
+    counts.delete("missing")
+    fmt.println(counts.len().string() + " words left")
+
+    // Setting an existing key keeps its place; a new key goes to the end.
+    counts["cat"] = 10
+    counts["the"] = 0
+    fmt.println(counts.keys().join(" "))
+
+    map[int]bool seenIds = map[int]bool{7: true}
+    fmt.println((seenIds[7] != null).string() + " " + (seenIds[8] != null).string())
+    return null
+}

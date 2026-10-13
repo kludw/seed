@@ -1,0 +1,84 @@
+package main
+
+import "fmt"
+
+type Shape interface {
+    area() float
+    name() string
+}
+
+type Square struct implements Shape {
+    float side
+}
+
+fn (Square s) area() float {
+    return s.side * s.side
+}
+
+fn (Square s) name() string {
+    return "square"
+}
+
+// Enums can implement interfaces too.
+type Blob enum implements Shape {
+    Small
+    Big(float size)
+}
+
+fn (Blob b) area() float {
+    switch (b) {
+    case Blob.Small:
+        return 1.0
+    case Blob.Big(float size):
+        return size
+    }
+}
+
+fn (Blob b) name() string {
+    return "blob"
+}
+
+// An interface method can be mut.
+type Counter interface {
+    mut add(int n)
+    total() int
+}
+
+type Tally struct implements Counter {
+    int sum
+}
+
+fn (Tally t) mut add(int n) {
+    t.sum = t.sum + n
+}
+
+fn (Tally t) total() int {
+    return t.sum
+}
+
+fn totalArea([]Shape shapes) float {
+    float sum = 0.0
+    for (int i = 0; i < shapes.len(); i++) {
+        sum = sum + shapes[i].area()
+    }
+    return sum
+}
+
+fn main([]string args) error {
+    []Shape shapes = []Shape{Square{side: 2.0}, Blob.Small, Blob.Big(2.5)}
+    for (int i = 0; i < shapes.len(); i++) {
+        fmt.println(shapes[i].name() + " " + shapes[i].area().string())
+    }
+    fmt.println("total " + totalArea(shapes).string())
+
+    Counter c = Tally{sum: 0}
+    c.add(3)
+    c.add(4)
+    fmt.println(c.total().string())
+
+    Shape? nothing = null
+    if (nothing == null) {
+        fmt.println("no shape")
+    }
+    return null
+}

@@ -1,0 +1,27 @@
+package main
+
+import "fmt"
+
+const int maxUsers = 100
+const string appName = "seedling"
+
+fn main([]string args) error {
+    int count = 0
+    count = count + 1
+    count++
+
+    []string names = []string{}
+    names.push("ann")
+
+    string? email = null
+    email = "ann@example.com"
+
+    const float taxRate = 0.25
+
+    fmt.println(appName + ": " + count.string() + " of " + maxUsers.string())
+    fmt.println(names[0] + " " + taxRate.string())
+    if (email != null) {
+        fmt.println(email)
+    }
+    return null
+}

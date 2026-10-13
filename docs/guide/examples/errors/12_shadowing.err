@@ -1,0 +1,4 @@
+12_shadowing.sd:8:13: error: total is already declared at line 6; shadowing is not allowed
+    8 |         int total = i * 2
+      |             ^
+    hint: assign with = instead, or choose another name

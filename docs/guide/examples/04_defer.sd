@@ -1,0 +1,26 @@
+package main
+
+import "fmt"
+
+fn step(string name) {
+    fmt.println("  undo " + name)
+}
+
+fn work(bool fail) int {
+    fmt.println("start")
+    defer step("first")
+    defer step("second")
+    if (fail) {
+        fmt.println("failing early")
+        return 1
+    }
+    fmt.println("finished")
+    return 0
+}
+
+fn main([]string args) error {
+    int a = work(false)
+    int b = work(true)
+    fmt.println(a.string() + " " + b.string())
+    return null
+}

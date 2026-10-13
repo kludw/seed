@@ -1,0 +1,68 @@
+// Shared state without sharing: one goroutine owns the counter, and the
+// others talk to it with messages. A request that needs an answer carries
+// its own reply channel.
+package main
+
+import "errors"
+import "fmt"
+
+type Op enum {
+    Add(int n)
+    Get(chan int reply)
+    Done
+}
+
+// Owns the count. Returns it once every client has said Done.
+fn counter(chan Op ops, int clients, chan int result) error {
+    int count = 0
+    int finished = 0
+    for (; finished < clients; ) {
+        Op? op = ops.receive()
+        if (op == null) {
+            return errors.new("counter: channel closed early")
+        }
+        switch (op) {
+        case Op.Add(int n):
+            count = count + n
+        case Op.Get(chan int reply):
+            reply.send(count)
+        case Op.Done:
+            finished++
+        }
+    }
+    result.send(count)
+    return null
+}
+
+fn client(chan Op ops, int step) error {
+    for (int i = 0; i < 3; i++) {
+        ops.send(Op.Add(step))
+    }
+    chan int reply = chan int(1)
+    ops.send(Op.Get(reply))
+    int? seen = reply.receive()
+    if (seen == null || seen < 3 * step) {
+        return errors.new("client: lost an update")
+    }
+    ops.send(Op.Done)
+    return null
+}
+
+fn main([]string args) error {
+    chan Op ops = chan Op(0)
+    chan int result = chan int(1)
+    error err = group {
+        spawn counter(ops, 3, result)
+        spawn client(ops, 1)
+        spawn client(ops, 2)
+        spawn client(ops, 3)
+    }
+    if (err != null) {
+        return err
+    }
+    int? count = result.receive()
+    if (count != null) {
+        fmt.println("final count: " + count.string())
+    }
+    return null
+}

@@ -1,0 +1,46 @@
+package main
+
+import "errors"
+import "fmt"
+
+// Any type can be an error by implementing error's one method.
+type ParseError struct implements error {
+    int line
+    string reason
+}
+
+fn (ParseError e) message() string {
+    return "line " + e.line.string() + ": " + e.reason
+}
+
+fn parseLine(int line, string text) (int, error) {
+    if (text == "") {
+        return null, ParseError{line: line, reason: "empty line"}
+    }
+    int n, error err = text.toInt()
+    if (err != null) {
+        return null, errors.new("line " + line.string() + ": " + err.message())
+    }
+    return n, null
+}
+
+fn sumLines([]string lines) (int, error) {
+    int sum = 0
+    for (int i = 0; i < lines.len(); i++) {
+        sum = sum + try parseLine(i + 1, lines[i])
+    }
+    return sum, null
+}
+
+fn main([]string args) error {
+    int total = try sumLines([]string{"1", "2", "3"})
+    fmt.println("total " + total.string())
+
+    int bad, error err = sumLines([]string{"1", "", "3"})
+    if (err != null) {
+        fmt.println("failed: " + err.message())
+    } else {
+        fmt.println("total " + bad.string())
+    }
+    return null
+}

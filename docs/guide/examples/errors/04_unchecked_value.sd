@@ -1,0 +1,12 @@
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    int n, error err = "42x".toInt()
+    fmt.println(n.string())
+    if (err != null) {
+        return err
+    }
+    return null
+}

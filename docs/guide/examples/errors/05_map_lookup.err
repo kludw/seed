@@ -1,0 +1,4 @@
+05_map_lookup.sd:7:23: error: the value is nullable (int?) and cannot be used as int to initialize apples
+    7 |     int apples = stock["apples"]
+      |                       ^
+    hint: check the value != null first

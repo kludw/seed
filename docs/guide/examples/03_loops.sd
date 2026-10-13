@@ -1,0 +1,58 @@
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    // The classic three-part loop.
+    for (int i = 1; i <= 15; i++) {
+        if (i % 15 == 0) {
+            fmt.println("FizzBuzz")
+        } else if (i % 3 == 0) {
+            fmt.println("Fizz")
+        } else if (i % 5 == 0) {
+            fmt.println("Buzz")
+        } else {
+            fmt.println(i.string())
+        }
+    }
+
+    // A "while" loop: leave out the first and last parts.
+    int n = 27
+    int steps = 0
+    for (; n != 1; ) {
+        if (n % 2 == 0) {
+            n = n / 2
+        } else {
+            n = 3 * n + 1
+        }
+        steps++
+    }
+    fmt.println("collatz(27) takes " + steps.string() + " steps")
+
+    // An infinite loop, left with break.
+    int power = 1
+    for (;;) {
+        power = power * 2
+        if (power > 1000) {
+            break
+        }
+    }
+    fmt.println(power.string())
+
+    // continue skips to the next iteration (running i++ first).
+    []string evens = []string{}
+    for (int i = 0; i < 10; i++) {
+        if (i % 2 == 1) {
+            continue
+        }
+        evens.push(i.string())
+    }
+    fmt.println(evens.join(" "))
+
+    // Looping over a list.
+    []string fruits = []string{"apple", "banana", "cherry"}
+    for (int i = 0; i < fruits.len(); i++) {
+        fmt.println(i.string() + ": " + fruits[i])
+    }
+    return null
+}

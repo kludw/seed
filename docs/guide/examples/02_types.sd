@@ -1,0 +1,25 @@
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    int count = 42
+    int mask = 0xff
+    float ratio = 2.5
+    float huge = 1.0e9
+    bool done = false
+    byte letter = 'a'
+    string greeting = "hi\tthere"
+    []int primes = []int{2, 3, 5, 7}
+    map[string]int ages = map[string]int{"ann": 31, "bob": 27}
+    string? nickname = null
+
+    fmt.println(count.string() + " " + mask.string())
+    fmt.println(ratio.string() + " " + huge.string())
+    fmt.println(done.string())
+    fmt.println(letter.string())
+    fmt.println(greeting)
+    fmt.println(primes.len().string() + " primes, " + ages.len().string() + " ages")
+    fmt.println((nickname == null).string())
+    return null
+}

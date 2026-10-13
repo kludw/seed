@@ -1,0 +1,19 @@
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    []string words = []string{"one", "skip", "two", "end", "three"}
+    for (int i = 0; i < words.len(); i++) {
+        switch (words[i]) {
+        case "skip":
+            continue
+        case "end":
+            break
+        default:
+            fmt.println(words[i])
+        }
+    }
+    fmt.println("done")
+    return null
+}

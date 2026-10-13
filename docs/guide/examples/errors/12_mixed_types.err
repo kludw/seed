@@ -1,0 +1,4 @@
+12_mixed_types.sd:8:25: error: mismatched types int and float for *
+    8 |     float total = items * price
+      |                         ^
+    hint: there are no implicit conversions; use float(x), int(x), x.string(), ...

@@ -1,0 +1,4 @@
+12_typo.sd:12:19: error: struct User has no field nmae
+   12 |     fmt.println(u.nmae)
+      |                   ^
+    hint: did you mean name?

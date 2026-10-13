@@ -1,0 +1,37 @@
+// Waiting with a timeout. The collector gives up after 500 ms, its error stops
+// the group, and the slow goroutine is stopped in time.sleep.
+package main
+
+import "errors"
+import "fmt"
+import "time"
+
+fn slowSquare(int n, chan int out) error {
+    time.sleep(n * 100 * time.millisecond)
+    out.send(n * n)
+    return null
+}
+
+fn collect(chan int results, int count) error {
+    for (int i = 0; i < count; i++) {
+        select {
+        case int? r = results.receive():
+            if (r != null) {
+                fmt.println("got " + r.string())
+            }
+        case time.after(500 * time.millisecond).receive():
+            return errors.new("timed out waiting for " + (count - i).string() + " more result(s)")
+        }
+    }
+    return null
+}
+
+fn main([]string args) error {
+    chan int results = chan int(0)
+    return group {
+        spawn slowSquare(1, results)
+        spawn slowSquare(2, results)
+        spawn slowSquare(60, results)
+        spawn collect(results, 3)
+    }
+}

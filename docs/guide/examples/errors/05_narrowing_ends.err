@@ -1,0 +1,4 @@
+05_narrowing_ends.sd:10:21: error: name is nullable (string?)
+   10 |         fmt.println(name.toUpper())
+      |                     ^
+    hint: check name != null before calling toUpper()

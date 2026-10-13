@@ -1,0 +1,28 @@
+package main
+
+import "fmt"
+import "fs"
+
+fn main([]string args) error {
+    string dir = "/tmp/seed-guide-discard"
+    try fs.mkdir(dir)
+    string path = dir + "/note.txt"
+    try fs.write(path, "remember the milk\n")
+
+    // Discarding the error: the value comes back as string?.
+    string? text, _ = fs.read(path)
+    if (text != null) {
+        fmt.print(text)
+    }
+
+    string? missing, _ = fs.read(dir + "/nope.txt")
+    if (missing == null) {
+        fmt.println("no such file, and that is fine here")
+    }
+
+    // Nothing else is returned, so there is nothing to check.
+    _ = fs.remove(path)
+    _ = fs.remove(dir)
+    fmt.println(fs.exists(dir).string())
+    return null
+}

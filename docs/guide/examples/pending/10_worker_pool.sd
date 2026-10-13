@@ -1,0 +1,58 @@
+// A fixed number of workers take jobs from one channel and send results to
+// another.
+package main
+
+import "fmt"
+
+const int workers = 3
+
+fn produce(int count, chan int jobs) error {
+    for (int i = 1; i <= count; i++) {
+        jobs.send(i)
+    }
+    jobs.close()
+    return null
+}
+
+fn work(chan int jobs, chan int results) error {
+    for (;;) {
+        int? job = jobs.receive()
+        if (job == null) {
+            return null // no more jobs
+        }
+        results.send(job * job)
+    }
+}
+
+fn main([]string args) error {
+    int count = 10
+    chan int jobs = chan int(0)
+    chan int results = chan int(count)
+    error err = group {
+        spawn produce(count, jobs)
+        for (int i = 0; i < workers; i++) {
+            spawn work(jobs, results)
+        }
+    }
+    if (err != null) {
+        return err
+    }
+    results.close()
+
+    // Results arrive in any order; sort them for printing.
+    []int squares = []int{}
+    for (;;) {
+        int? r = results.receive()
+        if (r == null) {
+            break
+        }
+        squares.push(r)
+    }
+    squares.sort()
+    []string text = []string{}
+    for (int i = 0; i < squares.len(); i++) {
+        text.push(squares[i].string())
+    }
+    fmt.println(text.join(" "))
+    return null
+}

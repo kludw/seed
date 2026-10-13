@@ -1,0 +1,17 @@
+// The program's entry point, in package main at the root of the project.
+//
+//     seed build -o shop .
+//     ./shop
+package main
+
+import "cart"
+import "fmt"
+
+fn main([]string args) error {
+    cart.Cart c = cart.newCart()
+    try c.add(cart.Item{name: "notebook", cents: 450, quantity: 2})
+    try c.add(cart.Item{name: "pencil", cents: 120, quantity: 5})
+    c.setDiscount(10)
+    fmt.println(c.count().string() + " items, total " + c.total().string() + " cents")
+    return null
+}

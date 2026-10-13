@@ -1,0 +1,16 @@
+// Greets the name given on the command line, or the world.
+//
+//     seed run 01_greet.sd -- Ada
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    // args[0] is the program itself.
+    string name = "world"
+    if (args.len() > 1) {
+        name = args[1]
+    }
+    fmt.println("Hello, " + name + "!")
+    return null
+}
