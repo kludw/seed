@@ -1,0 +1,303 @@
+// seed.sd — the Seed compiler, written in Seed.
+//
+// Reads Seed source on stdin, writes C on stdout.
+// Every value is a 64-bit integer; strings are pointers to bytes.
+//
+// Builtins: getchar putchar eputchar alloc load8 store8 exit
+
+var src;
+var pos;
+var line;
+var kind;     // 0 eof, 1 ident, 2 number, 3 string, 4 char, 5 punct
+var tstart;
+var tlen;
+
+// ---------- output & errors ----------
+
+fn out(s) {
+  while (load8(s) != 0) { putchar(load8(s)); s = s + 1; }
+  return 0;
+}
+
+fn eout(s) {
+  while (load8(s) != 0) { eputchar(load8(s)); s = s + 1; }
+  return 0;
+}
+
+fn eputnum(n) {
+  if (n >= 10) { eputnum(n / 10); }
+  eputchar('0' + n % 10);
+  return 0;
+}
+
+fn fail2(a, b) {
+  eout("line "); eputnum(line); eout(": "); eout(a); eout(b);
+  eout(" (found '");
+  var i = 0;
+  while (i < tlen) { eputchar(load8(src + tstart + i)); i = i + 1; }
+  eout("')\n");
+  exit(1);
+  return 0;
+}
+
+fn fail(msg) { return fail2(msg, ""); }
+
+// ---------- lexer ----------
+
+fn peekc(i) { return load8(src + pos + i); }
+fn isdigit(c) { return c >= '0' && c <= '9'; }
+fn isalpha(c) { return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c == '_'; }
+
+fn skipspace() {
+  var going = 1;
+  while (going) {
+    var c = peekc(0);
+    if (c == '\n') { line = line + 1; pos = pos + 1; }
+    else if (c == ' ' || c == '\t' || c == '\r') { pos = pos + 1; }
+    else if (c == '/' && peekc(1) == '/') {
+      while (peekc(0) != '\n' && peekc(0) != 0) { pos = pos + 1; }
+    }
+    else { going = 0; }
+  }
+  return 0;
+}
+
+fn next() {
+  skipspace();
+  tstart = pos;
+  var c = peekc(0);
+  if (c == 0) { kind = 0; }
+  else if (isalpha(c)) {
+    kind = 1;
+    while (isalpha(peekc(0)) || isdigit(peekc(0))) { pos = pos + 1; }
+  }
+  else if (isdigit(c)) {
+    kind = 2;
+    while (isdigit(peekc(0))) { pos = pos + 1; }
+  }
+  else if (c == '"' || c == '\'') {
+    kind = 3;
+    if (c == '\'') { kind = 4; }
+    pos = pos + 1;
+    while (peekc(0) != c) {
+      if (peekc(0) == 0 || peekc(0) == '\n') { fail("unterminated literal"); }
+      if (peekc(0) == '\\') { pos = pos + 1; }
+      pos = pos + 1;
+    }
+    pos = pos + 1;
+  }
+  else {
+    kind = 5;
+    var d = peekc(1);
+    if (c == '=' && d == '=' || c == '!' && d == '=' || c == '<' && d == '=' ||
+        c == '>' && d == '=' || c == '&' && d == '&' || c == '|' && d == '|') {
+      pos = pos + 2;
+    } else {
+      pos = pos + 1;
+    }
+  }
+  tlen = pos - tstart;
+  return 0;
+}
+
+// Does the current token's text equal the string s?
+fn is(s) {
+  var i = 0;
+  while (i < tlen) {
+    if (load8(s + i) != load8(src + tstart + i)) { return 0; }
+    i = i + 1;
+  }
+  return load8(s + tlen) == 0;
+}
+
+fn restart() { pos = 0; line = 1; next(); return 0; }
+
+// Is the token after the current one '='? (to spot `x = ...;`)
+fn peekassign() {
+  var p = tstart;
+  var l = line;
+  next();
+  var r = is("=");
+  pos = p; line = l; next();
+  return r;
+}
+
+// ---------- emitting helpers ----------
+
+fn emittok() {
+  var i = 0;
+  while (i < tlen) { putchar(load8(src + tstart + i)); i = i + 1; }
+  putchar(' ');
+  return 0;
+}
+
+fn skip(s) { if (!is(s)) { fail2("expected ", s); } next(); return 0; }
+fn take(s) { if (!is(s)) { fail2("expected ", s); } emittok(); next(); return 0; }
+fn skipident() { if (kind != 1) { fail("expected identifier"); } next(); return 0; }
+fn ident() { if (kind != 1) { fail("expected identifier"); } out("m_"); emittok(); next(); return 0; }
+
+// ---------- expressions ----------
+// Seed's operator precedence is exactly C's, so tokens pass straight through.
+
+fn isbinop() {
+  return kind == 5 && (is("+") || is("-") || is("*") || is("/") || is("%") || is("<") ||
+                       is(">") || is("<=") || is(">=") || is("==") || is("!=") ||
+                       is("&&") || is("||"));
+}
+
+fn primary() {
+  if (kind == 2 || kind == 4) { emittok(); next(); }
+  else if (kind == 3) { out("(long)"); emittok(); next(); }
+  else if (kind == 1) {
+    ident();
+    if (is("(")) {
+      take("(");
+      if (!is(")")) {
+        expr();
+        while (is(",")) { take(","); expr(); }
+      }
+      take(")");
+    }
+  }
+  else if (is("(")) { take("("); expr(); take(")"); }
+  else { fail("expected expression"); }
+  return 0;
+}
+
+fn unary() {
+  if (is("-") || is("!")) { emittok(); next(); unary(); }
+  else { primary(); }
+  return 0;
+}
+
+fn expr() {
+  unary();
+  while (isbinop()) { emittok(); next(); unary(); }
+  return 0;
+}
+
+// ---------- statements ----------
+
+fn block() {
+  take("{"); putchar('\n');
+  while (!is("}")) { stmt(); }
+  take("}"); putchar('\n');
+  return 0;
+}
+
+fn stmt() {
+  if (is("var")) {
+    next(); out("long "); ident(); take("="); expr(); take(";");
+  } else if (is("if")) {
+    emittok(); next(); take("("); expr(); take(")"); block();
+    if (is("else")) {
+      emittok(); next();
+      if (is("if")) { stmt(); } else { block(); }
+    }
+  } else if (is("while")) {
+    emittok(); next(); take("("); expr(); take(")"); block();
+  } else if (is("return")) {
+    emittok(); next(); expr(); take(";");
+  } else if (kind == 1 && peekassign()) {
+    ident(); take("="); expr(); take(";");
+  } else {
+    expr(); take(";");
+  }
+  putchar('\n');
+  return 0;
+}
+
+// ---------- top level ----------
+
+fn skipblock() {
+  if (!is("{")) { fail2("expected ", "{"); }
+  var depth = 0;
+  var going = 1;
+  while (going) {
+    if (kind == 0) { fail("unexpected end of file"); }
+    if (is("{")) { depth = depth + 1; }
+    if (is("}")) { depth = depth - 1; }
+    next();
+    going = depth != 0;
+  }
+  return 0;
+}
+
+// Pass 1: declare globals and function prototypes, so order doesn't matter.
+fn declare() {
+  while (kind != 0) {
+    if (is("var")) {
+      next(); out("long "); ident(); skip(";"); out(";\n");
+    } else if (is("fn")) {
+      next(); out("long "); ident(); skip("(");
+      if (is(")")) { out("(void)"); }
+      else {
+        out("(long"); skipident();
+        while (is(",")) { next(); out(", long"); skipident(); }
+        out(")");
+      }
+      skip(")"); out(";\n");
+      skipblock();
+    } else { fail("expected 'fn' or 'var' at top level"); }
+  }
+  return 0;
+}
+
+fn func() {
+  skip("fn"); out("long "); ident(); take("(");
+  if (is(")")) { out("void "); }
+  else {
+    out("long "); ident();
+    while (is(",")) { take(","); out("long "); ident(); }
+  }
+  take(")");
+  take("{"); putchar('\n');
+  while (!is("}")) { stmt(); }
+  out("return 0;\n"); take("}"); putchar('\n');
+  return 0;
+}
+
+// Pass 2: emit function bodies.
+fn define() {
+  while (kind != 0) {
+    if (is("var")) { next(); next(); next(); }
+    else { func(); }
+  }
+  return 0;
+}
+
+fn prelude() {
+  out("#include <stdio.h>\n");
+  out("#include <stdlib.h>\n");
+  out("long m_getchar(void) { return getchar(); }\n");
+  out("long m_putchar(long c) { putchar((int)c); return c; }\n");
+  out("long m_eputchar(long c) { fputc((int)c, stderr); return c; }\n");
+  out("long m_alloc(long n) { return (long)calloc(1, (size_t)n); }\n");
+  out("long m_load8(long p) { return *(unsigned char *)p; }\n");
+  out("long m_store8(long p, long v) { *(unsigned char *)p = (unsigned char)v; return v; }\n");
+  out("long m_exit(long c) { exit((int)c); return 0; }\n");
+  return 0;
+}
+
+fn readall() {
+  var cap = 4000000;
+  var n = 0;
+  src = alloc(cap + 1);
+  var c = getchar();
+  while (c != -1) {
+    if (n == cap) { fail("input too large"); }
+    store8(src + n, c);
+    n = n + 1;
+    c = getchar();
+  }
+  return 0;
+}
+
+fn main() {
+  readall();
+  prelude();
+  restart(); declare();
+  restart(); define();
+  out("int main(void) { return (int)m_main(); }\n");
+  return 0;
+}
