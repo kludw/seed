@@ -1,0 +1,49 @@
+// break and continue affect only the innermost loop.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    string kept = ""
+    for (int i = 0; i < 10; i++) {
+        if (i % 3 == 0) {
+            continue
+        }
+        if (i > 7) {
+            break
+        }
+        kept = kept + i.string()
+    }
+    fmt.println(kept)
+    string pairs = ""
+    for (int i = 0; i < 4; i++) {
+        for (int j = 0; j < 4; j++) {
+            if (j > i) {
+                break
+            }
+            if (j == 1) {
+                continue
+            }
+            pairs = pairs + i.string() + j.string() + " "
+        }
+    }
+    fmt.println(pairs)
+    int found = -1
+    []int xs = []int{3, 8, 12, 7, 20}
+    for (int i = 0; i < xs.len(); i++) {
+        if (xs[i] > 10) {
+            found = i
+            break
+        }
+    }
+    fmt.println("first over 10 at " + found.string())
+    int odd = 0
+    for (int i = 0; i < 10; i++) {
+        if (i % 2 == 0) {
+            continue
+        }
+        odd = odd + i
+    }
+    fmt.println("odd sum " + odd.string())
+    return null
+}

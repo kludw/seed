@@ -1,0 +1,11 @@
+// expect-error: "os"
+// An unused import is a compile error.
+package main
+
+import "fmt"
+import "os"
+
+fn main([]string args) error {
+    fmt.println("hi")
+    return null
+}

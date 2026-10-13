@@ -1,0 +1,9 @@
+package main
+
+import "errors"
+import "fmt"
+
+fn main([]string args) error {
+    fmt.print("partial")
+    return errors.new("something failed")
+}

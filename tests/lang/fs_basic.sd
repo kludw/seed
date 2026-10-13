@@ -1,0 +1,58 @@
+// fs: mkdir (with parents), write, read, exists, isDir, list and remove, in a
+// directory under $TMPDIR (or /tmp).
+package main
+
+import "fmt"
+import "fs"
+import "os"
+
+fn tempBase() string {
+    string? tmp = os.env("TMPDIR")
+    if (tmp == null) {
+        return "/tmp"
+    }
+    return tmp
+}
+
+fn cleanup(string dir) {
+    _ = fs.remove(dir + "/a.txt")
+    _ = fs.remove(dir + "/b.txt")
+    _ = fs.remove(dir + "/hello.txt")
+    _ = fs.remove(dir + "/sub/deep")
+    _ = fs.remove(dir + "/sub")
+    _ = fs.remove(dir)
+}
+
+fn main([]string args) error {
+    string dir = tempBase() + "/seed_lang_fs_basic"
+    cleanup(dir)
+    fmt.println(fs.exists(dir).string())
+    try fs.mkdir(dir + "/sub/deep")
+    try fs.mkdir(dir)
+    fmt.println(fs.exists(dir).string() + " " + fs.isDir(dir).string())
+    fmt.println(fs.isDir(dir + "/sub/deep").string())
+    string file = dir + "/hello.txt"
+    fmt.println(fs.exists(file).string())
+    try fs.write(file, "line one\nline two\n")
+    fmt.println(fs.exists(file).string() + " " + fs.isDir(file).string())
+    string text = try fs.read(file)
+    fmt.println(text.len().string())
+    []string lines = text.split("\n")
+    fmt.println(lines.len().string() + " [" + lines[1] + "]")
+    try fs.write(file, "replaced")
+    string again = try fs.read(file)
+    fmt.println(again)
+    try fs.write(dir + "/b.txt", "")
+    try fs.write(dir + "/a.txt", "a")
+    string empty = try fs.read(dir + "/b.txt")
+    fmt.println(empty.len().string())
+    []string names = try fs.list(dir)
+    fmt.println(names.join(","))
+    []string deep = try fs.list(dir + "/sub/deep")
+    fmt.println(deep.len().string())
+    try fs.remove(dir + "/a.txt")
+    fmt.println(fs.exists(dir + "/a.txt").string())
+    cleanup(dir)
+    fmt.println(fs.exists(dir).string())
+    return null
+}

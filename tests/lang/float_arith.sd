@@ -1,0 +1,28 @@
+// Float arithmetic and comparisons.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    float a = 7.5
+    float b = 2.0
+    fmt.println("a + b = " + (a + b).string())
+    fmt.println("a - b = " + (a - b).string())
+    fmt.println("b - a = " + (b - a).string())
+    fmt.println("a * b = " + (a * b).string())
+    fmt.println("a / b = " + (a / b).string())
+    fmt.println("-a = " + (-a).string())
+    fmt.println("a > b: " + (a > b).string())
+    fmt.println("a <= b: " + (a <= b).string())
+    fmt.println("a == 7.5: " + (a == 7.5).string())
+    fmt.println("a != b: " + (a != b).string())
+    float c = 0.1 + 0.2
+    fmt.println("0.1 + 0.2 = " + c.string())
+    fmt.println("0.1 + 0.2 == 0.3: " + (c == 0.3).string())
+    fmt.println("1.0 / 3.0 = " + (1.0 / 3.0).string())
+    fmt.println("2.0 / 3.0 = " + (2.0 / 3.0).string())
+    int n = 3
+    fmt.println("float(3) * 1.5 = " + (float(n) * 1.5).string())
+    fmt.println("0.5 - 1.25 = " + (0.5 - 1.25).string())
+    return null
+}

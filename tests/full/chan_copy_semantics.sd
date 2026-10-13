@@ -1,0 +1,42 @@
+// Sending a value on a channel copies it: later changes by the sender are not
+// seen by the receiver, and the receiver's changes do not affect other copies.
+package main
+
+import "fmt"
+
+fn sender(chan []int out) error {
+    []int xs = []int{1, 2}
+    out.send(xs)
+    xs.push(3)
+    out.send(xs)
+    xs[0] = 100
+    return null
+}
+
+fn show([]int xs) string {
+    []string parts = []string{}
+    for (int i = 0; i < xs.len(); i++) {
+        parts.push(xs[i].string())
+    }
+    return "[" + parts.join(" ") + "]"
+}
+
+fn main([]string args) error {
+    chan []int ch = chan []int(2)
+    error err = group {
+        spawn sender(ch)
+    }
+    if (err != null) {
+        return err
+    }
+    []int? first = ch.receive()
+    []int? second = ch.receive()
+    if (first != null) {
+        if (second != null) {
+            []int a = first
+            a.push(99)
+            fmt.println(show(first) + " " + show(second) + " " + show(a))
+        }
+    }
+    return null
+}

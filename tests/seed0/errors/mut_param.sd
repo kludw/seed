@@ -1,0 +1,10 @@
+// expect-error: parameters are read-only
+package main
+
+fn add([]int xs) {
+    xs.push(1)
+}
+
+fn main([]string args) error {
+    return null
+}

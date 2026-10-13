@@ -1,0 +1,11 @@
+// expect-error: takes 2 arguments but 1 was given
+package main
+
+fn add(int a, int b) int {
+    return a + b
+}
+
+fn main([]string args) error {
+    int x = add(1)
+    return null
+}

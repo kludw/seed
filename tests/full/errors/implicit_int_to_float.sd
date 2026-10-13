@@ -1,0 +1,15 @@
+// expect-error: float
+// No implicit conversion: an int cannot be passed where a float is expected.
+package main
+
+import "fmt"
+
+fn half(float x) float {
+    return x / 2.0
+}
+
+fn main([]string args) error {
+    int n = 3
+    fmt.println(half(n).string())
+    return null
+}

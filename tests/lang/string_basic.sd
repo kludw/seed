@@ -1,0 +1,28 @@
+// String length, indexing, slicing, joining and comparison.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    string s = "hello"
+    fmt.println(s.len().string())
+    fmt.println(s[0].string())
+    fmt.println(s[4].string())
+    fmt.println(s.slice(1, 4))
+    fmt.println("[" + s.slice(0, 0) + "]")
+    fmt.println(s.slice(0, 5))
+    fmt.println(s + ", world")
+    string empty = ""
+    fmt.println(empty.len().string())
+    fmt.println(("abc" == "abc").string())
+    fmt.println(("abc" != "abd").string())
+    fmt.println(("abc" < "abd").string())
+    fmt.println(("ab" < "abc").string())
+    fmt.println(("B" < "a").string())
+    fmt.println(("b" > "a").string())
+    fmt.println(("b" <= "a").string())
+    string accented = "h\xc3\xa9llo"
+    fmt.println(accented)
+    fmt.println(accented.len().string())
+    return null
+}

@@ -1,0 +1,160 @@
+// Assorted syntax: literal receivers, else-if chains, switch inside loops
+// with break/continue, empty structs, ++ on paths, try inside arguments.
+package main
+
+import "errors"
+import "fmt"
+
+type Empty struct {
+}
+
+type Pt struct {
+    int x
+    int y
+}
+
+type Holder struct {
+    Pt p
+    []Pt pts
+    []int counts
+}
+
+type Dir enum {
+    North
+    East
+    South
+    West
+}
+
+fn turn(Dir d) Dir {
+    switch (d) {
+    case Dir.North:
+        return Dir.East
+    case Dir.East:
+        return Dir.South
+    case Dir.South:
+        return Dir.West
+    case Dir.West:
+        return Dir.North
+    }
+}
+
+fn isVertical(Dir d) bool {
+    switch (d) {
+    case Dir.North, Dir.South:
+        return true
+    case Dir.East, Dir.West:
+        return false
+    }
+}
+
+fn half(int n) (int, error) {
+    if (n % 2 != 0) {
+        return null, errors.new(n.string() + " is odd")
+    }
+    return n / 2, null
+}
+
+fn add(int a, int b) int {
+    return a + b
+}
+
+fn halves(int a, int b) (int, error) {
+    return add(try half(a), try half(b)), null
+}
+
+fn quarter(int n) (int, error) {
+    return half(try half(n))
+}
+
+fn grade(int score) string {
+    if (score >= 90) {
+        return "A"
+    } else if (score >= 80) {
+        return "B"
+    } else if (score >= 70) {
+        return "C"
+    } else {
+        return "F"
+    }
+}
+
+fn forever(int n) int {
+    int i = 0
+    for (;;) {
+        i++
+        if (i * i > n) {
+            return i
+        }
+    }
+}
+
+fn main([]string args) error {
+    fmt.println(5.string() + "abc".len().string() + (1 + 2).string() + []int{}.len().string() + true.string())
+    fmt.println(0xff.string() + " " + 0x10.string() + " " + (-0x10).string()) // hex literals
+    Empty e1 = Empty{}
+    Empty e2 = Empty{}
+    fmt.println((e1 == e2).string())
+    Dir d = Dir.North
+    []string seen = []string{}
+    for (int i = 0; i < 8; i++) {
+        d = turn(d)
+        switch (d) {
+        case Dir.West:
+            seen.push("W")
+            continue
+        case Dir.North:
+            seen.push("N")
+            if (i > 3) {
+                break
+            }
+        case Dir.East, Dir.South:
+            seen.push("-")
+        }
+        seen.push(isVertical(d).string().slice(0, 1))
+    }
+    fmt.println(seen.join(""))
+    fmt.println(grade(95) + grade(85) + grade(75) + grade(5))
+    fmt.println(forever(50).string())
+
+    Holder h = Holder{
+        p: Pt{x: 1, y: 2},
+        pts: []Pt{
+            Pt{x: 0, y: 0},
+            Pt{x: 5, y: 5},
+        },
+        counts: []int{0, 0, 0},
+    }
+    h.p.x++
+    h.p.y--
+    h.pts[1].x++
+    h.counts[2]++
+    h.counts[2]++
+    h.counts[0]--
+    fmt.println(h.p.x.string() + h.p.y.string() + " " + h.pts[1].x.string() + " " + h.counts[0].string() + h.counts[2].string())
+    float f = 1.5
+    f++
+    fmt.println(f.string())
+
+    int q, error err = halves(8, 6)
+    fmt.println(q.string() + " " + (err == null).string())
+    q, err = halves(8, 5)
+    if (err != null) {
+        fmt.println(err.message())
+    }
+    int? qq, _ = quarter(12)
+    if (qq != null) {
+        fmt.println(qq.string())
+    }
+    qq, _ = quarter(6)
+    fmt.println((qq == null).string())
+
+    byte b = 'a'
+    byte mask = byte(0x0f)
+    fmt.println((b & mask).string() + " " + (b | byte(0x20)).string() + " " + (b ^ b).string() + " " + (b << byte(1)).string() + " " + (b >> byte(4)).string())
+    int big = 1 << 62
+    fmt.println(big.string() + " " + (big >> 61).string() + " " + (-8 >> 1).string() + " " + (7 % -3).string() + " " + (-7 / 2).string())
+    bool t = !!true && !(1 > 2) || false
+    fmt.println(t.string())
+    return null
+}

@@ -1,0 +1,9 @@
+// expect-error: is not handled
+package main
+
+import "fs"
+
+fn main([]string args) error {
+    fs.write("x", "y")
+    return null
+}

@@ -1,0 +1,24 @@
+// Integer literals: decimal, hexadecimal, negative and the largest 64-bit value.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    int a = 42
+    int b = 0xff
+    int c = 0x10
+    int d = -17
+    int e = 0
+    int f = 0xabcdef
+    int big = 9223372036854775807
+    int hexBig = 0x7fffffffffffffff
+    fmt.println(a.string())
+    fmt.println(b.string())
+    fmt.println(c.string())
+    fmt.println(d.string())
+    fmt.println(e.string())
+    fmt.println(f.string())
+    fmt.println(big.string())
+    fmt.println((big == hexBig).string())
+    return null
+}

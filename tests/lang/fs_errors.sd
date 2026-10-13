@@ -1,0 +1,47 @@
+// fs operations that fail return errors instead of crashing.
+package main
+
+import "fmt"
+import "fs"
+import "os"
+
+fn tempBase() string {
+    string? tmp = os.env("TMPDIR")
+    if (tmp == null) {
+        return "/tmp"
+    }
+    return tmp
+}
+
+fn main([]string args) error {
+    string dir = tempBase() + "/seed_lang_fs_errors"
+    _ = fs.remove(dir + "/f.txt")
+    _ = fs.remove(dir)
+    string missing = dir + "/does-not-exist.txt"
+    string text, error err = fs.read(missing)
+    if (err != null) {
+        fmt.println("read missing: error")
+    } else {
+        fmt.println("unexpected: " + text)
+    }
+    fmt.println(fs.exists(missing).string() + " " + fs.isDir(missing).string())
+    error werr = fs.write(dir + "/no/such/dir/file.txt", "x")
+    fmt.println("write into missing dir: " + (werr != null).string())
+    []string names, error lerr = fs.list(dir + "/nope")
+    if (lerr != null) {
+        fmt.println("list missing: error")
+    } else {
+        fmt.println("unexpected " + names.len().string())
+    }
+    error rerr = fs.remove(missing)
+    fmt.println("remove missing: " + (rerr != null).string())
+    try fs.mkdir(dir)
+    try fs.write(dir + "/f.txt", "data")
+    error nonEmpty = fs.remove(dir)
+    fmt.println("remove non-empty dir: " + (nonEmpty != null).string())
+    error r1 = fs.remove(dir + "/f.txt")
+    error r2 = fs.remove(dir)
+    fmt.println((r1 == null).string() + " " + (r2 == null).string())
+    fmt.println(fs.exists(dir).string())
+    return null
+}

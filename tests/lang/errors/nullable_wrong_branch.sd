@@ -1,0 +1,17 @@
+// expect-error: nullable_wrong_branch.sd:14:
+// Inside `if (x == null) { ... }`, x is still nullable.
+package main
+
+import "fmt"
+
+fn lookup(int x) int? {
+    return x
+}
+
+fn main([]string args) error {
+    int? maybeValue = lookup(1)
+    if (maybeValue == null) {
+        fmt.println(maybeValue.string())
+    }
+    return null
+}

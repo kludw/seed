@@ -1,0 +1,69 @@
+// Performance canary: these loops are linear only if push on an unshared
+// list is amortised O(1), mut methods on fields do not copy, and join is
+// linear. A quadratic implementation would take minutes.
+package main
+
+import "fmt"
+
+type Gen struct {
+    []string out
+    map[string]int counts
+    [][]int rows
+}
+
+fn (Gen g) mut emit(string s) {
+    g.out.push(s)
+}
+
+fn (Gen g) mut count(string k) {
+    int? c = g.counts[k]
+    if (c == null) {
+        g.counts[k] = 1
+    } else {
+        g.counts[k] = c + 1
+    }
+}
+
+type Outer struct {
+    Gen gen
+}
+
+fn build(int n) []int {
+    []int xs = []int{}
+    for (int i = 0; i < n; i++) {
+        xs.push(i)
+    }
+    return xs
+}
+
+fn main([]string args) error {
+    int n = 300000
+    Gen g = Gen{out: []string{}, counts: map[string]int{}, rows: [][]int{}}
+    for (int i = 0; i < n; i++) {
+        g.emit(i.string())
+        g.count((i % 100).string())
+    }
+    string all = g.out.join(",")
+    fmt.println(all.len().string())
+    Outer o = Outer{gen: g}
+    for (int i = 0; i < n; i++) {
+        o.gen.out.push("x")
+    }
+    fmt.println(o.gen.out.len().string() + " " + g.out.len().string())
+    for (int i = 0; i < 1000; i++) {
+        o.gen.rows.push([]int{})
+    }
+    for (int i = 0; i < n; i++) {
+        o.gen.rows[i % 1000].push(i)
+    }
+    fmt.println(o.gen.rows[999].len().string())
+    []int big = build(n)
+    big.push(1)
+    big[0] = 5
+    fmt.println(big.len().string())
+    int? c = g.counts["7"]
+    if (c != null) {
+        fmt.println(c.string())
+    }
+    return null
+}

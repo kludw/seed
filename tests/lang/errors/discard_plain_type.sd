@@ -1,0 +1,19 @@
+// expect-error: discard_plain_type.sd:16:
+// When an error is discarded with _, the value beside it must be declared T?.
+package main
+
+import "errors"
+import "fmt"
+
+fn parse(string s) (int, error) {
+    if (s == "") {
+        return null, errors.new("empty")
+    }
+    return 1, null
+}
+
+fn main([]string args) error {
+    int parsedNumber, _ = parse("1")
+    fmt.println(parsedNumber.string())
+    return null
+}

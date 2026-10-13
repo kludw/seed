@@ -1,0 +1,24 @@
+// A buffered channel used from one goroutine: receive returns the buffered
+// values in order, then null once the channel is closed and empty.
+package main
+
+import "fmt"
+
+fn show(int? v) string {
+    if (v == null) {
+        return "null"
+    }
+    return v.string()
+}
+
+fn main([]string args) error {
+    chan int ch = chan int(3)
+    ch.send(1)
+    ch.send(2)
+    ch.send(3)
+    ch.close()
+    for (int i = 0; i < 5; i++) {
+        fmt.println(show(ch.receive()))
+    }
+    return null
+}

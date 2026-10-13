@@ -1,0 +1,7 @@
+// expect-error: expected the end of the statement
+package main
+
+fn main([]string args) error {
+    int x = 1 int y = 2
+    return null
+}

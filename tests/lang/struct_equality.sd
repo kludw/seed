@@ -1,0 +1,41 @@
+// Structs compare by contents, including list and nullable fields.
+package main
+
+import "fmt"
+
+type Point struct {
+    int x
+    int y
+}
+
+type Team struct {
+    string name
+    []string members
+}
+
+type Contact struct {
+    string name
+    string? email
+}
+
+fn main([]string args) error {
+    Point a = Point{x: 1, y: 2}
+    Point b = Point{x: 1, y: 2}
+    Point c = Point{x: 2, y: 1}
+    fmt.println((a == b).string())
+    fmt.println((a == c).string())
+    fmt.println((a != c).string())
+    Team t1 = Team{name: "red", members: []string{"ann", "bob"}}
+    Team t2 = Team{name: "red", members: []string{"ann", "bob"}}
+    fmt.println((t1 == t2).string())
+    t2.members.push("cid")
+    fmt.println((t1 == t2).string())
+    Contact k1 = Contact{name: "x", email: null}
+    Contact k2 = Contact{name: "x", email: null}
+    Contact k3 = Contact{name: "x", email: "x@example.com"}
+    Contact k4 = Contact{name: "x", email: "x@example.com"}
+    fmt.println((k1 == k2).string())
+    fmt.println((k1 == k3).string())
+    fmt.println((k3 == k4).string())
+    return null
+}

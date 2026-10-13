@@ -1,0 +1,16 @@
+// expect-error: unknown_field.sd:14:
+// Reading a field that the struct does not have.
+package main
+
+import "fmt"
+
+type Point struct {
+    int x
+    int y
+}
+
+fn main([]string args) error {
+    Point p = Point{x: 1, y: 2}
+    fmt.println(p.z.string())
+    return null
+}

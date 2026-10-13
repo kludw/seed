@@ -1,0 +1,13 @@
+// expect-error: syntax_condition_without_parens.sd:9:
+// Syntax error: conditions must be in parentheses.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    int x = 3
+    if x > 1 {
+        fmt.println("big")
+    }
+    return null
+}

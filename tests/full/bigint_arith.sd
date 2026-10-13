@@ -1,0 +1,33 @@
+// Arithmetic on integers larger than 64 bits, including literals, division
+// and % (both truncate toward zero), and comparison.
+package main
+
+import "fmt"
+
+fn fib(int n) int {
+    int a = 0
+    int b = 1
+    for (int i = 0; i < n; i++) {
+        int next = a + b
+        a = b
+        b = next
+    }
+    return a
+}
+
+fn main([]string args) error {
+    int a = 123456789012345678901234567890
+    int b = 987654321098765432109876543210
+    fmt.println((a * b).string())
+    fmt.println((b - a).string())
+    fmt.println((a - b).string())
+    int p = 1267650600228229401496703205376
+    fmt.println((p / 3).string())
+    fmt.println((p % 1000007).string())
+    fmt.println((-p / 7).string())
+    fmt.println((-p % 7).string())
+    fmt.println(fib(100).string())
+    fmt.println((a < b).string())
+    fmt.println((a * b == b * a).string())
+    return null
+}

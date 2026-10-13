@@ -1,0 +1,40 @@
+// Groups can run one after another and inside functions; each waits for all
+// of its goroutines before the next statement runs.
+package main
+
+import "fmt"
+
+fn square(int n, chan int out) error {
+    out.send(n * n)
+    return null
+}
+
+fn sumSquares(int n) (int, error) {
+    chan int out = chan int(n)
+    error err = group {
+        for (int i = 1; i <= n; i++) {
+            spawn square(i, out)
+        }
+    }
+    if (err != null) {
+        return null, err
+    }
+    out.close()
+    int sum = 0
+    for (;;) {
+        int? v = out.receive()
+        if (v == null) {
+            break
+        }
+        sum = sum + v
+    }
+    return sum, null
+}
+
+fn main([]string args) error {
+    for (int n = 1; n <= 4; n++) {
+        int s = try sumSquares(n)
+        fmt.println(n.string() + ": " + s.string())
+    }
+    return null
+}

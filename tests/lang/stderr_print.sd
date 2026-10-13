@@ -1,0 +1,14 @@
+// print has no newline; eprint and eprintln write to stderr, not stdout.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    fmt.print("no newline, ")
+    fmt.println("then newline")
+    fmt.eprintln("this goes to stderr")
+    fmt.eprint("so does this")
+    fmt.println("")
+    fmt.print("end\n")
+    return null
+}

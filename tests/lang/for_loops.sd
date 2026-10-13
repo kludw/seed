@@ -1,0 +1,66 @@
+// Every form of the C-style for loop.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    int sum = 0
+    for (int i = 0; i < 5; i++) {
+        sum = sum + i
+    }
+    fmt.println("sum " + sum.string())
+    string down = ""
+    for (int i = 3; i > 0; i--) {
+        down = down + i.string()
+    }
+    fmt.println("down " + down)
+    string steps = ""
+    for (int i = 0; i < 10; i = i + 3) {
+        steps = steps + i.string() + " "
+    }
+    fmt.println("steps " + steps)
+    int j = 100
+    int loops = 0
+    for (j = 0; j < 4; j++) {
+        loops++
+    }
+    fmt.println("j " + j.string() + " loops " + loops.string())
+    int k = 0
+    for (; k < 3; k++) {
+        loops++
+    }
+    fmt.println("k " + k.string() + " loops " + loops.string())
+    int last = 0
+    for (int n = 1; ; n = n * 2) {
+        if (n > 100) {
+            last = n
+            break
+        }
+    }
+    fmt.println("last " + last.string())
+    int spins = 0
+    for (;;) {
+        spins++
+        if (spins == 4) {
+            break
+        }
+    }
+    fmt.println("spins " + spins.string())
+    int never = 0
+    for (int i = 0; i < 0; i++) {
+        never++
+    }
+    fmt.println("never " + never.string())
+    string table = ""
+    for (int r = 1; r <= 3; r++) {
+        for (int c = 1; c <= 3; c++) {
+            table = table + (r * c).string()
+            if (c < 3) {
+                table = table + ","
+            }
+        }
+        table = table + ";"
+    }
+    fmt.println(table)
+    return null
+}

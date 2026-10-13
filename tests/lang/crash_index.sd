@@ -1,0 +1,13 @@
+// Indexing a list out of range crashes: "crash: ..." on stderr, exit code 2.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    []int xs = []int{1, 2, 3}
+    fmt.println("before")
+    int i = xs.len()
+    int v = xs[i]
+    fmt.println("after " + v.string())
+    return null
+}

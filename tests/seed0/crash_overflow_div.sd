@@ -1,0 +1,11 @@
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    int x = -9223372036854775807 - 1
+    int d = -1
+    fmt.println((x % d).string())
+    fmt.println((x / d).string())
+    return null
+}

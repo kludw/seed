@@ -1,0 +1,9 @@
+// The smallest complete program.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    fmt.println("hello, world")
+    return null
+}

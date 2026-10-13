@@ -1,0 +1,14 @@
+// expect-error: parameters are read-only
+package main
+
+type C struct {
+    int n
+}
+
+fn (C c) inc() {
+    c.n = 1
+}
+
+fn main([]string args) error {
+    return null
+}

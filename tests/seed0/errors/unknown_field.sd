@@ -1,0 +1,12 @@
+// expect-error: did you mean name?
+package main
+
+type U struct {
+    string name
+}
+
+fn main([]string args) error {
+    U u = U{name: "a"}
+    string s = u.nmae
+    return null
+}

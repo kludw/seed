@@ -1,0 +1,30 @@
+# compute some things
+def fib(n) {
+    if n < 2 { return n; }
+    return fib(n - 1) + fib(n - 2);
+}
+def fact(n) {
+    let acc = 1;
+    while n > 1 {
+        acc = acc * n;
+        n = n - 1;
+    }
+    return acc;
+}
+let i = 0;
+let total = 0;
+while i < 10 {
+    total = total + fib(i);
+    i = i + 1;
+}
+print "sum of fib(0..9) = " + total;
+print fact(20);
+print "ab" * 3;
+def countdown(n) {
+    while 1 {
+        if n == 0 { return "liftoff"; }
+        n = n - 1;
+    }
+}
+print countdown(5);
+print (2 + 3) * 4 - 10 / 3 % 2;

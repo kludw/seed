@@ -1,0 +1,28 @@
+// String and byte escapes, embedded zero bytes, and text that looks like C trigraphs.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    string s = "a\tb\\c\"d\'e\x41\x7a"
+    fmt.println(s)
+    string z = "x\0y"
+    fmt.println(z.len().string() + " " + z[1].string())
+    fmt.println("??= ??/ ??' %d %s")
+    byte q = '\''
+    byte nl = '\n'
+    byte hx = '\xff'
+    fmt.println(q.string() + " " + nl.string() + " " + hx.string())
+    []byte bs = "hé".bytes()
+    fmt.println(bs.len().string() + " " + bs[1].string())
+    fmt.println(string([]byte{'o', 'k'}))
+    fmt.println("a,b,,c".split(",").len().string() + " " + "  pad \n".trim() + "|")
+    fmt.println("x-y-z".replace("-", "--") + " " + "MiXeD".toUpper() + " " + "MiXeD".toLower())
+    fmt.println("hello".slice(1, 3) + " " + "".len().string())
+    int n, error err = "-42".toInt()
+    float f, error err2 = "2.5".toFloat()
+    if (err == null && err2 == null) {
+        fmt.println((n * 2).string() + " " + (f * 2.0).string())
+    }
+    return null
+}

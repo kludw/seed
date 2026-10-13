@@ -1,0 +1,29 @@
+// Boolean operators, including short-circuit evaluation of && and ||.
+package main
+
+import "fmt"
+
+fn noisy(string label, bool result) bool {
+    fmt.println("called " + label)
+    return result
+}
+
+fn main([]string args) error {
+    bool t = true
+    bool f = false
+    fmt.println("t && f: " + (t && f).string())
+    fmt.println("t || f: " + (t || f).string())
+    fmt.println("!t: " + (!t).string())
+    fmt.println("!f: " + (!f).string())
+    fmt.println("t == f: " + (t == f).string())
+    fmt.println("t != f: " + (t != f).string())
+    fmt.println("t && !f: " + (t && !f).string())
+    fmt.println("f || f: " + (f || f).string())
+    fmt.println("1 < 2: " + (1 < 2).string())
+    bool r1 = f && noisy("and-skipped", true)
+    bool r2 = t || noisy("or-skipped", false)
+    bool r3 = t && noisy("and-run", false)
+    bool r4 = f || noisy("or-run", true)
+    fmt.println(r1.string() + " " + r2.string() + " " + r3.string() + " " + r4.string())
+    return null
+}

@@ -1,0 +1,9 @@
+// expect-error: must be declared as string?
+package main
+
+import "fs"
+
+fn main([]string args) error {
+    string data, _ = fs.read("x")
+    return null
+}

@@ -1,0 +1,7 @@
+// expect-error: only nullable types
+package main
+
+fn main([]string args) error {
+    string s = null
+    return null
+}

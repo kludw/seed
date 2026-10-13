@@ -1,0 +1,10 @@
+// expect-error: not supported by seed0
+package main
+
+type Named interface {
+    name() string
+}
+
+fn main([]string args) error {
+    return null
+}

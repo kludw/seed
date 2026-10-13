@@ -1,0 +1,82 @@
+// Every narrowing rule for T? values: != null and == null with if/else,
+// early return, && and ||, and narrowing that ends on assignment.
+package main
+
+import "fmt"
+
+fn thenBranch(int? n) string {
+    string out = ""
+    if (n != null) {
+        out = "doubled " + (n * 2).string()
+    } else {
+        out = "null"
+    }
+    return out
+}
+
+fn elseBranch(int? n) string {
+    string out = ""
+    if (n == null) {
+        out = "none"
+    } else {
+        out = "plus one " + (n + 1).string()
+    }
+    return out
+}
+
+fn earlyReturn(int? n) string {
+    if (n == null) {
+        return "early"
+    }
+    return "after " + n.string()
+}
+
+fn big(int? n) bool {
+    return n != null && n > 5
+}
+
+fn notNegative(int? n) bool {
+    return n == null || n >= 0
+}
+
+fn find([]int xs, int target) int? {
+    for (int i = 0; i < xs.len(); i++) {
+        if (xs[i] == target) {
+            return i
+        }
+    }
+    return null
+}
+
+fn main([]string args) error {
+    fmt.println(thenBranch(4) + ", " + thenBranch(null))
+    fmt.println(elseBranch(4) + ", " + elseBranch(null))
+    fmt.println(earlyReturn(4) + ", " + earlyReturn(null))
+    fmt.println(big(null).string() + " " + big(3).string() + " " + big(9).string())
+    fmt.println(notNegative(null).string() + " " + notNegative(-1).string() + " " + notNegative(2).string())
+    int? pos = find([]int{4, 8, 15}, 15)
+    if (pos != null) {
+        fmt.println("found at " + pos.string())
+    }
+    int? missing = find([]int{4, 8, 15}, 16)
+    fmt.println((missing == null).string())
+    int? x = 5
+    if (x != null) {
+        int y = x + 1
+        x = null
+        if (x == null) {
+            fmt.println("reset after " + y.string())
+        }
+    }
+    string? name = null
+    name = "kam"
+    if (name != null) {
+        fmt.println("hello " + name + " " + name.len().string())
+    }
+    int plain = 7
+    int? wrapped = plain
+    if (wrapped != null) {
+        fmt.println((wrapped == plain).string())
+    }
+    return null
+}

@@ -1,0 +1,77 @@
+// mut methods change the variable they are called on, including through
+// fields and list elements, and can call other mut methods on the receiver.
+package main
+
+import "fmt"
+
+type Counter struct {
+    int n
+}
+
+type Pair struct {
+    Counter left
+    Counter right
+}
+
+type User struct {
+    string name
+    []string tags
+}
+
+fn (Counter c) mut inc() {
+    c.n = c.n + 1
+}
+
+fn (Counter c) mut add(int k) {
+    for (int i = 0; i < k; i++) {
+        c.inc()
+    }
+}
+
+fn (Counter c) mut reset() int {
+    int old = c.n
+    c.n = 0
+    return old
+}
+
+fn (Counter c) value() int {
+    return c.n
+}
+
+fn (Pair p) mut bumpBoth() {
+    p.left.inc()
+    p.right.add(2)
+}
+
+fn (User u) mut tag(string t) {
+    u.tags.push(t)
+}
+
+fn main([]string args) error {
+    Counter c = Counter{n: 0}
+    c.inc()
+    c.inc()
+    fmt.println(c.value().string())
+    c.add(3)
+    fmt.println(c.value().string())
+    int old = c.reset()
+    fmt.println(old.string() + " " + c.value().string())
+    Pair p = Pair{left: Counter{n: 0}, right: Counter{n: 0}}
+    p.left.inc()
+    p.bumpBoth()
+    fmt.println(p.left.value().string() + " " + p.right.value().string())
+    []Counter cs = []Counter{Counter{n: 10}, Counter{n: 20}}
+    cs[1].inc()
+    cs[0].add(3)
+    fmt.println(cs[0].value().string() + " " + cs[1].value().string())
+    []User users = []User{User{name: "ann", tags: []string{}}, User{name: "bob", tags: []string{}}}
+    users[1].tag("admin")
+    users[1].tag("dev")
+    users[0].tags.push("guest")
+    fmt.println(users[0].name + ":" + users[0].tags.join(","))
+    fmt.println(users[1].name + ":" + users[1].tags.join(","))
+    [][]Counter grid = [][]Counter{[]Counter{Counter{n: 1}}}
+    grid[0][0].add(4)
+    fmt.println(grid[0][0].value().string())
+    return null
+}

@@ -1,0 +1,87 @@
+// select inside a goroutine, multiplexing two producers until both close.
+package main
+
+import "fmt"
+
+fn produce(chan int out, int start, int count) error {
+    for (int i = 0; i < count; i++) {
+        out.send(start + i)
+    }
+    out.close()
+    return null
+}
+
+fn merge(chan int a, chan int b, chan int result) error {
+    bool aOpen = true
+    bool bOpen = true
+    int sum = 0
+    int count = 0
+    for (;;) {
+        if (!aOpen && !bOpen) {
+            break
+        }
+        if (aOpen) {
+            if (bOpen) {
+                select {
+                case int? x = a.receive():
+                    if (x == null) {
+                        aOpen = false
+                    } else {
+                        sum = sum + x
+                        count++
+                    }
+                case int? y = b.receive():
+                    if (y == null) {
+                        bOpen = false
+                    } else {
+                        sum = sum + y
+                        count++
+                    }
+                }
+                continue
+            }
+        }
+        if (aOpen) {
+            int? x = a.receive()
+            if (x == null) {
+                aOpen = false
+            } else {
+                sum = sum + x
+                count++
+            }
+        } else {
+            int? y = b.receive()
+            if (y == null) {
+                bOpen = false
+            } else {
+                sum = sum + y
+                count++
+            }
+        }
+    }
+    result.send(count)
+    result.send(sum)
+    return null
+}
+
+fn main([]string args) error {
+    chan int a = chan int(0)
+    chan int b = chan int(0)
+    chan int result = chan int(2)
+    error err = group {
+        spawn produce(a, 1, 10)
+        spawn produce(b, 100, 5)
+        spawn merge(a, b, result)
+    }
+    if (err != null) {
+        return err
+    }
+    int? count = result.receive()
+    int? sum = result.receive()
+    if (count != null) {
+        if (sum != null) {
+            fmt.println(count.string() + " values, sum " + sum.string())
+        }
+    }
+    return null
+}

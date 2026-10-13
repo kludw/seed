@@ -1,0 +1,12 @@
+// Removing at an index out of range crashes.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    []int xs = []int{1, 2}
+    fmt.println("before")
+    xs.remove(2)
+    fmt.println("after " + xs.len().string())
+    return null
+}

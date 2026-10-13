@@ -1,0 +1,30 @@
+// split keeps empty pieces; join puts the separator between elements.
+package main
+
+import "fmt"
+
+fn show([]string parts) string {
+    return parts.len().string() + " [" + parts.join("|") + "]"
+}
+
+fn main([]string args) error {
+    string csv = "a,b,"
+    fmt.println(show(csv.split(",")))
+    string words = "one two three"
+    []string ws = words.split(" ")
+    fmt.println(show(ws))
+    fmt.println(ws.join("+"))
+    string doubled = "a  b"
+    fmt.println(show(doubled.split(" ")))
+    string plain = "abc"
+    fmt.println(show(plain.split(",")))
+    string dashes = "a--b--c"
+    fmt.println(show(dashes.split("--")))
+    string leading = ",x"
+    fmt.println(show(leading.split(",")))
+    []string empty = []string{}
+    fmt.println("[" + empty.join(",") + "]")
+    []string single = []string{"x"}
+    fmt.println("[" + single.join(", ") + "]")
+    return null
+}

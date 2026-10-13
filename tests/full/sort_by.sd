@@ -1,0 +1,61 @@
+// sortBy sorts in place with a comparator that returns true when the first
+// argument goes first. The sort is stable.
+package main
+
+import "fmt"
+
+type Person struct {
+    string name
+    int age
+}
+
+fn byAge(Person a, Person b) bool {
+    return a.age < b.age
+}
+
+fn byNameDesc(Person a, Person b) bool {
+    return a.name > b.name
+}
+
+fn shorter(string a, string b) bool {
+    return a.len() < b.len()
+}
+
+fn greater(int a, int b) bool {
+    return a > b
+}
+
+fn show([]Person people) string {
+    []string parts = []string{}
+    for (int i = 0; i < people.len(); i++) {
+        parts.push(people[i].name + ":" + people[i].age.string())
+    }
+    return parts.join(" ")
+}
+
+fn main([]string args) error {
+    []Person people = []Person{
+        Person{name: "ann", age: 31},
+        Person{name: "bob", age: 25},
+        Person{name: "cid", age: 31},
+        Person{name: "dan", age: 25},
+        Person{name: "eve", age: 40},
+    }
+    people.sortBy(byAge)
+    fmt.println(show(people))
+    people.sortBy(byNameDesc)
+    fmt.println(show(people))
+    people.sortBy(byAge)
+    fmt.println(show(people))
+    []string words = []string{"pear", "fig", "banana", "kiwi", "apple", "plum"}
+    words.sortBy(shorter)
+    fmt.println(words.join(" "))
+    []int nums = []int{3, 1, 4, 1, 5, 9, 2, 6}
+    nums.sortBy(greater)
+    []string out = []string{}
+    for (int i = 0; i < nums.len(); i++) {
+        out.push(nums[i].string())
+    }
+    fmt.println(out.join(" "))
+    return null
+}

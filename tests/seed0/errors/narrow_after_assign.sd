@@ -1,0 +1,11 @@
+// expect-error: is nullable (int?)
+package main
+
+fn main([]string args) error {
+    int? n = 1
+    if (n != null) {
+        n = null
+        int m = n + 1
+    }
+    return null
+}

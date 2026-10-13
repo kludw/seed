@@ -1,0 +1,9 @@
+5050
+3628800
+steps=1431 stack=0
+0: push 0
+1: store 0
+2: push 1
+3: store 1
+error: stack underflow at 2
+error: unknown instruction bogus

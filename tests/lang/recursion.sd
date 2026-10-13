@@ -1,0 +1,76 @@
+// Recursive and mutually recursive functions.
+package main
+
+import "fmt"
+
+fn fib(int n) int {
+    if (n < 2) {
+        return n
+    }
+    return fib(n - 1) + fib(n - 2)
+}
+
+fn fact(int n) int {
+    if (n <= 1) {
+        return 1
+    }
+    return n * fact(n - 1)
+}
+
+fn gcd(int a, int b) int {
+    if (b == 0) {
+        return a
+    }
+    return gcd(b, a % b)
+}
+
+fn hanoi(int n) int {
+    if (n == 0) {
+        return 0
+    }
+    return 2 * hanoi(n - 1) + 1
+}
+
+fn isEven(int n) bool {
+    if (n == 0) {
+        return true
+    }
+    return isOdd(n - 1)
+}
+
+fn isOdd(int n) bool {
+    if (n == 0) {
+        return false
+    }
+    return isEven(n - 1)
+}
+
+fn digitSum(int n) int {
+    if (n < 10) {
+        return n
+    }
+    return n % 10 + digitSum(n / 10)
+}
+
+fn power(int base, int exp) int {
+    if (exp == 0) {
+        return 1
+    }
+    int half = power(base, exp / 2)
+    if (exp % 2 == 0) {
+        return half * half
+    }
+    return half * half * base
+}
+
+fn main([]string args) error {
+    fmt.println(fib(20).string())
+    fmt.println(fact(10).string())
+    fmt.println(gcd(84, 36).string())
+    fmt.println(hanoi(10).string())
+    fmt.println(isEven(10).string() + " " + isOdd(7).string() + " " + isEven(3).string())
+    fmt.println(digitSum(98765).string())
+    fmt.println(power(2, 20).string())
+    fmt.println(power(3, 13).string())
+    return null
+}

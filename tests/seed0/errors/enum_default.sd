@@ -1,0 +1,17 @@
+// expect-error: cannot have default
+package main
+
+type L enum {
+    A
+    B
+}
+
+fn main([]string args) error {
+    L l = L.A
+    switch (l) {
+    case L.A:
+        return null
+    default:
+        return null
+    }
+}

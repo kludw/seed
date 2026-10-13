@@ -1,0 +1,16 @@
+// expect-error: email
+// A nullable field must be checked before it is used as a plain value.
+package main
+
+import "fmt"
+
+type User struct {
+    string name
+    string? email
+}
+
+fn main([]string args) error {
+    User u = User{name: "ann", email: null}
+    fmt.println(u.name + " " + u.email.toUpper())
+    return null
+}

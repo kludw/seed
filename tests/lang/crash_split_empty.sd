@@ -1,0 +1,13 @@
+// split with an empty separator crashes.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    string s = "abc"
+    string sep = ""
+    fmt.println("before")
+    []string parts = s.split(sep)
+    fmt.println("after " + parts.len().string())
+    return null
+}

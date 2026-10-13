@@ -1,0 +1,11 @@
+// expect-error: temporary value
+package main
+
+fn make() []int {
+    return []int{}
+}
+
+fn main([]string args) error {
+    make().push(1)
+    return null
+}

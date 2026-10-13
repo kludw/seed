@@ -1,0 +1,31 @@
+// trim, replace, toUpper and toLower.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    string padded = "  hi there \t\n"
+    fmt.println("[" + padded.trim() + "]")
+    string crlf = "\r\n x \r\n"
+    fmt.println("[" + crlf.trim() + "]")
+    string none = "none"
+    fmt.println("[" + none.trim() + "]")
+    string spaces = "   "
+    fmt.println("[" + spaces.trim() + "]")
+    string inner = " a  b "
+    fmt.println("[" + inner.trim() + "]")
+    string dashed = "a-b-c"
+    fmt.println(dashed.replace("-", "+"))
+    string as = "aaa"
+    fmt.println(as.replace("aa", "b"))
+    string hello = "hello"
+    fmt.println(hello.replace("l", ""))
+    fmt.println(hello.replace("x", "y"))
+    fmt.println(hello.replace("hello", "bye"))
+    string mixed = "Hello, World 42!"
+    fmt.println(mixed.toUpper())
+    fmt.println(mixed.toLower())
+    string accented = "h\xc3\xa9llo"
+    fmt.println(accented.toUpper())
+    return null
+}

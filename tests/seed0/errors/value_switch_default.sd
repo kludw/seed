@@ -1,0 +1,11 @@
+// expect-error: must end with a default
+package main
+
+fn main([]string args) error {
+    int x = 1
+    switch (x) {
+    case 1:
+        return null
+    }
+    return null
+}

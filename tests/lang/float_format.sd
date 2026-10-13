@@ -1,0 +1,29 @@
+// float.string() gives the shortest text that reads back as the same value,
+// always with a "." or an "e".
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    []float values = []float{
+        1.0,
+        0.1,
+        2.5,
+        100.0,
+        -0.5,
+        0.001,
+        12345.678,
+        0.0,
+        1.25e2,
+        1.0e300,
+        1.5e300,
+        3.0e100,
+        1.0 / 1.0e300,
+    }
+    for (int i = 0; i < values.len(); i++) {
+        fmt.println(values[i].string())
+    }
+    int n = 42
+    fmt.println(float(n).string())
+    return null
+}

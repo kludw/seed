@@ -1,0 +1,15 @@
+// os.run returns an error when the program cannot be started.
+package main
+
+import "fmt"
+import "os"
+
+fn main([]string args) error {
+    int code, error err = os.run([]string{"seed-no-such-program-zzz"})
+    if (err != null) {
+        fmt.println("could not start")
+    } else {
+        fmt.println("exit code " + code.string())
+    }
+    return null
+}

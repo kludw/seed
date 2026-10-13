@@ -1,0 +1,14 @@
+// expect-error: is nullable (int?)
+package main
+
+fn main([]string args) error {
+    int? n = 1
+    if (n == null) {
+        return null
+    }
+    for (int i = 0; i < 3; i++) {
+        int m = n + 1
+        n = null
+    }
+    return null
+}

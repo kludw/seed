@@ -1,0 +1,24 @@
+// expect-error: Shape
+// Having the methods is not enough: a type satisfies an interface only by
+// declaring it with `implements`.
+package main
+
+import "fmt"
+
+type Shape interface {
+    name() string
+}
+
+type Square struct {
+    float side
+}
+
+fn (Square s) name() string {
+    return "square"
+}
+
+fn main([]string args) error {
+    Shape s = Square{side: 2.0}
+    fmt.println(s.name())
+    return null
+}

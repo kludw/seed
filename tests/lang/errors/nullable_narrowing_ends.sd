@@ -1,0 +1,18 @@
+// expect-error: nullable_narrowing_ends.sd:15:
+// Assigning to a narrowed variable ends the narrowing.
+package main
+
+import "fmt"
+
+fn lookup(int x) int? {
+    return x
+}
+
+fn main([]string args) error {
+    int? maybeValue = lookup(1)
+    if (maybeValue != null) {
+        maybeValue = lookup(2)
+        fmt.println((maybeValue + 1).string())
+    }
+    return null
+}

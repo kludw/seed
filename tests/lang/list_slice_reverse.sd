@@ -1,0 +1,40 @@
+// slice returns an independent copy; reverse works in place.
+package main
+
+import "fmt"
+
+fn showInts([]int xs) string {
+    string out = "["
+    for (int i = 0; i < xs.len(); i++) {
+        if (i > 0) {
+            out = out + ", "
+        }
+        out = out + xs[i].string()
+    }
+    return out + "]"
+}
+
+fn main([]string args) error {
+    []int xs = []int{1, 2, 3, 4, 5}
+    []int mid = xs.slice(1, 4)
+    fmt.println(showInts(mid))
+    mid.push(99)
+    mid[0] = 20
+    fmt.println(showInts(mid))
+    fmt.println(showInts(xs))
+    fmt.println(showInts(xs.slice(0, 0)))
+    fmt.println(showInts(xs.slice(2, 5)))
+    xs.reverse()
+    fmt.println(showInts(xs))
+    fmt.println(showInts(mid))
+    []int one = []int{7}
+    one.reverse()
+    fmt.println(showInts(one))
+    []int empty = []int{}
+    empty.reverse()
+    fmt.println(showInts(empty))
+    []int even = []int{1, 2, 3, 4}
+    even.reverse()
+    fmt.println(showInts(even))
+    return null
+}

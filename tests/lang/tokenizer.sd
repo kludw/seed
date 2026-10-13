@@ -1,0 +1,127 @@
+// A tokenizer for arithmetic expressions producing an enum Token type.
+package main
+
+import "errors"
+import "fmt"
+
+type Token enum {
+    Num(int value)
+    Ident(string name)
+    Plus
+    Minus
+    Star
+    Slash
+    LParen
+    RParen
+}
+
+fn (Token t) string() string {
+    string out = ""
+    switch (t) {
+    case Token.Num(int value):
+        out = "Num(" + value.string() + ")"
+    case Token.Ident(string name):
+        out = "Ident(" + name + ")"
+    case Token.Plus:
+        out = "Plus"
+    case Token.Minus:
+        out = "Minus"
+    case Token.Star:
+        out = "Star"
+    case Token.Slash:
+        out = "Slash"
+    case Token.LParen:
+        out = "LParen"
+    case Token.RParen:
+        out = "RParen"
+    }
+    return out
+}
+
+fn isDigit(byte c) bool {
+    return c >= '0' && c <= '9'
+}
+
+fn isLetter(byte c) bool {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_'
+}
+
+fn tokenize(string src) ([]Token, error) {
+    []Token out = []Token{}
+    int i = 0
+    for (;;) {
+        if (i >= src.len()) {
+            break
+        }
+        byte c = src[i]
+        if (c == ' ') {
+            i++
+            continue
+        }
+        if (isDigit(c)) {
+            int value = 0
+            for (;;) {
+                if (i >= src.len() || !isDigit(src[i])) {
+                    break
+                }
+                value = value * 10 + int(src[i]) - int('0')
+                i++
+            }
+            out.push(Token.Num(value))
+            continue
+        }
+        if (isLetter(c)) {
+            int start = i
+            for (;;) {
+                if (i >= src.len() || !(isLetter(src[i]) || isDigit(src[i]))) {
+                    break
+                }
+                i++
+            }
+            out.push(Token.Ident(src.slice(start, i)))
+            continue
+        }
+        switch (c) {
+        case '+':
+            out.push(Token.Plus)
+        case '-':
+            out.push(Token.Minus)
+        case '*':
+            out.push(Token.Star)
+        case '/':
+            out.push(Token.Slash)
+        case '(':
+            out.push(Token.LParen)
+        case ')':
+            out.push(Token.RParen)
+        default:
+            return null, errors.new("unexpected character '" + string([]byte{c}) + "' at " + i.string())
+        }
+        i++
+    }
+    return out, null
+}
+
+fn main([]string args) error {
+    []string inputs = []string{"12 + x*(3 - 4) / y2", "(1+2)", "", "7 % 2", "  42  ", "foo_bar-baz"}
+    for (int i = 0; i < inputs.len(); i++) {
+        []Token tokens, error err = tokenize(inputs[i])
+        if (err != null) {
+            fmt.println("error: " + err.message())
+            continue
+        }
+        []string names = []string{}
+        for (int j = 0; j < tokens.len(); j++) {
+            names.push(tokens[j].string())
+        }
+        fmt.println(tokens.len().string() + ": " + names.join(" "))
+    }
+    []Token a, error e1 = tokenize("a+1")
+    []Token b, error e2 = tokenize("a + 1")
+    if (e1 == null) {
+        if (e2 == null) {
+            fmt.println("same tokens: " + (a == b).string())
+        }
+    }
+    return null
+}

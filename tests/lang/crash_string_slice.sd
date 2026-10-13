@@ -1,0 +1,11 @@
+// s.slice(a, b) crashes unless 0 <= a <= b <= len.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    string s = "hello"
+    fmt.println("before")
+    fmt.println(s.slice(3, 2))
+    return null
+}

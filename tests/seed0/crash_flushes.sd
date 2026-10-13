@@ -1,0 +1,13 @@
+// Output written before a crash is flushed; the crash goes to stderr.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    []int xs = []int{1, 2, 3}
+    for (int i = 0; i < 1000; i++) {
+        fmt.println("line " + i.string())
+    }
+    fmt.println(xs[3].string())
+    return null
+}

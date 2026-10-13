@@ -1,0 +1,32 @@
+// select runs the one case whose channel operation can proceed.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    chan int numbers = chan int(1)
+    chan string words = chan string(1)
+    words.send("hello")
+    select {
+    case int? n = numbers.receive():
+        if (n != null) {
+            fmt.println("number " + n.string())
+        }
+    case string? w = words.receive():
+        if (w != null) {
+            fmt.println("word " + w)
+        }
+    }
+    numbers.send(42)
+    select {
+    case int? n = numbers.receive():
+        if (n != null) {
+            fmt.println("number " + n.string())
+        }
+    case string? w = words.receive():
+        if (w != null) {
+            fmt.println("word " + w)
+        }
+    }
+    return null
+}

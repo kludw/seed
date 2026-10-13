@@ -1,0 +1,12 @@
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    int x = 9223372036854775800
+    for (int i = 0; i < 10; i++) {
+        x = x + 1
+    }
+    fmt.println("unreachable")
+    return null
+}

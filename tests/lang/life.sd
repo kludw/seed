@@ -1,0 +1,95 @@
+// Conway's Game of Life on a small bounded grid stored as [][]bool.
+package main
+
+import "fmt"
+
+fn parse([]string rows) [][]bool {
+    [][]bool grid = [][]bool{}
+    for (int r = 0; r < rows.len(); r++) {
+        []bool row = []bool{}
+        for (int c = 0; c < rows[r].len(); c++) {
+            row.push(rows[r][c] == '#')
+        }
+        grid.push(row)
+    }
+    return grid
+}
+
+fn neighbours([][]bool grid, int r, int c) int {
+    int count = 0
+    for (int dr = -1; dr <= 1; dr++) {
+        for (int dc = -1; dc <= 1; dc++) {
+            if (dr == 0 && dc == 0) {
+                continue
+            }
+            int nr = r + dr
+            int nc = c + dc
+            if (nr < 0 || nc < 0 || nr >= grid.len() || nc >= grid[nr].len()) {
+                continue
+            }
+            if (grid[nr][nc]) {
+                count++
+            }
+        }
+    }
+    return count
+}
+
+fn step([][]bool grid) [][]bool {
+    [][]bool next = grid
+    for (int r = 0; r < grid.len(); r++) {
+        for (int c = 0; c < grid[r].len(); c++) {
+            int n = neighbours(grid, r, c)
+            next[r][c] = n == 3 || (grid[r][c] && n == 2)
+        }
+    }
+    return next
+}
+
+fn render([][]bool grid) string {
+    string out = ""
+    for (int r = 0; r < grid.len(); r++) {
+        []byte line = []byte{}
+        for (int c = 0; c < grid[r].len(); c++) {
+            if (grid[r][c]) {
+                line.push('#')
+            } else {
+                line.push('.')
+            }
+        }
+        out = out + string(line) + "\n"
+    }
+    return out
+}
+
+fn population([][]bool grid) int {
+    int count = 0
+    for (int r = 0; r < grid.len(); r++) {
+        for (int c = 0; c < grid[r].len(); c++) {
+            if (grid[r][c]) {
+                count++
+            }
+        }
+    }
+    return count
+}
+
+fn main([]string args) error {
+    [][]bool grid = parse([]string{
+        ".#....",
+        "..#...",
+        "###...",
+        "......",
+        "......",
+        "......",
+    })
+    fmt.print(render(grid))
+    for (int gen = 1; gen <= 4; gen++) {
+        grid = step(grid)
+        fmt.println("gen " + gen.string() + ": " + population(grid).string())
+    }
+    fmt.print(render(grid))
+    [][]bool blinker = parse([]string{".....", "..#..", "..#..", "..#..", "....."})
+    fmt.print(render(step(blinker)))
+    return null
+}

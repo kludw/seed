@@ -1,0 +1,12 @@
+// expect-error: missing field age
+package main
+
+type U struct {
+    string name
+    int age
+}
+
+fn main([]string args) error {
+    U u = U{name: "a"}
+    return null
+}

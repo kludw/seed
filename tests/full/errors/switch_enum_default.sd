@@ -1,0 +1,27 @@
+// expect-error: default
+// A switch over an enum cannot have a default case.
+package main
+
+import "fmt"
+
+type Color enum {
+    Red
+    Green
+    Blue
+}
+
+fn isRed(Color c) bool {
+    bool result = false
+    switch (c) {
+    case Color.Red:
+        result = true
+    default:
+        result = false
+    }
+    return result
+}
+
+fn main([]string args) error {
+    fmt.println(isRed(Color.Blue).string())
+    return null
+}

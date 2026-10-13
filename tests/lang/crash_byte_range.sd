@@ -1,0 +1,14 @@
+// byte(i) crashes unless 0 <= i <= 255.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    int n = 255
+    byte ok = byte(n)
+    fmt.println("before")
+    n = n + 1
+    byte bad = byte(n)
+    fmt.println("after " + ok.string() + bad.string())
+    return null
+}

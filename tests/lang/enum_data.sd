@@ -1,0 +1,76 @@
+// Enums whose cases carry data, matched with typed bindings in a switch.
+package main
+
+import "fmt"
+
+type Shape enum {
+    Circle(float radius)
+    Rect(float w, float h)
+    Empty
+}
+
+type Event enum {
+    Click(int x, int y)
+    Key(string name)
+    Batch([]int ids)
+}
+
+fn area(Shape s) float {
+    float result = 0.0
+    switch (s) {
+    case Shape.Circle(float r):
+        result = 3.0 * r * r
+    case Shape.Rect(float w, float h):
+        result = w * h
+    case Shape.Empty:
+        result = 0.0
+    }
+    return result
+}
+
+fn (Shape s) describe() string {
+    string out = ""
+    switch (s) {
+    case Shape.Circle(float r):
+        out = "circle r=" + r.string()
+    case Shape.Rect(float w, float h):
+        out = "rect " + w.string() + "x" + h.string()
+    case Shape.Empty:
+        out = "empty"
+    }
+    return out
+}
+
+fn describeEvent(Event e) string {
+    string out = ""
+    switch (e) {
+    case Event.Click(int x, int y):
+        out = "click at " + x.string() + "," + y.string()
+    case Event.Key(string name):
+        out = "key " + name
+    case Event.Batch([]int ids):
+        out = "batch of " + ids.len().string()
+    }
+    return out
+}
+
+fn main([]string args) error {
+    []Shape shapes = []Shape{Shape.Circle(2.0), Shape.Rect(2.5, 4.0), Shape.Empty}
+    for (int i = 0; i < shapes.len(); i++) {
+        fmt.println(shapes[i].describe() + " area=" + area(shapes[i]).string())
+    }
+    fmt.println(describeEvent(Event.Click(3, 4)))
+    fmt.println(describeEvent(Event.Key("enter")))
+    fmt.println(describeEvent(Event.Batch([]int{7, 8, 9})))
+    Shape c1 = Shape.Circle(1.0)
+    fmt.println((c1 == Shape.Circle(1.0)).string())
+    fmt.println((c1 == Shape.Circle(2.0)).string())
+    fmt.println((c1 == Shape.Empty).string())
+    fmt.println((Shape.Empty == Shape.Empty).string())
+    fmt.println((Shape.Rect(1.0, 2.0) == Shape.Rect(1.0, 2.0)).string())
+    fmt.println((Shape.Rect(1.0, 2.0) != Shape.Rect(2.0, 1.0)).string())
+    fmt.println((Event.Batch([]int{1}) == Event.Batch([]int{1})).string())
+    c1 = Shape.Rect(3.0, 3.0)
+    fmt.println(c1.describe())
+    return null
+}

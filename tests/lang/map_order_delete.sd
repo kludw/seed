@@ -1,0 +1,40 @@
+// Maps keep insertion order. Replacing a value keeps its position, delete keeps
+// the order of the rest, and a re-inserted key goes to the end.
+package main
+
+import "fmt"
+
+fn show(map[string]int m) string {
+    string out = ""
+    []string keys = m.keys()
+    for (int i = 0; i < keys.len(); i++) {
+        int? v = m[keys[i]]
+        if (v != null) {
+            out = out + keys[i] + "=" + v.string() + " "
+        }
+    }
+    return out + "(" + m.len().string() + ")"
+}
+
+fn main([]string args) error {
+    map[string]int m = map[string]int{}
+    m["zeta"] = 1
+    m["alpha"] = 2
+    m["mid"] = 3
+    fmt.println(show(m))
+    m["alpha"] = 20
+    fmt.println(show(m))
+    m.delete("zeta")
+    fmt.println(show(m))
+    m.delete("nope")
+    fmt.println(show(m))
+    m["zeta"] = 5
+    fmt.println(show(m))
+    m.delete("mid")
+    fmt.println(show(m))
+    map[string]int same = map[string]int{"alpha": 20, "zeta": 5}
+    fmt.println((m == same).string())
+    same["zeta"] = 6
+    fmt.println((m == same).string())
+    return null
+}

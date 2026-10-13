@@ -1,0 +1,149 @@
+// Value semantics: every copy is independent (assignment, params, fields,
+// list elements, map values, returns).
+package main
+
+import "fmt"
+
+type Bag struct {
+    string name
+    []int items
+    map[string]int tags
+}
+
+type Box struct {
+    Bag bag
+    []Bag bags
+}
+
+fn show(string label, []int xs) {
+    []string parts = []string{}
+    for (int i = 0; i < xs.len(); i++) {
+        parts.push(xs[i].string())
+    }
+    fmt.println(label + ": [" + parts.join(", ") + "]")
+}
+
+fn addOne([]int xs) []int {
+    []int copy = xs
+    copy.push(1)
+    return copy
+}
+
+fn itemsOf(Bag b) []int {
+    return b.items
+}
+
+fn identity([]int xs) []int {
+    return xs
+}
+
+fn main([]string args) error {
+    // assignment
+    []int a = []int{1, 2}
+    []int b = a
+    b.push(3)
+    b[0] = 100
+    show("a", a)
+    show("b", b)
+
+    // nested lists
+    [][]int grid = [][]int{[]int{1}, []int{2}}
+    [][]int grid2 = grid
+    grid2[0].push(9)
+    grid2.push([]int{7})
+    show("grid[0]", grid[0])
+    show("grid2[0]", grid2[0])
+    fmt.println(grid.len().string() + " " + grid2.len().string())
+
+    // a list element copied out
+    []int row = grid[1]
+    row.push(5)
+    show("grid[1]", grid[1])
+    show("row", row)
+
+    // params and returns
+    []int c = addOne(a)
+    show("a after addOne", a)
+    show("c", c)
+    []int d = identity(a)
+    d.push(42)
+    show("a after identity", a)
+
+    // struct fields
+    Bag bag = Bag{name: "x", items: a, tags: map[string]int{"k": 1}}
+    a.push(77)
+    show("bag.items", bag.items)
+    Bag bag2 = bag
+    bag2.items.push(5)
+    bag2.tags["k"] = 2
+    bag2.name = "y"
+    show("bag.items", bag.items)
+    show("bag2.items", bag2.items)
+    fmt.println(bag.name + " " + bag2.name)
+    int? k1 = bag.tags["k"]
+    int? k2 = bag2.tags["k"]
+    if (k1 != null && k2 != null) {
+        fmt.println(k1.string() + " " + k2.string())
+    }
+
+    // returning a field of a parameter
+    []int its = itemsOf(bag)
+    its.push(6)
+    show("bag.items", bag.items)
+    show("its", its)
+
+    // structs inside structs and lists
+    Box box = Box{bag: bag, bags: []Bag{bag, bag2}}
+    Box box2 = box
+    box2.bag.items.push(8)
+    box2.bags[0].items.push(9)
+    box2.bags[1].name = "z"
+    show("box.bag.items", box.bag.items)
+    show("box2.bag.items", box2.bag.items)
+    show("box.bags[0].items", box.bags[0].items)
+    show("box2.bags[0].items", box2.bags[0].items)
+    fmt.println(box.bags[1].name + " " + box2.bags[1].name)
+
+    // element of list of structs copied into a local
+    Bag first = box.bags[0]
+    first.items.push(10)
+    show("box.bags[0].items", box.bags[0].items)
+    show("first.items", first.items)
+
+    // maps
+    map[string][]int m = map[string][]int{"a": []int{1}}
+    map[string][]int m2 = m
+    []int? got = m2["a"]
+    if (got != null) {
+        []int g = got
+        g.push(2)
+        m2["a"] = g
+    }
+    []int? ma = m["a"]
+    []int? m2a = m2["a"]
+    if (ma != null && m2a != null) {
+        show("m[a]", ma)
+        show("m2[a]", m2a)
+    }
+
+    // a list pushed into another list, then changed
+    [][]int outer = [][]int{}
+    []int inner = []int{1}
+    outer.push(inner)
+    inner.push(2)
+    show("outer[0]", outer[0])
+    show("inner", inner)
+
+    // pop returns a copy
+    [][]int st = [][]int{[]int{1, 2}}
+    [][]int st2 = st
+    []int? top = st2.pop()
+    if (top != null) {
+        []int t = top
+        t.push(3)
+        show("t", t)
+    }
+    fmt.println(st.len().string() + " " + st2.len().string())
+    show("st[0]", st[0])
+    return null
+}

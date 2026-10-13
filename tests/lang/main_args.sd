@@ -1,0 +1,10 @@
+// args holds the program path and nothing else when no arguments are given.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    fmt.println("args: " + args.len().string())
+    fmt.println("has path: " + (args[0].len() > 0).string())
+    return null
+}

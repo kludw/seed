@@ -1,0 +1,31 @@
+a: [1, 2]
+b: [100, 2, 3]
+grid[0]: [1]
+grid2[0]: [1, 9]
+2 3
+grid[1]: [2]
+row: [2, 5]
+a after addOne: [1, 2]
+c: [1, 2, 1]
+a after identity: [1, 2]
+bag.items: [1, 2]
+bag.items: [1, 2]
+bag2.items: [1, 2, 5]
+x y
+1 2
+bag.items: [1, 2]
+its: [1, 2, 6]
+box.bag.items: [1, 2]
+box2.bag.items: [1, 2, 8]
+box.bags[0].items: [1, 2]
+box2.bags[0].items: [1, 2, 9]
+y z
+box.bags[0].items: [1, 2]
+first.items: [1, 2, 10]
+m[a]: [1]
+m2[a]: [1, 2]
+outer[0]: [1]
+inner: [1, 2]
+t: [1, 2, 3]
+1 0
+st[0]: [1, 2]

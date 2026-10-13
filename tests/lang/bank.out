@@ -1,0 +1,11 @@
+ok
+ok
+failed: account exists: ann
+ok
+ok
+failed: insufficient funds: bob has 30, needs 50
+failed: no account: cat
+failed: amount must be positive
+ok
+ann 100 [+100 -30 +30]
+bob 0 [+30 -30]

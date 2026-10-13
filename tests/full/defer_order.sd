@@ -1,0 +1,17 @@
+// Deferred calls run when the function returns, last deferred first.
+package main
+
+import "fmt"
+
+fn work() int {
+    defer fmt.println("deferred 1")
+    defer fmt.println("deferred 2")
+    fmt.println("body")
+    return 7
+}
+
+fn main([]string args) error {
+    int r = work()
+    fmt.println("returned " + r.string())
+    return null
+}

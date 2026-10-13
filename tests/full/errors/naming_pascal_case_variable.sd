@@ -1,0 +1,11 @@
+// expect-error: TotalCount
+// Variables use camelCase, so a PascalCase variable is a compile error.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    int TotalCount = 3
+    fmt.println(TotalCount.string())
+    return null
+}

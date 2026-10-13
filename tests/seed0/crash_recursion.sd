@@ -1,0 +1,15 @@
+// Unbounded recursion overflows the stack: reported as a crash (exit 2), and
+// output written before it is flushed.
+package main
+
+import "fmt"
+
+fn down(int n) int {
+    return down(n + 1) + 1
+}
+
+fn main([]string args) error {
+    fmt.println("start")
+    fmt.println(down(0).string())
+    return null
+}

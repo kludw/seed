@@ -1,0 +1,24 @@
+// A goroutine's error passed up from main ends the program with exit code 1.
+package main
+
+import "errors"
+import "fmt"
+
+fn job(int id) error {
+    if (id == 3) {
+        return errors.new("job 3 failed")
+    }
+    return null
+}
+
+fn main([]string args) error {
+    fmt.println("starting")
+    error err = group {
+        spawn job(3)
+    }
+    if (err != null) {
+        return err
+    }
+    fmt.println("not reached")
+    return null
+}

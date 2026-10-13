@@ -1,0 +1,11 @@
+// expect-error: nullable_method_call.sd:9:
+// Calling a method on an unchecked T? is an error.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    string? maybeName = null
+    fmt.println(maybeName.toUpper())
+    return null
+}

@@ -1,0 +1,15 @@
+// expect-error: type_wrong_argument.sd:12:
+// Passing a string where an int is expected.
+package main
+
+import "fmt"
+
+fn double(int x) int {
+    return x * 2
+}
+
+fn main([]string args) error {
+    int r = double("4")
+    fmt.println(r.string())
+    return null
+}

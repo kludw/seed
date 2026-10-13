@@ -1,0 +1,37 @@
+// contains and index on lists, including lists of structs.
+package main
+
+import "fmt"
+
+type Point struct {
+    int x
+    int y
+}
+
+fn showIndex(int? i) string {
+    if (i == null) {
+        return "null"
+    }
+    return i.string()
+}
+
+fn main([]string args) error {
+    []int xs = []int{5, 3, 5, 9}
+    fmt.println(xs.contains(9).string())
+    fmt.println(xs.contains(4).string())
+    fmt.println(showIndex(xs.index(5)))
+    fmt.println(showIndex(xs.index(9)))
+    fmt.println(showIndex(xs.index(4)))
+    []string names = []string{"a", "b", "c"}
+    fmt.println(showIndex(names.index("b")))
+    fmt.println(names.contains("d").string())
+    []Point pts = []Point{Point{x: 1, y: 2}, Point{x: 3, y: 4}}
+    Point target = Point{x: 3, y: 4}
+    fmt.println(pts.contains(target).string())
+    fmt.println(showIndex(pts.index(target)))
+    Point other = Point{x: 4, y: 3}
+    fmt.println(pts.contains(other).string())
+    []int empty = []int{}
+    fmt.println(showIndex(empty.index(1)))
+    return null
+}

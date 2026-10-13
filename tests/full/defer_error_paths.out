@@ -1,0 +1,10 @@
+step ok
+cleanup
+true
+cleanup
+step failed
+parsed
+load cleanup
+3
+load cleanup
+empty input

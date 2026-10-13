@@ -1,0 +1,93 @@
+// try, _ and multiple results.
+package main
+
+import "errors"
+import "fmt"
+
+fn parse(string s) (int, error) {
+    if (s == "") {
+        return null, errors.new("empty")
+    }
+    int n = try s.toInt()
+    return n, null
+}
+
+fn pair(string s) (int, string, error) {
+    int n = try parse(s)
+    return n * 2, "ok:" + s, null
+}
+
+fn check(int n) error {
+    if (n < 0) {
+        return errors.new("negative: " + n.string())
+    }
+    return null
+}
+
+fn run(string a, string b) error {
+    int x, string label = try pair(a)
+    try check(x)
+    int y = try parse(b)
+    fmt.println(label + " " + (x + y).string())
+    return null
+}
+
+fn sum([]string xs) (int, error) {
+    int total = 0
+    for (int i = 0; i < xs.len(); i++) {
+        total = total + try parse(xs[i])
+    }
+    return total, null
+}
+
+fn passThrough(string s) (int, string, error) {
+    return pair(s)
+}
+
+fn main([]string args) error {
+    error err = run("3", "4")
+    fmt.println((err == null).string())
+    err = run("x", "4")
+    if (err != null) {
+        fmt.println("error: " + err.message())
+    }
+    err = run("-3", "4")
+    if (err != null) {
+        fmt.println("error: " + err.message())
+    }
+    err = run("1", "")
+    if (err != null) {
+        fmt.println("error: " + err.message())
+    }
+
+    int? v, _ = parse("12")
+    int? w, _ = parse("nope")
+    fmt.println((v == null).string() + " " + (w == null).string())
+    if (v != null) {
+        fmt.println(v.string())
+    }
+    _ = check(-1)
+    _ = check(1)
+
+    int total, error e2 = sum([]string{"1", "2", "3"})
+    fmt.println(total.string() + " " + (e2 == null).string())
+    int t2 = 0
+    t2, e2 = sum([]string{"1", "bad"})
+    if (e2 != null) {
+        fmt.println(e2.message())
+    }
+
+    int? a = null
+    string? b = null
+    a, b, _ = passThrough("5")
+    if (a != null && b != null) {
+        fmt.println(a.string() + " " + b)
+    }
+    a, b, _ = passThrough("")
+    fmt.println((a == null).string() + " " + (b == null).string())
+
+    error e3 = errors.new("same")
+    error e4 = errors.new("same")
+    fmt.println((e3 == e4).string())
+    return null
+}

@@ -1,0 +1,12 @@
+// A negative list index crashes.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    []string xs = []string{"a"}
+    fmt.println("before")
+    int i = xs.len() - 2
+    fmt.println("after " + xs[i])
+    return null
+}

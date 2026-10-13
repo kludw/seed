@@ -1,0 +1,15 @@
+// expect-error: builtin_mut_on_param.sd:8:
+// Built-in mut methods such as push cannot be called on a parameter either.
+package main
+
+import "fmt"
+
+fn addOne([]int frozenList) int {
+    frozenList.push(1)
+    return frozenList.len()
+}
+
+fn main([]string args) error {
+    fmt.println(addOne([]int{}).string())
+    return null
+}

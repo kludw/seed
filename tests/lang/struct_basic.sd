@@ -1,0 +1,37 @@
+// Struct declaration, literals, field reads and writes, and passing structs around.
+package main
+
+import "fmt"
+
+type Point struct {
+    int x
+    int y
+}
+
+type User struct {
+    string name
+    []string tags
+    bool admin
+}
+
+fn moved(Point p, int dx) Point {
+    return Point{x: p.x + dx, y: p.y}
+}
+
+fn main([]string args) error {
+    Point p = Point{x: 3, y: 4}
+    fmt.println(p.x.string() + "," + p.y.string())
+    p.x = 10
+    p.y++
+    fmt.println(p.x.string() + "," + p.y.string())
+    Point q = moved(p, 5)
+    fmt.println(q.x.string() + "," + q.y.string())
+    fmt.println(p.x.string() + "," + p.y.string())
+    User u = User{name: "kam", tags: []string{}, admin: false}
+    u.tags.push("dev")
+    u.tags.push("ops")
+    u.admin = true
+    fmt.println(u.name + " " + u.tags.join("+") + " " + u.admin.string())
+    fmt.println(u.tags.len().string())
+    return null
+}

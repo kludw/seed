@@ -1,0 +1,26 @@
+// insert(i, x) for 0 <= i <= len, and remove(i).
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    []string xs = []string{"b", "d"}
+    xs.insert(0, "a")
+    fmt.println(xs.join(" "))
+    xs.insert(2, "c")
+    fmt.println(xs.join(" "))
+    xs.insert(4, "e")
+    fmt.println(xs.join(" "))
+    xs.remove(0)
+    fmt.println(xs.join(" "))
+    xs.remove(3)
+    fmt.println(xs.join(" "))
+    xs.remove(1)
+    fmt.println(xs.join(" "))
+    xs.remove(0)
+    xs.remove(0)
+    fmt.println(xs.len().string())
+    xs.insert(0, "only")
+    fmt.println(xs.join(" "))
+    return null
+}

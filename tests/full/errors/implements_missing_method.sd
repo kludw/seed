@@ -1,0 +1,24 @@
+// expect-error: area
+// A type that declares `implements` must have every method of the interface.
+package main
+
+import "fmt"
+
+type Shape interface {
+    area() float
+    name() string
+}
+
+type Square struct implements Shape {
+    float side
+}
+
+fn (Square s) name() string {
+    return "square"
+}
+
+fn main([]string args) error {
+    Shape s = Square{side: 2.0}
+    fmt.println(s.name())
+    return null
+}

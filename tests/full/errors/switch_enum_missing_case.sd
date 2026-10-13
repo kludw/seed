@@ -1,0 +1,27 @@
+// expect-error: Triangle
+// A switch over an enum must cover every case.
+package main
+
+import "fmt"
+
+type Shape enum {
+    Circle
+    Square
+    Triangle
+}
+
+fn sides(Shape s) int {
+    int n = 0
+    switch (s) {
+    case Shape.Circle:
+        n = 0
+    case Shape.Square:
+        n = 4
+    }
+    return n
+}
+
+fn main([]string args) error {
+    fmt.println(sides(Shape.Triangle).string())
+    return null
+}

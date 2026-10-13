@@ -1,0 +1,30 @@
+// Integer arithmetic. Division and % truncate toward zero.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    int a = 17
+    int b = 5
+    fmt.println("a + b = " + (a + b).string())
+    fmt.println("a - b = " + (a - b).string())
+    fmt.println("b - a = " + (b - a).string())
+    fmt.println("a * b = " + (a * b).string())
+    fmt.println("a / b = " + (a / b).string())
+    fmt.println("a % b = " + (a % b).string())
+    fmt.println("-a / b = " + (-a / b).string())
+    fmt.println("-a % b = " + (-a % b).string())
+    fmt.println("a / -b = " + (a / -b).string())
+    fmt.println("a % -b = " + (a % -b).string())
+    fmt.println("-a / -b = " + (-a / -b).string())
+    fmt.println("-a % -b = " + (-a % -b).string())
+    fmt.println("-(a - b) = " + (-(a - b)).string())
+    fmt.println("a * b - a / b = " + (a * b - a / b).string())
+    int c = 1000000 * 1000000
+    fmt.println("c = " + c.string())
+    fmt.println("c / 7 = " + (c / 7).string())
+    fmt.println("c % 7 = " + (c % 7).string())
+    int zero = 0
+    fmt.println("0 / 5 = " + (zero / b).string())
+    return null
+}

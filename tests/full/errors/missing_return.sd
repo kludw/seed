@@ -1,0 +1,16 @@
+// expect-error: return
+// A function with a result must return on every path.
+package main
+
+import "fmt"
+
+fn classify(int n) string {
+    if (n > 0) {
+        return "positive"
+    }
+}
+
+fn main([]string args) error {
+    fmt.println(classify(1))
+    return null
+}

@@ -1,0 +1,7 @@
+11: Num(12) Plus Ident(x) Star LParen Num(3) Minus Num(4) RParen Slash Ident(y2)
+5: LParen Num(1) Plus Num(2) RParen
+0: 
+error: unexpected character '%' at 2
+1: Num(42)
+3: Ident(foo_bar) Minus Ident(baz)
+same tokens: true

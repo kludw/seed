@@ -1,0 +1,16 @@
+// expect-error: circle
+// Enum cases use PascalCase.
+package main
+
+import "fmt"
+
+type Shape enum {
+    circle
+    Square
+}
+
+fn main([]string args) error {
+    Shape s = Shape.Square
+    fmt.println((s == Shape.circle).string())
+    return null
+}

@@ -1,0 +1,32 @@
+// sort works on lists of int, float, string and byte. Strings sort by bytes.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    []int ints = []int{5, -2, 9, 0, 3, 3}
+    ints.sort()
+    string out = ""
+    for (int i = 0; i < ints.len(); i++) {
+        out = out + ints[i].string() + " "
+    }
+    fmt.println(out)
+    []float floats = []float{2.5, -1.0, 0.25, 10.0}
+    floats.sort()
+    string fout = ""
+    for (int i = 0; i < floats.len(); i++) {
+        fout = fout + floats[i].string() + " "
+    }
+    fmt.println(fout)
+    []string ss = []string{"pear", "apple", "Banana", "apple2", "fig"}
+    ss.sort()
+    fmt.println(ss.join(" "))
+    string word = "hello"
+    []byte bs = word.bytes()
+    bs.sort()
+    fmt.println(string(bs))
+    []int sorted = []int{1, 2, 3}
+    sorted.sort()
+    fmt.println((sorted == []int{1, 2, 3}).string())
+    return null
+}

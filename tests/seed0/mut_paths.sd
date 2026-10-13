@@ -1,0 +1,141 @@
+// mut methods (user and built-in) through local, field and index paths,
+// including calls where an argument aliases the receiver.
+package main
+
+import "fmt"
+
+type Counter struct {
+    int n
+    []string log
+}
+
+fn (Counter c) mut bump(string why) {
+    c.n = c.n + 1
+    c.log.push(why)
+}
+
+fn (Counter c) mut bumpTwice(string why) {
+    c.bump(why + "1")
+    c.bump(why + "2")
+}
+
+fn (Counter c) summary() string {
+    return c.n.string() + " [" + c.log.join(",") + "]"
+}
+
+type Gen struct {
+    []string out
+    Counter counter
+    []Counter counters
+}
+
+fn (Gen g) mut emit(string s) {
+    g.out.push(s)
+    g.counter.bump(s)
+}
+
+type Bag struct {
+    []int items
+}
+
+fn (Bag b) mut addAll(Bag other) {
+    for (int i = 0; i < other.items.len(); i++) {
+        b.items.push(other.items[i])
+    }
+}
+
+fn (Bag b) mut absorb([]Bag all) {
+    for (int i = 0; i < all.len(); i++) {
+        b.items.push(all[i].items.len())
+    }
+}
+
+type Light enum {
+    Red
+    Green
+}
+
+fn (Light l) mut toggle() {
+    switch (l) {
+    case Light.Red:
+        l = Light.Green
+    case Light.Green:
+        l = Light.Red
+    }
+}
+
+fn (Light l) name() string {
+    switch (l) {
+    case Light.Red:
+        return "red"
+    case Light.Green:
+        return "green"
+    }
+}
+
+fn main([]string args) error {
+    Counter c = Counter{n: 0, log: []string{}}
+    c.bump("a")
+    c.bumpTwice("b")
+    fmt.println(c.summary())
+
+    Gen g = Gen{out: []string{}, counter: c, counters: []Counter{c, c}}
+    g.emit("x")
+    g.emit("y")
+    g.counters[1].bump("z")
+    g.counters[1].log.push("direct")
+    g.counter.log[0] = "A"
+    fmt.println(g.out.join(" "))
+    fmt.println(g.counter.summary())
+    fmt.println(g.counters[0].summary())
+    fmt.println(g.counters[1].summary())
+    fmt.println(c.summary())
+
+    []Counter cs = []Counter{c}
+    cs[0].bump("q")
+    fmt.println(cs[0].summary() + " / " + c.summary())
+
+    Bag bag = Bag{items: []int{1, 2}}
+    bag.addAll(bag)
+    fmt.println(bag.items.len().string())
+
+    []Bag bags = []Bag{Bag{items: []int{1}}, Bag{items: []int{1, 2}}}
+    bags[0].absorb(bags)
+    fmt.println(bags[0].items.len().string() + " " + bags[1].items.len().string())
+    bags[1].addAll(bags[1])
+    fmt.println(bags[1].items.len().string())
+
+    Light l = Light.Red
+    l.toggle()
+    fmt.println(l.name())
+    []Light ls = []Light{Light.Red, Light.Red}
+    ls[1].toggle()
+    fmt.println(ls[0].name() + " " + ls[1].name())
+
+    map[string][]int m = map[string][]int{}
+    m["a"] = []int{}
+    for (int i = 0; i < 3; i++) {
+        []int? cur = m["a"]
+        if (cur != null) {
+            []int xs = cur
+            xs.push(i)
+            m["a"] = xs
+        }
+    }
+    []int? fin = m["a"]
+    if (fin != null) {
+        fmt.println(fin.len().string())
+    }
+
+    [][]int grid = [][]int{[]int{3, 1, 2}, []int{9}}
+    grid[0].sort()
+    grid[0].reverse()
+    grid[0].insert(0, 7)
+    grid[0].remove(1)
+    int? p = grid[1].pop()
+    fmt.println(grid[0][0].string() + grid[0][1].string() + grid[0][2].string() + " " + grid[1].len().string())
+    if (p != null) {
+        fmt.println(p.string())
+    }
+    return null
+}

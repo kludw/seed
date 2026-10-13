@@ -1,0 +1,27 @@
+// Every string escape: \n \t \r \0 \\ \" \' \xHH.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    fmt.println("tab:\t|")
+    fmt.println("quote: \" single: \' backslash: \\")
+    fmt.println("hex: \x41\x62\x7a")
+    string nl = "a\nb"
+    fmt.println(nl)
+    fmt.println(nl.len().string())
+    string cr = "x\ry"
+    fmt.println(cr.len().string())
+    fmt.println(cr[1].string())
+    string z = "a\0b"
+    fmt.println(z.len().string())
+    fmt.println(z[1].string())
+    fmt.println(z[2].string())
+    string esc = "\\n"
+    fmt.println(esc.len().string())
+    fmt.println(esc)
+    string high = "\xff"
+    fmt.println(high.len().string())
+    fmt.println(high[0].string())
+    return null
+}

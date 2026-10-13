@@ -1,0 +1,11 @@
+// expect-error: leftover
+// An unused variable is a compile error.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    int leftover = 5
+    fmt.println("hi")
+    return null
+}

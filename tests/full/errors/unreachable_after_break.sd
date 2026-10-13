@@ -1,0 +1,13 @@
+// expect-error: unreachable_after_break.sd:10:
+// Code after break in the same block is unreachable.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    for (int i = 0; i < 3; i++) {
+        break
+        fmt.println(i.string())
+    }
+    return null
+}

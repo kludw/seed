@@ -1,0 +1,48 @@
+// Narrowing after `if (x == null)` whose block ends in break, continue or
+// os.exit, for the rest of the enclosing block.
+package main
+
+import "fmt"
+import "os"
+
+fn lookup(map[string]int m, string key) int? {
+    return m[key]
+}
+
+fn main([]string args) error {
+    [](int?) items = [](int?){1, null, 3, null, 5}
+    int total = 0
+    int skipped = 0
+    for (int i = 0; i < items.len(); i++) {
+        int? v = items[i]
+        if (v == null) {
+            skipped++
+            continue
+        }
+        total = total + v
+    }
+    fmt.println("total " + total.string() + " skipped " + skipped.string())
+    []int stack = []int{4, 5, 6}
+    int popped = 0
+    for (;;) {
+        int? top = stack.pop()
+        if (top == null) {
+            break
+        }
+        popped = popped + top
+    }
+    fmt.println("popped " + popped.string())
+    map[string]int cfg = map[string]int{"port": 8080}
+    int? port = lookup(cfg, "port")
+    if (port == null) {
+        fmt.println("no port")
+        os.exit(4)
+    }
+    fmt.println("port " + (port + 1).string())
+    items[1] = 2
+    int? second = items[1]
+    if (second != null) {
+        fmt.println("second " + second.string())
+    }
+    return null
+}

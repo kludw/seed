@@ -1,0 +1,77 @@
+// switch over int, string, byte and bool: several labels per case, a required
+// default, and no fall-through.
+package main
+
+import "fmt"
+
+fn classify(int n) string {
+    string r = ""
+    switch (n) {
+    case 0:
+        r = "zero"
+    case 1, 2, 3:
+        r = "small"
+    case 10, 20:
+        r = "round"
+    default:
+        r = "other"
+    }
+    return r
+}
+
+fn action(string signal) string {
+    string r = ""
+    switch (signal) {
+    case "go":
+        r = "drive"
+    case "stop":
+        r = "brake"
+    case "wait", "pause":
+        r = "idle"
+    default:
+        r = "unknown"
+    }
+    return r
+}
+
+fn main([]string args) error {
+    []int nums = []int{0, 1, 3, 10, 20, 7, -1}
+    for (int i = 0; i < nums.len(); i++) {
+        fmt.println(nums[i].string() + " " + classify(nums[i]))
+    }
+    []string signals = []string{"go", "pause", "stop", "wait", "fly"}
+    for (int i = 0; i < signals.len(); i++) {
+        fmt.println(signals[i] + " " + action(signals[i]))
+    }
+    string text = "programming language"
+    int vowels = 0
+    int spaces = 0
+    int others = 0
+    for (int i = 0; i < text.len(); i++) {
+        switch (text[i]) {
+        case 'a', 'e', 'i', 'o', 'u':
+            vowels++
+        case ' ':
+            spaces++
+        default:
+            others++
+        }
+    }
+    fmt.println(vowels.string() + " " + spaces.string() + " " + others.string())
+    bool flag = vowels > 5
+    switch (flag) {
+    case true:
+        fmt.println("many vowels")
+    default:
+        fmt.println("few vowels")
+    }
+    for (int i = 0; i < 4; i++) {
+        switch (i % 3) {
+        case 0:
+            fmt.println("fizz " + i.string())
+        default:
+            fmt.println("plain " + i.string())
+        }
+    }
+    return null
+}

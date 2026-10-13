@@ -1,0 +1,29 @@
+// s.chars() splits a string into UTF-8 characters; len() still counts bytes.
+package main
+
+import "fmt"
+
+fn reverseChars(string s) string {
+    []string cs = s.chars()
+    cs.reverse()
+    return cs.join("")
+}
+
+fn main([]string args) error {
+    string word = "héllo"
+    []string cs = word.chars()
+    fmt.println(cs.len().string() + " chars, " + word.len().string() + " bytes")
+    fmt.println(cs.join("|"))
+    fmt.println(cs[1] + " has " + cs[1].len().string() + " bytes")
+    string emoji = "a😀b"
+    fmt.println(emoji.chars().len().string() + " chars, " + emoji.len().string() + " bytes")
+    string kanji = "日本語"
+    fmt.println(kanji.chars().len().string() + " chars, " + kanji.len().string() + " bytes")
+    string empty = ""
+    fmt.println(empty.chars().len().string())
+    fmt.println(reverseChars(word))
+    fmt.println(reverseChars(kanji))
+    string ascii = "abc"
+    fmt.println(ascii.chars().join(","))
+    return null
+}

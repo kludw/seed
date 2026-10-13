@@ -1,0 +1,12 @@
+// expect-error: MAX_USERS
+// Constants use camelCase too, so SCREAMING_CASE is a compile error.
+package main
+
+import "fmt"
+
+const int MAX_USERS = 100
+
+fn main([]string args) error {
+    fmt.println(MAX_USERS.string())
+    return null
+}

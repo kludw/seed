@@ -1,0 +1,32 @@
+// When one goroutine returns an error, the others are stopped at their next
+// channel operation and the group returns that error.
+package main
+
+import "errors"
+import "fmt"
+
+fn waiter(chan int never) error {
+    int? v = never.receive()
+    if (v != null) {
+        return errors.new("unexpected value " + v.string())
+    }
+    return null
+}
+
+fn failing(int id) error {
+    return errors.new("worker " + id.string() + " failed")
+}
+
+fn main([]string args) error {
+    chan int never = chan int(0)
+    error err = group {
+        spawn waiter(never)
+        spawn failing(7)
+        spawn waiter(never)
+    }
+    if (err != null) {
+        fmt.println("group failed: " + err.message())
+    }
+    fmt.println("main continues")
+    return null
+}

@@ -1,0 +1,55 @@
+// push adds to the end; pop removes from the end and returns T? (null when empty).
+package main
+
+import "fmt"
+
+fn showInts([]int xs) string {
+    string out = "["
+    for (int i = 0; i < xs.len(); i++) {
+        if (i > 0) {
+            out = out + ", "
+        }
+        out = out + xs[i].string()
+    }
+    return out + "]"
+}
+
+fn showOpt(int? x) string {
+    if (x == null) {
+        return "null"
+    }
+    return x.string()
+}
+
+fn main([]string args) error {
+    []int xs = []int{}
+    for (int i = 0; i < 5; i++) {
+        xs.push(i * i)
+    }
+    fmt.println(showInts(xs))
+    int? last = xs.pop()
+    fmt.println(showOpt(last))
+    fmt.println(showInts(xs))
+    int sum = 0
+    int count = 0
+    for (;;) {
+        int? v = xs.pop()
+        if (v == null) {
+            break
+        }
+        sum = sum + v
+        count++
+    }
+    fmt.println("sum " + sum.string() + " count " + count.string())
+    int? none = xs.pop()
+    fmt.println(showOpt(none))
+    fmt.println(xs.len().string())
+    []string words = []string{"x", "y"}
+    string? w = words.pop()
+    if (w != null) {
+        fmt.println("popped " + w)
+    }
+    words.push("z")
+    fmt.println(words.join(","))
+    return null
+}

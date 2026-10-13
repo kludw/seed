@@ -1,0 +1,12 @@
+t && f: false
+t || f: true
+!t: false
+!f: true
+t == f: false
+t != f: true
+t && !f: true
+f || f: false
+1 < 2: true
+called and-run
+called or-run
+false true false true

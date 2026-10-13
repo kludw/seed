@@ -1,0 +1,56 @@
+// A three-stage pipeline: generate, square, sum.
+package main
+
+import "fmt"
+
+fn generate(int n, chan int out) error {
+    for (int i = 1; i <= n; i++) {
+        out.send(i)
+    }
+    out.close()
+    return null
+}
+
+fn squares(chan int input, chan int out) error {
+    for (;;) {
+        int? v = input.receive()
+        if (v == null) {
+            break
+        }
+        out.send(v * v)
+    }
+    out.close()
+    return null
+}
+
+fn total(chan int input, chan int result) error {
+    int sum = 0
+    for (;;) {
+        int? v = input.receive()
+        if (v == null) {
+            break
+        }
+        sum = sum + v
+    }
+    result.send(sum)
+    return null
+}
+
+fn main([]string args) error {
+    chan int numbers = chan int(0)
+    chan int squared = chan int(2)
+    chan int result = chan int(1)
+    error err = group {
+        spawn generate(10, numbers)
+        spawn squares(numbers, squared)
+        spawn total(squared, result)
+    }
+    if (err != null) {
+        return err
+    }
+    int? sum = result.receive()
+    if (sum != null) {
+        fmt.println("sum of squares 1..10 = " + sum.string())
+    }
+    return null
+}

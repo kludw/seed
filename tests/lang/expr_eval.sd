@@ -1,0 +1,176 @@
+// A recursive-descent parser and evaluator. The AST lives in a list and nodes
+// refer to their children by index, because there are no pointers.
+package main
+
+import "errors"
+import "fmt"
+
+type Node enum {
+    Num(int value)
+    Neg(int operand)
+    Bin(byte op, int left, int right)
+}
+
+type Parser struct {
+    string src
+    int pos
+    []Node nodes
+}
+
+fn (Parser p) mut skipSpaces() {
+    for (;;) {
+        if (p.pos >= p.src.len() || p.src[p.pos] != ' ') {
+            break
+        }
+        p.pos++
+    }
+}
+
+fn (Parser p) mut peek() byte {
+    p.skipSpaces()
+    if (p.pos >= p.src.len()) {
+        return '\0'
+    }
+    return p.src[p.pos]
+}
+
+fn (Parser p) mut add(Node n) int {
+    p.nodes.push(n)
+    return p.nodes.len() - 1
+}
+
+// expr := term { ("+" | "-") term }
+fn (Parser p) mut parseExpr() (int, error) {
+    int left = try p.parseTerm()
+    for (;;) {
+        byte c = p.peek()
+        if (c != '+' && c != '-') {
+            break
+        }
+        p.pos++
+        int right = try p.parseTerm()
+        left = p.add(Node.Bin(c, left, right))
+    }
+    return left, null
+}
+
+// term := unary { ("*" | "/" | "%") unary }
+fn (Parser p) mut parseTerm() (int, error) {
+    int left = try p.parseUnary()
+    for (;;) {
+        byte c = p.peek()
+        if (c != '*' && c != '/' && c != '%') {
+            break
+        }
+        p.pos++
+        int right = try p.parseUnary()
+        left = p.add(Node.Bin(c, left, right))
+    }
+    return left, null
+}
+
+// unary := "-" unary | primary
+fn (Parser p) mut parseUnary() (int, error) {
+    if (p.peek() == '-') {
+        p.pos++
+        int operand = try p.parseUnary()
+        return p.add(Node.Neg(operand)), null
+    }
+    int primary = try p.parsePrimary()
+    return primary, null
+}
+
+// primary := number | "(" expr ")"
+fn (Parser p) mut parsePrimary() (int, error) {
+    byte c = p.peek()
+    if (c == '(') {
+        p.pos++
+        int inner = try p.parseExpr()
+        if (p.peek() != ')') {
+            return null, errors.new("expected ) at " + p.pos.string())
+        }
+        p.pos++
+        return inner, null
+    }
+    if (c < '0' || c > '9') {
+        return null, errors.new("expected number at " + p.pos.string())
+    }
+    int value = 0
+    for (;;) {
+        if (p.pos >= p.src.len()) {
+            break
+        }
+        byte d = p.src[p.pos]
+        if (d < '0' || d > '9') {
+            break
+        }
+        value = value * 10 + int(d) - int('0')
+        p.pos++
+    }
+    return p.add(Node.Num(value)), null
+}
+
+fn eval([]Node nodes, int i) (int, error) {
+    int result = 0
+    switch (nodes[i]) {
+    case Node.Num(int value):
+        result = value
+    case Node.Neg(int operand):
+        int v = try eval(nodes, operand)
+        result = -v
+    case Node.Bin(byte op, int left, int right):
+        int a = try eval(nodes, left)
+        int b = try eval(nodes, right)
+        if ((op == '/' || op == '%') && b == 0) {
+            return null, errors.new("division by zero")
+        }
+        switch (op) {
+        case '+':
+            result = a + b
+        case '-':
+            result = a - b
+        case '*':
+            result = a * b
+        case '/':
+            result = a / b
+        default:
+            result = a % b
+        }
+    }
+    return result, null
+}
+
+fn calc(string src) (int, int, error) {
+    Parser p = Parser{src: src, pos: 0, nodes: []Node{}}
+    int root = try p.parseExpr()
+    if (p.peek() != '\0') {
+        return null, null, errors.new("unexpected input at " + p.pos.string())
+    }
+    int v = try eval(p.nodes, root)
+    return v, p.nodes.len(), null
+}
+
+fn main([]string args) error {
+    []string inputs = []string{
+        "1 + 2 * 3",
+        "(1 + 2) * 3",
+        "10 - 4 - 3",
+        "-(2 + 3) * 4",
+        "7 % 4 + 100 / 7",
+        "2 * (3 + 4) * 5",
+        "--5",
+        "8 / (4 - 4)",
+        "1 + ",
+        "(1 + 2",
+        "3 3",
+    }
+    for (int i = 0; i < inputs.len(); i++) {
+        int value, int count, error err = calc(inputs[i])
+        if (err != null) {
+            fmt.println(inputs[i] + ": error: " + err.message())
+        } else {
+            fmt.println(inputs[i] + " = " + value.string() + " (" + count.string() + " nodes)")
+        }
+    }
+    return null
+}

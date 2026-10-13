@@ -1,0 +1,10 @@
+b=1 a=2 c=3
+b=1 a=20 c=3 d=4
+a=20 c=3 d=4 len=3
+a=20 c=3 d=4 b=5
+500 919 757 81
+true true
+1000 919 0 998
+helo wrd
+true false 2
+a=20 c=3 d=4 b=5 | c=3 d=4 b=5 z=26

@@ -1,0 +1,11 @@
+package main
+
+import "fs"
+import "fmt"
+
+fn main([]string args) error {
+    fmt.println("before")
+    string s = try fs.read("/nonexistent/seed0/file")
+    fmt.println(s)
+    return null
+}

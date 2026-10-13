@@ -1,0 +1,14 @@
+// expect-error: unreachable_code.sd:10:
+// Code after a return is unreachable, which is a compile error.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    if (args.len() > 5) {
+        return null
+        fmt.println("never")
+    }
+    fmt.println("one")
+    return null
+}

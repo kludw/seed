@@ -1,0 +1,34 @@
+// Functions, types and constants can be used before they are declared.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    Box b = makeBox(limit)
+    fmt.println(b.describe())
+    return null
+}
+
+fn makeBox(int size) Box {
+    return Box{size: size, kind: Kind.Large}
+}
+
+fn (Box b) describe() string {
+    string k = "small"
+    if (b.kind == Kind.Large) {
+        k = "large"
+    }
+    return k + " box of " + b.size.string()
+}
+
+type Box struct {
+    int size
+    Kind kind
+}
+
+type Kind enum {
+    Small
+    Large
+}
+
+const int limit = 12

@@ -1,0 +1,47 @@
+// A group waits for every goroutine it spawned. Workers send results on a
+// buffered channel; main reads them after the group finishes.
+package main
+
+import "fmt"
+
+type Result struct {
+    int id
+    int sum
+}
+
+fn worker(int id, []int part, chan Result out) error {
+    int sum = 0
+    for (int i = 0; i < part.len(); i++) {
+        sum = sum + part[i]
+    }
+    out.send(Result{id: id, sum: sum})
+    return null
+}
+
+fn main([]string args) error {
+    chan Result results = chan Result(3)
+    error err = group {
+        spawn worker(0, []int{1, 2, 3}, results)
+        spawn worker(1, []int{10, 20}, results)
+        spawn worker(2, []int{100}, results)
+    }
+    if (err != null) {
+        return err
+    }
+    results.close()
+    []int sums = []int{0, 0, 0}
+    int total = 0
+    for (;;) {
+        Result? r = results.receive()
+        if (r == null) {
+            break
+        }
+        sums[r.id] = r.sum
+        total = total + r.sum
+    }
+    for (int i = 0; i < sums.len(); i++) {
+        fmt.println("worker " + i.string() + ": " + sums[i].string())
+    }
+    fmt.println("total " + total.string())
+    return null
+}

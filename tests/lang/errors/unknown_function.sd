@@ -1,0 +1,15 @@
+// expect-error: computeTotl
+// Calling an undeclared function.
+package main
+
+import "fmt"
+
+fn computeTotal() int {
+    return 3
+}
+
+fn main([]string args) error {
+    fmt.println(computeTotl().string())
+    fmt.println(computeTotal().string())
+    return null
+}

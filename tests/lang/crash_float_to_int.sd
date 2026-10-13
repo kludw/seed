@@ -1,0 +1,13 @@
+// int(f) crashes on infinity.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    float big = 1.0e300
+    float inf = big * big
+    fmt.println("before")
+    int n = int(inf)
+    fmt.println("after " + n.string())
+    return null
+}

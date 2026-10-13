@@ -1,0 +1,46 @@
+// try on a call that returns only an error, used as a statement.
+package main
+
+import "errors"
+import "fmt"
+
+fn validate(int n) error {
+    if (n > 100) {
+        return errors.new("too big: " + n.string())
+    }
+    return null
+}
+
+fn validateAll([]int xs) error {
+    for (int i = 0; i < xs.len(); i++) {
+        try validate(xs[i])
+    }
+    return null
+}
+
+fn countValid([]int xs) (int, error) {
+    for (int i = 0; i < xs.len(); i++) {
+        try validate(xs[i])
+    }
+    return xs.len(), null
+}
+
+fn main([]string args) error {
+    error e = validateAll([]int{1, 50, 100})
+    fmt.println((e == null).string())
+    e = validateAll([]int{1, 500, 1000})
+    if (e != null) {
+        fmt.println(e.message())
+    }
+    int n, error err = countValid([]int{1, 2})
+    if (err == null) {
+        fmt.println("valid " + n.string())
+    }
+    n, err = countValid([]int{101})
+    if (err != null) {
+        fmt.println(err.message())
+    }
+    try validate(7)
+    fmt.println("done")
+    return null
+}

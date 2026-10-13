@@ -1,0 +1,12 @@
+// expect-error: syntax_decl_without_value.sd:8:
+// Syntax error: every declaration must have a value.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    int count
+    count = 1
+    fmt.println(count.string())
+    return null
+}

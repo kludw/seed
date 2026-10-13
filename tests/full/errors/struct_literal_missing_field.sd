@@ -1,0 +1,16 @@
+// expect-error: email
+// A struct literal must set every field.
+package main
+
+import "fmt"
+
+type User struct {
+    string name
+    string? email
+}
+
+fn main([]string args) error {
+    User u = User{name: "ann"}
+    fmt.println(u.name)
+    return null
+}

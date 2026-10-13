@@ -1,0 +1,29 @@
+// Byte literals use single quotes and the same escapes as strings.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    byte a = 'a'
+    byte nl = '\n'
+    byte tab = '\t'
+    byte q = '\''
+    byte dq = '\"'
+    byte bs = '\\'
+    byte zero = '\0'
+    byte hex = '\x41'
+    byte cr = '\r'
+    byte sp = ' '
+    fmt.println(a.string())
+    fmt.println(nl.string())
+    fmt.println(tab.string())
+    fmt.println(q.string())
+    fmt.println(dq.string())
+    fmt.println(bs.string())
+    fmt.println(zero.string())
+    fmt.println(hex.string())
+    fmt.println(cr.string())
+    fmt.println(sp.string())
+    fmt.println('z'.string())
+    return null
+}

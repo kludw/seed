@@ -1,0 +1,15 @@
+// expect-error: type_wrong_return.sd:6:
+// Returning a value of the wrong type.
+package main
+
+fn label() string {
+    return 42
+}
+
+fn main([]string args) error {
+    string s = label()
+    if (s == "") {
+        return null
+    }
+    return null
+}

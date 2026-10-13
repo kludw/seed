@@ -1,0 +1,17 @@
+// os.exit flushes stdout and exits immediately with the given code.
+package main
+
+import "fmt"
+import "os"
+
+fn stop(int code) {
+    os.exit(code)
+}
+
+fn main([]string args) error {
+    fmt.print("start ")
+    fmt.println("now")
+    stop(3)
+    fmt.println("not printed")
+    return null
+}

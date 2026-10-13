@@ -1,0 +1,35 @@
+// Constants at package level and inside functions. pub is accepted.
+package main
+
+import "fmt"
+
+const int maxItems = 3
+const string greeting = "hello"
+const float rate = 1.5
+const bool verbose = true
+const byte sep = ','
+const int doubled = maxItems * 2
+pub const int publicLimit = 10
+
+pub fn shout(string s) string {
+    return s.toUpper()
+}
+
+fn main([]string args) error {
+    const int local = 7
+    fmt.println(maxItems.string())
+    fmt.println(greeting + " " + shout(greeting))
+    fmt.println(rate.string())
+    fmt.println(verbose.string())
+    fmt.println(sep.string())
+    fmt.println(doubled.string())
+    fmt.println(publicLimit.string())
+    fmt.println((local + maxItems).string())
+    string out = ""
+    for (int i = 0; i < maxItems; i++) {
+        out = out + i.string()
+    }
+    fmt.println(out)
+    fmt.println((rate * 2.0).string())
+    return null
+}

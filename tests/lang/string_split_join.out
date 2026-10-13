@@ -1,0 +1,9 @@
+3 [a|b|]
+3 [one|two|three]
+one+two+three
+3 [a||b]
+1 [abc]
+3 [a|b|c]
+2 [|x]
+[]
+[x]

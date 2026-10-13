@@ -1,0 +1,304 @@
+// A stack machine: an assembler with labels (maps), a VM struct driven by mut
+// methods, a call stack of frames (list of structs), and a disassembler.
+package main
+
+import "errors"
+import "fmt"
+
+type Op enum {
+    Push(int n)
+    Add
+    Sub
+    Mul
+    Lt
+    Dup
+    Swap
+    Drop
+    Jump(int target)
+    JumpIfZero(int target)
+    Call(int target)
+    Ret
+    Print
+    Load(int slot)
+    Store(int slot)
+    Halt
+}
+
+type Frame struct {
+    int ret
+    []int locals
+}
+
+type VM struct {
+    []Op code
+    []int stack
+    []Frame frames
+    []string out
+    int pc
+    int steps
+}
+
+fn (VM vm) mut push(int n) {
+    vm.stack.push(n)
+}
+
+fn (VM vm) mut pop() (int, error) {
+    int? v = vm.stack.pop()
+    if (v == null) {
+        return null, errors.new("stack underflow at " + vm.pc.string())
+    }
+    return v, null
+}
+
+fn (VM vm) mut step() (bool, error) {
+    if (vm.pc < 0 || vm.pc >= vm.code.len()) {
+        return null, errors.new("pc out of range: " + vm.pc.string())
+    }
+    Op op = vm.code[vm.pc]
+    vm.pc++
+    vm.steps++
+    switch (op) {
+    case Op.Push(int n):
+        vm.push(n)
+    case Op.Add, Op.Sub, Op.Mul, Op.Lt:
+        int b = try vm.pop()
+        int a = try vm.pop()
+        int r = 0
+        if (op == Op.Add) {
+            r = a + b
+        } else if (op == Op.Sub) {
+            r = a - b
+        } else if (op == Op.Mul) {
+            r = a * b
+        } else if (a < b) {
+            r = 1
+        }
+        vm.push(r)
+    case Op.Dup:
+        int a = try vm.pop()
+        vm.push(a)
+        vm.push(a)
+    case Op.Swap:
+        int b = try vm.pop()
+        int a = try vm.pop()
+        vm.push(b)
+        vm.push(a)
+    case Op.Drop:
+        _, error err = vm.pop()
+        if (err != null) {
+            return null, err
+        }
+    case Op.Jump(int t):
+        vm.pc = t
+    case Op.JumpIfZero(int t):
+        int c = try vm.pop()
+        if (c == 0) {
+            vm.pc = t
+        }
+    case Op.Call(int t):
+        vm.frames.push(Frame{ret: vm.pc, locals: []int{0, 0, 0, 0}})
+        vm.pc = t
+    case Op.Ret:
+        Frame? f = vm.frames.pop()
+        if (f == null) {
+            return null, errors.new("return without call")
+        }
+        vm.pc = f.ret
+    case Op.Print:
+        int v = try vm.pop()
+        vm.out.push(v.string())
+    case Op.Load(int s):
+        int top = vm.frames.len() - 1
+        vm.push(vm.frames[top].locals[s])
+    case Op.Store(int s):
+        int v = try vm.pop()
+        vm.frames[vm.frames.len() - 1].locals[s] = v
+    case Op.Halt:
+        return false, null
+    }
+    return true, null
+}
+
+fn assemble(string src) ([]Op, error) {
+    []string lines = src.split("\n")
+    map[string]int labels = map[string]int{}
+    []string body = []string{}
+    for (int i = 0; i < lines.len(); i++) {
+        string line = lines[i].trim()
+        if (line == "" || line.startsWith(";")) {
+            continue
+        }
+        if (line.endsWith(":")) {
+            labels[line.slice(0, line.len() - 1)] = body.len()
+            continue
+        }
+        body.push(line)
+    }
+    []Op code = []Op{}
+    for (int i = 0; i < body.len(); i++) {
+        []string parts = body[i].split(" ")
+        string name = parts[0]
+        int arg = 0
+        if (parts.len() > 1) {
+            int? target = labels[parts[1]]
+            if (target != null) {
+                arg = target
+            } else {
+                arg = try parts[1].toInt()
+            }
+        }
+        switch (name) {
+        case "push":
+            code.push(Op.Push(arg))
+        case "add":
+            code.push(Op.Add)
+        case "sub":
+            code.push(Op.Sub)
+        case "mul":
+            code.push(Op.Mul)
+        case "lt":
+            code.push(Op.Lt)
+        case "dup":
+            code.push(Op.Dup)
+        case "swap":
+            code.push(Op.Swap)
+        case "drop":
+            code.push(Op.Drop)
+        case "jump":
+            code.push(Op.Jump(arg))
+        case "jz":
+            code.push(Op.JumpIfZero(arg))
+        case "call":
+            code.push(Op.Call(arg))
+        case "ret":
+            code.push(Op.Ret)
+        case "print":
+            code.push(Op.Print)
+        case "load":
+            code.push(Op.Load(arg))
+        case "store":
+            code.push(Op.Store(arg))
+        case "halt":
+            code.push(Op.Halt)
+        default:
+            return null, errors.new("unknown instruction " + name)
+        }
+    }
+    return code, null
+}
+
+fn disasm(Op op) string {
+    switch (op) {
+    case Op.Push(int n):
+        return "push " + n.string()
+    case Op.Jump(int t):
+        return "jump @" + t.string()
+    case Op.JumpIfZero(int t):
+        return "jz @" + t.string()
+    case Op.Call(int t):
+        return "call @" + t.string()
+    case Op.Load(int s):
+        return "load " + s.string()
+    case Op.Store(int s):
+        return "store " + s.string()
+    case Op.Add:
+        return "add"
+    case Op.Sub:
+        return "sub"
+    case Op.Mul:
+        return "mul"
+    case Op.Lt:
+        return "lt"
+    case Op.Dup:
+        return "dup"
+    case Op.Swap:
+        return "swap"
+    case Op.Drop:
+        return "drop"
+    case Op.Ret:
+        return "ret"
+    case Op.Print:
+        return "print"
+    case Op.Halt:
+        return "halt"
+    }
+}
+
+fn run(string src) ([]string, error) {
+    []Op code = try assemble(src)
+    VM vm = VM{code: code, stack: []int{}, frames: []Frame{Frame{ret: -1, locals: []int{0, 0, 0, 0}}}, out: []string{}, pc: 0, steps: 0}
+    for (;;) {
+        bool more = try vm.step()
+        if (!more) {
+            break
+        }
+    }
+    vm.out.push("steps=" + vm.steps.string() + " stack=" + vm.stack.len().string())
+    return vm.out, null
+}
+
+const []string programLines = []string{
+    "; sum 1..100 and factorial of 10 using a subroutine",
+    "push 0",
+    "store 0",
+    "push 1",
+    "store 1",
+    "loop:",
+    "load 1",
+    "push 101",
+    "lt",
+    "jz done",
+    "load 0",
+    "load 1",
+    "add",
+    "store 0",
+    "load 1",
+    "push 1",
+    "add",
+    "store 1",
+    "jump loop",
+    "done:",
+    "load 0",
+    "print",
+    "push 10",
+    "call fact",
+    "print",
+    "halt",
+    "fact:",
+    "store 0",
+    "push 1",
+    "store 1",
+    "factloop:",
+    "load 0",
+    "jz factend",
+    "load 1",
+    "load 0",
+    "mul",
+    "store 1",
+    "load 0",
+    "push 1",
+    "sub",
+    "store 0",
+    "jump factloop",
+    "factend:",
+    "load 1",
+    "ret",
+}
+
+fn main([]string args) error {
+    []string out = try run(programLines.join("\n"))
+    fmt.println(out.join("\n"))
+    []Op code = try assemble(programLines.join("\n"))
+    for (int i = 0; i < 4; i++) {
+        fmt.println(i.string() + ": " + disasm(code[i]))
+    }
+    []string? bad, error err = run("push 1\nadd\nhalt")
+    if (err != null) {
+        fmt.println("error: " + err.message())
+    }
+    bad, err = run("bogus")
+    if (err != null) {
+        fmt.println("error: " + err.message())
+    }
+    return null
+}

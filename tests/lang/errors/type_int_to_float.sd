@@ -1,0 +1,11 @@
+// expect-error: type_int_to_float.sd:8:
+// There are no implicit conversions: an int literal is not a float.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    float ratio = 1
+    fmt.println(ratio.string())
+    return null
+}

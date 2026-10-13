@@ -1,0 +1,13 @@
+// os.env returns string? and null for unset variables.
+package main
+
+import "fmt"
+import "os"
+
+fn main([]string args) error {
+    string? path = os.env("PATH")
+    fmt.println("PATH set: " + (path != null).string())
+    string? unset = os.env("SEED_TEST_VARIABLE_THAT_IS_NEVER_SET")
+    fmt.println("unset is null: " + (unset == null).string())
+    return null
+}

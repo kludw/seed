@@ -1,0 +1,19 @@
+// expect-error: error_call_statement.sd:17:
+// A call that returns an error cannot be used as a plain statement.
+package main
+
+import "errors"
+import "fmt"
+
+fn validateInput(int n) error {
+    if (n < 0) {
+        return errors.new("negative")
+    }
+    return null
+}
+
+fn main([]string args) error {
+    fmt.println("start")
+    validateInput(5)
+    return null
+}

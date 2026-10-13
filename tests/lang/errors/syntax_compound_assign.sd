@@ -1,0 +1,12 @@
+// expect-error: syntax_compound_assign.sd:9:
+// Syntax error: there is no compound assignment.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    int x = 1
+    x += 2
+    fmt.println(x.string())
+    return null
+}

@@ -1,0 +1,51 @@
+// Enums without data: values, equality and an exhaustive switch.
+package main
+
+import "fmt"
+
+type Color enum {
+    Red
+    Green
+    Blue
+}
+
+fn colorName(Color c) string {
+    string name = ""
+    switch (c) {
+    case Color.Red:
+        name = "red"
+    case Color.Green:
+        name = "green"
+    case Color.Blue:
+        name = "blue"
+    }
+    return name
+}
+
+fn next(Color c) Color {
+    Color result = Color.Red
+    switch (c) {
+    case Color.Red:
+        result = Color.Green
+    case Color.Green:
+        result = Color.Blue
+    case Color.Blue:
+        result = Color.Red
+    }
+    return result
+}
+
+fn main([]string args) error {
+    []Color all = []Color{Color.Red, Color.Green, Color.Blue}
+    for (int i = 0; i < all.len(); i++) {
+        fmt.println(colorName(all[i]) + " -> " + colorName(next(all[i])))
+    }
+    Color c = Color.Green
+    fmt.println((c == Color.Green).string())
+    fmt.println((c != Color.Blue).string())
+    c = next(c)
+    fmt.println(colorName(c))
+    fmt.println((c == all[2]).string())
+    fmt.println(all.contains(Color.Blue).string())
+    return null
+}

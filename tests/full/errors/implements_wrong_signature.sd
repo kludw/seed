@@ -1,0 +1,24 @@
+// expect-error: area
+// A method with the right name but the wrong result type does not satisfy the
+// interface.
+package main
+
+import "fmt"
+
+type Shape interface {
+    area() float
+}
+
+type Square struct implements Shape {
+    int side
+}
+
+fn (Square s) area() int {
+    return s.side * s.side
+}
+
+fn main([]string args) error {
+    Shape s = Square{side: 2}
+    fmt.println(s.area().string())
+    return null
+}

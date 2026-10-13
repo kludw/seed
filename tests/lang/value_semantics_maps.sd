@@ -1,0 +1,48 @@
+// Maps are copied on assignment and when stored in structs; lists stored in
+// maps are copies too.
+package main
+
+import "fmt"
+
+type Index struct {
+    map[string]int counts
+}
+
+fn main([]string args) error {
+    map[string]int a = map[string]int{"x": 1}
+    map[string]int b = a
+    b["y"] = 2
+    b["x"] = 10
+    int? ax = a["x"]
+    int? bx = b["x"]
+    if (ax != null) {
+        if (bx != null) {
+            fmt.println(ax.string() + " " + bx.string())
+        }
+    }
+    fmt.println(a.len().string() + " " + b.len().string())
+    a.delete("x")
+    fmt.println(a.len().string() + " " + b.len().string())
+    map[string][]int groups = map[string][]int{}
+    []int xs = []int{1}
+    groups["one"] = xs
+    xs.push(2)
+    []int? got = groups["one"]
+    if (got != null) {
+        []int local = got
+        local.push(3)
+        fmt.println(got.len().string() + " " + local.len().string())
+    }
+    []int? again = groups["one"]
+    if (again != null) {
+        fmt.println(again.len().string())
+    }
+    Index i1 = Index{counts: map[string]int{}}
+    Index i2 = i1
+    i2.counts["z"] = 1
+    fmt.println(i1.counts.len().string() + " " + i2.counts.len().string())
+    map[string]int fromStruct = i2.counts
+    fromStruct["w"] = 2
+    fmt.println(i2.counts.len().string() + " " + fromStruct.len().string())
+    return null
+}

@@ -1,0 +1,12 @@
+// expect-error: totl
+// Using an undeclared variable.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    int total = 3
+    fmt.println(totl.string())
+    fmt.println(total.string())
+    return null
+}

@@ -1,0 +1,11 @@
+1 + 2 * 3 = 7 (5 nodes)
+(1 + 2) * 3 = 9 (5 nodes)
+10 - 4 - 3 = 3 (5 nodes)
+-(2 + 3) * 4 = -20 (6 nodes)
+7 % 4 + 100 / 7 = 17 (7 nodes)
+2 * (3 + 4) * 5 = 70 (7 nodes)
+--5 = 5 (3 nodes)
+8 / (4 - 4): error: division by zero
+1 + : error: expected number at 4
+(1 + 2: error: expected ) at 6
+3 3: error: unexpected input at 2

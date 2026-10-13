@@ -1,0 +1,11 @@
+// expect-error: is not handled
+package main
+
+fn f() (int, error) {
+    return 1, null
+}
+
+fn main([]string args) error {
+    f()
+    return null
+}

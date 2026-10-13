@@ -1,0 +1,15 @@
+// expect-error: counter
+// Declaring a name that exists in an outer scope is a compile error.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    int counter = 1
+    if (counter > 0) {
+        int counter = 2
+        fmt.println(counter.string())
+    }
+    fmt.println(counter.string())
+    return null
+}

@@ -1,0 +1,16 @@
+// expect-error: nullable_as_plain.sd:13:
+// A T? cannot be used as a T until it has been checked.
+package main
+
+import "fmt"
+
+fn find(int x) int? {
+    return x
+}
+
+fn main([]string args) error {
+    int? maybeCount = find(3)
+    int total = maybeCount + 1
+    fmt.println(total.string())
+    return null
+}

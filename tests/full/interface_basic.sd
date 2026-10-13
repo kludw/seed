@@ -1,0 +1,54 @@
+// Interfaces: structs declare `implements`, and values are used through the
+// interface, including in lists and as parameters.
+package main
+
+import "fmt"
+
+type Shape interface {
+    area() float
+    name() string
+}
+
+type Square struct implements Shape {
+    float side
+}
+
+type Rect struct implements Shape {
+    float w
+    float h
+}
+
+fn (Square s) area() float {
+    return s.side * s.side
+}
+
+fn (Square s) name() string {
+    return "square"
+}
+
+fn (Rect r) area() float {
+    return r.w * r.h
+}
+
+fn (Rect r) name() string {
+    return "rect"
+}
+
+fn describe(Shape s) string {
+    return s.name() + " " + s.area().string()
+}
+
+fn main([]string args) error {
+    []Shape shapes = []Shape{Square{side: 2.0}, Rect{w: 1.5, h: 4.0}}
+    float total = 0.0
+    for (int i = 0; i < shapes.len(); i++) {
+        fmt.println(describe(shapes[i]))
+        total = total + shapes[i].area()
+    }
+    fmt.println("total " + total.string())
+    Shape s = Square{side: 3.0}
+    fmt.println(describe(s))
+    s = Rect{w: 0.5, h: 0.5}
+    fmt.println(describe(s))
+    return null
+}

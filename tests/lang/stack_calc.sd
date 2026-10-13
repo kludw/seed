@@ -1,0 +1,92 @@
+// A reverse-Polish calculator built on a Stack struct with mut methods that
+// can fail.
+package main
+
+import "errors"
+import "fmt"
+
+type Stack struct {
+    []int items
+}
+
+fn (Stack s) mut push(int v) {
+    s.items.push(v)
+}
+
+fn (Stack s) mut pop() (int, error) {
+    int? top = s.items.pop()
+    if (top == null) {
+        return null, errors.new("stack underflow")
+    }
+    return top, null
+}
+
+fn (Stack s) size() int {
+    return s.items.len()
+}
+
+fn apply(string op, int a, int b) (int, error) {
+    int result = 0
+    switch (op) {
+    case "+":
+        result = a + b
+    case "-":
+        result = a - b
+    case "*":
+        result = a * b
+    case "/":
+        if (b == 0) {
+            return null, errors.new("division by zero")
+        }
+        result = a / b
+    default:
+        return null, errors.new("unknown operator: " + op)
+    }
+    return result, null
+}
+
+fn evaluate(string expr) (int, error) {
+    Stack st = Stack{items: []int{}}
+    []string tokens = expr.split(" ")
+    for (int i = 0; i < tokens.len(); i++) {
+        string tok = tokens[i]
+        int? n, _ = tok.toInt()
+        if (n != null) {
+            st.push(n)
+            continue
+        }
+        int b = try st.pop()
+        int a = try st.pop()
+        int r = try apply(tok, a, b)
+        st.push(r)
+    }
+    if (st.size() != 1) {
+        return null, errors.new("bad expression: " + st.size().string() + " values left")
+    }
+    int result = try st.pop()
+    return result, null
+}
+
+fn main([]string args) error {
+    []string exprs = []string{
+        "3 4 +",
+        "5 1 2 + 4 * + 3 -",
+        "10 2 8 * + 3 -",
+        "7 2 /",
+        "-7 2 /",
+        "6 7 *",
+        "1 +",
+        "4 0 /",
+        "1 2 3",
+        "2 3 ^",
+    }
+    for (int i = 0; i < exprs.len(); i++) {
+        int v, error err = evaluate(exprs[i])
+        if (err != null) {
+            fmt.println(exprs[i] + " -> error: " + err.message())
+        } else {
+            fmt.println(exprs[i] + " = " + v.string())
+        }
+    }
+    return null
+}

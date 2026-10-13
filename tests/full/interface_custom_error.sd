@@ -1,0 +1,34 @@
+// A user type can implement the built-in error interface. An unhandled one
+// ends main with "error: <message>" and exit code 1.
+package main
+
+import "fmt"
+
+type NotFound struct implements error {
+    string path
+}
+
+fn (NotFound e) message() string {
+    return "not found: " + e.path
+}
+
+fn open(string path) (string, error) {
+    if (path != "a.txt") {
+        return null, NotFound{path: path}
+    }
+    return "contents of a", null
+}
+
+fn main([]string args) error {
+    string a = try open("a.txt")
+    fmt.println(a)
+    string b, error err = open("b.txt")
+    if (err != null) {
+        fmt.println("handled: " + err.message())
+    } else {
+        fmt.println(b)
+    }
+    string c = try open("c.txt")
+    fmt.println(c)
+    return null
+}

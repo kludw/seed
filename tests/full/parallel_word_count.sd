@@ -1,0 +1,62 @@
+// Count words in several chunks concurrently. Each goroutine sends its own map
+// over a channel (a copy), and main merges them and prints the words sorted.
+package main
+
+import "fmt"
+
+fn countChunk(string chunk, chan map[string]int out) error {
+    map[string]int counts = map[string]int{}
+    []string words = chunk.split(" ")
+    for (int i = 0; i < words.len(); i++) {
+        int? c = counts[words[i]]
+        if (c == null) {
+            counts[words[i]] = 1
+        } else {
+            counts[words[i]] = c + 1
+        }
+    }
+    out.send(counts)
+    return null
+}
+
+fn main([]string args) error {
+    []string chunks = []string{"the quick brown fox", "jumps over the lazy dog", "the dog sleeps"}
+    chan map[string]int partials = chan map[string]int(chunks.len())
+    error err = group {
+        for (int i = 0; i < chunks.len(); i++) {
+            spawn countChunk(chunks[i], partials)
+        }
+    }
+    if (err != null) {
+        return err
+    }
+    partials.close()
+    map[string]int total = map[string]int{}
+    for (;;) {
+        map[string]int? part = partials.receive()
+        if (part == null) {
+            break
+        }
+        []string keys = part.keys()
+        for (int k = 0; k < keys.len(); k++) {
+            int? add = part[keys[k]]
+            int? have = total[keys[k]]
+            if (add != null) {
+                if (have == null) {
+                    total[keys[k]] = add
+                } else {
+                    total[keys[k]] = have + add
+                }
+            }
+        }
+    }
+    []string words = total.keys()
+    words.sort()
+    for (int i = 0; i < words.len(); i++) {
+        int? n = total[words[i]]
+        if (n != null) {
+            fmt.println(words[i] + " " + n.string())
+        }
+    }
+    return null
+}

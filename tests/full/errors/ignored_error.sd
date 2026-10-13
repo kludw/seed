@@ -1,0 +1,19 @@
+// expect-error: saveReport
+// Every returned error must be handled.
+package main
+
+import "errors"
+import "fmt"
+
+fn saveReport(string text) error {
+    if (text == "") {
+        return errors.new("empty report")
+    }
+    return null
+}
+
+fn main([]string args) error {
+    saveReport("data")
+    fmt.println("saved")
+    return null
+}

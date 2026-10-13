@@ -1,0 +1,5 @@
+// expect-error: main must be declared as
+package main
+
+fn main() {
+}

@@ -1,0 +1,25 @@
+// Powers of two past 64 bits, and the 64-bit boundaries themselves.
+package main
+
+import "fmt"
+
+fn pow(int base, int exp) int {
+    int result = 1
+    for (int i = 0; i < exp; i++) {
+        result = result * base
+    }
+    return result
+}
+
+fn main([]string args) error {
+    int maxInt64 = 9223372036854775807
+    fmt.println((maxInt64 + 1).string())
+    fmt.println((pow(2, 64) - 1).string())
+    fmt.println(pow(2, 100).string())
+    fmt.println(pow(2, 200).string())
+    fmt.println((-pow(2, 70)).string())
+    int one = 1
+    fmt.println(((one << 100) == pow(2, 100)).string())
+    fmt.println((pow(2, 100) > pow(2, 99)).string())
+    return null
+}

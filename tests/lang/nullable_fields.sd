@@ -1,0 +1,63 @@
+// Narrowing through field paths that start at a local variable or parameter,
+// and nullable structs and lists.
+package main
+
+import "fmt"
+
+type Address struct {
+    string street
+    string? zip
+}
+
+type User struct {
+    string name
+    string? email
+    int? age
+    Address home
+}
+
+type Point struct {
+    int x
+    int y
+}
+
+fn contact(User u) string {
+    if (u.email != null) {
+        return u.name + " <" + u.email + ">"
+    }
+    return u.name + " (no email)"
+}
+
+fn zipOf(User u) string {
+    if (u.home.zip == null) {
+        return "no zip"
+    }
+    return "zip " + u.home.zip
+}
+
+fn main([]string args) error {
+    User u = User{name: "ann", email: null, age: 30, home: Address{street: "Main St", zip: null}}
+    fmt.println(contact(u))
+    fmt.println(zipOf(u))
+    if (u.age != null) {
+        fmt.println("next year " + (u.age + 1).string())
+    }
+    u.email = "ann@example.com"
+    u.home.zip = "00-950"
+    fmt.println(contact(u))
+    fmt.println(zipOf(u))
+    u.age = null
+    fmt.println((u.age == null).string())
+    Point? p = null
+    fmt.println((p == null).string())
+    p = Point{x: 1, y: 2}
+    if (p != null) {
+        fmt.println((p.x + p.y).string())
+    }
+    []int? maybe = null
+    maybe = []int{1, 2, 3}
+    if (maybe != null) {
+        fmt.println(maybe.len().string())
+    }
+    return null
+}

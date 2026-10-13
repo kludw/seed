@@ -1,0 +1,11 @@
+// expect-error: type_string_plus_int.sd:9:
+// Strings only join with strings; ints need .string().
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    int n = 5
+    fmt.println("n = " + n)
+    return null
+}

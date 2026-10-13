@@ -1,0 +1,15 @@
+// expect-error: computeArea
+// Ignoring a function's return value is a compile error.
+package main
+
+import "fmt"
+
+fn computeArea(int w, int h) int {
+    return w * h
+}
+
+fn main([]string args) error {
+    computeArea(3, 4)
+    fmt.println("done")
+    return null
+}

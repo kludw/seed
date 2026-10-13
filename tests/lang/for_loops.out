@@ -1,0 +1,9 @@
+sum 10
+down 321
+steps 0 3 6 9 
+j 4 loops 4
+k 3 loops 7
+last 128
+spins 4
+never 0
+1,2,3;2,4,6;3,6,9;

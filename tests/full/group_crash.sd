@@ -1,0 +1,36 @@
+// A crash inside a goroutine becomes the group's error instead of ending the
+// program.
+package main
+
+import "errors"
+import "fmt"
+
+fn crasher(int n) error {
+    []int xs = []int{1, 2, 3}
+    if (xs[n] > 100) {
+        return errors.new("too big")
+    }
+    return null
+}
+
+fn waiter(chan int never) error {
+    int? v = never.receive()
+    if (v != null) {
+        return errors.new("unexpected value " + v.string())
+    }
+    return null
+}
+
+fn main([]string args) error {
+    chan int never = chan int(0)
+    error err = group {
+        spawn waiter(never)
+        spawn crasher(10)
+    }
+    fmt.println("group error: " + (err != null).string())
+    if (err != null) {
+        fmt.println("has message: " + (err.message().len() > 0).string())
+    }
+    fmt.println("still running")
+    return null
+}

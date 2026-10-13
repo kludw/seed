@@ -1,0 +1,14 @@
+// expect-error: contains itself
+package main
+
+type A struct {
+    B b
+}
+
+type B struct {
+    A a
+}
+
+fn main([]string args) error {
+    return null
+}

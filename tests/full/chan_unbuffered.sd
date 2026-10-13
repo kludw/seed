@@ -1,0 +1,46 @@
+// An unbuffered channel between a producer and a consumer in one group.
+package main
+
+import "fmt"
+
+fn produce(chan int out, int n) error {
+    for (int i = 1; i <= n; i++) {
+        out.send(i * 10)
+    }
+    out.close()
+    return null
+}
+
+fn consume(chan int input, chan []int done) error {
+    []int seen = []int{}
+    for (;;) {
+        int? v = input.receive()
+        if (v == null) {
+            break
+        }
+        seen.push(v)
+    }
+    done.send(seen)
+    return null
+}
+
+fn main([]string args) error {
+    chan int jobs = chan int(0)
+    chan []int done = chan []int(1)
+    error err = group {
+        spawn produce(jobs, 5)
+        spawn consume(jobs, done)
+    }
+    if (err != null) {
+        return err
+    }
+    []int? seen = done.receive()
+    if (seen != null) {
+        []string parts = []string{}
+        for (int i = 0; i < seen.len(); i++) {
+            parts.push(seen[i].string())
+        }
+        fmt.println(parts.join(" "))
+    }
+    return null
+}

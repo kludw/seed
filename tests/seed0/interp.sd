@@ -1,0 +1,535 @@
+// A small interpreter: tokenizer, recursive-descent parser building an AST of
+// enums and structs, and a tree-walking evaluator with scopes in maps.
+// The program to run comes from stdin.
+package main
+
+import "errors"
+import "fmt"
+import "fs"
+
+type Kind enum {
+    Num
+    Ident
+    Str
+    Op
+    Eof
+}
+
+type Token struct {
+    Kind kind
+    string text
+    int line
+}
+
+type Expr enum {
+    Number(int value)
+    Text(string value)
+    Var(string name)
+    Binary(string op, Expr left, Expr right)
+    Call(string name, []Expr args)
+}
+
+type Stmt enum {
+    Let(string name, Expr value)
+    Assign(string name, Expr value)
+    Print(Expr value)
+    While(Expr cond, []Stmt body)
+    If(Expr cond, []Stmt then, []Stmt els)
+    Def(string name, []string params, []Stmt body)
+    Return(Expr value)
+}
+
+type Value enum {
+    IntV(int n)
+    StrV(string s)
+    Nothing
+}
+
+type Lexer struct {
+    string src
+    int pos
+    int line
+    []Token tokens
+}
+
+fn isDigit(byte c) bool {
+    return c >= '0' && c <= '9'
+}
+
+fn isAlpha(byte c) bool {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_'
+}
+
+fn (Lexer l) mut add(Kind k, string text) {
+    l.tokens.push(Token{kind: k, text: text, line: l.line})
+}
+
+fn (Lexer l) mut run() error {
+    for (; l.pos < l.src.len(); ) {
+        byte c = l.src[l.pos]
+        if (c == '\n') {
+            l.line++
+            l.pos++
+            continue
+        }
+        if (c == ' ' || c == '\t') {
+            l.pos++
+            continue
+        }
+        if (c == '#') {
+            for (; l.pos < l.src.len() && l.src[l.pos] != '\n'; ) {
+                l.pos++
+            }
+            continue
+        }
+        int start = l.pos
+        if (isDigit(c)) {
+            for (; l.pos < l.src.len() && isDigit(l.src[l.pos]); ) {
+                l.pos++
+            }
+            l.add(Kind.Num, l.src.slice(start, l.pos))
+            continue
+        }
+        if (isAlpha(c)) {
+            for (; l.pos < l.src.len() && (isAlpha(l.src[l.pos]) || isDigit(l.src[l.pos])); ) {
+                l.pos++
+            }
+            l.add(Kind.Ident, l.src.slice(start, l.pos))
+            continue
+        }
+        if (c == '"') {
+            l.pos++
+            for (; l.pos < l.src.len() && l.src[l.pos] != '"'; ) {
+                l.pos++
+            }
+            if (l.pos >= l.src.len()) {
+                return errors.new("line " + l.line.string() + ": unterminated string")
+            }
+            l.add(Kind.Str, l.src.slice(start + 1, l.pos))
+            l.pos++
+            continue
+        }
+        string two = ""
+        if (l.pos + 1 < l.src.len()) {
+            two = l.src.slice(l.pos, l.pos + 2)
+        }
+        if (two == "==" || two == "!=" || two == "<=" || two == ">=") {
+            l.add(Kind.Op, two)
+            l.pos = l.pos + 2
+            continue
+        }
+        string ops = "+-*/%<>=(){},;"
+        if (ops.contains(l.src.slice(l.pos, l.pos + 1))) {
+            l.add(Kind.Op, l.src.slice(l.pos, l.pos + 1))
+            l.pos++
+            continue
+        }
+        return errors.new("line " + l.line.string() + ": unexpected character " + l.src.slice(l.pos, l.pos + 1))
+    }
+    l.add(Kind.Eof, "")
+    return null
+}
+
+type Parser struct {
+    []Token tokens
+    int pos
+}
+
+fn (Parser p) peek() Token {
+    return p.tokens[p.pos]
+}
+
+fn (Parser p) at(string text) bool {
+    Token t = p.tokens[p.pos]
+    return (t.kind == Kind.Op || t.kind == Kind.Ident) && t.text == text
+}
+
+fn (Parser p) mut next() Token {
+    Token t = p.tokens[p.pos]
+    if (t.kind != Kind.Eof) {
+        p.pos++
+    }
+    return t
+}
+
+fn (Parser p) mut expect(string text) error {
+    Token t = p.next()
+    if (t.text != text) {
+        return errors.new("line " + t.line.string() + ": expected " + text + ", found '" + t.text + "'")
+    }
+    return null
+}
+
+fn precedence(string op) int {
+    switch (op) {
+    case "==", "!=":
+        return 1
+    case "<", ">", "<=", ">=":
+        return 2
+    case "+", "-":
+        return 3
+    case "*", "/", "%":
+        return 4
+    default:
+        return 0
+    }
+}
+
+fn (Parser p) mut primary() (Expr, error) {
+    Token t = p.next()
+    switch (t.kind) {
+    case Kind.Num:
+        int n = try t.text.toInt()
+        return Expr.Number(n), null
+    case Kind.Str:
+        return Expr.Text(t.text), null
+    case Kind.Ident:
+        if (p.at("(")) {
+            p.pos++
+            []Expr args = []Expr{}
+            for (; !p.at(")"); ) {
+                Expr a = try p.expr(1)
+                args.push(a)
+                if (p.at(",")) {
+                    p.pos++
+                }
+            }
+            p.pos++
+            return Expr.Call(t.text, args), null
+        }
+        return Expr.Var(t.text), null
+    case Kind.Op:
+        if (t.text == "(") {
+            Expr inner = try p.expr(1)
+            try p.expect(")")
+            return inner, null
+        }
+        return null, errors.new("line " + t.line.string() + ": unexpected '" + t.text + "'")
+    case Kind.Eof:
+        return null, errors.new("unexpected end of input")
+    }
+}
+
+fn (Parser p) mut expr(int minPrec) (Expr, error) {
+    Expr left = try p.primary()
+    for (;;) {
+        Token t = p.peek()
+        int prec = 0
+        if (t.kind == Kind.Op) {
+            prec = precedence(t.text)
+        }
+        if (prec == 0 || prec < minPrec) {
+            break
+        }
+        p.pos++
+        Expr right = try p.expr(prec + 1)
+        left = Expr.Binary(t.text, left, right)
+    }
+    return left, null
+}
+
+fn (Parser p) mut block() ([]Stmt, error) {
+    try p.expect("{")
+    []Stmt out = []Stmt{}
+    for (; !p.at("}"); ) {
+        if (p.peek().kind == Kind.Eof) {
+            return null, errors.new("missing }")
+        }
+        Stmt s = try p.stmt()
+        out.push(s)
+    }
+    p.pos++
+    return out, null
+}
+
+fn (Parser p) mut stmt() (Stmt, error) {
+    Token t = p.next()
+    if (t.kind != Kind.Ident) {
+        return null, errors.new("line " + t.line.string() + ": expected a statement, found '" + t.text + "'")
+    }
+    switch (t.text) {
+    case "let":
+        Token name = p.next()
+        try p.expect("=")
+        Expr v = try p.expr(1)
+        try p.expect(";")
+        return Stmt.Let(name.text, v), null
+    case "print":
+        Expr v = try p.expr(1)
+        try p.expect(";")
+        return Stmt.Print(v), null
+    case "return":
+        Expr v = try p.expr(1)
+        try p.expect(";")
+        return Stmt.Return(v), null
+    case "while":
+        Expr c = try p.expr(1)
+        []Stmt body = try p.block()
+        return Stmt.While(c, body), null
+    case "if":
+        Expr c = try p.expr(1)
+        []Stmt then = try p.block()
+        []Stmt els = []Stmt{}
+        if (p.at("else")) {
+            p.pos++
+            els = try p.block()
+        }
+        return Stmt.If(c, then, els), null
+    case "def":
+        Token name = p.next()
+        try p.expect("(")
+        []string params = []string{}
+        for (; !p.at(")"); ) {
+            params.push(p.next().text)
+            if (p.at(",")) {
+                p.pos++
+            }
+        }
+        p.pos++
+        []Stmt body = try p.block()
+        return Stmt.Def(name.text, params, body), null
+    default:
+        try p.expect("=")
+        Expr v = try p.expr(1)
+        try p.expect(";")
+        return Stmt.Assign(t.text, v), null
+    }
+}
+
+type Func struct {
+    []string params
+    []Stmt body
+}
+
+type Interp struct {
+    []map[string]Value frames
+    map[string]Func funcs
+    []string output
+    int steps
+}
+
+fn show(Value v) string {
+    switch (v) {
+    case Value.IntV(int n):
+        return n.string()
+    case Value.StrV(string s):
+        return s
+    case Value.Nothing:
+        return "nothing"
+    }
+}
+
+fn (Interp it) lookup(string name) Value? {
+    map[string]Value top = it.frames[it.frames.len() - 1]
+    Value? v = top[name]
+    if (v != null) {
+        return v
+    }
+    return it.frames[0][name]
+}
+
+fn (Interp it) mut set(string name, Value v) {
+    int last = it.frames.len() - 1
+    if (it.frames[last][name] == null && it.frames[0][name] != null) {
+        it.frames[0][name] = v
+        return
+    }
+    it.frames[last][name] = v
+}
+
+fn (Interp it) mut eval(Expr e) (Value, error) {
+    it.steps++
+    switch (e) {
+    case Expr.Number(int n):
+        return Value.IntV(n), null
+    case Expr.Text(string s):
+        return Value.StrV(s), null
+    case Expr.Var(string name):
+        Value? v = it.lookup(name)
+        if (v == null) {
+            return null, errors.new("undefined variable " + name)
+        }
+        return v, null
+    case Expr.Binary(string op, Expr l, Expr r):
+        Value a = try it.eval(l)
+        Value b = try it.eval(r)
+        return binop(op, a, b)
+    case Expr.Call(string name, []Expr args):
+        Func? f = it.funcs[name]
+        if (f == null) {
+            return null, errors.new("undefined function " + name)
+        }
+        if (f.params.len() != args.len()) {
+            return null, errors.new(name + " takes " + f.params.len().string() + " arguments")
+        }
+        map[string]Value frame = map[string]Value{}
+        for (int i = 0; i < args.len(); i++) {
+            Value v = try it.eval(args[i])
+            frame[f.params[i]] = v
+        }
+        it.frames.push(frame)
+        Value? result = try it.exec(f.body)
+        it.frames.pop()
+        if (result == null) {
+            return Value.Nothing, null
+        }
+        return result, null
+    }
+}
+
+fn binop(string op, Value a, Value b) (Value, error) {
+    switch (a) {
+    case Value.StrV(string x):
+        switch (b) {
+        case Value.StrV(string y):
+            if (op == "+") {
+                return Value.StrV(x + y), null
+            }
+            if (op == "==") {
+                return boolValue(x == y), null
+            }
+        case Value.IntV(int y):
+            if (op == "*") {
+                []string parts = []string{}
+                for (int i = 0; i < y; i++) {
+                    parts.push(x)
+                }
+                return Value.StrV(parts.join("")), null
+            }
+            if (op == "+") {
+                return Value.StrV(x + y.string()), null
+            }
+        case Value.Nothing:
+        }
+        return null, errors.new("bad operands for " + op)
+    case Value.IntV(int x):
+        switch (b) {
+        case Value.IntV(int y):
+            switch (op) {
+            case "+":
+                return Value.IntV(x + y), null
+            case "-":
+                return Value.IntV(x - y), null
+            case "*":
+                return Value.IntV(x * y), null
+            case "/":
+                if (y == 0) {
+                    return null, errors.new("division by zero")
+                }
+                return Value.IntV(x / y), null
+            case "%":
+                return Value.IntV(x % y), null
+            case "<":
+                return boolValue(x < y), null
+            case ">":
+                return boolValue(x > y), null
+            case "<=":
+                return boolValue(x <= y), null
+            case ">=":
+                return boolValue(x >= y), null
+            case "==":
+                return boolValue(x == y), null
+            case "!=":
+                return boolValue(x != y), null
+            default:
+                return null, errors.new("unknown operator " + op)
+            }
+        case Value.StrV(string y):
+        case Value.Nothing:
+        }
+        return null, errors.new("bad operands for " + op)
+    case Value.Nothing:
+        return null, errors.new("nothing has no operators")
+    }
+}
+
+fn boolValue(bool b) Value {
+    if (b) {
+        return Value.IntV(1)
+    }
+    return Value.IntV(0)
+}
+
+fn truthy(Value v) bool {
+    return v != Value.IntV(0) && v != Value.Nothing && v != Value.StrV("")
+}
+
+fn (Interp it) mut exec([]Stmt body) (Value?, error) {
+    for (int i = 0; i < body.len(); i++) {
+        switch (body[i]) {
+        case Stmt.Let(string name, Expr e):
+            Value v = try it.eval(e)
+            it.frames[it.frames.len() - 1][name] = v
+        case Stmt.Assign(string name, Expr e):
+            Value v = try it.eval(e)
+            if (it.lookup(name) == null) {
+                return null, errors.new("assignment to undeclared " + name)
+            }
+            it.set(name, v)
+        case Stmt.Print(Expr e):
+            Value v = try it.eval(e)
+            it.output.push(show(v))
+        case Stmt.While(Expr c, []Stmt loopBody):
+            for (;;) {
+                Value cv = try it.eval(c)
+                if (!truthy(cv)) {
+                    break
+                }
+                Value? r = try it.exec(loopBody)
+                if (r != null) {
+                    return r, null
+                }
+            }
+        case Stmt.If(Expr c, []Stmt then, []Stmt els):
+            Value cv = try it.eval(c)
+            Value? r = null
+            if (truthy(cv)) {
+                r = try it.exec(then)
+            } else {
+                r = try it.exec(els)
+            }
+            if (r != null) {
+                return r, null
+            }
+        case Stmt.Def(string name, []string params, []Stmt fbody):
+            it.funcs[name] = Func{params: params, body: fbody}
+        case Stmt.Return(Expr e):
+            Value v = try it.eval(e)
+            return v, null
+        }
+    }
+    return null, null
+}
+
+fn run(string src) error {
+    Lexer lx = Lexer{src: src, pos: 0, line: 1, tokens: []Token{}}
+    try lx.run()
+    Parser p = Parser{tokens: lx.tokens, pos: 0}
+    []Stmt prog = []Stmt{}
+    for (; p.peek().kind != Kind.Eof; ) {
+        Stmt s = try p.stmt()
+        prog.push(s)
+    }
+    Interp it = Interp{frames: []map[string]Value{map[string]Value{}}, funcs: map[string]Func{}, output: []string{}, steps: 0}
+    Value? r, error err = it.exec(prog)
+    fmt.println(it.output.join("\n"))
+    if (err != null) {
+        return err
+    }
+    fmt.println("tokens: " + lx.tokens.len().string() + ", statements: " + prog.len().string() + ", steps: " + it.steps.string())
+    return null
+}
+
+fn main([]string args) error {
+    string src = try fs.read("/dev/stdin")
+    try run(src)
+    error bad = run("let x = 1 +;")
+    if (bad != null) {
+        fmt.println("parse error: " + bad.message())
+    }
+    bad = run("print nope(1);")
+    if (bad != null) {
+        fmt.println("runtime error: " + bad.message())
+    }
+    return null
+}

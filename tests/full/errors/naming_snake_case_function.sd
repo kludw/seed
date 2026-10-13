@@ -1,0 +1,14 @@
+// expect-error: add_numbers
+// Functions use camelCase, so snake_case is a compile error.
+package main
+
+import "fmt"
+
+fn add_numbers(int a, int b) int {
+    return a + b
+}
+
+fn main([]string args) error {
+    fmt.println(add_numbers(1, 2).string())
+    return null
+}

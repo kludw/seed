@@ -1,0 +1,11 @@
+// expect-error: parameters are read-only
+package main
+
+fn f(int x) int {
+    x = 2
+    return x
+}
+
+fn main([]string args) error {
+    return null
+}

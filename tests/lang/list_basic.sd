@@ -1,0 +1,49 @@
+// List literals, length, indexing, element assignment and equality.
+package main
+
+import "fmt"
+
+fn showInts([]int xs) string {
+    string out = "["
+    for (int i = 0; i < xs.len(); i++) {
+        if (i > 0) {
+            out = out + ", "
+        }
+        out = out + xs[i].string()
+    }
+    return out + "]"
+}
+
+fn main([]string args) error {
+    []int xs = []int{10, 20, 30}
+    fmt.println(xs.len().string())
+    fmt.println(xs[0].string() + " " + xs[2].string())
+    xs[1] = 25
+    fmt.println(showInts(xs))
+    xs[0]++
+    xs[2]--
+    fmt.println(showInts(xs))
+    []int empty = []int{}
+    fmt.println(empty.len().string() + " " + showInts(empty))
+    []string names = []string{"ann", "bob"}
+    fmt.println(names.join(","))
+    []float floats = []float{1.5, 2.0}
+    fmt.println(floats[0].string() + " " + floats[1].string())
+    []bool flags = []bool{true, false}
+    fmt.println(flags[1].string())
+    []int multi = []int{
+        1,
+        2,
+        3,
+    }
+    fmt.println(multi.len().string())
+    []int a = []int{1, 2}
+    []int b = []int{1, 2}
+    []int c = []int{2, 1}
+    []int d = []int{1, 2, 3}
+    fmt.println((a == b).string())
+    fmt.println((a == c).string())
+    fmt.println((a != d).string())
+    fmt.println((empty == []int{}).string())
+    return null
+}

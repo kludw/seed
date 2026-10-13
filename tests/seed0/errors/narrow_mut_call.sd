@@ -1,0 +1,19 @@
+// expect-error: is nullable (string?)
+package main
+
+type U struct {
+    string? email
+}
+
+fn (U u) mut clear() {
+    u.email = null
+}
+
+fn main([]string args) error {
+    U u = U{email: "x"}
+    if (u.email != null) {
+        u.clear()
+        int n = u.email.len()
+    }
+    return null
+}

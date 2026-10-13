@@ -1,0 +1,12 @@
+// expect-error: seed fmt
+// Code that is not formatted fails to compile, and the error names the command
+// that fixes it.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    int x=1+2
+    fmt.println(x.string())
+    return null
+}

@@ -1,0 +1,13 @@
+// expect-error: last result is error
+package main
+
+import "fs"
+
+fn f() string {
+    string s = try fs.read("x")
+    return s
+}
+
+fn main([]string args) error {
+    return null
+}

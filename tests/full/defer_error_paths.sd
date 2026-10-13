@@ -1,0 +1,48 @@
+// Deferred calls run on every return path, including early returns and try.
+package main
+
+import "errors"
+import "fmt"
+
+fn step(bool fail) error {
+    defer fmt.println("cleanup")
+    if (fail) {
+        return errors.new("step failed")
+    }
+    fmt.println("step ok")
+    return null
+}
+
+fn parse(string s) (int, error) {
+    if (s == "") {
+        return null, errors.new("empty input")
+    }
+    return s.len(), null
+}
+
+fn load(string s) (int, error) {
+    defer fmt.println("load cleanup")
+    int v = try parse(s)
+    fmt.println("parsed")
+    return v, null
+}
+
+fn main([]string args) error {
+    error e1 = step(false)
+    fmt.println((e1 == null).string())
+    error e2 = step(true)
+    if (e2 != null) {
+        fmt.println(e2.message())
+    }
+    int n, error e3 = load("abc")
+    if (e3 == null) {
+        fmt.println(n.string())
+    }
+    int m, error e4 = load("")
+    if (e4 != null) {
+        fmt.println(e4.message())
+    } else {
+        fmt.println(m.string())
+    }
+    return null
+}

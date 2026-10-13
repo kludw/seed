@@ -1,0 +1,35 @@
+// select with send cases: only the channel with buffer space is chosen.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    chan int full = chan int(1)
+    chan int empty = chan int(1)
+    full.send(1)
+    select {
+    case full.send(2):
+        fmt.println("sent to full")
+    case empty.send(3):
+        fmt.println("sent to empty")
+    }
+    int? a = full.receive()
+    int? b = empty.receive()
+    if (a != null) {
+        if (b != null) {
+            fmt.println(a.string() + " " + b.string())
+        }
+    }
+    chan int idle = chan int(0)
+    chan int ready = chan int(1)
+    ready.send(5)
+    select {
+    case idle.send(9):
+        fmt.println("sent to idle")
+    case int? v = ready.receive():
+        if (v != null) {
+            fmt.println("received " + v.string())
+        }
+    }
+    return null
+}

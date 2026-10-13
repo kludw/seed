@@ -1,0 +1,8 @@
+// expect-error: mismatched types int and float
+package main
+
+fn main([]string args) error {
+    int n = 2
+    float f = n * 1.5
+    return null
+}

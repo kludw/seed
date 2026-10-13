@@ -1,0 +1,14 @@
+// Integer % by zero crashes.
+package main
+
+import "fmt"
+
+fn rem(int a, int b) int {
+    return a % b
+}
+
+fn main([]string args) error {
+    fmt.println("before")
+    fmt.println(rem(7, 0).string())
+    return null
+}

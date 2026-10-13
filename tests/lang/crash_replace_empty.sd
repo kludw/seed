@@ -1,0 +1,12 @@
+// replace with an empty old string crashes.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    string s = "abc"
+    string old = ""
+    fmt.println("before")
+    fmt.println(s.replace(old, "x"))
+    return null
+}

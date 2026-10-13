@@ -1,0 +1,54 @@
+// Constants (package level and local) and left-to-right evaluation order.
+package main
+
+import "fmt"
+
+const int limit = 3
+const []string names = []string{"zero", "one", "two"}
+const map[string]int ids = map[string]int{"a": 1, "b": 2}
+const string greeting = "hi " + names[1]
+const int twice = limit * 2
+
+fn trace(string s, int v) int {
+    fmt.print(s + " ")
+    return v
+}
+
+fn three(int a, int b, int c) int {
+    return a * 100 + b * 10 + c
+}
+
+type T struct {
+    int a
+    int b
+}
+
+fn main([]string args) error {
+    fmt.println(greeting + " " + twice.string())
+    []string copy = names
+    copy.push("three")
+    fmt.println(names.len().string() + " " + copy.len().string())
+    int? a = ids["a"]
+    if (a != null) {
+        fmt.println(a.string())
+    }
+    const int local = 10
+    int x = 2
+    switch (x) {
+    case limit:
+        fmt.println("limit")
+    case 2, local:
+        fmt.println("two or ten")
+    default:
+        fmt.println("other")
+    }
+    int r = three(trace("a", 1), trace("b", 2), trace("c", 3))
+    fmt.println(r.string())
+    int s = trace("x", 5) - trace("y", 3)
+    fmt.println(s.string())
+    T t = T{b: trace("b", 1), a: trace("a", 2)}
+    fmt.println(t.a.string() + t.b.string())
+    []int xs = []int{trace("1", 1), trace("2", 2)}
+    fmt.println(xs.len().string())
+    return null
+}

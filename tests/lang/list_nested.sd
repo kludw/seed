@@ -1,0 +1,36 @@
+// Lists of lists, with mutation through index paths.
+package main
+
+import "fmt"
+
+fn showRow([]int xs) string {
+    string out = "["
+    for (int i = 0; i < xs.len(); i++) {
+        if (i > 0) {
+            out = out + " "
+        }
+        out = out + xs[i].string()
+    }
+    return out + "]"
+}
+
+fn main([]string args) error {
+    [][]int grid = [][]int{[]int{1, 2}, []int{3}}
+    grid[1].push(4)
+    grid.push([]int{})
+    grid[2].push(5)
+    grid[0][1] = 20
+    int sum = 0
+    for (int r = 0; r < grid.len(); r++) {
+        fmt.println(showRow(grid[r]))
+        for (int c = 0; c < grid[r].len(); c++) {
+            sum = sum + grid[r][c]
+        }
+    }
+    fmt.println("rows " + grid.len().string() + " sum " + sum.string())
+    [][]string table = [][]string{}
+    table.push([]string{"a"})
+    table[0].push("b")
+    fmt.println(table[0].join(""))
+    return null
+}

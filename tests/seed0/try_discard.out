@@ -1,0 +1,12 @@
+ok:3 10
+true
+error: invalid integer: "x"
+error: negative: -6
+error: empty
+false true
+12
+6 true
+invalid integer: "bad"
+10 ok:5
+true true
+true

@@ -1,0 +1,19 @@
+// expect-error: does not handle case Shape.Rect
+package main
+
+type Shape enum {
+    Circle(float r)
+    Rect(float w, float h)
+}
+
+fn area(Shape s) float {
+    switch (s) {
+    case Shape.Circle(float r):
+        return r
+    }
+    return 0.0
+}
+
+fn main([]string args) error {
+    return null
+}

@@ -1,0 +1,29 @@
+// bytes() copies a string into a []byte; string(xs) converts back.
+package main
+
+import "fmt"
+
+fn reversed(string s) string {
+    []byte bs = s.bytes()
+    bs.reverse()
+    return string(bs)
+}
+
+fn main([]string args) error {
+    string s = "Hi!"
+    []byte bs = s.bytes()
+    fmt.println(bs.len().string())
+    fmt.println(bs[0].string() + " " + bs[1].string() + " " + bs[2].string())
+    bs[0] = 'h'
+    fmt.println(string(bs))
+    fmt.println(s)
+    string empty = ""
+    fmt.println(empty.bytes().len().string())
+    fmt.println(reversed("stressed"))
+    []byte built = []byte{}
+    for (int i = 0; i < 5; i++) {
+        built.push(byte(int('a') + i))
+    }
+    fmt.println(string(built))
+    return null
+}

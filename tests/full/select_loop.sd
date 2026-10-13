@@ -1,0 +1,31 @@
+// A select loop draining two channels. Which channel goes first may vary, but
+// the totals cannot.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    chan int a = chan int(3)
+    chan int b = chan int(2)
+    a.send(1)
+    a.send(2)
+    a.send(3)
+    b.send(10)
+    b.send(20)
+    int sumA = 0
+    int sumB = 0
+    for (int i = 0; i < 5; i++) {
+        select {
+        case int? x = a.receive():
+            if (x != null) {
+                sumA = sumA + x
+            }
+        case int? y = b.receive():
+            if (y != null) {
+                sumB = sumB + y
+            }
+        }
+    }
+    fmt.println(sumA.string() + " " + sumB.string())
+    return null
+}

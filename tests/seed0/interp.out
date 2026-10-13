@@ -1,0 +1,9 @@
+sum of fib(0..9) = 88
+2432902008176640000
+ababab
+liftoff
+19
+tokens: 159, statements: 11, steps: 2510
+parse error: line 1: unexpected ';'
+
+runtime error: undefined function nope

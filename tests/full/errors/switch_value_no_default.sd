@@ -1,0 +1,21 @@
+// expect-error: default
+// A switch over an int must end with a default case.
+package main
+
+import "fmt"
+
+fn name(int n) string {
+    string result = "many"
+    switch (n) {
+    case 0:
+        result = "none"
+    case 1:
+        result = "one"
+    }
+    return result
+}
+
+fn main([]string args) error {
+    fmt.println(name(2))
+    return null
+}

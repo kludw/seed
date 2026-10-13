@@ -1,0 +1,43 @@
+// Structs, including the lists inside them, are copied on assignment and when
+// stored in or read from fields and lists.
+package main
+
+import "fmt"
+
+type Team struct {
+    string name
+    []string members
+}
+
+type League struct {
+    Team top
+    []Team teams
+}
+
+fn show(Team t) string {
+    return t.name + "[" + t.members.join(",") + "]"
+}
+
+fn main([]string args) error {
+    Team t1 = Team{name: "red", members: []string{"ann"}}
+    Team t2 = t1
+    t2.members.push("bob")
+    t2.name = "blue"
+    fmt.println(show(t1) + " " + show(t2))
+    League lg = League{top: t1, teams: []Team{t1, t2}}
+    t1.members.push("cid")
+    fmt.println(show(t1) + " " + show(lg.top) + " " + show(lg.teams[0]))
+    lg.teams[0].members.push("dan")
+    fmt.println(show(lg.top) + " " + show(lg.teams[0]) + " " + show(t1))
+    Team picked = lg.teams[1]
+    picked.members.push("eve")
+    fmt.println(show(picked) + " " + show(lg.teams[1]))
+    League lg2 = lg
+    lg2.top.name = "gold"
+    lg2.teams[1].members.push("fay")
+    fmt.println(show(lg.top) + " " + show(lg.teams[1]))
+    fmt.println(show(lg2.top) + " " + show(lg2.teams[1]))
+    lg.teams[1] = t1
+    fmt.println(show(lg.teams[1]) + " " + show(lg2.teams[1]))
+    return null
+}

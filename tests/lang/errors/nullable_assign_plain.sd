@@ -1,0 +1,12 @@
+// expect-error: nullable_assign_plain.sd:9:
+// The int? result of index() cannot be stored in a plain int.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    []int xs = []int{1, 2, 3}
+    int position = xs.index(2)
+    fmt.println(position.string())
+    return null
+}

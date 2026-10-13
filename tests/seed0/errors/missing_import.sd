@@ -1,0 +1,7 @@
+// expect-error: is not imported
+package main
+
+fn main([]string args) error {
+    fmt.println("x")
+    return null
+}

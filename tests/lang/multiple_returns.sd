@@ -1,0 +1,55 @@
+// Functions returning several values; declaring and reusing names on the left.
+package main
+
+import "fmt"
+
+fn minMax([]int xs) (int, int) {
+    int lo = xs[0]
+    int hi = xs[0]
+    for (int i = 1; i < xs.len(); i++) {
+        if (xs[i] < lo) {
+            lo = xs[i]
+        }
+        if (xs[i] > hi) {
+            hi = xs[i]
+        }
+    }
+    return lo, hi
+}
+
+fn divMod(int a, int b) (int, int) {
+    return a / b, a % b
+}
+
+fn swap(string a, string b) (string, string) {
+    return b, a
+}
+
+fn stats([]int xs) (int, int, float) {
+    int sum = 0
+    for (int i = 0; i < xs.len(); i++) {
+        sum = sum + xs[i]
+    }
+    return xs.len(), sum, float(sum) / float(xs.len())
+}
+
+fn main([]string args) error {
+    int lo, int hi = minMax([]int{4, -2, 9, 0})
+    fmt.println(lo.string() + " " + hi.string())
+    int q, int r = divMod(17, 5)
+    fmt.println(q.string() + " " + r.string())
+    q, r = divMod(9, 4)
+    fmt.println(q.string() + " " + r.string())
+    int q2, r = divMod(20, 6)
+    fmt.println(q2.string() + " " + r.string())
+    string x, string y = swap("left", "right")
+    fmt.println(x + " " + y)
+    x, y = swap(x, y)
+    fmt.println(x + " " + y)
+    int count, int sum, float mean = stats([]int{1, 2, 3, 4})
+    fmt.println(count.string() + " " + sum.string() + " " + mean.string())
+    []int pair = []int{0, 0}
+    pair[0], pair[1] = divMod(7, 2)
+    fmt.println(pair[0].string() + " " + pair[1].string())
+    return null
+}

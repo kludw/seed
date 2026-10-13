@@ -1,0 +1,68 @@
+// Maps keep insertion order through overwrites, deletes, re-inserts and growth.
+package main
+
+import "fmt"
+
+fn keysOf(map[string]int m) string {
+    []string ks = m.keys()
+    []string parts = []string{}
+    for (int i = 0; i < ks.len(); i++) {
+        int? v = m[ks[i]]
+        if (v != null) {
+            parts.push(ks[i] + "=" + v.string())
+        }
+    }
+    return parts.join(" ")
+}
+
+fn main([]string args) error {
+    map[string]int m = map[string]int{"b": 1, "a": 2, "c": 3}
+    fmt.println(keysOf(m))
+    m["a"] = 20
+    m["d"] = 4
+    fmt.println(keysOf(m))
+    m.delete("b")
+    m.delete("zz")
+    fmt.println(keysOf(m) + " len=" + m.len().string())
+    m["b"] = 5
+    fmt.println(keysOf(m))
+
+    map[int]int big = map[int]int{}
+    for (int i = 0; i < 1000; i++) {
+        big[i * 7919 % 1000] = i
+    }
+    for (int i = 0; i < 1000; i = i + 2) {
+        big.delete(i)
+    }
+    []int ks = big.keys()
+    fmt.println(big.len().string() + " " + ks[0].string() + " " + ks[1].string() + " " + ks[ks.len() - 1].string())
+    int? missing = big[2]
+    int? present = big[3]
+    fmt.println((missing == null).string() + " " + (present != null).string())
+    for (int i = 0; i < 1000; i++) {
+        big[i] = i
+    }
+    ks = big.keys()
+    fmt.println(big.len().string() + " " + ks[0].string() + " " + ks[500].string() + " " + ks[999].string())
+
+    map[byte]bool seen = map[byte]bool{}
+    string s = "hello world"
+    for (int i = 0; i < s.len(); i++) {
+        seen[s[i]] = true
+    }
+    []byte bs = seen.keys()
+    fmt.println(string(bs))
+
+    map[bool]string bm = map[bool]string{true: "yes"}
+    bm[false] = "no"
+    bm[true] = "YES"
+    []bool bk = bm.keys()
+    fmt.println(bk[0].string() + " " + bk[1].string() + " " + bm.len().string())
+
+    // copies of maps are independent
+    map[string]int m2 = m
+    m2.delete("a")
+    m2["z"] = 26
+    fmt.println(keysOf(m) + " | " + keysOf(m2))
+    return null
+}

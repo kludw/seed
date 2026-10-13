@@ -1,0 +1,13 @@
+// Sending on a closed channel crashes.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    chan int ch = chan int(1)
+    ch.close()
+    fmt.println("before")
+    ch.send(1)
+    fmt.println("after")
+    return null
+}

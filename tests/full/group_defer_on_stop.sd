@@ -1,0 +1,37 @@
+// A goroutine stopped because another one failed still runs its defers, and
+// they finish before the group returns.
+package main
+
+import "errors"
+import "fmt"
+
+fn waiter(chan int ready, chan int never) error {
+    defer fmt.println("waiter cleanup")
+    ready.send(1)
+    int? v = never.receive()
+    if (v != null) {
+        return errors.new("unexpected value " + v.string())
+    }
+    return null
+}
+
+fn failing(chan int ready) error {
+    int? v = ready.receive()
+    if (v == null) {
+        return errors.new("ready was closed")
+    }
+    return errors.new("failing after " + v.string())
+}
+
+fn main([]string args) error {
+    chan int ready = chan int(0)
+    chan int never = chan int(0)
+    error err = group {
+        spawn waiter(ready, never)
+        spawn failing(ready)
+    }
+    if (err != null) {
+        fmt.println("group failed: " + err.message())
+    }
+    return null
+}

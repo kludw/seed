@@ -1,0 +1,11 @@
+// message() on a null error crashes.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    error e = null
+    fmt.println("a")
+    fmt.println(e.message())
+    return null
+}

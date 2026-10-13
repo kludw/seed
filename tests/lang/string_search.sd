@@ -1,0 +1,27 @@
+// contains, index, startsWith and endsWith on strings.
+package main
+
+import "fmt"
+
+fn showIndex(int? i) string {
+    if (i == null) {
+        return "null"
+    }
+    return i.string()
+}
+
+fn main([]string args) error {
+    string s = "banana"
+    fmt.println(s.contains("nan").string())
+    fmt.println(s.contains("nab").string())
+    fmt.println(showIndex(s.index("an")))
+    fmt.println(showIndex(s.index("na")))
+    fmt.println(showIndex(s.index("a")))
+    fmt.println(showIndex(s.index("x")))
+    fmt.println(showIndex(s.index("banana")))
+    fmt.println(s.startsWith("ban").string())
+    fmt.println(s.startsWith("an").string())
+    fmt.println(s.endsWith("ana").string())
+    fmt.println(s.endsWith("nab").string())
+    return null
+}

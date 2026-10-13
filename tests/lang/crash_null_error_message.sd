@@ -1,0 +1,19 @@
+// Calling message() on a null error crashes.
+package main
+
+import "errors"
+import "fmt"
+
+fn maybeFail(bool fail) error {
+    if (fail) {
+        return errors.new("failed")
+    }
+    return null
+}
+
+fn main([]string args) error {
+    error err = maybeFail(false)
+    fmt.println("before")
+    fmt.println(err.message())
+    return null
+}

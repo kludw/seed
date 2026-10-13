@@ -1,0 +1,19 @@
+// Infinity and NaN come from ordinary IEEE arithmetic and print as inf, -inf and nan.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    float big = 1.0e300
+    float inf = big * big
+    float negInf = -inf
+    float nan = inf - inf
+    fmt.println(inf.string())
+    fmt.println(negInf.string())
+    fmt.println(nan.string())
+    fmt.println((inf > big).string())
+    fmt.println((negInf < -big).string())
+    fmt.println((nan == nan).string())
+    fmt.println((nan != nan).string())
+    return null
+}

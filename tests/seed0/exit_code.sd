@@ -1,0 +1,17 @@
+package main
+
+import "fmt"
+import "os"
+
+fn finish(int code) int {
+    fmt.println("bye")
+    os.exit(code)
+    return 0
+}
+
+fn main([]string args) error {
+    fmt.print("x")
+    int n = finish(7)
+    fmt.println(n.string())
+    return null
+}

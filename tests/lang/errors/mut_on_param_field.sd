@@ -1,0 +1,19 @@
+// expect-error: mut_on_param_field.sd:12:
+// Calling a mut method on a field of a parameter changes the parameter too.
+package main
+
+import "fmt"
+
+type Bag struct {
+    []string items
+}
+
+fn fill(Bag frozenBag) int {
+    frozenBag.items.push("x")
+    return frozenBag.items.len()
+}
+
+fn main([]string args) error {
+    fmt.println(fill(Bag{items: []string{}}).string())
+    return null
+}

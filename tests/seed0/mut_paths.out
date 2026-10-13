@@ -1,0 +1,15 @@
+3 [a,b1,b2]
+x y
+5 [A,b1,b2,x,y]
+3 [a,b1,b2]
+4 [a,b1,b2,z,direct]
+3 [a,b1,b2]
+4 [a,b1,b2,q] / 3 [a,b1,b2]
+4
+3 2
+4
+green
+red green
+3
+721 0
+9

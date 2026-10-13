@@ -1,0 +1,37 @@
+// Map literals, lookup returning V?, insert, replace, len and keys.
+package main
+
+import "fmt"
+
+fn showOpt(int? x) string {
+    if (x == null) {
+        return "null"
+    }
+    return x.string()
+}
+
+fn main([]string args) error {
+    map[string]int ages = map[string]int{"ann": 31, "bob": 25}
+    fmt.println(ages.len().string())
+    fmt.println(showOpt(ages["ann"]))
+    fmt.println(showOpt(ages["zed"]))
+    ages["cat"] = 7
+    ages["bob"] = 26
+    fmt.println(ages.len().string())
+    []string keys = ages.keys()
+    for (int i = 0; i < keys.len(); i++) {
+        string k = keys[i]
+        int? v = ages[k]
+        if (v != null) {
+            fmt.println(k + "=" + v.string())
+        }
+    }
+    map[string]int empty = map[string]int{}
+    fmt.println(empty.len().string() + " " + empty.keys().len().string())
+    map[string]string multi = map[string]string{
+        "x": "1",
+        "y": "2",
+    }
+    fmt.println(multi.keys().join(","))
+    return null
+}

@@ -1,0 +1,52 @@
+// try passes an error up from a call that returns one value and an error.
+package main
+
+import "errors"
+import "fmt"
+
+fn half(int n) (int, error) {
+    if (n % 2 != 0) {
+        return null, errors.new("odd: " + n.string())
+    }
+    return n / 2, null
+}
+
+fn quarter(int n) (int, error) {
+    int h = try half(n)
+    int q = try half(h)
+    return q, null
+}
+
+fn sumStrings([]string xs) (int, error) {
+    int total = 0
+    for (int i = 0; i < xs.len(); i++) {
+        int v = try xs[i].toInt()
+        total = total + v
+    }
+    return total, null
+}
+
+fn main([]string args) error {
+    []int inputs = []int{8, 6, 5, 12}
+    for (int i = 0; i < inputs.len(); i++) {
+        int r, error err = quarter(inputs[i])
+        if (err != null) {
+            fmt.println(inputs[i].string() + ": " + err.message())
+        } else {
+            fmt.println(inputs[i].string() + " -> " + r.string())
+        }
+    }
+    int s1, error e1 = sumStrings([]string{"1", "2", "3"})
+    if (e1 == null) {
+        fmt.println("sum " + s1.string())
+    }
+    int s2, error e2 = sumStrings([]string{"1", "x"})
+    if (e2 != null) {
+        fmt.println("sum failed")
+    } else {
+        fmt.println("unexpected " + s2.string())
+    }
+    int direct = try quarter(40)
+    fmt.println("direct " + direct.string())
+    return null
+}

@@ -1,0 +1,15 @@
+// expect-error: spawn
+// spawn is only allowed inside a group block.
+package main
+
+import "fmt"
+
+fn work() error {
+    return null
+}
+
+fn main([]string args) error {
+    spawn work()
+    fmt.println("done")
+    return null
+}

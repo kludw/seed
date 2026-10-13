@@ -1,0 +1,41 @@
+// try on a call that returns several values and an error.
+package main
+
+import "errors"
+import "fmt"
+
+fn bounds([]int xs) (int, int, error) {
+    if (xs.len() == 0) {
+        return null, null, errors.new("empty list")
+    }
+    int lo = xs[0]
+    int hi = xs[0]
+    for (int i = 1; i < xs.len(); i++) {
+        if (xs[i] < lo) {
+            lo = xs[i]
+        }
+        if (xs[i] > hi) {
+            hi = xs[i]
+        }
+    }
+    return lo, hi, null
+}
+
+fn span([]int xs) (int, error) {
+    int lo, int hi = try bounds(xs)
+    return hi - lo, null
+}
+
+fn main([]string args) error {
+    int s, error err = span([]int{3, 9, 1})
+    if (err == null) {
+        fmt.println("span " + s.string())
+    }
+    s, err = span([]int{})
+    if (err != null) {
+        fmt.println("error " + err.message())
+    }
+    int lo, int hi = try bounds([]int{7, -7})
+    fmt.println(lo.string() + ".." + hi.string())
+    return null
+}

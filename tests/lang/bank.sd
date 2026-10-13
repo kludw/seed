@@ -1,0 +1,95 @@
+// A small bank: structs in a list, a map from owner to index, and mut methods
+// that fail with errors, called through list elements.
+package main
+
+import "errors"
+import "fmt"
+
+type Account struct {
+    string owner
+    int balance
+    []string history
+}
+
+type Bank struct {
+    map[string]int index
+    []Account accounts
+}
+
+fn (Account a) mut deposit(int amount) error {
+    if (amount <= 0) {
+        return errors.new("amount must be positive")
+    }
+    a.balance = a.balance + amount
+    a.history.push("+" + amount.string())
+    return null
+}
+
+fn (Account a) mut withdraw(int amount) error {
+    if (amount <= 0) {
+        return errors.new("amount must be positive")
+    }
+    if (amount > a.balance) {
+        return errors.new("insufficient funds: " + a.owner + " has " + a.balance.string() + ", needs " + amount.string())
+    }
+    a.balance = a.balance - amount
+    a.history.push("-" + amount.string())
+    return null
+}
+
+fn (Bank b) find(string owner) (int, error) {
+    int? i = b.index[owner]
+    if (i == null) {
+        return null, errors.new("no account: " + owner)
+    }
+    return i, null
+}
+
+fn (Bank b) mut open(string owner) error {
+    if (b.index[owner] != null) {
+        return errors.new("account exists: " + owner)
+    }
+    b.index[owner] = b.accounts.len()
+    b.accounts.push(Account{owner: owner, balance: 0, history: []string{}})
+    return null
+}
+
+fn (Bank b) mut deposit(string owner, int amount) error {
+    int i = try b.find(owner)
+    try b.accounts[i].deposit(amount)
+    return null
+}
+
+fn (Bank b) mut transfer(string from, string to, int amount) error {
+    int fi = try b.find(from)
+    int ti = try b.find(to)
+    try b.accounts[fi].withdraw(amount)
+    try b.accounts[ti].deposit(amount)
+    return null
+}
+
+fn report(error err) {
+    if (err == null) {
+        fmt.println("ok")
+    } else {
+        fmt.println("failed: " + err.message())
+    }
+}
+
+fn main([]string args) error {
+    Bank bank = Bank{index: map[string]int{}, accounts: []Account{}}
+    report(bank.open("ann"))
+    report(bank.open("bob"))
+    report(bank.open("ann"))
+    report(bank.deposit("ann", 100))
+    report(bank.transfer("ann", "bob", 30))
+    report(bank.transfer("bob", "ann", 50))
+    report(bank.transfer("ann", "cat", 10))
+    report(bank.deposit("bob", 0))
+    report(bank.transfer("bob", "ann", 30))
+    for (int i = 0; i < bank.accounts.len(); i++) {
+        Account a = bank.accounts[i]
+        fmt.println(a.owner + " " + a.balance.string() + " [" + a.history.join(" ") + "]")
+    }
+    return null
+}

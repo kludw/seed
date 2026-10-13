@@ -1,0 +1,8 @@
+// expect-error: is nullable (string?)
+package main
+
+fn main([]string args) error {
+    string? s = null
+    int n = s.len()
+    return null
+}

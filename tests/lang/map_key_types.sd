@@ -1,0 +1,51 @@
+// Map keys can be int, byte, bool or string.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    map[int]string names = map[int]string{3: "three", 1: "one"}
+    names[2] = "two"
+    []int ks = names.keys()
+    for (int i = 0; i < ks.len(); i++) {
+        string? n = names[ks[i]]
+        if (n != null) {
+            fmt.println(ks[i].string() + " " + n)
+        }
+    }
+    map[bool]int parity = map[bool]int{}
+    for (int i = 0; i < 7; i++) {
+        bool even = i % 2 == 0
+        int? c = parity[even]
+        if (c == null) {
+            parity[even] = 1
+        } else {
+            parity[even] = c + 1
+        }
+    }
+    []bool bks = parity.keys()
+    for (int i = 0; i < bks.len(); i++) {
+        int? c = parity[bks[i]]
+        if (c != null) {
+            fmt.println(bks[i].string() + " " + c.string())
+        }
+    }
+    map[byte]int freq = map[byte]int{}
+    string word = "hello"
+    for (int i = 0; i < word.len(); i++) {
+        int? c = freq[word[i]]
+        if (c == null) {
+            freq[word[i]] = 1
+        } else {
+            freq[word[i]] = c + 1
+        }
+    }
+    []byte letters = freq.keys()
+    for (int i = 0; i < letters.len(); i++) {
+        int? c = freq[letters[i]]
+        if (c != null) {
+            fmt.println(string([]byte{letters[i]}) + " " + c.string())
+        }
+    }
+    return null
+}

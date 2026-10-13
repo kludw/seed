@@ -1,0 +1,11 @@
+// expect-error: error_builtin_call_statement.sd:9:
+// Ignoring the error from a core package function is a compile error too.
+package main
+
+import "fs"
+
+fn main([]string args) error {
+    string path = "/tmp/seed-never-created.txt"
+    fs.remove(path)
+    return null
+}

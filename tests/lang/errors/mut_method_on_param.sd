@@ -1,0 +1,23 @@
+// expect-error: mut_method_on_param.sd:16:
+// A mut method cannot be called on a function parameter.
+package main
+
+import "fmt"
+
+type Counter struct {
+    int n
+}
+
+fn (Counter c) mut inc() {
+    c.n = c.n + 1
+}
+
+fn bump(Counter frozenCounter) int {
+    frozenCounter.inc()
+    return frozenCounter.n
+}
+
+fn main([]string args) error {
+    fmt.println(bump(Counter{n: 1}).string())
+    return null
+}

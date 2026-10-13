@@ -1,0 +1,17 @@
+// expect-error: error_multi_call_statement.sd:15:
+// A call returning (T, error) cannot be used as a plain statement either.
+package main
+
+import "errors"
+
+fn parseCount(string s) (int, error) {
+    if (s == "") {
+        return null, errors.new("empty")
+    }
+    return 1, null
+}
+
+fn main([]string args) error {
+    parseCount("x")
+    return null
+}

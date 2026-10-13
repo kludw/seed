@@ -1,0 +1,95 @@
+// Enum payloads are copies: binding them in a switch and changing the binding
+// leaves the enum value unchanged. Also copies of nullable structs and
+// values moved out of functions.
+package main
+
+import "fmt"
+
+type Item struct {
+    string name
+    []string tags
+}
+
+type Ev enum {
+    Batch([]int ids)
+    One(Item item)
+    Nothing
+}
+
+fn sizeAfterAdd(Ev e) int {
+    switch (e) {
+    case Ev.Batch([]int ids):
+        ids.push(99)
+        return ids.len()
+    case Ev.One(Item item):
+        item.tags.push("changed")
+        return item.tags.len()
+    case Ev.Nothing:
+        return 0
+    }
+}
+
+fn ids(Ev e) []int {
+    switch (e) {
+    case Ev.Batch([]int xs):
+        return xs
+    case Ev.One(Item _):
+        return []int{}
+    case Ev.Nothing:
+        return []int{}
+    }
+}
+
+fn makeItems(int n) []Item {
+    []Item out = []Item{}
+    for (int i = 0; i < n; i++) {
+        Item it = Item{name: "i" + i.string(), tags: []string{}}
+        it.tags.push("t")
+        out.push(it)
+    }
+    return out
+}
+
+fn main([]string args) error {
+    []int xs = []int{1, 2}
+    Ev e = Ev.Batch(xs)
+    xs.push(3)
+    fmt.println(sizeAfterAdd(e).string() + " " + ids(e).len().string() + " " + xs.len().string())
+    []int got = ids(e)
+    got.push(7)
+    fmt.println(ids(e).len().string())
+    Item it = Item{name: "a", tags: []string{"x"}}
+    Ev one = Ev.One(it)
+    it.tags.push("y")
+    fmt.println(sizeAfterAdd(one).string() + " " + sizeAfterAdd(one).string() + " " + it.tags.len().string())
+    Ev copy = e
+    e = Ev.Nothing
+    fmt.println(ids(copy).len().string() + " " + (e == Ev.Nothing).string())
+
+    Item? maybe = it
+    Item? other = maybe
+    if (other != null) {
+        other.tags.push("z")
+        other.name = "b"
+    }
+    if (maybe != null && other != null) {
+        fmt.println(maybe.name + maybe.tags.len().string() + " " + other.name + other.tags.len().string())
+    }
+    []Item items = makeItems(3)
+    []Item items2 = items
+    items2[0].tags.push("u")
+    fmt.println(items[0].tags.len().string() + " " + items2[0].tags.len().string())
+    map[string]Item byName = map[string]Item{}
+    byName["k"] = it
+    it.tags.push("after")
+    Item? fromMap = byName["k"]
+    if (fromMap != null) {
+        fromMap.tags.push("local")
+        fmt.println(fromMap.tags.len().string())
+    }
+    Item? again = byName["k"]
+    if (again != null) {
+        fmt.println(again.tags.len().string() + " " + it.tags.len().string())
+    }
+    return null
+}

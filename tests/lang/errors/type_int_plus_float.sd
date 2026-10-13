@@ -1,0 +1,13 @@
+// expect-error: type_int_plus_float.sd:10:
+// Both sides of an operator must have the same type: no int + float.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    int n = 2
+    float f = 1.5
+    float sum = n + f
+    fmt.println(sum.string())
+    return null
+}

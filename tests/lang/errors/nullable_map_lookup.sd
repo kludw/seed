@@ -1,0 +1,12 @@
+// expect-error: nullable_map_lookup.sd:9:
+// A map lookup returns V?, which must be checked before use.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    map[string]int ages = map[string]int{"ann": 31}
+    int nextYear = ages["ann"] + 1
+    fmt.println(nextYear.string())
+    return null
+}

@@ -1,0 +1,54 @@
+// Plain methods: reading the receiver, calling other methods, chaining, and
+// calling through fields and list elements.
+package main
+
+import "fmt"
+
+type Rect struct {
+    int w
+    int h
+}
+
+type Frame struct {
+    string label
+    Rect inner
+}
+
+fn (Rect r) area() int {
+    return r.w * r.h
+}
+
+fn (Rect r) perimeter() int {
+    return 2 * (r.w + r.h)
+}
+
+fn (Rect r) scaled(int k) Rect {
+    return Rect{w: r.w * k, h: r.h * k}
+}
+
+fn (Rect r) isSquare() bool {
+    return r.w == r.h
+}
+
+fn (Rect r) string() string {
+    return r.w.string() + "x" + r.h.string()
+}
+
+fn (Rect r) describe() string {
+    return r.string() + " area=" + r.area().string() + " perimeter=" + r.perimeter().string()
+}
+
+fn main([]string args) error {
+    Rect r = Rect{w: 3, h: 4}
+    fmt.println(r.describe())
+    fmt.println(r.scaled(2).describe())
+    fmt.println(r.scaled(3).area().string())
+    fmt.println(r.isSquare().string())
+    []Rect rs = []Rect{r, Rect{w: 5, h: 5}}
+    fmt.println(rs[1].isSquare().string())
+    fmt.println(rs[1].string())
+    Frame f = Frame{label: "box", inner: Rect{w: 2, h: 7}}
+    fmt.println(f.label + " " + f.inner.string() + " " + f.inner.area().string())
+    fmt.println(r.string())
+    return null
+}

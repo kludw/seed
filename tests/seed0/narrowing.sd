@@ -1,0 +1,138 @@
+// Nullable values and narrowing: if/else, early exit, && and ||, field paths,
+// loops, and nullable structs (including recursive ones).
+package main
+
+import "fmt"
+
+type User struct {
+    string name
+    string? email
+    int? age
+}
+
+type Node struct {
+    int value
+    Node? next
+}
+
+fn describe(User u) string {
+    string out = u.name
+    if (u.email != null) {
+        out = out + " <" + u.email + ">"
+    }
+    if (u.age == null) {
+        out = out + " (age unknown)"
+    } else {
+        out = out + " (" + u.age.string() + ")"
+    }
+    return out
+}
+
+fn firstChar(string? s) string {
+    if (s == null) {
+        return "-"
+    }
+    if (s.len() == 0) {
+        return "empty"
+    }
+    return s.slice(0, 1)
+}
+
+fn sumList(Node? head) int {
+    int total = 0
+    Node? cur = head
+    for (; cur != null; ) {
+        total = total + cur.value
+        cur = cur.next
+    }
+    return total
+}
+
+fn push(Node? head, int v) Node {
+    return Node{value: v, next: head}
+}
+
+fn bothSet(int? a, int? b) bool {
+    return a != null && b != null && a + b > 0
+}
+
+fn eitherNull(int? a, int? b) bool {
+    return a == null || b == null || a == b
+}
+
+fn main([]string args) error {
+    User u = User{name: "ann", email: "a@x.org", age: null}
+    fmt.println(describe(u))
+    u.email = null
+    u.age = 30
+    fmt.println(describe(u))
+    fmt.println(firstChar(null) + firstChar("") + firstChar("hey"))
+
+    Node? list = null
+    for (int i = 1; i <= 4; i++) {
+        list = push(list, i)
+    }
+    fmt.println(sumList(list).string())
+
+    // mutate through a narrowed nullable struct; copies are independent
+    Node? copy = list
+    if (copy != null) {
+        copy.value = 100
+        if (copy.next != null) {
+            copy.next.value = 50
+        }
+    }
+    fmt.println(sumList(list).string() + " " + sumList(copy).string())
+
+    fmt.println(bothSet(1, 2).string() + " " + bothSet(null, 2).string() + " " + bothSet(-5, 2).string())
+    fmt.println(eitherNull(1, null).string() + " " + eitherNull(3, 3).string() + " " + eitherNull(3, 4).string())
+
+    // early exits narrow the rest of the block
+    []string? names = []string{"x"}
+    for (int i = 0; i < 3; i++) {
+        string? s = null
+        if (i > 0) {
+            s = "n" + i.string()
+        }
+        if (s == null) {
+            continue
+        }
+        if (names == null) {
+            break
+        }
+        names.push(s)
+    }
+    if (names != null) {
+        fmt.println(names.join(","))
+    }
+
+    // narrowing is re-established after reassignment
+    int? n = 5
+    if (n != null) {
+        int doubled = n * 2
+        n = doubled
+        if (n != null) {
+            fmt.println(n.string())
+        }
+    }
+
+    // T is accepted where T? is expected; comparing with null works both ways
+    string? maybe = "v"
+    fmt.println((maybe == null).string() + " " + (null != maybe).string())
+    if (!(maybe == null)) {
+        fmt.println("not null: " + maybe)
+    }
+
+    // nullable list of nullable values
+    [](int?) holes = [](int?){1, null, 3}
+    int count = 0
+    for (int i = 0; i < holes.len(); i++) {
+        int? h = holes[i]
+        if (h != null) {
+            count = count + h
+        }
+    }
+    fmt.println(count.string())
+    fmt.println((holes == [](int?){1, null, 3}).string())
+    return null
+}

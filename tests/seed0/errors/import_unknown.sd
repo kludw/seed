@@ -1,0 +1,8 @@
+// expect-error: can only import the core packages
+package main
+
+import "strings"
+
+fn main([]string args) error {
+    return null
+}

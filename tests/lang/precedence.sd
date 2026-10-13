@@ -1,0 +1,30 @@
+// Operator precedence follows Go: * / % << >> & bind tighter than + - | ^,
+// which bind tighter than comparisons, then &&, then ||.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    int one = 1
+    int two = 2
+    fmt.println((1 + 2 * 3).string())
+    fmt.println(((1 + 2) * 3).string())
+    fmt.println((two + 3 << 2).string())
+    fmt.println((one << 2 + 1).string())
+    fmt.println((one | 2 & 3).string())
+    fmt.println((6 ^ 3 & 5).string())
+    fmt.println((8 >> 1 | 1).string())
+    fmt.println((5 & 3 + 1).string())
+    fmt.println((10 - 4 - 3).string())
+    fmt.println((100 / 10 / 5).string())
+    fmt.println((2 * 3 % 4).string())
+    fmt.println((-two * 3).string())
+    fmt.println((-(two + 3)).string())
+    fmt.println((1 + 2 == 3 && 4 < 5 || false).string())
+    fmt.println((true || false && false).string())
+    fmt.println((!true || true).string())
+    fmt.println((false && true || true).string())
+    fmt.println((!(1 < 2)).string())
+    fmt.println((1 + 2 * 3 == 7).string())
+    return null
+}

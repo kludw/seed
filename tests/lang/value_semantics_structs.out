@@ -1,0 +1,7 @@
+red[ann] blue[ann,bob]
+red[ann,cid] red[ann] red[ann]
+red[ann] red[ann,dan] red[ann,cid]
+blue[ann,bob,eve] blue[ann,bob]
+red[ann] blue[ann,bob]
+gold[ann] blue[ann,bob,fay]
+red[ann,cid] blue[ann,bob,fay]

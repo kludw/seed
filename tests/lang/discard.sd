@@ -1,0 +1,59 @@
+// `_` discards an error; a value returned beside it must be declared T? and is
+// null when the call failed.
+package main
+
+import "errors"
+import "fmt"
+import "fs"
+
+fn divide(int a, int b) (int, error) {
+    if (b == 0) {
+        return null, errors.new("divide by zero")
+    }
+    return a / b, null
+}
+
+fn check(int n) error {
+    if (n < 0) {
+        return errors.new("negative")
+    }
+    return null
+}
+
+fn pair(bool ok) (int, string, error) {
+    if (!ok) {
+        return null, null, errors.new("no pair")
+    }
+    return 1, "one", null
+}
+
+fn showOpt(int? x) string {
+    if (x == null) {
+        return "null"
+    }
+    return x.string()
+}
+
+fn main([]string args) error {
+    int? a, _ = divide(10, 2)
+    int? b, _ = divide(1, 0)
+    fmt.println(showOpt(a) + " " + showOpt(b))
+    _ = check(-1)
+    _ = check(1)
+    string? content, _ = fs.read("/nonexistent-seed-dir/no-such-file.txt")
+    fmt.println((content == null).string())
+    string twelve = "12"
+    int? n, _ = twelve.toInt()
+    string zz = "zz"
+    int? bad, _ = zz.toInt()
+    fmt.println(showOpt(n) + " " + showOpt(bad))
+    int? num, string? word, _ = pair(true)
+    if (num != null) {
+        if (word != null) {
+            fmt.println(num.string() + " " + word)
+        }
+    }
+    int? num2, string? word2, _ = pair(false)
+    fmt.println((num2 == null).string() + " " + (word2 == null).string())
+    return null
+}

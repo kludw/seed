@@ -1,0 +1,65 @@
+// == compares lists, maps, structs, enums and nullable values by contents.
+package main
+
+import "fmt"
+
+type P struct {
+    string name
+    []int nums
+    int? age
+    P2? inner
+}
+
+type P2 struct {
+    float x
+}
+
+type Tree enum {
+    Leaf(int v)
+    Node([]Tree kids, string tag)
+    Empty
+}
+
+fn b(bool v) string {
+    return v.string()
+}
+
+fn main([]string args) error {
+    fmt.println(b([]int{1, 2} == []int{1, 2}) + " " + b([]int{1, 2} == []int{2, 1}) + " " + b([]int{} == []int{}))
+    fmt.println(b([][]string{[]string{"a"}} == [][]string{[]string{"a"}}) + " " + b([]string{"a"} != []string{"a", ""}))
+    map[string]int m1 = map[string]int{"a": 1, "b": 2}
+    map[string]int m2 = map[string]int{"b": 2, "a": 1}
+    map[string]int m3 = map[string]int{"a": 1, "b": 3}
+    fmt.println(b(m1 == m2) + " " + b(m1 == m3) + " " + b(m1 != map[string]int{"a": 1}))
+    P p1 = P{name: "x", nums: []int{1}, age: null, inner: P2{x: 1.5}}
+    P p2 = P{name: "x", nums: []int{1}, age: null, inner: P2{x: 1.5}}
+    fmt.println(b(p1 == p2))
+    p2.age = 3
+    fmt.println(b(p1 == p2))
+    p2.age = null
+    p2.inner = null
+    fmt.println(b(p1 == p2))
+    p2.inner = P2{x: 1.5}
+    p2.nums.push(2)
+    fmt.println(b(p1 == p2) + " " + b(p1.nums == []int{1}))
+    Tree t1 = Tree.Node([]Tree{Tree.Leaf(1), Tree.Empty}, "t")
+    Tree t2 = Tree.Node([]Tree{Tree.Leaf(1), Tree.Empty}, "t")
+    Tree t3 = Tree.Node([]Tree{Tree.Leaf(2), Tree.Empty}, "t")
+    fmt.println(b(t1 == t2) + " " + b(t1 == t3) + " " + b(Tree.Empty == Tree.Empty) + " " + b(Tree.Leaf(1) != Tree.Empty))
+    []P ps = []P{p1}
+    fmt.println(b(ps.contains(p1)) + " " + b(ps.contains(p2)))
+    int? i = ps.index(p1)
+    if (i != null) {
+        fmt.println(i.string())
+    }
+    []Tree ts = []Tree{t3, t1}
+    int? j = ts.index(t2)
+    if (j != null) {
+        fmt.println(j.string())
+    }
+    string? s1 = "a"
+    string? s2 = null
+    fmt.println(b([](string?){s1, s2} == [](string?){"a", null}))
+    fmt.println(b(0.1 + 0.2 == 0.3) + " " + b('a' == 'a') + " " + b("ab" < "b") + " " + b("" < "a"))
+    return null
+}

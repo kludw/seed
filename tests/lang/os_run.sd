@@ -1,0 +1,21 @@
+// os.run starts a program found on PATH and returns its exit code.
+package main
+
+import "fmt"
+import "os"
+
+fn main([]string args) error {
+    int code, error err = os.run([]string{"true"})
+    if (err != null) {
+        return err
+    }
+    fmt.println("true -> " + code.string())
+    code, err = os.run([]string{"false"})
+    if (err != null) {
+        return err
+    }
+    fmt.println("false -> " + code.string())
+    int custom = try os.run([]string{"sh", "-c", "exit 7"})
+    fmt.println("exit 7 -> " + custom.string())
+    return null
+}

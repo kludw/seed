@@ -1,0 +1,18 @@
+// expect-error: parameters are read-only
+package main
+
+type C struct {
+    int n
+}
+
+fn (C c) mut inc() {
+    c.n = c.n + 1
+}
+
+fn bump(C c) {
+    c.inc()
+}
+
+fn main([]string args) error {
+    return null
+}

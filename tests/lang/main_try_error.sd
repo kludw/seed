@@ -1,0 +1,21 @@
+// try in main returns the error from main, which exits with code 1.
+package main
+
+import "errors"
+import "fmt"
+
+fn parseAge(string s) (int, error) {
+    int n, error err = s.toInt()
+    if (err != null) {
+        return null, errors.new("bad age: " + s)
+    }
+    return n, null
+}
+
+fn main([]string args) error {
+    int a = try parseAge("42")
+    fmt.println("age " + a.string())
+    int b = try parseAge("x")
+    fmt.println("not reached " + b.string())
+    return null
+}

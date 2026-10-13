@@ -1,0 +1,12 @@
+// Indexing a string out of range crashes.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    string s = "abc"
+    fmt.println("before")
+    byte b = s[s.len()]
+    fmt.println("after " + b.string())
+    return null
+}

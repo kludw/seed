@@ -1,0 +1,25 @@
+// Explicit conversions between int, float, byte and string.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    fmt.println(int(3.99).string())
+    fmt.println(int(-3.99).string())
+    fmt.println(int(0.5).string())
+    fmt.println(int(1.0e15).string())
+    int seven = 7
+    int minusTwo = -2
+    fmt.println(float(seven).string())
+    fmt.println(float(minusTwo).string())
+    fmt.println(int('A').string())
+    int code = 97
+    fmt.println(byte(code).string())
+    fmt.println(string([]byte{byte(72), byte(105)}))
+    int ten = 10
+    fmt.println(int(float(ten) / 4.0).string())
+    fmt.println(float(int(2.5)).string())
+    byte maxByte = byte(255)
+    fmt.println(int(maxByte).string())
+    return null
+}

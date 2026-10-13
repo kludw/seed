@@ -1,0 +1,15 @@
+// expect-error: tally
+// A local variable cannot reuse the name of a package-level function.
+package main
+
+import "fmt"
+
+fn tally() int {
+    return 1
+}
+
+fn main([]string args) error {
+    int tally = 2
+    fmt.println(tally.string())
+    return null
+}

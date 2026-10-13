@@ -1,0 +1,16 @@
+// expect-error: point
+// Types use PascalCase, so a lowercase type name is a compile error.
+package main
+
+import "fmt"
+
+type point struct {
+    int x
+    int y
+}
+
+fn main([]string args) error {
+    point p = point{x: 1, y: 2}
+    fmt.println(p.x.string())
+    return null
+}

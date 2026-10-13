@@ -1,0 +1,10 @@
+// main returning an error prints "error: <message>" to stderr and exits with 1.
+package main
+
+import "errors"
+import "fmt"
+
+fn main([]string args) error {
+    fmt.println("working")
+    return errors.new("disk full")
+}

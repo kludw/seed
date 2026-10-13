@@ -1,0 +1,70 @@
+// Named functions as values: variables, parameters, return values and lists.
+package main
+
+import "fmt"
+
+fn double(int x) int {
+    return x * 2
+}
+
+fn square(int x) int {
+    return x * x
+}
+
+fn add(int a, int b) int {
+    return a + b
+}
+
+fn mul(int a, int b) int {
+    return a * b
+}
+
+fn apply([]int xs, fn(int) int f) []int {
+    []int out = []int{}
+    for (int i = 0; i < xs.len(); i++) {
+        out.push(f(xs[i]))
+    }
+    return out
+}
+
+fn fold([]int xs, int start, fn(int, int) int f) int {
+    int acc = start
+    for (int i = 0; i < xs.len(); i++) {
+        acc = f(acc, xs[i])
+    }
+    return acc
+}
+
+fn pick(bool useSquare) fn(int) int {
+    if (useSquare) {
+        return square
+    }
+    return double
+}
+
+fn show([]int xs) string {
+    []string parts = []string{}
+    for (int i = 0; i < xs.len(); i++) {
+        parts.push(xs[i].string())
+    }
+    return "[" + parts.join(" ") + "]"
+}
+
+fn main([]string args) error {
+    fn(int) int g = double
+    fmt.println(g(21).string())
+    g = square
+    fmt.println(g(21).string())
+    fmt.println(show(apply([]int{1, 2, 3}, square)))
+    fmt.println(show(apply([]int{1, 2, 3}, double)))
+    []fn(int) int pipeline = []fn(int) int{double, square, double}
+    int v = 3
+    for (int i = 0; i < pipeline.len(); i++) {
+        v = pipeline[i](v)
+    }
+    fmt.println(v.string())
+    fmt.println(pick(true)(5).string() + " " + pick(false)(5).string())
+    []int nums = []int{1, 2, 3, 4, 5}
+    fmt.println(fold(nums, 0, add).string() + " " + fold(nums, 1, mul).string())
+    return null
+}

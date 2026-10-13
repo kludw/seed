@@ -1,0 +1,40 @@
+// Enums can implement interfaces too.
+package main
+
+import "fmt"
+
+type Describer interface {
+    describe() string
+}
+
+type Animal enum implements Describer {
+    Dog(string name)
+    Cat
+}
+
+type Plant struct implements Describer {
+    string species
+}
+
+fn (Animal a) describe() string {
+    string out = ""
+    switch (a) {
+    case Animal.Dog(string name):
+        out = "dog called " + name
+    case Animal.Cat:
+        out = "a cat"
+    }
+    return out
+}
+
+fn (Plant p) describe() string {
+    return "plant: " + p.species
+}
+
+fn main([]string args) error {
+    []Describer things = []Describer{Animal.Dog("rex"), Animal.Cat, Plant{species: "fern"}}
+    for (int i = 0; i < things.len(); i++) {
+        fmt.println(things[i].describe())
+    }
+    return null
+}

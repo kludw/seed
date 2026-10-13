@@ -1,0 +1,72 @@
+// Word frequency count: normalise text, count words in a map (which keeps
+// first-seen order) and rank them with a stable insertion sort.
+package main
+
+import "fmt"
+
+fn normalize(string text) string {
+    string out = text.toLower()
+    out = out.replace(",", " ")
+    out = out.replace(".", " ")
+    out = out.replace("\n", " ")
+    return out
+}
+
+fn countWords(string text) map[string]int {
+    map[string]int counts = map[string]int{}
+    []string words = normalize(text).split(" ")
+    for (int i = 0; i < words.len(); i++) {
+        string w = words[i]
+        if (w == "") {
+            continue
+        }
+        int? c = counts[w]
+        if (c == null) {
+            counts[w] = 1
+        } else {
+            counts[w] = c + 1
+        }
+    }
+    return counts
+}
+
+fn countOf(map[string]int counts, string w) int {
+    int? c = counts[w]
+    if (c == null) {
+        return 0
+    }
+    return c
+}
+
+fn ranked(map[string]int counts) []string {
+    []string words = counts.keys()
+    for (int i = 1; i < words.len(); i++) {
+        for (int j = i; j > 0; j--) {
+            if (countOf(counts, words[j - 1]) >= countOf(counts, words[j])) {
+                break
+            }
+            string tmp = words[j]
+            words[j] = words[j - 1]
+            words[j - 1] = tmp
+        }
+    }
+    return words
+}
+
+fn main([]string args) error {
+    string text = "A cat sat on the mat.\nThe dog sat on the log, and the cat ran."
+    map[string]int counts = countWords(text)
+    fmt.println("distinct: " + counts.len().string())
+    []string order = counts.keys()
+    string line = ""
+    for (int i = 0; i < order.len(); i++) {
+        line = line + order[i] + "=" + countOf(counts, order[i]).string() + " "
+    }
+    fmt.println(line.trim())
+    []string top = ranked(counts)
+    for (int i = 0; i < 4; i++) {
+        fmt.println((i + 1).string() + ". " + top[i] + " " + countOf(counts, top[i]).string())
+    }
+    fmt.println("last: " + top[top.len() - 1])
+    return null
+}

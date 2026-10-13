@@ -1,0 +1,32 @@
+// toInt accepts an optional "-" and decimal digits only. toFloat parses floats.
+package main
+
+import "fmt"
+
+fn showInt(string s) string {
+    int n, error err = s.toInt()
+    if (err != null) {
+        return "[" + s + "] -> error"
+    }
+    return "[" + s + "] -> " + n.string()
+}
+
+fn showFloat(string s) string {
+    float f, error err = s.toFloat()
+    if (err != null) {
+        return "[" + s + "] -> error"
+    }
+    return "[" + s + "] -> " + f.string()
+}
+
+fn main([]string args) error {
+    []string ints = []string{"123", "-45", "0", "007", "+5", "12a", "", " 1", "-", "0x10", "1.5"}
+    for (int i = 0; i < ints.len(); i++) {
+        fmt.println(showInt(ints[i]))
+    }
+    []string floats = []string{"3.25", "-0.5", "10", "abc", ""}
+    for (int i = 0; i < floats.len(); i++) {
+        fmt.println(showFloat(floats[i]))
+    }
+    return null
+}

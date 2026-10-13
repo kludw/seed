@@ -1,0 +1,77 @@
+// Values passed to functions and methods, and values returned from them, are
+// independent of the caller's copies, even when a mut method is given part of
+// its own receiver.
+package main
+
+import "fmt"
+
+type Bag struct {
+    []int items
+}
+
+type Holder struct {
+    []int xs
+}
+
+fn show([]int xs) string {
+    string out = "["
+    for (int i = 0; i < xs.len(); i++) {
+        if (i > 0) {
+            out = out + " "
+        }
+        out = out + xs[i].string()
+    }
+    return out + "]"
+}
+
+fn withExtra([]int xs, int v) []int {
+    []int out = xs
+    out.push(v)
+    return out
+}
+
+fn (Bag b) mut addAll([]int xs) {
+    for (int i = 0; i < xs.len(); i++) {
+        b.items.push(xs[i])
+    }
+}
+
+fn (Bag b) snapshot() []int {
+    return b.items
+}
+
+fn build() []int {
+    []int xs = []int{1}
+    Holder h = Holder{xs: xs}
+    xs.push(2)
+    return h.xs
+}
+
+fn countdown(int n, []int acc) []int {
+    if (n == 0) {
+        return acc
+    }
+    []int next = acc
+    next.push(n)
+    []int result = countdown(n - 1, next)
+    if (acc.len() != next.len() - 1) {
+        fmt.println("acc changed")
+    }
+    return result
+}
+
+fn main([]string args) error {
+    []int base = []int{1, 2}
+    []int more = withExtra(base, 3)
+    fmt.println(show(base) + " " + show(more))
+    Bag bag = Bag{items: []int{1, 2}}
+    bag.addAll(bag.items)
+    fmt.println(show(bag.items))
+    []int snap = bag.snapshot()
+    snap.push(9)
+    fmt.println(show(bag.items) + " " + show(snap))
+    fmt.println(show(build()))
+    []int start = []int{}
+    fmt.println(show(countdown(3, start)) + " " + show(start))
+    return null
+}

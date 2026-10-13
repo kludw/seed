@@ -1,0 +1,22 @@
+// expect-error: unchecked_error_value.sd:17:
+// A value returned beside an error cannot be read until the error is checked.
+package main
+
+import "errors"
+import "fmt"
+
+fn parse(string s) (int, error) {
+    if (s == "") {
+        return null, errors.new("empty")
+    }
+    return s.len(), null
+}
+
+fn main([]string args) error {
+    int n, error err = parse("abc")
+    fmt.println(n.string())
+    if (err != null) {
+        return err
+    }
+    return null
+}

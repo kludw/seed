@@ -1,0 +1,45 @@
+// Structs inside structs and lists of structs, assigned through field paths.
+package main
+
+import "fmt"
+
+type Point struct {
+    int x
+    int y
+}
+
+type Rect struct {
+    Point min
+    Point max
+}
+
+type Scene struct {
+    string name
+    []Rect rects
+}
+
+fn area(Rect r) int {
+    return (r.max.x - r.min.x) * (r.max.y - r.min.y)
+}
+
+fn main([]string args) error {
+    Rect r = Rect{min: Point{x: 0, y: 0}, max: Point{x: 4, y: 3}}
+    fmt.println(area(r).string())
+    r.max.x = 10
+    fmt.println(area(r).string())
+    r.min = Point{x: 5, y: 1}
+    fmt.println(area(r).string())
+    Scene s = Scene{name: "demo", rects: []Rect{}}
+    s.rects.push(r)
+    s.rects.push(Rect{min: Point{x: 1, y: 1}, max: Point{x: 2, y: 2}})
+    s.rects[1].max.y = 5
+    s.rects[1].min.x--
+    int total = 0
+    for (int i = 0; i < s.rects.len(); i++) {
+        total = total + area(s.rects[i])
+    }
+    fmt.println(s.name + " total " + total.string())
+    fmt.println(s.rects[0].min.x.string())
+    fmt.println(s.rects[1].min.x.string())
+    return null
+}

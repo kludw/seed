@@ -1,0 +1,12 @@
+// expect-error: missing return
+package main
+
+fn f(int x) int {
+    if (x > 0) {
+        return 1
+    }
+}
+
+fn main([]string args) error {
+    return null
+}

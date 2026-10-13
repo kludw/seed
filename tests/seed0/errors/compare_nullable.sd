@@ -1,0 +1,8 @@
+// expect-error: can only be compared with null
+package main
+
+fn main([]string args) error {
+    int? n = 1
+    bool b = n == 1
+    return null
+}

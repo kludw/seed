@@ -1,0 +1,23 @@
+// Bytes compare, support bitwise operators and convert to and from int.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    byte a = 'a'
+    byte z = 'z'
+    fmt.println((a < z).string())
+    fmt.println((a == 'a').string())
+    fmt.println((a != z).string())
+    fmt.println((z >= a).string())
+    fmt.println(int(a).string())
+    fmt.println((int(z) - int(a)).string())
+    byte b = byte(66)
+    fmt.println(b.string())
+    fmt.println((a ^ ' ').string())
+    fmt.println((a & byte(0xdf)).string())
+    fmt.println((byte(1) | byte(2)).string())
+    byte upper = byte(int(a) - 32)
+    fmt.println(string([]byte{upper, b, 'c'}))
+    return null
+}

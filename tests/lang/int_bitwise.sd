@@ -1,0 +1,24 @@
+// Bitwise operators on int.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    int x = 12
+    int y = 10
+    int one = 1
+    fmt.println("x & y = " + (x & y).string())
+    fmt.println("x | y = " + (x | y).string())
+    fmt.println("x ^ y = " + (x ^ y).string())
+    fmt.println("1 << 10 = " + (one << 10).string())
+    fmt.println("x << 2 = " + (x << 2).string())
+    fmt.println("x >> 2 = " + (x >> 2).string())
+    fmt.println("1024 >> 3 = " + ((one << 10) >> 3).string())
+    int mask = 0xff
+    int low = 0x0f
+    fmt.println("0xff & 0x0f = " + (mask & low).string())
+    fmt.println("0xf0 | 0x0f = " + (0xf0 | low).string())
+    fmt.println("0xff ^ 0xff = " + (mask ^ mask).string())
+    fmt.println("x & 0 = " + (x & 0).string())
+    return null
+}
