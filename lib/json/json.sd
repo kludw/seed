@@ -1,0 +1,775 @@
+package json
+
+// JSON through a dynamic `Value` (docs/stdlib.md, "json"): a strict
+// RFC 8259 recursive-descent parser, a compact and an indented printer, and
+// the accessors. All pure Seed.
+//
+// Parse errors read `json.parse: line L, column C: <reason>`, with the line
+// and column (from 1; the column counts bytes) of the offending byte.
+// Reasons include: unexpected end of input, expected ':', expected ',' or
+// '}', expected ',' or ']', expected a string key, trailing comma, invalid
+// literal, unexpected character 'x', leading zeros are not allowed, number
+// out of range, invalid escape, invalid \u escape, unescaped control
+// character, invalid UTF-8 in string, unterminated string, nesting deeper
+// than 512 levels, byte-order mark is not allowed.
+//
+// Decisions not fixed by docs/stdlib.md:
+// - A number whose magnitude is too large for a float (1e400) is an error,
+//   "number out of range"; one too small (1e-400) becomes 0.
+// - When printing, each byte of invalid UTF-8 becomes one U+FFFD, and
+//   control characters without a short escape are written \u00xx with
+//   lowercase hex. DEL (0x7f) is written as it is.
+
+import "errors"
+import "fmt"
+import "os"
+
+// A JSON document. Object keys keep their order (maps keep insertion
+// order); a repeated key keeps its first position and its last value.
+pub type Value enum {
+    Null
+    Bool(bool b)
+    Number(float n)
+    String(string s)
+    Array([]Value items)
+    Object(map[string]Value fields)
+}
+
+// Nesting deeper than this many arrays and objects is an error.
+const int jsonMaxDepth = 512
+
+// Parses one JSON document (RFC 8259). Whitespace around it is allowed;
+// anything else after it is an error.
+pub fn parse(string text) (Value, error) {
+    JsonParser p = JsonParser{text: text, pos: 0, depth: 0}
+    if (text.startsWith("\xef\xbb\xbf")) {
+        return null, p.fail(0, "byte-order mark is not allowed")
+    }
+    p.skipSpace()
+    Value v = try p.value()
+    p.skipSpace()
+    if (p.pos < text.len()) {
+        return null, p.fail(p.pos, "unexpected " + jsonDescribe(text[p.pos]) + " after the value")
+    }
+    return v, null
+}
+
+type JsonParser struct {
+    string text
+    int pos
+    int depth
+}
+
+// An error at byte offset `at`, with its line and column.
+fn (JsonParser p) fail(int at, string reason) error {
+    int line = 1
+    int lineStart = 0
+    for (int i = 0; i < at && i < p.text.len(); i++) {
+        if (p.text[i] == '\n') {
+            line++
+            lineStart = i + 1
+        }
+    }
+    int col = at - lineStart + 1
+    return errors.new("json.parse: line " + line.string() + ", column " + col.string() + ": " + reason)
+}
+
+// The error for a missing `want` at the current position.
+fn (JsonParser p) expected(string want) error {
+    if (p.pos >= p.text.len()) {
+        return p.fail(p.pos, "unexpected end of input")
+    }
+    return p.fail(p.pos, "expected " + want)
+}
+
+fn (JsonParser p) mut skipSpace() {
+    for (; p.pos < p.text.len(); p.pos++) {
+        byte c = p.text[p.pos]
+        if (c != ' ' && c != '\t' && c != '\n' && c != '\r') {
+            return
+        }
+    }
+}
+
+fn (JsonParser p) mut value() (Value, error) {
+    if (p.pos >= p.text.len()) {
+        return null, p.fail(p.pos, "unexpected end of input")
+    }
+    byte c = p.text[p.pos]
+    switch (c) {
+    case '{':
+        return p.object()
+    case '[':
+        return p.array()
+    case '"':
+        string s = try p.str()
+        return Value.String(s), null
+    case 't':
+        return p.literal("true", Value.Bool(true))
+    case 'f':
+        return p.literal("false", Value.Bool(false))
+    case 'n':
+        return p.literal("null", Value.Null)
+    case '-', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
+        return p.number()
+    case '/':
+        return null, p.fail(p.pos, "unexpected character '/' (comments are not allowed)")
+    case '\'':
+        return null, p.fail(p.pos, "unexpected character ''' (strings use double quotes)")
+    default:
+        return null, p.fail(p.pos, "unexpected " + jsonDescribe(c))
+    }
+}
+
+fn (JsonParser p) mut literal(string word, Value v) (Value, error) {
+    int end = p.pos + word.len()
+    if (end > p.text.len() || p.text.slice(p.pos, end) != word) {
+        return null, p.fail(p.pos, "invalid literal (expected " + word + ")")
+    }
+    p.pos = end
+    return v, null
+}
+
+fn (JsonParser p) mut enter() error {
+    p.depth++
+    if (p.depth > jsonMaxDepth) {
+        return p.fail(p.pos, "nesting deeper than " + jsonMaxDepth.string() + " levels")
+    }
+    return null
+}
+
+fn (JsonParser p) mut array() (Value, error) {
+    try p.enter()
+    p.pos++
+    []Value items = []Value{}
+    p.skipSpace()
+    if (p.pos < p.text.len() && p.text[p.pos] == ']') {
+        p.pos++
+        p.depth--
+        return Value.Array(items), null
+    }
+    for (;;) {
+        Value v = try p.value()
+        items.push(v)
+        p.skipSpace()
+        if (p.pos < p.text.len() && p.text[p.pos] == ']') {
+            p.pos++
+            p.depth--
+            return Value.Array(items), null
+        }
+        if (p.pos >= p.text.len() || p.text[p.pos] != ',') {
+            return null, p.expected("',' or ']'")
+        }
+        p.pos++
+        p.skipSpace()
+        if (p.pos < p.text.len() && p.text[p.pos] == ']') {
+            return null, p.fail(p.pos, "trailing comma")
+        }
+    }
+}
+
+fn (JsonParser p) mut object() (Value, error) {
+    try p.enter()
+    p.pos++
+    map[string]Value fields = map[string]Value{}
+    p.skipSpace()
+    if (p.pos < p.text.len() && p.text[p.pos] == '}') {
+        p.pos++
+        p.depth--
+        return Value.Object(fields), null
+    }
+    for (;;) {
+        if (p.pos >= p.text.len() || p.text[p.pos] != '"') {
+            return null, p.expected("a string key")
+        }
+        string key = try p.str()
+        p.skipSpace()
+        if (p.pos >= p.text.len() || p.text[p.pos] != ':') {
+            return null, p.expected("':'")
+        }
+        p.pos++
+        p.skipSpace()
+        Value v = try p.value()
+        fields[key] = v
+        p.skipSpace()
+        if (p.pos < p.text.len() && p.text[p.pos] == '}') {
+            p.pos++
+            p.depth--
+            return Value.Object(fields), null
+        }
+        if (p.pos >= p.text.len() || p.text[p.pos] != ',') {
+            return null, p.expected("',' or '}'")
+        }
+        p.pos++
+        p.skipSpace()
+        if (p.pos < p.text.len() && p.text[p.pos] == '}') {
+            return null, p.fail(p.pos, "trailing comma")
+        }
+    }
+}
+
+// A number: -? (0 | [1-9][0-9]*) (. [0-9]+)? ([eE] [+-]? [0-9]+)?
+fn (JsonParser p) mut number() (Value, error) {
+    int start = p.pos
+    int n = p.text.len()
+    if (p.text[p.pos] == '-') {
+        p.pos++
+    }
+    if (p.pos >= n || !jsonIsDigit(p.text[p.pos])) {
+        return null, p.expected("a digit")
+    }
+    if (p.text[p.pos] == '0') {
+        p.pos++
+        if (p.pos < n && jsonIsDigit(p.text[p.pos])) {
+            return null, p.fail(p.pos - 1, "leading zeros are not allowed")
+        }
+    } else {
+        p.skipDigits()
+    }
+    if (p.pos < n && p.text[p.pos] == '.') {
+        p.pos++
+        if (p.pos >= n || !jsonIsDigit(p.text[p.pos])) {
+            return null, p.expected("a digit after '.'")
+        }
+        p.skipDigits()
+    }
+    if (p.pos < n && (p.text[p.pos] == 'e' || p.text[p.pos] == 'E')) {
+        p.pos++
+        if (p.pos < n && (p.text[p.pos] == '+' || p.text[p.pos] == '-')) {
+            p.pos++
+        }
+        if (p.pos >= n || !jsonIsDigit(p.text[p.pos])) {
+            return null, p.expected("a digit in the exponent")
+        }
+        p.skipDigits()
+    }
+    float f, error err = p.text.slice(start, p.pos).toFloat()
+    if (err != null) {
+        return null, p.fail(start, "invalid number")
+    }
+    if (f - f != 0.0) {
+        return null, p.fail(start, "number out of range")
+    }
+    return Value.Number(f), null
+}
+
+fn (JsonParser p) mut skipDigits() {
+    for (; p.pos < p.text.len() && jsonIsDigit(p.text[p.pos]); ) {
+        p.pos++
+    }
+}
+
+// A string starting at the opening quote. Returns the decoded bytes.
+fn (JsonParser p) mut str() (string, error) {
+    int open = p.pos
+    int n = p.text.len()
+    p.pos++
+    // Fast path: printable ASCII without escapes.
+    int i = p.pos
+    for (; i < n; i++) {
+        byte c = p.text[i]
+        if (c == '"') {
+            string s = p.text.slice(p.pos, i)
+            p.pos = i + 1
+            return s, null
+        }
+        if (c == '\\' || c < ' ' || c >= '\x80') {
+            break
+        }
+    }
+    []string parts = []string{}
+    int runStart = p.pos
+    for (; i < n; ) {
+        byte c = p.text[i]
+        if (c == '"') {
+            parts.push(p.text.slice(runStart, i))
+            p.pos = i + 1
+            return parts.join(""), null
+        }
+        if (c < ' ') {
+            return null, p.fail(i, "unescaped control character " + jsonDescribe(c) + " in string")
+        }
+        if (c >= '\x80') {
+            int k = jsonUtf8Len(p.text, i)
+            if (k == 0) {
+                return null, p.fail(i, "invalid UTF-8 in string")
+            }
+            i = i + k
+            continue
+        }
+        if (c != '\\') {
+            i++
+            continue
+        }
+        parts.push(p.text.slice(runStart, i))
+        if (i + 1 >= n) {
+            break
+        }
+        byte esc = p.text[i + 1]
+        switch (esc) {
+        case '"', '\\', '/':
+            parts.push(string([]byte{esc}))
+        case 'b':
+            parts.push("\x08")
+        case 'f':
+            parts.push("\x0c")
+        case 'n':
+            parts.push("\n")
+        case 'r':
+            parts.push("\r")
+        case 't':
+            parts.push("\t")
+        case 'u':
+            int cp = jsonHex4(p.text, i + 2)
+            if (cp < 0) {
+                return null, p.fail(i, "invalid \\u escape (expected 4 hex digits)")
+            }
+            i = i + 6
+            if (cp >= 0xd800 && cp <= 0xdbff) {
+                int lo = -1
+                if (i + 1 < n && p.text[i] == '\\' && p.text[i + 1] == 'u') {
+                    lo = jsonHex4(p.text, i + 2)
+                }
+                if (lo >= 0xdc00 && lo <= 0xdfff) {
+                    cp = 0x10000 + ((cp - 0xd800) << 10) + (lo - 0xdc00)
+                    i = i + 6
+                } else {
+                    cp = 0xfffd
+                }
+            } else if (cp >= 0xdc00 && cp <= 0xdfff) {
+                cp = 0xfffd
+            }
+            parts.push(jsonUtf8Encode(cp))
+            runStart = i
+            continue
+        default:
+            if (esc < ' ' || esc >= '\x80') {
+                return null, p.fail(i, "invalid escape")
+            }
+            return null, p.fail(i, "invalid escape '\\" + string([]byte{esc}) + "'")
+        }
+        i = i + 2
+        runStart = i
+    }
+    return null, p.fail(open, "unterminated string")
+}
+
+// The value of 4 hex digits at text[i], or -1.
+fn jsonHex4(string text, int i) int {
+    if (i + 4 > text.len()) {
+        return -1
+    }
+    int v = 0
+    for (int j = i; j < i + 4; j++) {
+        byte c = text[j]
+        int d = -1
+        if (c >= '0' && c <= '9') {
+            d = int(c) - int('0')
+        } else if (c >= 'a' && c <= 'f') {
+            d = int(c) - int('a') + 10
+        } else if (c >= 'A' && c <= 'F') {
+            d = int(c) - int('A') + 10
+        }
+        if (d < 0) {
+            return -1
+        }
+        v = v * 16 + d
+    }
+    return v
+}
+
+fn jsonIsDigit(byte c) bool {
+    return c >= '0' && c <= '9'
+}
+
+// The length of the valid UTF-8 sequence starting at s[i] (1 to 4), or 0 if
+// it is not valid (overlong forms, surrogates and code points above
+// U+10FFFF are invalid).
+fn jsonUtf8Len(string s, int i) int {
+    int n = s.len()
+    int c = int(s[i])
+    if (c < 0x80) {
+        return 1
+    }
+    int need = 0
+    int lo = 0x80
+    int hi = 0xbf
+    if (c >= 0xc2 && c <= 0xdf) {
+        need = 1
+    } else if (c == 0xe0) {
+        need = 2
+        lo = 0xa0
+    } else if (c >= 0xe1 && c <= 0xec) {
+        need = 2
+    } else if (c == 0xed) {
+        need = 2
+        hi = 0x9f
+    } else if (c >= 0xee && c <= 0xef) {
+        need = 2
+    } else if (c == 0xf0) {
+        need = 3
+        lo = 0x90
+    } else if (c >= 0xf1 && c <= 0xf3) {
+        need = 3
+    } else if (c == 0xf4) {
+        need = 3
+        hi = 0x8f
+    } else {
+        return 0
+    }
+    if (i + need >= n) {
+        return 0
+    }
+    int second = int(s[i + 1])
+    if (second < lo || second > hi) {
+        return 0
+    }
+    for (int j = i + 2; j <= i + need; j++) {
+        int x = int(s[j])
+        if (x < 0x80 || x > 0xbf) {
+            return 0
+        }
+    }
+    return need + 1
+}
+
+// The UTF-8 bytes of code point `cp` (at most U+10FFFF, not a surrogate).
+fn jsonUtf8Encode(int cp) string {
+    if (cp < 0x80) {
+        return string([]byte{byte(cp)})
+    }
+    if (cp < 0x800) {
+        return string([]byte{byte(0xc0 | (cp >> 6)), byte(0x80 | (cp & 0x3f))})
+    }
+    if (cp < 0x10000) {
+        return string([]byte{byte(0xe0 | (cp >> 12)), byte(0x80 | ((cp >> 6) & 0x3f)), byte(0x80 | (cp & 0x3f))})
+    }
+    return string([]byte{byte(0xf0 | (cp >> 18)), byte(0x80 | ((cp >> 12) & 0x3f)), byte(0x80 | ((cp >> 6) & 0x3f)), byte(0x80 | (cp & 0x3f))})
+}
+
+// 'c' for printable ASCII, "byte 0xNN" otherwise.
+fn jsonDescribe(byte c) string {
+    if (c >= ' ' && c <= '~') {
+        return "character '" + string([]byte{c}) + "'"
+    }
+    string digits = "0123456789abcdef"
+    return "byte 0x" + string([]byte{digits[int(c) >> 4], digits[int(c) & 15]})
+}
+
+// ---------------------------------------------------------------- printing
+
+// Compact JSON with no spaces: {"a":[1,2.5,"x"]}. Crashes if the value
+// contains nan or an infinity.
+pub fn (Value v) string() string {
+    JsonWriter w = JsonWriter{out: []string{}, pretty: false, method: "json.Value.string"}
+    w.write(v, 0)
+    return w.out.join("")
+}
+
+// JSON indented by two spaces per level, "key": value with one space, no
+// trailing newline. Empty arrays and objects print as [] and {}. Crashes if
+// the value contains nan or an infinity.
+pub fn (Value v) pretty() string {
+    JsonWriter w = JsonWriter{out: []string{}, pretty: true, method: "json.Value.pretty"}
+    w.write(v, 0)
+    return w.out.join("")
+}
+
+type JsonWriter struct {
+    []string out
+    bool pretty
+    string method
+}
+
+fn (JsonWriter w) mut newline(int indent) {
+    if (w.pretty) {
+        w.out.push("\n")
+        for (int i = 0; i < indent; i++) {
+            w.out.push("  ")
+        }
+    }
+}
+
+fn (JsonWriter w) mut write(Value v, int indent) {
+    switch (v) {
+    case Value.Null:
+        w.out.push("null")
+    case Value.Bool(bool b):
+        w.out.push(b.string())
+    case Value.Number(float n):
+        w.out.push(jsonNumber(n, w.method))
+    case Value.String(string s):
+        w.out.push(jsonQuote(s))
+    case Value.Array([]Value items):
+        if (items.len() == 0) {
+            w.out.push("[]")
+            return
+        }
+        w.out.push("[")
+        for (int i = 0; i < items.len(); i++) {
+            if (i > 0) {
+                w.out.push(",")
+            }
+            w.newline(indent + 1)
+            w.write(items[i], indent + 1)
+        }
+        w.newline(indent)
+        w.out.push("]")
+    case Value.Object(map[string]Value fields):
+        if (fields.len() == 0) {
+            w.out.push("{}")
+            return
+        }
+        w.out.push("{")
+        []string keys = fields.keys()
+        for (int i = 0; i < keys.len(); i++) {
+            if (i > 0) {
+                w.out.push(",")
+            }
+            w.newline(indent + 1)
+            w.out.push(jsonQuote(keys[i]))
+            if (w.pretty) {
+                w.out.push(": ")
+            } else {
+                w.out.push(":")
+            }
+            Value? field = fields[keys[i]]
+            if (field != null) {
+                w.write(field, indent + 1)
+            }
+        }
+        w.newline(indent)
+        w.out.push("}")
+    }
+}
+
+// A whole number with absolute value below 1e21 prints without a fraction
+// (-0 for negative zero); other numbers print as f.string() does.
+fn jsonNumber(float n, string method) string {
+    if (n != n) {
+        jsonCrash(method + ": nan cannot be written in JSON")
+    }
+    if (n - n != 0.0) {
+        jsonCrash(method + ": " + n.string() + " cannot be written in JSON")
+    }
+    if (n > -1.0e21 && n < 1.0e21) {
+        int i = int(n)
+        if (float(i) == n) {
+            if (i == 0 && 1.0 / n < 0.0) {
+                return "-0"
+            }
+            return i.string()
+        }
+    }
+    return n.string()
+}
+
+// `s` as a JSON string literal: '"', '\' and bytes below 0x20 are escaped,
+// other valid UTF-8 is kept, and each invalid byte becomes U+FFFD.
+fn jsonQuote(string s) string {
+    bool plain = true
+    for (int i = 0; i < s.len(); i++) {
+        byte c = s[i]
+        if (c < ' ' || c == '"' || c == '\\' || c >= '\x80') {
+            plain = false
+            break
+        }
+    }
+    if (plain) {
+        return "\"" + s + "\""
+    }
+    string digits = "0123456789abcdef"
+    []byte out = []byte{'"'}
+    for (int i = 0; i < s.len(); ) {
+        byte c = s[i]
+        if (c >= '\x80') {
+            int k = jsonUtf8Len(s, i)
+            if (k == 0) {
+                out.push('\xef')
+                out.push('\xbf')
+                out.push('\xbd')
+                i++
+                continue
+            }
+            for (int j = i; j < i + k; j++) {
+                out.push(s[j])
+            }
+            i = i + k
+            continue
+        }
+        if (c == '"' || c == '\\') {
+            out.push('\\')
+            out.push(c)
+        } else if (c == '\n') {
+            out.push('\\')
+            out.push('n')
+        } else if (c == '\t') {
+            out.push('\\')
+            out.push('t')
+        } else if (c == '\r') {
+            out.push('\\')
+            out.push('r')
+        } else if (c == '\x08') {
+            out.push('\\')
+            out.push('b')
+        } else if (c == '\x0c') {
+            out.push('\\')
+            out.push('f')
+        } else if (c < ' ') {
+            out.push('\\')
+            out.push('u')
+            out.push('0')
+            out.push('0')
+            out.push(digits[int(c) >> 4])
+            out.push(digits[int(c) & 15])
+        } else {
+            out.push(c)
+        }
+        i++
+    }
+    out.push('"')
+    return string(out)
+}
+
+// Ends the program the way a crash does: "crash: <message>" on stderr and
+// exit code 2. Seed has no way yet for library code to crash with its own
+// message (see lib/README.md); this becomes a real crash when it does.
+fn jsonCrash(string message) {
+    fmt.eprintln("crash: " + message)
+    os.exit(2)
+}
+
+// --------------------------------------------------------------- accessors
+
+// The field `key` of an object; Value.Null if `v` is not an object or has
+// no such key.
+pub fn (Value v) get(string key) Value {
+    map[string]Value? fields = v.asObject()
+    if (fields == null) {
+        return Value.Null
+    }
+    Value? field = fields[key]
+    if (field == null) {
+        return Value.Null
+    }
+    return field
+}
+
+// Element `i` of an array; Value.Null if `v` is not an array or `i` is out
+// of range.
+pub fn (Value v) at(int i) Value {
+    []Value? items = v.asArray()
+    if (items == null || i < 0 || i >= items.len()) {
+        return Value.Null
+    }
+    return items[i]
+}
+
+// The string, or null if `v` is not a String.
+pub fn (Value v) asString() string? {
+    switch (v) {
+    case Value.Null:
+        return null
+    case Value.Bool(bool _):
+        return null
+    case Value.Number(float _):
+        return null
+    case Value.String(string s):
+        return s
+    case Value.Array([]Value _):
+        return null
+    case Value.Object(map[string]Value _):
+        return null
+    }
+}
+
+// The number, or null if `v` is not a Number.
+pub fn (Value v) asFloat() float? {
+    switch (v) {
+    case Value.Null:
+        return null
+    case Value.Bool(bool _):
+        return null
+    case Value.Number(float n):
+        return n
+    case Value.String(string _):
+        return null
+    case Value.Array([]Value _):
+        return null
+    case Value.Object(map[string]Value _):
+        return null
+    }
+}
+
+// The number as an int if it is a whole number with absolute value at most
+// 2^53; otherwise null.
+pub fn (Value v) asInt() int? {
+    float? n = v.asFloat()
+    if (n == null || n < -9007199254740992.0 || n > 9007199254740992.0) {
+        return null
+    }
+    int i = int(n)
+    if (float(i) != n) {
+        return null
+    }
+    return i
+}
+
+// The bool, or null if `v` is not a Bool.
+pub fn (Value v) asBool() bool? {
+    switch (v) {
+    case Value.Null:
+        return null
+    case Value.Bool(bool b):
+        return b
+    case Value.Number(float _):
+        return null
+    case Value.String(string _):
+        return null
+    case Value.Array([]Value _):
+        return null
+    case Value.Object(map[string]Value _):
+        return null
+    }
+}
+
+// The elements, or null if `v` is not an Array.
+pub fn (Value v) asArray() []Value? {
+    switch (v) {
+    case Value.Null:
+        return null
+    case Value.Bool(bool _):
+        return null
+    case Value.Number(float _):
+        return null
+    case Value.String(string _):
+        return null
+    case Value.Array([]Value items):
+        return items
+    case Value.Object(map[string]Value _):
+        return null
+    }
+}
+
+// The fields, or null if `v` is not an Object.
+pub fn (Value v) asObject() map[string]Value? {
+    switch (v) {
+    case Value.Null:
+        return null
+    case Value.Bool(bool _):
+        return null
+    case Value.Number(float _):
+        return null
+    case Value.String(string _):
+        return null
+    case Value.Array([]Value _):
+        return null
+    case Value.Object(map[string]Value fields):
+        return fields
+    }
+}
+
+// Whether `v` is Value.Null.
+pub fn (Value v) isNull() bool {
+    return v == Value.Null
+}

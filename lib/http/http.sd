@@ -1,0 +1,285 @@
+package http
+
+// An HTTP/1.1 server and client (docs/stdlib.md, "http"). This file has the
+// public types and the pure-Seed parts of the API: Request.path and
+// Request.query, statusText and the status constants, textResponse and
+// jsonResponse. wire.sd has the message reader and writer that serve, get
+// and send are built on.
+//
+// serve, get and send need the net package (native sockets) and are added
+// with it; see lib/README.md for how they use wire.sd.
+//
+// Until the compiler supports `pub` on struct fields, the fields of Request
+// and Response are written without it; every one of them is meant to be
+// `pub`.
+
+import "encoding"
+import "json"
+
+// A request. On the server, `url` is the request target ("/todos?done=1");
+// on the client it is the full URL ("http://example.com/todos?done=1").
+// Header names are lowercase; a header received more than once is joined
+// into one value with ", ".
+pub type Request struct {
+    string method
+    string url
+    map[string]string headers
+    string body
+}
+
+// A response. Header names are lowercase.
+pub type Response struct {
+    int status
+    map[string]string headers
+    string body
+}
+
+// Serves requests. A struct that implements Handler can hold configuration
+// and channels; each request sees a copy of it.
+pub type Handler interface {
+    handle(Request req) (Response, error)
+}
+
+pub const int statusOk = 200
+pub const int statusCreated = 201
+pub const int statusNoContent = 204
+pub const int statusMovedPermanently = 301
+pub const int statusFound = 302
+pub const int statusNotModified = 304
+pub const int statusBadRequest = 400
+pub const int statusUnauthorized = 401
+pub const int statusForbidden = 403
+pub const int statusNotFound = 404
+pub const int statusMethodNotAllowed = 405
+pub const int statusConflict = 409
+pub const int statusInternalServerError = 500
+pub const int statusServiceUnavailable = 503
+
+// The path part of `url`, percent-decoded: "/todos". If decoding fails, the
+// raw path. For a client request (a full URL), the path after the host, "/"
+// if there is none. Unlike in a query, '+' in a path stays '+'.
+pub fn (Request r) path() string {
+    string rest = httpAfterAuthority(r.url)
+    int end = rest.len()
+    for (int i = 0; i < rest.len(); i++) {
+        if (rest[i] == '?' || rest[i] == '#') {
+            end = i
+            break
+        }
+    }
+    string raw = rest.slice(0, end)
+    if (raw == "") {
+        return "/"
+    }
+    string decoded, error err = encoding.urlDecode(raw.replace("+", "%2B"))
+    if (err != null) {
+        return raw
+    }
+    return decoded
+}
+
+// The query parameters, decoded with encoding.urlDecode ('+' is a space).
+// Keys appear in the order of their first occurrence; a repeated key keeps
+// its last value. A key without '=' has the value "". Parameters that fail
+// to decode, and empty ones ("a=1&&b=2"), are skipped.
+pub fn (Request r) query() map[string]string {
+    map[string]string out = map[string]string{}
+    int? q = r.url.index("?")
+    if (q == null) {
+        return out
+    }
+    string rest = r.url.slice(q + 1, r.url.len())
+    int? hash = rest.index("#")
+    if (hash != null) {
+        rest = rest.slice(0, hash)
+    }
+    []string pairs = rest.split("&")
+    for (int i = 0; i < pairs.len(); i++) {
+        string pair = pairs[i]
+        if (pair == "") {
+            continue
+        }
+        string rawKey = pair
+        string rawValue = ""
+        int? eq = pair.index("=")
+        if (eq != null) {
+            rawKey = pair.slice(0, eq)
+            rawValue = pair.slice(eq + 1, pair.len())
+        }
+        string key, error err = encoding.urlDecode(rawKey)
+        if (err != null) {
+            continue
+        }
+        string value, error err2 = encoding.urlDecode(rawValue)
+        if (err2 != null) {
+            continue
+        }
+        out[key] = value
+    }
+    return out
+}
+
+// `url` without "scheme://authority" when it has them; unchanged otherwise.
+fn httpAfterAuthority(string url) string {
+    int? sep = url.index("://")
+    if (sep == null) {
+        return url
+    }
+    // Only a scheme (letters, digits, + - .) may come before "://".
+    for (int i = 0; i < sep; i++) {
+        byte c = url[i]
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '+' || c == '-' || c == '.')) {
+            return url
+        }
+    }
+    for (int i = sep + 3; i < url.len(); i++) {
+        if (url[i] == '/' || url[i] == '?' || url[i] == '#') {
+            return url.slice(i, url.len())
+        }
+    }
+    return ""
+}
+
+// The reason phrase of a status code ("Not Found"), or "" for an unknown
+// code. Covers the codes registered in RFC 9110 and a few common others.
+pub fn statusText(int code) string {
+    switch (code) {
+    case 100:
+        return "Continue"
+    case 101:
+        return "Switching Protocols"
+    case 102:
+        return "Processing"
+    case 103:
+        return "Early Hints"
+    case 200:
+        return "OK"
+    case 201:
+        return "Created"
+    case 202:
+        return "Accepted"
+    case 203:
+        return "Non-Authoritative Information"
+    case 204:
+        return "No Content"
+    case 205:
+        return "Reset Content"
+    case 206:
+        return "Partial Content"
+    case 207:
+        return "Multi-Status"
+    case 208:
+        return "Already Reported"
+    case 226:
+        return "IM Used"
+    case 300:
+        return "Multiple Choices"
+    case 301:
+        return "Moved Permanently"
+    case 302:
+        return "Found"
+    case 303:
+        return "See Other"
+    case 304:
+        return "Not Modified"
+    case 305:
+        return "Use Proxy"
+    case 307:
+        return "Temporary Redirect"
+    case 308:
+        return "Permanent Redirect"
+    case 400:
+        return "Bad Request"
+    case 401:
+        return "Unauthorized"
+    case 402:
+        return "Payment Required"
+    case 403:
+        return "Forbidden"
+    case 404:
+        return "Not Found"
+    case 405:
+        return "Method Not Allowed"
+    case 406:
+        return "Not Acceptable"
+    case 407:
+        return "Proxy Authentication Required"
+    case 408:
+        return "Request Timeout"
+    case 409:
+        return "Conflict"
+    case 410:
+        return "Gone"
+    case 411:
+        return "Length Required"
+    case 412:
+        return "Precondition Failed"
+    case 413:
+        return "Content Too Large"
+    case 414:
+        return "URI Too Long"
+    case 415:
+        return "Unsupported Media Type"
+    case 416:
+        return "Range Not Satisfiable"
+    case 417:
+        return "Expectation Failed"
+    case 418:
+        return "I'm a teapot"
+    case 421:
+        return "Misdirected Request"
+    case 422:
+        return "Unprocessable Content"
+    case 423:
+        return "Locked"
+    case 424:
+        return "Failed Dependency"
+    case 425:
+        return "Too Early"
+    case 426:
+        return "Upgrade Required"
+    case 428:
+        return "Precondition Required"
+    case 429:
+        return "Too Many Requests"
+    case 431:
+        return "Request Header Fields Too Large"
+    case 451:
+        return "Unavailable For Legal Reasons"
+    case 500:
+        return "Internal Server Error"
+    case 501:
+        return "Not Implemented"
+    case 502:
+        return "Bad Gateway"
+    case 503:
+        return "Service Unavailable"
+    case 504:
+        return "Gateway Timeout"
+    case 505:
+        return "HTTP Version Not Supported"
+    case 506:
+        return "Variant Also Negotiates"
+    case 507:
+        return "Insufficient Storage"
+    case 508:
+        return "Loop Detected"
+    case 510:
+        return "Not Extended"
+    case 511:
+        return "Network Authentication Required"
+    default:
+        return ""
+    }
+}
+
+// A response with content-type: text/plain; charset=utf-8.
+pub fn textResponse(int status, string body) Response {
+    return Response{status: status, headers: map[string]string{"content-type": "text/plain; charset=utf-8"}, body: body}
+}
+
+// A response with content-type: application/json and body.string() as the
+// body.
+pub fn jsonResponse(int status, json.Value body) Response {
+    return Response{status: status, headers: map[string]string{"content-type": "application/json"}, body: body.string()}
+}

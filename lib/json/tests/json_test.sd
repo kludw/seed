@@ -1,0 +1,426 @@
+package json
+
+import "fmt"
+
+// Parses `text`, which must succeed, and returns the compact form, or
+// "ERROR: <message>".
+fn jsonTestRoundTrip(string text) string {
+    Value v, error err = parse(text)
+    if (err != null) {
+        return "ERROR: " + err.message()
+    }
+    return v.string()
+}
+
+// The error message of parsing `text`, or "no error".
+fn jsonTestError(string text) string {
+    _, error err = parse(text)
+    if (err == null) {
+        return "no error"
+    }
+    return err.message()
+}
+
+fn testParseLiterals() TestLog {
+    TestLog t = newTestLog()
+    Value v, error err = parse("true")
+    t.ok(err == null && v == Value.Bool(true), "true")
+    v, err = parse(" false ")
+    t.ok(err == null && v == Value.Bool(false), "false")
+    v, err = parse("\t\r\n null \n")
+    t.ok(err == null && v == Value.Null, "null")
+    return t
+}
+
+fn testParseNumbers() TestLog {
+    TestLog t = newTestLog()
+    Value v, error err = parse("0")
+    t.ok(err == null && v == Value.Number(0.0), "0")
+    v, err = parse("-12")
+    t.ok(err == null && v == Value.Number(-12.0), "-12")
+    v, err = parse("2.5")
+    t.ok(err == null && v == Value.Number(2.5), "2.5")
+    v, err = parse("1e3")
+    t.ok(err == null && v == Value.Number(1000.0), "1e3")
+    v, err = parse("1E+3")
+    t.ok(err == null && v == Value.Number(1000.0), "1E+3")
+    v, err = parse("-1.5e-3")
+    t.ok(err == null && v == Value.Number(-0.0015), "-1.5e-3")
+    v, err = parse("0.1")
+    t.ok(err == null && v == Value.Number(0.1), "0.1")
+    v, err = parse("1e-400")
+    t.ok(err == null && v == Value.Number(0.0), "underflow is 0")
+    t.eqStr(jsonTestRoundTrip("-0"), "-0")
+    t.eqStr(jsonTestRoundTrip("-0.0"), "-0")
+    t.eqStr(jsonTestRoundTrip("9007199254740993"), "9007199254740992")
+    t.eqStr(jsonTestRoundTrip("123456789012345678901234567890"), "1.2345678901234568e+29")
+    t.eqStr(jsonTestRoundTrip("1.7976931348623157e308"), "1.7976931348623157e+308")
+    return t
+}
+
+fn testParseNumberErrors() TestLog {
+    TestLog t = newTestLog()
+    t.eqStr(jsonTestError("01"), "json.parse: line 1, column 1: leading zeros are not allowed")
+    t.eqStr(jsonTestError("-01"), "json.parse: line 1, column 2: leading zeros are not allowed")
+    t.eqStr(jsonTestError("1."), "json.parse: line 1, column 3: unexpected end of input")
+    t.eqStr(jsonTestError("1.e5"), "json.parse: line 1, column 3: expected a digit after '.'")
+    t.eqStr(jsonTestError(".5"), "json.parse: line 1, column 1: unexpected character '.'")
+    t.eqStr(jsonTestError("+1"), "json.parse: line 1, column 1: unexpected character '+'")
+    t.eqStr(jsonTestError("-"), "json.parse: line 1, column 2: unexpected end of input")
+    t.eqStr(jsonTestError("-a"), "json.parse: line 1, column 2: expected a digit")
+    t.eqStr(jsonTestError("1e"), "json.parse: line 1, column 3: unexpected end of input")
+    t.eqStr(jsonTestError("1e+x"), "json.parse: line 1, column 4: expected a digit in the exponent")
+    t.eqStr(jsonTestError("1e400"), "json.parse: line 1, column 1: number out of range")
+    t.eqStr(jsonTestError("[-1e999]"), "json.parse: line 1, column 2: number out of range")
+    t.eqStr(jsonTestError("NaN"), "json.parse: line 1, column 1: unexpected character 'N'")
+    t.eqStr(jsonTestError("Infinity"), "json.parse: line 1, column 1: unexpected character 'I'")
+    t.eqStr(jsonTestError("0x10"), "json.parse: line 1, column 2: unexpected character 'x' after the value")
+    return t
+}
+
+fn testParseStrings() TestLog {
+    TestLog t = newTestLog()
+    Value v, error err = parse("\"hello\"")
+    t.ok(err == null && v == Value.String("hello"), "plain")
+    v, err = parse("\"\"")
+    t.ok(err == null && v == Value.String(""), "empty")
+    v, err = parse("\"a\\\"b\\\\c\\/d\\be\\ff\\ng\\rh\\ti\"")
+    t.ok(err == null && v == Value.String("a\"b\\c/d\x08e\x0cf\ng\rh\ti"), "short escapes")
+    v, err = parse("\"\\u0041\\u00e9\\u20AC\\u0000\"")
+    t.ok(err == null && v == Value.String("A\xc3\xa9\xe2\x82\xac\x00"), "u escapes")
+    v, err = parse("\"caf\xc3\xa9 \xe2\x82\xac \xf0\x9f\x98\x80\"")
+    t.ok(err == null && v == Value.String("caf\xc3\xa9 \xe2\x82\xac \xf0\x9f\x98\x80"), "raw UTF-8")
+    v, err = parse("\"x\\ny\xc3\xa9z\"")
+    t.ok(err == null && v == Value.String("x\ny\xc3\xa9z"), "escape then UTF-8")
+    return t
+}
+
+fn testParseSurrogates() TestLog {
+    TestLog t = newTestLog()
+    Value v, error err = parse("\"\\ud83d\\ude00\"")
+    t.ok(err == null && v == Value.String("\xf0\x9f\x98\x80"), "pair U+1F600")
+    v, err = parse("\"\\uD834\\uDD1E\"")
+    t.ok(err == null && v == Value.String("\xf0\x9d\x84\x9e"), "pair U+1D11E")
+    v, err = parse("\"\\udbff\\udfff\"")
+    t.ok(err == null && v == Value.String("\xf4\x8f\xbf\xbf"), "pair U+10FFFF")
+    v, err = parse("\"\\ud83d\"")
+    t.ok(err == null && v == Value.String("\xef\xbf\xbd"), "lone high")
+    v, err = parse("\"\\ude00x\"")
+    t.ok(err == null && v == Value.String("\xef\xbf\xbdx"), "lone low")
+    v, err = parse("\"\\ud83d\\u0041\"")
+    t.ok(err == null && v == Value.String("\xef\xbf\xbdA"), "high then non-surrogate")
+    v, err = parse("\"\\ud83d\\ud83d\\ude00\"")
+    t.ok(err == null && v == Value.String("\xef\xbf\xbd\xf0\x9f\x98\x80"), "high, then a pair")
+    t.eqStr(jsonTestError("\"\\ud83d\\u12\""), "json.parse: line 1, column 8: invalid \\u escape (expected 4 hex digits)")
+    return t
+}
+
+fn testParseStringErrors() TestLog {
+    TestLog t = newTestLog()
+    t.eqStr(jsonTestError("\"abc"), "json.parse: line 1, column 1: unterminated string")
+    t.eqStr(jsonTestError("\"ab\\"), "json.parse: line 1, column 1: unterminated string")
+    t.eqStr(jsonTestError("\"a\nb\""), "json.parse: line 1, column 3: unescaped control character byte 0x0a in string")
+    t.eqStr(jsonTestError("\"a\tb\""), "json.parse: line 1, column 3: unescaped control character byte 0x09 in string")
+    t.eqStr(jsonTestError("\"\\x41\""), "json.parse: line 1, column 2: invalid escape '\\x'")
+    t.eqStr(jsonTestError("\"\\'\""), "json.parse: line 1, column 2: invalid escape '\\''")
+    t.eqStr(jsonTestError("\"\\u00g0\""), "json.parse: line 1, column 2: invalid \\u escape (expected 4 hex digits)")
+    t.eqStr(jsonTestError("\"\\u12\""), "json.parse: line 1, column 2: invalid \\u escape (expected 4 hex digits)")
+    t.eqStr(jsonTestError("'a'"), "json.parse: line 1, column 1: unexpected character ''' (strings use double quotes)")
+    return t
+}
+
+fn testParseInvalidUtf8() TestLog {
+    TestLog t = newTestLog()
+    t.eqStr(jsonTestError("\"a\xff\""), "json.parse: line 1, column 3: invalid UTF-8 in string")
+    t.eqStr(jsonTestError("\"\xc0\x80\""), "json.parse: line 1, column 2: invalid UTF-8 in string")
+    t.eqStr(jsonTestError("\"\xc3\""), "json.parse: line 1, column 2: invalid UTF-8 in string")
+    t.eqStr(jsonTestError("\"\xe0\x80\xaf\""), "json.parse: line 1, column 2: invalid UTF-8 in string")
+    t.eqStr(jsonTestError("\"\xed\xa0\x80\""), "json.parse: line 1, column 2: invalid UTF-8 in string")
+    t.eqStr(jsonTestError("\"\xf4\x90\x80\x80\""), "json.parse: line 1, column 2: invalid UTF-8 in string")
+    t.eqStr(jsonTestError("\"\xf5\x80\x80\x80\""), "json.parse: line 1, column 2: invalid UTF-8 in string")
+    t.eqStr(jsonTestError("\"\xe2\x82\""), "json.parse: line 1, column 2: invalid UTF-8 in string")
+    t.eqStr(jsonTestError("\"\xe2\x82"), "json.parse: line 1, column 2: invalid UTF-8 in string")
+    t.eqStr(jsonTestError("\"\x80\""), "json.parse: line 1, column 2: invalid UTF-8 in string")
+    t.eqStr(jsonTestRoundTrip("\"\xef\xbf\xbf\xf0\x90\x80\x80\xdf\xbf\""), "\"\xef\xbf\xbf\xf0\x90\x80\x80\xdf\xbf\"")
+    return t
+}
+
+fn testParseArraysAndObjects() TestLog {
+    TestLog t = newTestLog()
+    t.eqStr(jsonTestRoundTrip("[]"), "[]")
+    t.eqStr(jsonTestRoundTrip("{}"), "{}")
+    t.eqStr(jsonTestRoundTrip(" [ ] "), "[]")
+    t.eqStr(jsonTestRoundTrip("{ }"), "{}")
+    t.eqStr(jsonTestRoundTrip("[1, 2.5, \"x\", true, false, null, [], {}]"), "[1,2.5,\"x\",true,false,null,[],{}]")
+    t.eqStr(jsonTestRoundTrip("{\"a\" : [1, {\"b\": null}], \"c\": \"d\"}"), "{\"a\":[1,{\"b\":null}],\"c\":\"d\"}")
+    t.eqStr(jsonTestRoundTrip("{\"z\": 1, \"a\": 2, \"m\": 3}"), "{\"z\":1,\"a\":2,\"m\":3}")
+    t.eqStr(jsonTestRoundTrip("[[[[[[1]]]]]]"), "[[[[[[1]]]]]]")
+    t.eqStr(jsonTestRoundTrip("{\"\": \"\"}"), "{\"\":\"\"}")
+    return t
+}
+
+fn testRepeatedKeyKeepsFirstPositionLastValue() TestLog {
+    TestLog t = newTestLog()
+    t.eqStr(jsonTestRoundTrip("{\"a\": 1, \"b\": 2, \"a\": 3}"), "{\"a\":3,\"b\":2}")
+    return t
+}
+
+fn testParseStructureErrors() TestLog {
+    TestLog t = newTestLog()
+    t.eqStr(jsonTestError(""), "json.parse: line 1, column 1: unexpected end of input")
+    t.eqStr(jsonTestError("   "), "json.parse: line 1, column 4: unexpected end of input")
+    t.eqStr(jsonTestError("[1, 2"), "json.parse: line 1, column 6: unexpected end of input")
+    t.eqStr(jsonTestError("[1 2]"), "json.parse: line 1, column 4: expected ',' or ']'")
+    t.eqStr(jsonTestError("[1,]"), "json.parse: line 1, column 4: trailing comma")
+    t.eqStr(jsonTestError("{\"a\":1,}"), "json.parse: line 1, column 8: trailing comma")
+    t.eqStr(jsonTestError("{\"a\" 1}"), "json.parse: line 1, column 6: expected ':'")
+    t.eqStr(jsonTestError("{\"a\":1 \"b\":2}"), "json.parse: line 1, column 8: expected ',' or '}'")
+    t.eqStr(jsonTestError("{a:1}"), "json.parse: line 1, column 2: expected a string key")
+    t.eqStr(jsonTestError("{1:1}"), "json.parse: line 1, column 2: expected a string key")
+    t.eqStr(jsonTestError("{\"a\":}"), "json.parse: line 1, column 6: unexpected character '}'")
+    t.eqStr(jsonTestError("[,1]"), "json.parse: line 1, column 2: unexpected character ','")
+    t.eqStr(jsonTestError("]"), "json.parse: line 1, column 1: unexpected character ']'")
+    t.eqStr(jsonTestError("1 2"), "json.parse: line 1, column 3: unexpected character '2' after the value")
+    t.eqStr(jsonTestError("{} x"), "json.parse: line 1, column 4: unexpected character 'x' after the value")
+    t.eqStr(jsonTestError("tru"), "json.parse: line 1, column 1: invalid literal (expected true)")
+    t.eqStr(jsonTestError("nul"), "json.parse: line 1, column 1: invalid literal (expected null)")
+    t.eqStr(jsonTestError("True"), "json.parse: line 1, column 1: unexpected character 'T'")
+    t.eqStr(jsonTestError("[1] // c"), "json.parse: line 1, column 5: unexpected character '/' after the value")
+    t.eqStr(jsonTestError("/* c */ 1"), "json.parse: line 1, column 1: unexpected character '/' (comments are not allowed)")
+    t.eqStr(jsonTestError("\xef\xbb\xbf{}"), "json.parse: line 1, column 1: byte-order mark is not allowed")
+    t.eqStr(jsonTestError("\x00"), "json.parse: line 1, column 1: unexpected byte 0x00")
+    t.eqStr(jsonTestError("[1]\x0c"), "json.parse: line 1, column 4: unexpected byte 0x0c after the value")
+    return t
+}
+
+fn testErrorLineAndColumn() TestLog {
+    TestLog t = newTestLog()
+    t.eqStr(jsonTestError("{\n  \"a\" 1\n}"), "json.parse: line 2, column 7: expected ':'")
+    t.eqStr(jsonTestError("[\n1,\n2,\n\n   x]"), "json.parse: line 5, column 4: unexpected character 'x'")
+    t.eqStr(jsonTestError("{\"name\": \"caf\xc3\xa9\" \"x\"}"), "json.parse: line 1, column 18: expected ',' or '}'")
+    return t
+}
+
+fn jsonTestNested(int depth) string {
+    []string out = []string{}
+    for (int i = 0; i < depth; i++) {
+        out.push("[")
+    }
+    for (int i = 0; i < depth; i++) {
+        out.push("]")
+    }
+    return out.join("")
+}
+
+fn testNestingLimit() TestLog {
+    TestLog t = newTestLog()
+    _, error err = parse(jsonTestNested(512))
+    t.noErr(err)
+    t.eqStr(jsonTestError(jsonTestNested(513)), "json.parse: line 1, column 513: nesting deeper than 512 levels")
+    t.eqStr(jsonTestError(jsonTestNested(100000)), "json.parse: line 1, column 513: nesting deeper than 512 levels")
+    []string objs = []string{}
+    for (int i = 0; i < 513; i++) {
+        objs.push("{\"a\":")
+    }
+    t.eqStr(jsonTestError(objs.join("")), "json.parse: line 1, column 2561: nesting deeper than 512 levels")
+    // Depth counts open containers, not the total: many siblings are fine.
+    []string wide = []string{}
+    for (int i = 0; i < 2000; i++) {
+        wide.push("[[]]")
+    }
+    _, err = parse("[" + wide.join(",") + "]")
+    t.noErr(err)
+    return t
+}
+
+fn testStringCompact() TestLog {
+    TestLog t = newTestLog()
+    map[string]Value fields = map[string]Value{}
+    fields["a"] = Value.Array([]Value{Value.Number(1.0), Value.Number(2.5), Value.String("x")})
+    t.eqStr(Value.Object(fields).string(), "{\"a\":[1,2.5,\"x\"]}")
+    t.eqStr(Value.Null.string(), "null")
+    t.eqStr(Value.Bool(true).string(), "true")
+    t.eqStr(Value.Array([]Value{}).string(), "[]")
+    t.eqStr(Value.Object(map[string]Value{}).string(), "{}")
+    return t
+}
+
+fn testNumberPrinting() TestLog {
+    TestLog t = newTestLog()
+    t.eqStr(Value.Number(3.0).string(), "3")
+    t.eqStr(Value.Number(-12.0).string(), "-12")
+    t.eqStr(Value.Number(0.0).string(), "0")
+    t.eqStr(Value.Number(-0.0).string(), "-0")
+    t.eqStr(Value.Number(0.1).string(), "0.1")
+    t.eqStr(Value.Number(2.5).string(), "2.5")
+    t.eqStr(Value.Number(-2.5e-7).string(), "-2.5e-07")
+    t.eqStr(Value.Number(1.0e300).string(), "1e+300")
+    t.eqStr(Value.Number(1.0e20).string(), "100000000000000000000")
+    t.eqStr(Value.Number(-1.0e20).string(), "-100000000000000000000")
+    t.eqStr(Value.Number(999999999999999900000.0).string(), "999999999999999868928")
+    t.eqStr(Value.Number(1.0e21).string(), "1e+21")
+    t.eqStr(Value.Number(9007199254740993.0).string(), "9007199254740992")
+    t.eqStr(Value.Number(123456.789).string(), "123456.789")
+    return t
+}
+
+fn testStringEscaping() TestLog {
+    TestLog t = newTestLog()
+    t.eqStr(Value.String("a\"b\\c/d").string(), "\"a\\\"b\\\\c/d\"")
+    t.eqStr(Value.String("\n\t\r\x08\x0c").string(), "\"\\n\\t\\r\\b\\f\"")
+    t.eqStr(Value.String("\x00\x01\x1f\x7f").string(), "\"\\u0000\\u0001\\u001f\x7f\"")
+    t.eqStr(Value.String("caf\xc3\xa9 \xf0\x9f\x98\x80").string(), "\"caf\xc3\xa9 \xf0\x9f\x98\x80\"")
+    t.eqStr(Value.String("a\xffb").string(), "\"a\xef\xbf\xbdb\"")
+    t.eqStr(Value.String("\xc3").string(), "\"\xef\xbf\xbd\"")
+    t.eqStr(Value.String("\xed\xa0\x80").string(), "\"\xef\xbf\xbd\xef\xbf\xbd\xef\xbf\xbd\"")
+    map[string]Value fields = map[string]Value{}
+    fields["k\"ey\n"] = Value.Null
+    t.eqStr(Value.Object(fields).string(), "{\"k\\\"ey\\n\":null}")
+    return t
+}
+
+fn testPretty() TestLog {
+    TestLog t = newTestLog()
+    Value v, error err = parse("{\"a\":[1,2.5,\"x\"],\"b\":{},\"c\":[],\"d\":{\"e\":null,\"f\":[true]}}")
+    t.noErr(err)
+    if (err == null) {
+        t.eqStr(v.pretty(), "{\n  \"a\": [\n    1,\n    2.5,\n    \"x\"\n  ],\n  \"b\": {},\n  \"c\": [],\n  \"d\": {\n    \"e\": null,\n    \"f\": [\n      true\n    ]\n  }\n}")
+    }
+    t.eqStr(Value.Number(1.0).pretty(), "1")
+    t.eqStr(Value.Array([]Value{}).pretty(), "[]")
+    t.eqStr(Value.Object(map[string]Value{}).pretty(), "{}")
+    t.eqStr(Value.Array([]Value{Value.Null}).pretty(), "[\n  null\n]")
+    return t
+}
+
+fn testRoundTripKeepsValue() TestLog {
+    TestLog t = newTestLog()
+    string text = "{\"name\":\"Seed\",\"tags\":[\"a\",\"b\"],\"n\":3,\"pi\":3.14159,\"neg\":-0.5,\"ok\":true,\"none\":null,\"nested\":{\"x\":[[],{}]},\"s\":\"\\u0001\\n\\\"\"}"
+    Value v, error err = parse(text)
+    t.noErr(err)
+    if (err == null) {
+        t.eqStr(v.string(), text)
+        Value back, error err2 = parse(v.pretty())
+        t.ok(err2 == null && back == v, "pretty parses back to the same value")
+        Value again, error err3 = parse(v.string())
+        t.ok(err3 == null && again == v, "string parses back to the same value")
+    }
+    return t
+}
+
+fn testEquality() TestLog {
+    TestLog t = newTestLog()
+    Value a, error err = parse("{\"a\":1,\"b\":[true]}")
+    Value b, error err2 = parse("{ \"a\" : 1.0 , \"b\" : [ true ] }")
+    t.ok(err == null && err2 == null && a == b, "same document")
+    Value c, error err3 = parse("{\"b\":[true],\"a\":1}")
+    // docs/stdlib.md says key order counts in ==, "as it does for maps",
+    // but map == ignores order (DECISIONS.md 30), and Value's == is the
+    // built-in enum ==. See lib/README.md.
+    t.ok(err == null && err3 == null && a == c, "key order is ignored by ==")
+    return t
+}
+
+fn testAccessors() TestLog {
+    TestLog t = newTestLog()
+    Value doc, error err = parse("{\"name\":\"Seed\",\"user\":{\"address\":{\"city\":\"Oslo\"}},\"n\":42,\"f\":2.5,\"ok\":true,\"list\":[10,\"x\"],\"nil\":null}")
+    t.noErr(err)
+    if (err != null) {
+        return t
+    }
+    string? name = doc.get("name").asString()
+    t.ok(name != null && name == "Seed", "asString")
+    string? city = doc.get("user").get("address").get("city").asString()
+    t.ok(city != null && city == "Oslo", "chained get")
+    t.ok(doc.get("user").get("nope").get("city").asString() == null, "missing step")
+    t.ok(doc.get("name").get("x").isNull(), "get on a string")
+    int? n = doc.get("n").asInt()
+    t.ok(n != null && n == 42, "asInt")
+    float? f = doc.get("f").asFloat()
+    t.ok(f != null && f == 2.5, "asFloat")
+    t.ok(doc.get("f").asInt() == null, "asInt of a fraction")
+    t.ok(doc.get("name").asInt() == null && doc.get("name").asFloat() == null, "number of a string")
+    bool? ok = doc.get("ok").asBool()
+    t.ok(ok != null && ok, "asBool")
+    t.ok(doc.get("n").asBool() == null, "asBool of a number")
+    []Value? list = doc.get("list").asArray()
+    t.ok(list != null && list.len() == 2, "asArray")
+    t.ok(doc.asArray() == null, "asArray of an object")
+    map[string]Value? fields = doc.asObject()
+    t.ok(fields != null && fields.len() == 7, "asObject")
+    t.ok(doc.get("list").asObject() == null, "asObject of an array")
+    int? first = doc.get("list").at(0).asInt()
+    t.ok(first != null && first == 10, "at")
+    t.ok(doc.get("list").at(2).isNull() && doc.get("list").at(-1).isNull(), "at out of range")
+    t.ok(doc.at(0).isNull(), "at on an object")
+    t.ok(doc.get("nil").isNull() && doc.get("missing").isNull(), "isNull")
+    t.ok(!doc.get("n").isNull(), "not null")
+    return t
+}
+
+fn testMissingKeyVersusNull() TestLog {
+    TestLog t = newTestLog()
+    Value doc, error err = parse("{\"a\":null}")
+    t.noErr(err)
+    if (err != null) {
+        return t
+    }
+    map[string]Value? fields = doc.asObject()
+    if (fields != null) {
+        t.ok(fields["a"] != null, "present null")
+        t.ok(fields["b"] == null, "missing")
+    }
+    return t
+}
+
+fn testAsIntLimits() TestLog {
+    TestLog t = newTestLog()
+    int? a = Value.Number(9007199254740992.0).asInt()
+    t.ok(a != null && a == 9007199254740992, "2^53")
+    int? b = Value.Number(-9007199254740992.0).asInt()
+    t.ok(b != null && b == -9007199254740992, "-2^53")
+    t.ok(Value.Number(18014398509481984.0).asInt() == null, "2^54")
+    t.ok(Value.Number(1.0e300).asInt() == null, "1e300")
+    int? z = Value.Number(-0.0).asInt()
+    t.ok(z != null && z == 0, "-0")
+    return t
+}
+
+fn testDocExample() TestLog {
+    TestLog t = newTestLog()
+    Value out = Value.Object(map[string]Value{
+        "name": Value.String("demo"),
+        "tags": Value.Array([]Value{Value.String("a"), Value.String("b")}),
+        "count": Value.Number(3.0),
+    })
+    t.eqStr(out.pretty(), "{\n  \"name\": \"demo\",\n  \"tags\": [\n    \"a\",\n    \"b\"\n  ],\n  \"count\": 3\n}")
+    return t
+}
+
+fn testLargeDocument() TestLog {
+    TestLog t = newTestLog()
+    []string items = []string{}
+    for (int i = 0; i < 20000; i++) {
+        items.push("{\"id\":" + i.string() + ",\"name\":\"item " + i.string() + "\",\"tags\":[\"x\",\"y\"],\"score\":" + i.string() + ".5}")
+    }
+    string text = "[" + items.join(",") + "]"
+    Value v, error err = parse(text)
+    t.noErr(err)
+    if (err == null) {
+        t.eqInt(text.len(), v.string().len())
+        t.ok(v.string() == text, "large round trip")
+        int? id = v.at(19999).get("id").asInt()
+        t.ok(id != null && id == 19999, "last id")
+    }
+    return t
+}
+
+fn crashStringNan() {
+    float zero = 0.0
+    fmt.println(Value.Array([]Value{Value.Number(zero / zero)}).string())
+}
+
+fn crashPrettyInf() {
+    float zero = 0.0
+    fmt.println(Value.Number(-1.0 / zero).pretty())
+}

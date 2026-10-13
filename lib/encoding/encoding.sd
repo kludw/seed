@@ -1,0 +1,250 @@
+package encoding
+
+// Turning data into text and back (docs/stdlib.md, "encoding"): hex,
+// base64 (RFC 4648 §4 and §5) and URL percent-encoding. All pure Seed.
+//
+// Decoders return an error on malformed input naming the byte offset:
+//
+//   encoding.hexDecode: offset 3: invalid hex digit 'g'
+//
+// A byte is shown as 'c' when it is printable ASCII and as byte 0xNN
+// otherwise.
+
+import "errors"
+
+const string hexDigits = "0123456789abcdef"
+const string base64Std = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+const string base64Url = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+
+// Two lowercase hex digits per byte.
+pub fn hexEncode(string data) string {
+    []byte out = []byte{}
+    string digits = hexDigits
+    for (int i = 0; i < data.len(); i++) {
+        int b = int(data[i])
+        out.push(digits[b >> 4])
+        out.push(digits[b & 15])
+    }
+    return string(out)
+}
+
+// The bytes back. Accepts upper and lower case. Fails on an odd length or a
+// non-hex character.
+pub fn hexDecode(string text) (string, error) {
+    for (int i = 0; i < text.len(); i++) {
+        if (hexValue(text[i]) < 0) {
+            return null, encodingError("hexDecode", i, "invalid hex digit " + showByte(text[i]))
+        }
+    }
+    if (text.len() % 2 != 0) {
+        return null, encodingError("hexDecode", text.len() - 1, "odd number of hex digits")
+    }
+    []byte out = []byte{}
+    for (int i = 0; i < text.len(); i = i + 2) {
+        out.push(byte(hexValue(text[i]) * 16 + hexValue(text[i + 1])))
+    }
+    return string(out), null
+}
+
+// Standard base64 (RFC 4648 §4, '+' and '/') with '=' padding.
+pub fn base64Encode(string data) string {
+    return base64With(data, base64Std, true)
+}
+
+// Accepts the standard alphabet, with or without padding. Fails on any other
+// character, including whitespace.
+pub fn base64Decode(string text) (string, error) {
+    return unbase64(text, false, "base64Decode")
+}
+
+// URL-safe base64 (RFC 4648 §5, '-' and '_') without padding.
+pub fn base64UrlEncode(string data) string {
+    return base64With(data, base64Url, false)
+}
+
+// Accepts the URL-safe alphabet, with or without padding.
+pub fn base64UrlDecode(string text) (string, error) {
+    return unbase64(text, true, "base64UrlDecode")
+}
+
+// Percent-encoding for one URL path segment or query value: A-Z a-z 0-9
+// - _ . ~ stay, every other byte becomes %XX with uppercase hex.
+pub fn urlEncode(string text) string {
+    string upper = "0123456789ABCDEF"
+    []byte out = []byte{}
+    for (int i = 0; i < text.len(); i++) {
+        byte b = text[i]
+        if ((b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') || b == '-' || b == '_' || b == '.' || b == '~') {
+            out.push(b)
+        } else {
+            out.push('%')
+            out.push(upper[int(b) >> 4])
+            out.push(upper[int(b) & 15])
+        }
+    }
+    return string(out)
+}
+
+// Decodes %XX (either case) and '+' as a space, as in query strings. Fails
+// on a '%' not followed by two hex digits. Every other byte is kept as it
+// is.
+pub fn urlDecode(string text) (string, error) {
+    if (!text.contains("%") && !text.contains("+")) {
+        return text, null
+    }
+    []byte out = []byte{}
+    for (int i = 0; i < text.len(); i++) {
+        byte b = text[i]
+        if (b == '+') {
+            out.push(' ')
+        } else if (b == '%') {
+            if (i + 3 > text.len()) {
+                return null, encodingError("urlDecode", i, "'%' must be followed by two hex digits")
+            }
+            int hi = hexValue(text[i + 1])
+            int lo = hexValue(text[i + 2])
+            if (hi < 0 || lo < 0) {
+                return null, encodingError("urlDecode", i, "'%' must be followed by two hex digits")
+            }
+            out.push(byte(hi * 16 + lo))
+            i = i + 2
+        } else {
+            out.push(b)
+        }
+    }
+    return string(out), null
+}
+
+// The value of a hex digit, or -1.
+fn hexValue(byte b) int {
+    if (b >= '0' && b <= '9') {
+        return int(b) - int('0')
+    }
+    if (b >= 'a' && b <= 'f') {
+        return int(b) - int('a') + 10
+    }
+    if (b >= 'A' && b <= 'F') {
+        return int(b) - int('A') + 10
+    }
+    return -1
+}
+
+fn base64With(string data, string alphabet, bool pad) string {
+    []byte out = []byte{}
+    int n = data.len()
+    int i = 0
+    for (; i + 3 <= n; i = i + 3) {
+        int v = (int(data[i]) << 16) | (int(data[i + 1]) << 8) | int(data[i + 2])
+        out.push(alphabet[v >> 18])
+        out.push(alphabet[(v >> 12) & 63])
+        out.push(alphabet[(v >> 6) & 63])
+        out.push(alphabet[v & 63])
+    }
+    if (n - i == 1) {
+        int v = int(data[i]) << 16
+        out.push(alphabet[v >> 18])
+        out.push(alphabet[(v >> 12) & 63])
+        if (pad) {
+            out.push('=')
+            out.push('=')
+        }
+    } else if (n - i == 2) {
+        int v = (int(data[i]) << 16) | (int(data[i + 1]) << 8)
+        out.push(alphabet[v >> 18])
+        out.push(alphabet[(v >> 12) & 63])
+        out.push(alphabet[(v >> 6) & 63])
+        if (pad) {
+            out.push('=')
+        }
+    }
+    return string(out)
+}
+
+// The 6-bit value of a base64 character in the standard or the URL-safe
+// alphabet, or -1.
+fn base64Value(byte b, bool url) int {
+    if (b >= 'A' && b <= 'Z') {
+        return int(b) - int('A')
+    }
+    if (b >= 'a' && b <= 'z') {
+        return int(b) - int('a') + 26
+    }
+    if (b >= '0' && b <= '9') {
+        return int(b) - int('0') + 52
+    }
+    if (url) {
+        if (b == '-') {
+            return 62
+        }
+        if (b == '_') {
+            return 63
+        }
+        return -1
+    }
+    if (b == '+') {
+        return 62
+    }
+    if (b == '/') {
+        return 63
+    }
+    return -1
+}
+
+// Decodes base64 with or without '=' padding. With padding, the text must be
+// a whole number of 4-character groups and the padding must be exactly what
+// the last group needs. Without it, a final group of 1 character is an
+// error. Unused bits in the last character are ignored (as Go's decoders
+// do by default).
+fn unbase64(string text, bool url, string fnName) (string, error) {
+    int n = text.len()
+    // Strip the padding: at most two '=' at the end.
+    int end = n
+    for (; end > 0 && text[end - 1] == '='; ) {
+        end--
+    }
+    int padding = n - end
+    for (int i = 0; i < end; i++) {
+        if (base64Value(text[i], url) < 0) {
+            return null, encodingError(fnName, i, "invalid base64 character " + showByte(text[i]))
+        }
+    }
+    if (padding > 0) {
+        if (n % 4 != 0 || padding > 2 || (end % 4) + padding != 4) {
+            return null, encodingError(fnName, end, "incorrect padding")
+        }
+    }
+    if (end % 4 == 1) {
+        return null, encodingError(fnName, end, "input ends in the middle of a byte")
+    }
+    []byte out = []byte{}
+    int i = 0
+    for (; i + 4 <= end; i = i + 4) {
+        int v = (base64Value(text[i], url) << 18) | (base64Value(text[i + 1], url) << 12) | (base64Value(text[i + 2], url) << 6) | base64Value(text[i + 3], url)
+        out.push(byte(v >> 16))
+        out.push(byte((v >> 8) & 255))
+        out.push(byte(v & 255))
+    }
+    int rest = end - i
+    if (rest == 2) {
+        int v = (base64Value(text[i], url) << 18) | (base64Value(text[i + 1], url) << 12)
+        out.push(byte(v >> 16))
+    } else if (rest == 3) {
+        int v = (base64Value(text[i], url) << 18) | (base64Value(text[i + 1], url) << 12) | (base64Value(text[i + 2], url) << 6)
+        out.push(byte(v >> 16))
+        out.push(byte((v >> 8) & 255))
+    }
+    return string(out), null
+}
+
+// 'c' for printable ASCII, byte 0xNN otherwise.
+fn showByte(byte b) string {
+    if (b >= ' ' && b <= '~' && b != '\'') {
+        return "'" + string([]byte{b}) + "'"
+    }
+    string digits = hexDigits
+    return "byte 0x" + string([]byte{digits[int(b) >> 4], digits[int(b) & 15]})
+}
+
+fn encodingError(string fnName, int offset, string reason) error {
+    return errors.new("encoding." + fnName + ": offset " + offset.string() + ": " + reason)
+}

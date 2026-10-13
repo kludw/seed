@@ -1,0 +1,845 @@
+package http
+
+// HTTP/1.1 messages on the wire (RFC 9112), with no I/O: a reader that turns
+// bytes, as they arrive, into requests or responses, and the functions that
+// write them. serve, get and send (which need net) are built on these:
+//
+//   server, per connection:
+//     MessageReader r = newMessageReader(maxHeadBytes, maxRequestBody)
+//     loop: switch (r.nextRequest()):
+//       NeedMore            -> r.feed(conn.read(...)); on end of input, close
+//       Reject(status, why) -> write errorResponseBytes(status), close
+//       Done(req)           -> write responseBytes(req.method, resp, close)
+//
+//   client:
+//     HttpTarget t = try parseUrl("http.send", req.url)
+//     write try requestBytes("http.send", req, t) to net.dial(t.address)
+//     loop: switch (r.nextResponse(req.method, eof)) ...
+//
+// Reading rules:
+// - Lines end in CRLF or a bare LF. Empty lines before a request line are
+//   skipped. Obsolete line folding (a header line starting with a space or
+//   tab) is rejected.
+// - Header names must be tokens and are lowercased; values are trimmed of
+//   spaces and tabs and must not contain other control characters. A header
+//   received more than once is joined with ", ".
+// - An HTTP/1.1 request must have a host header.
+// - Bodies: transfer-encoding chunked (chunk extensions and trailers are
+//   read and ignored), else content-length (repeated equal values are
+//   accepted), else none for a request and "until the connection closes"
+//   for a response. A message with both transfer-encoding and
+//   content-length is rejected, as is any transfer-encoding other than
+//   chunked. Responses to HEAD, and 1xx, 204 and 304 responses, have no
+//   body; 1xx responses before the final one are skipped.
+// - Limits: the start line and headers (and the trailers) together at most
+//   `headLimit` bytes; the body at most `bodyLimit` bytes.
+// - The headers keep transfer-encoding as received; the body is decoded.
+
+import "errors"
+
+// The limits of docs/stdlib.md.
+const int maxHeadBytes = 65536
+const int maxRequestBody = 8388608
+const int maxResponseBody = 67108864
+// The longest chunk-size line accepted.
+const int maxChunkLine = 4096
+
+// The result of nextRequest.
+type RequestParse enum {
+    NeedMore
+    Done(Request req)
+    Reject(int status, string reason)
+}
+
+// The result of nextResponse.
+type ResponseParse enum {
+    NeedMore
+    Done(Response resp)
+    Fail(string reason)
+}
+
+// The result of one step of reading a message part.
+type ReadStep enum {
+    NeedMore
+    Done
+    TooLarge
+    Malformed(string reason)
+}
+
+// Where the reader is in the current message.
+type ReadPhase enum {
+    Head
+    Fixed
+    ChunkSize
+    ChunkData
+    ChunkEnd
+    Trailer
+    UntilEof
+}
+
+// Reads HTTP/1.1 messages from bytes as they arrive. Bytes after a complete
+// message stay in the reader for the next one (keep-alive, pipelining).
+// Each byte is copied a bounded number of times, so reading a large body in
+// small pieces is linear.
+type MessageReader struct {
+    // Received bytes; buf[pos:] is not parsed yet.
+    string buf
+    int pos
+    // How far after pos a newline has been searched for already.
+    int scanned
+    // Bytes fed since buf was last extended.
+    []string more
+    int moreLen
+    int headLimit
+    int bodyLimit
+    // The current message.
+    ReadPhase phase
+    []string head
+    int headBytes
+    int left
+    []string body
+    int bodyLen
+    // nextResponse: the status of the head being read.
+    int status
+}
+
+fn newMessageReader(int headLimit, int bodyLimit) MessageReader {
+    return MessageReader{
+        buf: "",
+        pos: 0,
+        scanned: 0,
+        more: []string{},
+        moreLen: 0,
+        headLimit: headLimit,
+        bodyLimit: bodyLimit,
+        phase: ReadPhase.Head,
+        head: []string{},
+        headBytes: 0,
+        left: 0,
+        body: []string{},
+        bodyLen: 0,
+        status: 0,
+    }
+}
+
+// Adds received bytes.
+fn (MessageReader r) mut feed(string data) {
+    if (data.len() > 0) {
+        r.more.push(data)
+        r.moreLen = r.moreLen + data.len()
+    }
+}
+
+// The number of bytes received and not yet used by a message.
+fn (MessageReader r) buffered() int {
+    return r.buf.len() - r.pos + r.moreLen
+}
+
+// Moves the fed bytes into buf, dropping the parsed bytes before pos.
+// Returns false if nothing was fed.
+fn (MessageReader r) mut gather() bool {
+    if (r.more.len() == 0) {
+        return false
+    }
+    r.more.insert(0, r.buf.slice(r.pos, r.buf.len()))
+    r.buf = r.more.join("")
+    r.pos = 0
+    r.more = []string{}
+    r.moreLen = 0
+    return true
+}
+
+// The next line without its line ending, or null when no complete line has
+// arrived yet. A line longer than `limit` gives the line "\n" (which no real
+// line can be), so the caller can reject it.
+fn (MessageReader r) mut readLine(int limit) string? {
+    for (;;) {
+        int i = r.pos + r.scanned
+        for (; i < r.buf.len(); i++) {
+            if (r.buf[i] == '\n') {
+                int end = i
+                if (end > r.pos && r.buf[end - 1] == '\r') {
+                    end--
+                }
+                string line = r.buf.slice(r.pos, end)
+                r.pos = i + 1
+                r.scanned = 0
+                return line
+            }
+        }
+        r.scanned = r.buf.len() - r.pos
+        if (r.scanned > limit) {
+            return "\n"
+        }
+        if (!r.gather()) {
+            return null
+        }
+    }
+}
+
+// Takes up to r.left body bytes. Done when r.left reaches 0.
+fn (MessageReader r) mut takeBody() ReadStep {
+    for (;;) {
+        int n = r.buf.len() - r.pos
+        if (n > r.left) {
+            n = r.left
+        }
+        if (n > 0) {
+            r.body.push(r.buf.slice(r.pos, r.pos + n))
+            r.pos = r.pos + n
+            r.left = r.left - n
+            r.scanned = 0
+        }
+        if (r.left == 0) {
+            return ReadStep.Done
+        }
+        if (!r.gather()) {
+            return ReadStep.NeedMore
+        }
+    }
+}
+
+// Reads the start line and header lines of a message into r.head.
+// `skipBlank` skips empty lines before the start line (requests).
+fn (MessageReader r) mut readHead(bool skipBlank) ReadStep {
+    for (;;) {
+        string? line = r.readLine(r.headLimit - r.headBytes)
+        if (line == null) {
+            return ReadStep.NeedMore
+        }
+        if (line == "\n") {
+            return ReadStep.TooLarge
+        }
+        r.headBytes = r.headBytes + line.len() + 2
+        if (r.headBytes > r.headLimit + 2) {
+            return ReadStep.TooLarge
+        }
+        if (line == "") {
+            if (r.head.len() > 0) {
+                return ReadStep.Done
+            }
+            if (!skipBlank) {
+                return ReadStep.Malformed("empty start line")
+            }
+            r.headBytes = 0
+            continue
+        }
+        r.head.push(line)
+    }
+}
+
+// Reads the body after the head, in the phase set from the headers.
+// `eof` means no more bytes will arrive.
+fn (MessageReader r) mut readBody(bool eof) ReadStep {
+    for (;;) {
+        switch (r.phase) {
+        case ReadPhase.Head:
+            return ReadStep.Done
+        case ReadPhase.Fixed:
+            return r.takeBody()
+        case ReadPhase.UntilEof:
+            int n = r.buffered()
+            if (r.bodyLen + n > r.bodyLimit) {
+                return ReadStep.TooLarge
+            }
+            r.bodyLen = r.bodyLen + n
+            r.left = n
+            ReadStep step = r.takeBody()
+            if (step != ReadStep.Done) {
+                return step
+            }
+            if (!eof) {
+                return ReadStep.NeedMore
+            }
+            return ReadStep.Done
+        case ReadPhase.ChunkSize:
+            string? line = r.readLine(maxChunkLine)
+            if (line == null) {
+                return ReadStep.NeedMore
+            }
+            int size = httpChunkSize(line)
+            if (size < 0) {
+                return ReadStep.Malformed("invalid chunk size line")
+            }
+            if (size == 0) {
+                r.phase = ReadPhase.Trailer
+                r.headBytes = 0
+                continue
+            }
+            if (r.bodyLen + size > r.bodyLimit) {
+                return ReadStep.TooLarge
+            }
+            r.left = size
+            r.bodyLen = r.bodyLen + size
+            r.phase = ReadPhase.ChunkData
+        case ReadPhase.ChunkData:
+            ReadStep step = r.takeBody()
+            if (step != ReadStep.Done) {
+                return step
+            }
+            r.phase = ReadPhase.ChunkEnd
+        case ReadPhase.ChunkEnd:
+            string? line = r.readLine(maxChunkLine)
+            if (line == null) {
+                return ReadStep.NeedMore
+            }
+            if (line != "") {
+                return ReadStep.Malformed("chunk data is longer than its size")
+            }
+            r.phase = ReadPhase.ChunkSize
+        case ReadPhase.Trailer:
+            string? line = r.readLine(r.headLimit - r.headBytes)
+            if (line == null) {
+                return ReadStep.NeedMore
+            }
+            if (line == "\n") {
+                return ReadStep.TooLarge
+            }
+            r.headBytes = r.headBytes + line.len() + 2
+            if (r.headBytes > r.headLimit + 2) {
+                return ReadStep.TooLarge
+            }
+            if (line == "") {
+                return ReadStep.Done
+            }
+        }
+    }
+}
+
+// The body read so far, and a fresh state for the next message.
+fn (MessageReader r) mut finish() string {
+    string body = r.body.join("")
+    r.phase = ReadPhase.Head
+    r.head = []string{}
+    r.headBytes = 0
+    r.left = 0
+    r.body = []string{}
+    r.bodyLen = 0
+    r.status = 0
+    return body
+}
+
+// The value of a chunk-size line ("1a", "1a;ext=x", "1a ; ext"), or -1.
+fn httpChunkSize(string line) int {
+    int size = 0
+    int i = 0
+    for (; i < line.len(); i++) {
+        int d = httpHexDigit(line[i])
+        if (d < 0) {
+            break
+        }
+        size = size * 16 + d
+    }
+    if (i == 0) {
+        return -1
+    }
+    for (; i < line.len() && (line[i] == ' ' || line[i] == '\t'); ) {
+        i++
+    }
+    if (i < line.len() && line[i] != ';') {
+        return -1
+    }
+    return size
+}
+
+fn httpHexDigit(byte c) int {
+    if (c >= '0' && c <= '9') {
+        return int(c) - int('0')
+    }
+    if (c >= 'a' && c <= 'f') {
+        return int(c) - int('a') + 10
+    }
+    if (c >= 'A' && c <= 'F') {
+        return int(c) - int('A') + 10
+    }
+    return -1
+}
+
+// Whether `s` is a token (RFC 9110 5.6.2): a method or a header name.
+fn httpIsToken(string s) bool {
+    if (s == "") {
+        return false
+    }
+    for (int i = 0; i < s.len(); i++) {
+        byte c = s[i]
+        bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+        if (!ok) {
+            switch (c) {
+            case '!', '#', '$', '%', '&', '\'', '*', '+', '-', '.', '^', '_', '`', '|', '~':
+                ok = true
+            default:
+                ok = false
+            }
+        }
+        if (!ok) {
+            return false
+        }
+    }
+    return true
+}
+
+// Parses header lines into a map with lowercase names, joining repeated
+// headers with ", ". Returns the reason when a line is malformed.
+fn httpParseHeaders([]string lines, int first) (map[string]string, string?) {
+    map[string]string out = map[string]string{}
+    for (int i = first; i < lines.len(); i++) {
+        string line = lines[i]
+        if (line[0] == ' ' || line[0] == '\t') {
+            return out, "obsolete line folding is not supported"
+        }
+        int? colon = line.index(":")
+        if (colon == null) {
+            return out, "header line without ':'"
+        }
+        string name = line.slice(0, colon)
+        if (!httpIsToken(name)) {
+            return out, "invalid header name"
+        }
+        string value = httpTrimOws(line.slice(colon + 1, line.len()))
+        for (int j = 0; j < value.len(); j++) {
+            if ((value[j] < ' ' && value[j] != '\t') || value[j] == '\x7f') {
+                return out, "control character in header value"
+            }
+        }
+        name = name.toLower()
+        string? old = out[name]
+        if (old != null) {
+            out[name] = old + ", " + value
+        } else {
+            out[name] = value
+        }
+    }
+    return out, null
+}
+
+// `s` without leading and trailing spaces and tabs.
+fn httpTrimOws(string s) string {
+    int start = 0
+    int end = s.len()
+    for (; start < end && (s[start] == ' ' || s[start] == '\t'); ) {
+        start++
+    }
+    for (; end > start && (s[end - 1] == ' ' || s[end - 1] == '\t'); ) {
+        end--
+    }
+    return s.slice(start, end)
+}
+
+// The value of a content-length header (possibly a joined list of equal
+// values, "5, 5"), or -1 if it is invalid.
+fn httpContentLength(string value) int {
+    []string parts = value.split(",")
+    int result = -1
+    for (int i = 0; i < parts.len(); i++) {
+        string p = httpTrimOws(parts[i])
+        if (p == "" || p.len() > 18) {
+            return -1
+        }
+        int n = 0
+        for (int j = 0; j < p.len(); j++) {
+            if (p[j] < '0' || p[j] > '9') {
+                return -1
+            }
+            n = n * 10 + int(p[j]) - int('0')
+        }
+        if (result >= 0 && n != result) {
+            return -1
+        }
+        result = n
+    }
+    return result
+}
+
+// Sets the body phase from the headers. Returns a reason if the framing is
+// invalid ("" if it is fine); `noBody` forces an empty body.
+fn (MessageReader r) mut startBody(map[string]string headers, bool noBody, bool untilEof) string {
+    r.left = 0
+    r.phase = ReadPhase.Fixed
+    if (noBody) {
+        return ""
+    }
+    string? te = headers["transfer-encoding"]
+    string? cl = headers["content-length"]
+    if (te != null) {
+        if (cl != null) {
+            return "both transfer-encoding and content-length"
+        }
+        if (httpTrimOws(te).toLower() != "chunked") {
+            return "unsupported transfer-encoding"
+        }
+        r.phase = ReadPhase.ChunkSize
+        return ""
+    }
+    if (cl != null) {
+        int n = httpContentLength(cl)
+        if (n < 0) {
+            return "invalid content-length"
+        }
+        r.left = n
+        r.bodyLen = n
+        return ""
+    }
+    if (untilEof) {
+        r.phase = ReadPhase.UntilEof
+    }
+    return ""
+}
+
+// Reads the next request. Reject gives the status to answer with (400,
+// 413, 431, 501 or 505) before closing the connection.
+fn (MessageReader r) mut nextRequest() RequestParse {
+    if (r.phase == ReadPhase.Head) {
+        switch (r.readHead(true)) {
+        case ReadStep.NeedMore:
+            return RequestParse.NeedMore
+        case ReadStep.TooLarge:
+            return RequestParse.Reject(431, "request header too large")
+        case ReadStep.Malformed(string reason):
+            return RequestParse.Reject(400, reason)
+        case ReadStep.Done:
+        }
+        []string parts = r.head[0].split(" ")
+        if (parts.len() != 3 || !httpIsToken(parts[0]) || parts[1] == "") {
+            return RequestParse.Reject(400, "malformed request line")
+        }
+        string version = parts[2]
+        if (version != "HTTP/1.1" && version != "HTTP/1.0") {
+            if (version.startsWith("HTTP/") && version.len() == 8 && version[6] == '.') {
+                return RequestParse.Reject(505, "unsupported HTTP version")
+            }
+            return RequestParse.Reject(400, "malformed request line")
+        }
+        for (int i = 0; i < parts[1].len(); i++) {
+            if (parts[1][i] < '!' || parts[1][i] == '\x7f') {
+                return RequestParse.Reject(400, "malformed request target")
+            }
+        }
+        map[string]string headers, string? bad = httpParseHeaders(r.head, 1)
+        if (bad != null) {
+            return RequestParse.Reject(400, bad)
+        }
+        if (version == "HTTP/1.1" && headers["host"] == null) {
+            return RequestParse.Reject(400, "missing host header")
+        }
+        string framing = r.startBody(headers, false, false)
+        if (framing == "unsupported transfer-encoding") {
+            return RequestParse.Reject(501, framing)
+        }
+        if (framing != "") {
+            return RequestParse.Reject(400, framing)
+        }
+        if (r.bodyLen > r.bodyLimit) {
+            return RequestParse.Reject(413, "request body too large")
+        }
+        // Keep the parsed request line and headers in r.head: the method,
+        // the target, then name/value pairs.
+        []string kept = []string{parts[0], parts[1]}
+        []string names = headers.keys()
+        for (int i = 0; i < names.len(); i++) {
+            string? v = headers[names[i]]
+            if (v != null) {
+                kept.push(names[i])
+                kept.push(v)
+            }
+        }
+        r.head = kept
+    }
+    switch (r.readBody(false)) {
+    case ReadStep.NeedMore:
+        return RequestParse.NeedMore
+    case ReadStep.TooLarge:
+        return RequestParse.Reject(413, "request body too large")
+    case ReadStep.Malformed(string reason):
+        return RequestParse.Reject(400, reason)
+    case ReadStep.Done:
+    }
+    []string h = r.head
+    map[string]string headers = map[string]string{}
+    for (int i = 2; i + 1 < h.len(); i = i + 2) {
+        headers[h[i]] = h[i + 1]
+    }
+    string method = h[0]
+    string target = h[1]
+    string body = r.finish()
+    return RequestParse.Done(Request{method: method, url: target, headers: headers, body: body})
+}
+
+// Reads the next response to a request with `method`. `eof` means the
+// connection has been closed, so no more bytes will arrive.
+fn (MessageReader r) mut nextResponse(string method, bool eof) ResponseParse {
+    for (; r.phase == ReadPhase.Head; ) {
+        switch (r.readHead(false)) {
+        case ReadStep.NeedMore:
+            if (eof) {
+                if (r.head.len() == 0 && r.buffered() == 0) {
+                    return ResponseParse.Fail("connection closed without a response")
+                }
+                return ResponseParse.Fail("connection closed in the middle of the response header")
+            }
+            return ResponseParse.NeedMore
+        case ReadStep.TooLarge:
+            return ResponseParse.Fail("response header too large")
+        case ReadStep.Malformed(string reason):
+            return ResponseParse.Fail(reason)
+        case ReadStep.Done:
+        }
+        int status = httpStatusLine(r.head[0])
+        if (status < 0) {
+            return ResponseParse.Fail("malformed status line")
+        }
+        if (status < 200) {
+            // An interim response (100 Continue): skip it.
+            _ = r.finish()
+            continue
+        }
+        map[string]string headers, string? bad = httpParseHeaders(r.head, 1)
+        if (bad != null) {
+            return ResponseParse.Fail(bad)
+        }
+        bool noBody = method == "HEAD" || status == 204 || status == 304
+        string framing = r.startBody(headers, noBody, true)
+        if (framing != "") {
+            return ResponseParse.Fail(framing)
+        }
+        if (r.bodyLen > r.bodyLimit) {
+            return ResponseParse.Fail("response body too large")
+        }
+        []string kept = []string{}
+        []string names = headers.keys()
+        for (int i = 0; i < names.len(); i++) {
+            string? v = headers[names[i]]
+            if (v != null) {
+                kept.push(names[i])
+                kept.push(v)
+            }
+        }
+        r.head = kept
+        r.status = status
+    }
+    switch (r.readBody(eof)) {
+    case ReadStep.NeedMore:
+        if (eof) {
+            return ResponseParse.Fail("connection closed in the middle of the response body")
+        }
+        return ResponseParse.NeedMore
+    case ReadStep.TooLarge:
+        return ResponseParse.Fail("response body too large")
+    case ReadStep.Malformed(string reason):
+        return ResponseParse.Fail(reason)
+    case ReadStep.Done:
+    }
+    map[string]string headers = map[string]string{}
+    for (int i = 0; i + 1 < r.head.len(); i = i + 2) {
+        headers[r.head[i]] = r.head[i + 1]
+    }
+    int status = r.status
+    string body = r.finish()
+    return ResponseParse.Done(Response{status: status, headers: headers, body: body})
+}
+
+// The status code of a status line "HTTP/1.x NNN reason", or -1.
+fn httpStatusLine(string line) int {
+    if (line.len() < 12 || !line.startsWith("HTTP/1.") || line[8] != ' ') {
+        return -1
+    }
+    if (line[7] < '0' || line[7] > '9') {
+        return -1
+    }
+    int status = 0
+    for (int i = 9; i < 12; i++) {
+        if (line[i] < '0' || line[i] > '9') {
+            return -1
+        }
+        status = status * 10 + int(line[i]) - int('0')
+    }
+    if (status < 100 || (line.len() > 12 && line[12] != ' ')) {
+        return -1
+    }
+    return status
+}
+
+// ----------------------------------------------------------------- writing
+
+// `s` with CR and LF replaced by spaces, so a header value cannot end the
+// header early (response splitting).
+fn httpHeaderValue(string s) string {
+    if (!s.contains("\r") && !s.contains("\n")) {
+        return s
+    }
+    return s.replace("\r", " ").replace("\n", " ")
+}
+
+// Writes headers a program set, lowercased, skipping invalid names and the
+// ones in `skip` (which the library writes itself).
+fn httpWriteHeaders([]string out, map[string]string headers, []string skip) []string {
+    []string lines = out
+    []string names = headers.keys()
+    for (int i = 0; i < names.len(); i++) {
+        string name = names[i].toLower()
+        string? value = headers[names[i]]
+        if (value == null || !httpIsToken(name) || skip.contains(name)) {
+            continue
+        }
+        lines.push(name + ": " + httpHeaderValue(value) + "\r\n")
+    }
+    return lines
+}
+
+// The bytes of a response to a request with `method`. The status line uses
+// statusText (an unknown code gets an empty reason). The library writes
+// content-length itself, ignoring one the handler set (and any
+// transfer-encoding or connection header); 1xx, 204 and 304 responses get
+// no content-length and no body; a HEAD response gets the headers of the
+// full response but no body. `close` adds connection: close.
+fn responseBytes(string method, Response resp, bool close) string {
+    []string out = []string{"HTTP/1.1 " + resp.status.string() + " " + statusText(resp.status) + "\r\n"}
+    out = httpWriteHeaders(out, resp.headers, []string{"content-length", "transfer-encoding", "connection"})
+    bool bodyless = resp.status < 200 || resp.status == 204 || resp.status == 304
+    if (!bodyless) {
+        out.push("content-length: " + resp.body.len().string() + "\r\n")
+    }
+    if (close) {
+        out.push("connection: close\r\n")
+    }
+    out.push("\r\n")
+    if (!bodyless && method != "HEAD") {
+        out.push(resp.body)
+    }
+    return out.join("")
+}
+
+// The response the server sends for a request it rejects while reading:
+// `status` with its reason phrase as a plain-text body, and connection:
+// close.
+fn errorResponseBytes(int status) string {
+    return responseBytes("GET", textResponse(status, statusText(status) + "\n"), true)
+}
+
+// Where a client request goes: the address for net.dial, the host header
+// and the request target.
+type HttpTarget struct {
+    string address
+    string host
+    string target
+}
+
+// Parses a client URL, http://host[:port][/path][?query] (a #fragment is
+// dropped). Errors read "<fnName>: <url>: <reason>".
+fn parseUrl(string fnName, string url) (HttpTarget, error) {
+    int? sep = url.index("://")
+    if (sep == null) {
+        return null, errors.new(fnName + ": " + url + ": not an http:// URL")
+    }
+    string scheme = url.slice(0, sep).toLower()
+    if (scheme == "https") {
+        return null, errors.new(fnName + ": " + url + ": https is not supported")
+    }
+    if (scheme != "http") {
+        return null, errors.new(fnName + ": " + url + ": unsupported scheme " + url.slice(0, sep))
+    }
+    string rest = url.slice(sep + 3, url.len())
+    int end = rest.len()
+    for (int i = 0; i < rest.len(); i++) {
+        if (rest[i] == '/' || rest[i] == '?' || rest[i] == '#') {
+            end = i
+            break
+        }
+    }
+    string authority = rest.slice(0, end)
+    string target = rest.slice(end, rest.len())
+    int? hash = target.index("#")
+    if (hash != null) {
+        target = target.slice(0, hash)
+    }
+    if (target == "" || target[0] == '?') {
+        target = "/" + target
+    }
+    for (int i = 0; i < target.len(); i++) {
+        if (target[i] <= ' ' || target[i] == '\x7f') {
+            return null, errors.new(fnName + ": " + url + ": invalid character in URL")
+        }
+    }
+    if (authority.contains("@")) {
+        return null, errors.new(fnName + ": " + url + ": user info in URLs is not supported")
+    }
+    string host = authority
+    string port = ""
+    if (authority.startsWith("[")) {
+        int? close = authority.index("]")
+        if (close == null) {
+            return null, errors.new(fnName + ": " + url + ": missing ']' in host")
+        }
+        host = authority.slice(0, close + 1)
+        string after = authority.slice(close + 1, authority.len())
+        if (after != "") {
+            if (after[0] != ':') {
+                return null, errors.new(fnName + ": " + url + ": invalid host")
+            }
+            port = after.slice(1, after.len())
+        }
+    } else {
+        int? colon = authority.index(":")
+        if (colon != null) {
+            host = authority.slice(0, colon)
+            port = authority.slice(colon + 1, authority.len())
+        }
+    }
+    if (host == "" || host == "[]") {
+        return null, errors.new(fnName + ": " + url + ": missing host")
+    }
+    for (int i = 0; i < host.len(); i++) {
+        if (host[i] <= ' ' || host[i] == '\x7f' || host[i] == '/' || host[i] == '\\') {
+            return null, errors.new(fnName + ": " + url + ": invalid host")
+        }
+    }
+    int portNum = 80
+    if (port != "" || authority.endsWith(":")) {
+        portNum = 0
+        if (port == "" || port.len() > 5) {
+            return null, errors.new(fnName + ": " + url + ": invalid port")
+        }
+        for (int i = 0; i < port.len(); i++) {
+            if (port[i] < '0' || port[i] > '9') {
+                return null, errors.new(fnName + ": " + url + ": invalid port")
+            }
+            portNum = portNum * 10 + int(port[i]) - int('0')
+        }
+        if (portNum < 1 || portNum > 65535) {
+            return null, errors.new(fnName + ": " + url + ": invalid port")
+        }
+    }
+    string hostHeader = host
+    if (portNum != 80) {
+        hostHeader = host + ":" + portNum.string()
+    }
+    return HttpTarget{address: host + ":" + portNum.string(), host: hostHeader, target: target}, null
+}
+
+// The bytes of a client request to `t`. The library writes host (unless
+// the request has one), content-length (when the body is not empty, or the
+// method is POST, PUT or PATCH) and connection: close, ignoring any
+// content-length, transfer-encoding or connection header the program set.
+fn requestBytes(string fnName, Request req, HttpTarget t) (string, error) {
+    if (!httpIsToken(req.method)) {
+        return null, errors.new(fnName + ": " + req.url + ": invalid method " + req.method)
+    }
+    []string out = []string{req.method + " " + t.target + " HTTP/1.1\r\n"}
+    bool hasHost = false
+    []string names = req.headers.keys()
+    for (int i = 0; i < names.len(); i++) {
+        if (names[i].toLower() == "host") {
+            hasHost = true
+        }
+    }
+    if (!hasHost) {
+        out.push("host: " + t.host + "\r\n")
+    }
+    out = httpWriteHeaders(out, req.headers, []string{"content-length", "transfer-encoding", "connection"})
+    if (req.body != "" || req.method == "POST" || req.method == "PUT" || req.method == "PATCH") {
+        out.push("content-length: " + req.body.len().string() + "\r\n")
+    }
+    out.push("connection: close\r\n")
+    out.push("\r\n")
+    out.push(req.body)
+    return out.join(""), null
+}
