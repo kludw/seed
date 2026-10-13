@@ -1,0 +1,54 @@
+// File header comment.
+// Second line.
+
+package main // trailing on package
+
+// About the import.
+import "fmt"
+import "os" // trailing on import
+
+
+
+// Doc comment for main.
+fn main([]string args) error {   // trailing after brace
+
+    // leading comment in body
+    int x = 1    // trailing comment
+        // oddly indented comment
+    int y = 2
+
+
+    // after two blank lines
+    switch (x) {
+    // comment before the first case
+    case 1:
+        foo() // trailing in case
+            // indented: belongs to the case body above
+    // at case level: belongs to the next case
+    case 2:
+        bar()
+        // last comment in the switch
+    }
+    xs = []int{
+        1, // one
+        // before two
+        2
+    }
+    call(a, // first
+        b)
+    total = a + // explain
+        b
+    if (x > 1) {
+        // only a comment
+    }
+    return null
+    // after return
+
+}
+// attached to f
+fn f() {}
+// floating comment between declarations
+
+fn g() {
+}
+// trailing comment at the end of the file

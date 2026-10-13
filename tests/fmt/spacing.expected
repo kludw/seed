@@ -1,0 +1,58 @@
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    int x = 1 + 2 * 3
+    int y = -x + -1
+    bool b = !(x < y) && y >= x || x != y
+    int z = (x + y) * (x - y)
+    []int xs = []int{1, 2, 3}
+    map[string]int m = map[string]int{"a": 1, "b": 2}
+    xs[0] = xs[1] + xs.len()
+    x++
+    y--
+    for (int i = 0; i < 10; i++) {
+        x = x << 1 >> 1
+    }
+    for (;;) {
+        break
+    }
+    for (int k = 0; ; k++) {
+        break
+    }
+    for (; x < 3; ) {
+        x = x + 1
+    }
+    string? s = null
+    if (s != null) {
+        fmt.println(s)
+    }
+    Point p = Point{x: 1, y: 2}
+    fmt.println(p.x.string())
+    T? t, _ = try parse("1")
+    return null
+}
+
+fn (Point p) mut move(int dx, int dy) {
+    p.x = p.x + dx
+}
+
+fn pair() (int, error) {
+    return 1, null
+}
+
+fn list() []int {
+    return []int{}
+}
+
+fn apply(fn(int) bool f, fn(int, int) (int, bool) g) [](string?) {
+    chan int c = chan int(10)
+    assert(true)
+    return [](string?){}
+}
+
+type Point struct {
+    int x
+    int y
+}

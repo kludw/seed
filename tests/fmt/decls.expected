@@ -1,0 +1,39 @@
+package main
+
+type Empty struct {}
+
+type Point struct {
+    int x
+    int y
+}
+
+type Color enum {
+    Red
+    Green
+    Blue
+}
+
+type Shape enum implements Describer {
+    Circle(float r)
+    Square(float side)
+}
+
+type Describer interface {
+    describe() string
+    mut reset(int to) (int, error)
+    apply(fn(int) bool f) fn(int) []int
+}
+
+fn (Point p) mut moveBy(int dx, int dy) {
+    p.x = p.x + dx
+}
+
+fn (Shape s) describe() string {
+    return "shape"
+}
+
+const fn(int) bool pred = isEven
+
+fn takesFn(fn(int) (int, bool) f, []fn() int gs) map[string][]int {
+    return map[string][]int{}
+}

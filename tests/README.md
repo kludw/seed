@@ -14,6 +14,7 @@ exact stdout (and exit code, where it isn't 0) is checked.
 | `full/errors/` | The full compiler's pedantic checks: unused names and imports, shadowing, switch coverage, missing returns, unreachable code, naming rules, `implements`, unhandled errors, formatting and so on. | full compiler only |
 | `seed0/` | Extra programs for the bootstrap compiler's subset (also run with the full compiler). | `seed0` and the full compiler |
 | `seed0/only/` | What only seed0 does: 64-bit ints that crash on overflow, rejecting interfaces. | `seed0` only |
+| `fmt/` | Golden tests for `seed fmt`: `NAME.sd` must format to `NAME.expected` (`tests/fmt/run.sh <seed>`, or `make test-fmt`). | full compiler |
 
 The `lang/` programs are written to also pass the full compiler's checks: they
 are formatted (4-space indentation, gofmt-style layout), have no unused names

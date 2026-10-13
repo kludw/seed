@@ -11,7 +11,7 @@ SEED_SRC = $(sort $(wildcard compiler/*.sd))
 # The runtime that the compiler pastes into every generated program.
 RUNTIME_SRC = $(wildcard runtime/*.h runtime/seed_*.c)
 
-.PHONY: all test0 test test-full test-leaks test-strict verify clean
+.PHONY: all test0 test test-full test-leaks test-strict test-fmt verify clean
 
 all: build/seed2
 
@@ -69,6 +69,19 @@ test-leaks: build/seed2
 # tests/lang is written to pass the full compiler's pedantic checks too.
 test-strict: build/seed2
 	tests/run.sh "build/seed2 c --strict" tests/lang
+
+# seed fmt. --verify runs the formatter's own checks on every .sd file under
+# compiler/ and tests/ (files with syntax errors are skipped): formatting the
+# formatted text changes nothing, and the tokens (ignoring newlines and
+# trailing commas), comments and syntax tree are unchanged. Then the golden
+# tests in tests/fmt, and a check that the compiler and the test programs
+# are formatted.
+FMT_CHECKED = $(SEED_SRC) $(wildcard tests/lang/*.sd tests/seed0/*.sd tests/full/*.sd)
+
+test-fmt: build/seed2
+	@build/seed2 fmt --verify $(SEED_SRC) $(wildcard tests/*/*.sd tests/*/errors/*.sd)
+	tests/fmt/run.sh build/seed2
+	@build/seed2 fmt --check $(FMT_CHECKED) && echo "seed fmt --check: the compiler and the test programs are formatted"
 
 clean:
 	rm -rf build

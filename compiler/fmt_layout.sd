@@ -1,0 +1,451 @@
+// The formatter, part 1: the Formatter state and the classification of
+// brackets. Before printing, every bracket is matched with its partner and
+// every `{` and `(` gets a role, found from the keywords around it:
+//
+//   {   a block (function, if, for, else, group, test), a switch or select
+//       body (case labels are indented less), a struct/enum/interface body,
+//       or else a literal (list, map or struct literal).
+//   (   a list (call arguments, parameters: may be written one element per
+//       line), or plain (conditions, grouping, result types, receivers,
+//       `chan T(n)`, `assert(...)`: never split into elements). Most are
+//       decided while printing from the token before them (a `(` after an
+//       operand is a call).
+//
+// A `)` that closes a parameter list is marked so that a result type after
+// it is separated by a space: `fn f() (int, error)`, `fn(int) []int`.
+package main
+
+type FmtBrace enum {
+    Literal
+    Block
+    Switch
+    Decl
+}
+
+type FmtParen enum {
+    Auto
+    List
+    Plain
+}
+
+// What an open bracket (or the file itself, Top) contains.
+type FmtFrameKind enum {
+    Top
+    Block
+    Switch
+    Decl
+    List
+    Plain
+}
+
+// What the previous item at the top level of the file was.
+type FmtTop enum {
+    Start
+    Comment
+    Package
+    Import
+    Const
+    Decl
+}
+
+// An open bracket while printing.
+//
+// indent is the indentation of the items inside (statements, fields, list
+// elements), closeIndent that of the line with the closing bracket, and
+// itemIndent that of the line where the current item started (continuation
+// lines are indented one more). A list is broken when it is written one
+// element per line. expectItem is set when the next token starts an item.
+type FmtFrame struct {
+    FmtFrameKind kind
+    int open
+    int indent
+    int closeIndent
+    int itemIndent
+    bool broken
+    bool expectItem
+    bool empty
+    bool caseLabel
+}
+
+// Where a token goes: on a new line (with indent) or on the current one.
+// item is set when the token starts an item; closer when it closes the
+// innermost open bracket.
+type FmtPlace struct {
+    bool newline
+    int indent
+    bool item
+    bool closer
+}
+
+type Formatter struct {
+    []Token toks
+    []bool nlBefore
+    []Comment comments
+    []int blanks
+    []int match
+    []FmtBrace brace
+    []FmtParen paren
+    []bool recv
+    []bool sigClose
+    []string out
+    []string cur
+    int curIndent
+    bool lineComment
+    bool justOpened
+    int lastLine
+    int prev
+    int nextComment
+    FmtTop prevTop
+    int topLine
+    bool seenImport
+    []FmtFrame stack
+}
+
+// A formatter for one file. Newline tokens are dropped (nlBefore records
+// where they were); blanks[l] counts the blank lines among lines 1..l.
+fn newFormatter([]Token tokens, []Comment comments, string src) Formatter {
+    Formatter f = Formatter{
+        toks: []Token{},
+        nlBefore: []bool{},
+        comments: comments,
+        blanks: []int{0},
+        match: []int{},
+        brace: []FmtBrace{},
+        paren: []FmtParen{},
+        recv: []bool{},
+        sigClose: []bool{},
+        out: []string{},
+        cur: []string{},
+        curIndent: 0,
+        lineComment: false,
+        justOpened: false,
+        lastLine: 0,
+        prev: -1,
+        nextComment: 0,
+        prevTop: FmtTop.Start,
+        topLine: 0,
+        seenImport: false,
+        stack: []FmtFrame{},
+    }
+    bool nl = false
+    for (int i = 0; i < tokens.len(); i++) {
+        if (tokens[i].kind == Tok.Newline) {
+            nl = true
+            continue
+        }
+        f.toks.push(tokens[i])
+        f.nlBefore.push(nl)
+        nl = false
+    }
+    []string srcLines = src.split("\n")
+    for (int l = 0; l < srcLines.len(); l++) {
+        int b = f.blanks[l]
+        if (srcLines[l].trim() == "") {
+            b++
+        }
+        f.blanks.push(b)
+    }
+    return f
+}
+
+fn fmtOpener(Tok k) bool {
+    return k == Tok.LParen || k == Tok.LBrack || k == Tok.LBrace
+}
+
+fn fmtCloser(Tok k) bool {
+    return k == Tok.RParen || k == Tok.RBrack || k == Tok.RBrace
+}
+
+fn (Formatter f) kindAt(int i) Tok {
+    if (i < 0 || i >= f.toks.len()) {
+        return Tok.Eof
+    }
+    return f.toks[i].kind
+}
+
+fn (Formatter f) lineOf(int i) int {
+    return f.toks[i].pos.line
+}
+
+// Whether a source line strictly between lines a and b is blank.
+fn (Formatter f) blankBetween(int a, int b) bool {
+    if (a < 1 || b - 1 <= a || b - 1 >= f.blanks.len()) {
+        return false
+    }
+    return f.blanks[b - 1] - f.blanks[a] > 0
+}
+
+// Whether the token at i ends an operand, so that a `-` after it is binary
+// and a `(` after it is a call.
+fn (Formatter f) operandEnd(int i) bool {
+    Tok k = f.kindAt(i)
+    if (k == Tok.Ident || k == Tok.Int || k == Tok.Float || k == Tok.Byte || k == Tok.String) {
+        return true
+    }
+    if (k == Tok.KwTrue || k == Tok.KwFalse || k == Tok.KwNull || k == Tok.RParen || k == Tok.RBrack) {
+        return true
+    }
+    if (k == Tok.RBrace) {
+        int o = f.match[i]
+        return o >= 0 && f.brace[o] == FmtBrace.Literal
+    }
+    return false
+}
+
+fn (Formatter f) isBinary(int i) bool {
+    Tok k = f.kindAt(i)
+    if (k == Tok.Minus) {
+        return f.operandEnd(i - 1)
+    }
+    return binaryPrecedence(k) > 0
+}
+
+fn (Formatter f) isUnary(int i) bool {
+    Tok k = f.kindAt(i)
+    return k == Tok.Not || (k == Tok.Minus && !f.operandEnd(i - 1))
+}
+
+// Whether the `(` at i holds a list (call arguments or parameters).
+fn (Formatter f) isListParen(int i) bool {
+    if (f.paren[i] == FmtParen.List) {
+        return true
+    }
+    if (f.paren[i] == FmtParen.Plain) {
+        return false
+    }
+    return f.operandEnd(i - 1)
+}
+
+// Matches the brackets and gives every `{` and `(` its role.
+fn (Formatter f) mut computeRoles() {
+    int n = f.toks.len()
+    for (int i = 0; i < n; i++) {
+        f.match.push(-1)
+        f.brace.push(FmtBrace.Literal)
+        f.paren.push(FmtParen.Auto)
+        f.recv.push(false)
+        f.sigClose.push(false)
+    }
+    []int opens = []int{}
+    for (int i = 0; i < n; i++) {
+        Tok k = f.toks[i].kind
+        if (fmtOpener(k)) {
+            opens.push(i)
+        } else if (fmtCloser(k) && opens.len() > 0) {
+            int o = opens[opens.len() - 1]
+            opens.remove(opens.len() - 1)
+            f.match[o] = i
+            f.match[i] = o
+        }
+    }
+    int depth = 0
+    for (int i = 0; i < n; i++) {
+        Tok k = f.toks[i].kind
+        if (k == Tok.KwIf || k == Tok.KwFor || k == Tok.KwSwitch) {
+            if (f.kindAt(i + 1) == Tok.LParen) {
+                f.paren[i + 1] = FmtParen.Plain
+                int close = f.match[i + 1]
+                if (close >= 0 && f.kindAt(close + 1) == Tok.LBrace) {
+                    if (k == Tok.KwSwitch) {
+                        f.brace[close + 1] = FmtBrace.Switch
+                    } else {
+                        f.brace[close + 1] = FmtBrace.Block
+                    }
+                }
+            }
+        } else if (k == Tok.KwElse || k == Tok.KwGroup) {
+            if (f.kindAt(i + 1) == Tok.LBrace) {
+                f.brace[i + 1] = FmtBrace.Block
+            }
+        } else if (k == Tok.KwSelect) {
+            if (f.kindAt(i + 1) == Tok.LBrace) {
+                f.brace[i + 1] = FmtBrace.Switch
+            }
+        } else if (k == Tok.KwTest) {
+            if (f.kindAt(i + 2) == Tok.LBrace) {
+                f.brace[i + 2] = FmtBrace.Block
+            }
+        } else if (k == Tok.KwStruct || k == Tok.KwEnum || k == Tok.KwInterface) {
+            int j = i + 1
+            for (; j < n && f.toks[j].kind != Tok.LBrace && f.toks[j].kind != Tok.Eof; ) {
+                j++
+            }
+            if (f.kindAt(j) == Tok.LBrace) {
+                f.brace[j] = FmtBrace.Decl
+                if (k == Tok.KwInterface) {
+                    f.markInterface(j)
+                }
+            }
+        } else if (k == Tok.KwAssert) {
+            if (f.kindAt(i + 1) == Tok.LParen) {
+                f.paren[i + 1] = FmtParen.Plain
+            }
+        } else if (k == Tok.KwChan) {
+            int end = f.skipBaseType(i + 1)
+            if (end >= 0 && f.kindAt(end) == Tok.LParen) {
+                f.paren[end] = FmtParen.Plain
+            }
+        } else if (k == Tok.KwFn) {
+            if (depth == 0 && (i == 0 || f.nlBefore[i] || f.toks[i - 1].kind == Tok.KwPub)) {
+                f.markFnDecl(i)
+            } else if (f.kindAt(i + 1) == Tok.LParen) {
+                f.markParams(i + 1)
+            }
+        }
+        if (fmtOpener(k)) {
+            depth++
+        } else if (fmtCloser(k)) {
+            depth--
+        }
+    }
+}
+
+// The parameter list that opens at i. A `(` right after it starts a result
+// list.
+fn (Formatter f) mut markParams(int open) {
+    f.paren[open] = FmtParen.List
+    int close = f.match[open]
+    if (close < 0) {
+        return
+    }
+    f.sigClose[close] = true
+    if (f.kindAt(close + 1) == Tok.LParen) {
+        f.paren[close + 1] = FmtParen.Plain
+    }
+}
+
+// A function declaration whose `fn` is at i: receiver, parameters, results
+// and the body.
+fn (Formatter f) mut markFnDecl(int i) {
+    int j = i + 1
+    if (f.kindAt(j) == Tok.LParen) {
+        f.paren[j] = FmtParen.Plain
+        f.recv[j] = true
+        if (f.match[j] < 0) {
+            return
+        }
+        j = f.match[j] + 1
+        if (f.kindAt(j) == Tok.KwMut) {
+            j++
+        }
+    }
+    j++
+    if (f.kindAt(j) != Tok.LParen) {
+        return
+    }
+    f.markParams(j)
+    int body = f.match[j]
+    if (body < 0) {
+        return
+    }
+    for (; body < f.toks.len() && f.toks[body].kind != Tok.LBrace && f.toks[body].kind != Tok.Eof; ) {
+        body++
+    }
+    if (f.kindAt(body) == Tok.LBrace) {
+        f.brace[body] = FmtBrace.Block
+    }
+}
+
+// The method signatures of an interface whose body opens at open.
+fn (Formatter f) mut markInterface(int open) {
+    int close = f.match[open]
+    if (close < 0) {
+        return
+    }
+    int depth = 0
+    for (int j = open + 1; j < close; j++) {
+        Tok k = f.toks[j].kind
+        if (depth == 0 && k == Tok.LParen && f.toks[j - 1].kind == Tok.Ident) {
+            f.markParams(j)
+        }
+        if (fmtOpener(k)) {
+            depth++
+        } else if (fmtCloser(k)) {
+            depth--
+        }
+    }
+}
+
+// The index just after a base type that starts at i, or -1. Used to find
+// the `(` of `chan T(n)`.
+fn (Formatter f) skipBaseType(int i) int {
+    Tok k = f.kindAt(i)
+    if (k == Tok.Ident) {
+        if (f.kindAt(i + 1) == Tok.Dot && f.kindAt(i + 2) == Tok.Ident) {
+            return i + 3
+        }
+        return i + 1
+    }
+    if (k == Tok.LBrack) {
+        if (f.kindAt(i + 1) != Tok.RBrack) {
+            return -1
+        }
+        return f.skipBaseType(i + 2)
+    }
+    if (k == Tok.KwMap) {
+        if (f.kindAt(i + 1) != Tok.LBrack || f.match[i + 1] < 0) {
+            return -1
+        }
+        return f.skipBaseType(f.match[i + 1] + 1)
+    }
+    if (k == Tok.KwChan) {
+        return f.skipBaseType(i + 1)
+    }
+    if (k == Tok.LParen) {
+        if (f.match[i] < 0) {
+            return -1
+        }
+        return f.match[i] + 1
+    }
+    if (k == Tok.KwFn) {
+        if (f.kindAt(i + 1) != Tok.LParen || f.match[i + 1] < 0) {
+            return -1
+        }
+        return f.match[i + 1] + 1
+    }
+    return -1
+}
+
+// Whether a list that opens at open is written one element per line: the
+// source breaks a line right after the opening bracket, before or after a
+// comma between elements, or before the closing bracket. An empty list is
+// broken only when it holds a comment.
+fn (Formatter f) isBroken(int open) bool {
+    int close = f.match[open]
+    if (close < 0) {
+        return false
+    }
+    if (close == open + 1) {
+        return f.commentBetween(open, close)
+    }
+    if (f.lineOf(open + 1) > f.lineOf(open) || f.lineOf(close) > f.lineOf(close - 1)) {
+        return true
+    }
+    int depth = 0
+    for (int j = open + 1; j < close; j++) {
+        Tok k = f.toks[j].kind
+        if (fmtCloser(k)) {
+            depth--
+        }
+        if (depth == 0 && k == Tok.Comma) {
+            if (f.lineOf(j) > f.lineOf(j - 1) || f.lineOf(j + 1) > f.lineOf(j)) {
+                return true
+            }
+        }
+        if (fmtOpener(k)) {
+            depth++
+        }
+    }
+    return false
+}
+
+// Whether a comment lies between the tokens at a and b.
+fn (Formatter f) commentBetween(int a, int b) bool {
+    for (int i = 0; i < f.comments.len(); i++) {
+        Pos p = f.comments[i].pos
+        if (posBefore(f.toks[a].pos, p) && posBefore(p, f.toks[b].pos)) {
+            return true
+        }
+    }
+    return false
+}

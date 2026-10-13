@@ -1,0 +1,38 @@
+package main
+
+fn main([]string args) error {
+    if (true) { return null }
+    if (a) { b() } else { c() }
+    if (a) {
+        b()
+    } else
+    if (c) {
+        d()
+    } else
+    {
+        e()
+    }
+    switch (x) { case 1: a()
+    case 2, 3:
+        b()
+    default: c() }
+    switch (shape) {
+        case Shape.Circle(float r):
+            area(r)
+        case Shape.Square(float s): area(s)
+    }
+    for (;;) {}
+    for (;;) {
+    }
+    x = group { spawn work() }
+    select {
+    case int v = ch.receive():
+        use(v)
+    }
+    return null
+}
+
+fn empty() {}
+
+fn alsoEmpty() {
+}

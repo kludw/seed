@@ -5,8 +5,7 @@ package main
 import "errors"
 import "fmt"
 
-type Empty struct {
-}
+type Empty struct {}
 
 type Pt struct {
     int x
