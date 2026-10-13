@@ -1,0 +1,550 @@
+// The checker, continued: statements.
+//
+// Whether a statement always exits (return, break, continue, os.exit, or a
+// compound statement whose every branch does) is computed by stmtExits over
+// the checked tree. It drives the "missing return" error, unreachable code
+// and narrowing after `if (x == null) { return ... }`.
+package main
+
+fn (Checker c) mut checkBlock(int b) {
+    if (b < 0) {
+        return
+    }
+    Block bl = c.ast.blocks[b]
+    bool exited = false
+    bool reported = false
+    c.pushScope()
+    for (int i = 0; i < bl.count; i++) {
+        int s = c.ast.at(bl.list, i)
+        if (exited && !reported) {
+            c.reportUnreachable(s)
+            reported = true
+        }
+        c.checkStmt(s)
+        if (c.stmtExits(s)) {
+            exited = true
+        }
+    }
+    c.popScope()
+}
+
+// Whether some statement of the (checked) block always exits.
+fn (Checker c) blockExits(int b) bool {
+    if (b < 0) {
+        return false
+    }
+    Block bl = c.ast.blocks[b]
+    for (int i = 0; i < bl.count; i++) {
+        if (c.stmtExits(c.ast.at(bl.list, i))) {
+            return true
+        }
+    }
+    return false
+}
+
+// Whether the (checked) statement always exits: control never reaches the
+// statement after it.
+fn (Checker c) stmtExits(int s) bool {
+    if (s < 0) {
+        return false
+    }
+    Stmt st = c.ast.stmts[s]
+    switch (st.kind) {
+    case StmtKind.Return, StmtKind.Break, StmtKind.Continue:
+        return true
+    case StmtKind.ExprStmt:
+        return c.isExitCall(st.expr)
+    case StmtKind.If:
+        if (st.elseIf >= 0) {
+            return c.blockExits(st.body) && c.stmtExits(st.elseIf)
+        }
+        return st.els >= 0 && c.blockExits(st.body) && c.blockExits(st.els)
+    case StmtKind.For:
+        return st.expr < 0 && !c.hasBreak(st.body)
+    case StmtKind.Switch:
+        if (st.count == 0) {
+            return false
+        }
+        bool hasDefault = false
+        for (int i = 0; i < st.count; i++) {
+            Case cs = c.ast.cases[c.ast.at(st.list, i)]
+            if (!c.blockExits(cs.body)) {
+                return false
+            }
+            if (cs.isDefault) {
+                hasDefault = true
+            }
+        }
+        return hasDefault || c.kindOf(c.typeOf(st.expr)) == Kind.Enum
+    case StmtKind.Bad, StmtKind.Assign, StmtKind.IncDec, StmtKind.Select, StmtKind.Defer, StmtKind.Spawn:
+        return false
+    case StmtKind.Assert, StmtKind.Const:
+        return false
+    }
+}
+
+fn (Checker c) isExitCall(int e) bool {
+    return c.ast.exprs[e].kind == ExprKind.Call && c.info[e].res == Res.Pkg && c.info[e].pkgFn == PkgFn.Exit
+}
+
+// Whether a loop body contains a break for that loop.
+fn (Checker c) hasBreak(int b) bool {
+    if (b < 0) {
+        return false
+    }
+    Block bl = c.ast.blocks[b]
+    for (int i = 0; i < bl.count; i++) {
+        Stmt s = c.ast.stmts[c.ast.at(bl.list, i)]
+        if (s.kind == StmtKind.Break) {
+            return true
+        }
+        if (s.kind == StmtKind.If && (c.hasBreak(s.body) || c.hasBreak(s.els) || c.stmtHasBreak(s.elseIf))) {
+            return true
+        }
+        if (s.kind == StmtKind.Switch || s.kind == StmtKind.Select) {
+            for (int j = 0; j < s.count; j++) {
+                if (c.hasBreak(c.ast.cases[c.ast.at(s.list, j)].body)) {
+                    return true
+                }
+            }
+        }
+    }
+    return false
+}
+
+fn (Checker c) stmtHasBreak(int s) bool {
+    if (s < 0) {
+        return false
+    }
+    Stmt st = c.ast.stmts[s]
+    return c.hasBreak(st.body) || c.hasBreak(st.els) || c.stmtHasBreak(st.elseIf)
+}
+
+fn (Checker c) mut checkStmt(int s) {
+    Stmt st = c.ast.stmts[s]
+    switch (st.kind) {
+    case StmtKind.Bad:
+        return
+    case StmtKind.ExprStmt:
+        c.checkExprStmt(st)
+    case StmtKind.Assign:
+        c.checkAssign(s)
+    case StmtKind.IncDec:
+        c.checkIncDec(st)
+    case StmtKind.Const:
+        int ct = c.resolve(st.typeExpr)
+        c.checkValue(st.expr, ct, "to initialize " + st.name)
+        c.stmtVar[s] = c.declare(st.name, ct, VarKind.LocalConst, st.namePos)
+    case StmtKind.If:
+        c.checkIf(st)
+    case StmtKind.For:
+        c.checkFor(st)
+    case StmtKind.Switch:
+        c.checkSwitch(st)
+    case StmtKind.Return:
+        c.checkReturn(st)
+    case StmtKind.Break, StmtKind.Continue:
+        if (c.loopDepth == 0) {
+            string what = "continue"
+            if (st.kind == StmtKind.Break) {
+                what = "break"
+            }
+            c.error(st.pos, what + " outside of a loop")
+        }
+    case StmtKind.Select:
+        c.unsupported(st.pos, "select")
+    case StmtKind.Defer:
+        c.unsupported(st.pos, "defer")
+    case StmtKind.Spawn:
+        c.unsupported(st.pos, "spawn")
+    case StmtKind.Assert:
+        c.unsupported(st.pos, "assert")
+    }
+}
+
+fn (Checker c) mut checkIncDec(Stmt st) {
+    c.checkLvalue(st.expr)
+    int t = c.typeOf(st.expr)
+    if (t != tyInvalid && t != tyInt && t != tyFloat) {
+        string op = "--"
+        if (st.inc) {
+            op = "++"
+        }
+        c.error(st.pos, op + " needs an int or float, not " + c.typeName(t))
+    }
+    c.killAssign(c.pathKey(st.expr))
+}
+
+fn (Checker c) mut checkExprStmt(Stmt st) {
+    int e = st.expr
+    c.checkExpr(e)
+    Expr x = c.ast.exprs[e]
+    if (x.kind != ExprKind.Call && x.kind != ExprKind.Try) {
+        if (x.kind != ExprKind.Bad && x.kind != ExprKind.Group) {
+            c.errorHint(x.pos, "this expression is not used", "only calls can be statements")
+        }
+        return
+    }
+    int t = c.typeOf(e)
+    if (x.kind == ExprKind.Call && t != tyInvalid && c.types.endsWithError(t)) {
+        c.errorHint(x.pos, "the error returned by " + c.describe(e) + " is not handled", "use try, assign it (error err = ...), or discard it with  _ = ...")
+    } else {
+        c.checkUnusedResult(e)
+    }
+}
+
+fn (Checker c) mut checkIf(Stmt st) {
+    c.checkValue(st.expr, tyBool, "as the if condition")
+    c.pushScope()
+    c.narrowOn(st.expr, true)
+    c.checkBlock(st.body)
+    c.popScope()
+    if (st.els >= 0 || st.elseIf >= 0) {
+        c.pushScope()
+        c.narrowOn(st.expr, false)
+        if (st.elseIf >= 0) {
+            c.pushScope()
+            c.checkStmt(st.elseIf)
+            c.popScope()
+        } else {
+            c.checkBlock(st.els)
+        }
+        c.popScope()
+    }
+    bool thenExits = c.blockExits(st.body)
+    bool elseExits = c.blockExits(st.els) || c.stmtExits(st.elseIf)
+    if (thenExits && !elseExits) {
+        c.narrowOn(st.expr, false)
+    }
+    if (elseExits && !thenExits) {
+        c.narrowOn(st.expr, true)
+    }
+}
+
+fn (Checker c) mut checkFor(Stmt st) {
+    c.pushScope()
+    if (st.init >= 0 && c.ast.stmts[st.init].kind == StmtKind.Assign) {
+        c.checkAssign(st.init)
+    }
+    c.scanBlockKills(st.body)
+    c.scanStmtKills(st.post)
+    c.scanExprKills(st.expr)
+    if (st.expr >= 0) {
+        c.checkValue(st.expr, tyBool, "as the loop condition")
+    }
+    c.pushScope()
+    if (st.expr >= 0) {
+        c.narrowOn(st.expr, true)
+    }
+    c.loopDepth++
+    c.checkBlock(st.body)
+    c.loopDepth--
+    c.popScope()
+    if (st.post >= 0) {
+        Stmt post = c.ast.stmts[st.post]
+        if (post.kind == StmtKind.Assign) {
+            for (int i = 0; i < post.count; i++) {
+                if (c.ast.targets[c.ast.at(post.list, i)].kind == TargetKind.Decl) {
+                    c.error(post.pos, "the loop post statement cannot declare a variable")
+                }
+            }
+            c.checkAssign(st.post)
+        } else if (post.kind == StmtKind.IncDec) {
+            c.checkIncDec(post)
+        }
+    }
+    c.popScope()
+}
+
+fn (Checker c) mut checkReturn(Stmt st) {
+    if (c.curFn < 0) {
+        return
+    }
+    FnDecl fd = c.ast.fns[c.curFn]
+    int n = fd.resultCount
+    int ret = c.fnRet[c.curFn]
+    bool hasErr = n > 0 && c.resultType(c.curFn, n - 1) == tyError
+    if (st.count == 0) {
+        if (n > 0) {
+            c.error(st.pos, "missing return value: " + fd.name + " returns " + c.typeName(ret))
+        }
+        return
+    }
+    if (n == 0) {
+        c.errorHint(st.pos, fd.name + " does not return a value", "write  return  on its own, or declare a result type")
+        for (int i = 0; i < st.count; i++) {
+            c.checkExpr(c.ast.at(st.list, i))
+        }
+        return
+    }
+    if (st.count == 1 && n > 1) {
+        int only = c.ast.at(st.list, 0)
+        c.checkExpr(only)
+        int ot = c.typeOf(only)
+        if (ot != tyInvalid && ot != ret) {
+            c.error(st.pos, fd.name + " returns " + n.string() + " values " + c.typeName(ret) + ", but this returns " + c.typeName(ot))
+        }
+        return
+    }
+    if (st.count != n) {
+        string s = "s"
+        if (n == 1) {
+            s = ""
+        }
+        c.error(st.pos, fd.name + " returns " + n.string() + " value" + s + " but this returns " + st.count.string())
+        for (int j = 0; j < st.count; j++) {
+            c.checkExpr(c.ast.at(st.list, j))
+        }
+        return
+    }
+    for (int k = 0; k < n; k++) {
+        int e = c.ast.at(st.list, k)
+        int rt = c.resultType(c.curFn, k)
+        c.checkExpr(e)
+        if (c.ast.exprs[e].kind == ExprKind.NullLit && n > 1 && hasErr && !c.types.isOpt(rt) && rt != tyError) {
+            // null in a plain slot next to an error: the value is never read.
+            c.setType(e, rt)
+            continue
+        }
+        string context = "as the return value"
+        if (n > 1) {
+            context = "as return value " + (k + 1).string()
+        }
+        c.coerce(e, rt, context)
+    }
+}
+
+fn (Checker c) assignable(int from, int to) bool {
+    return from == to || (c.types.isOpt(to) && c.types.elem(to) == from)
+}
+
+fn (Checker c) mut checkAssign(int s) {
+    Stmt st = c.ast.stmts[s]
+    int n = st.count
+    if (n == 1) {
+        int ti = c.ast.at(st.list, 0)
+        Target tg = c.ast.targets[ti]
+        switch (tg.kind) {
+        case TargetKind.Decl:
+            int t = c.resolve(tg.typeExpr)
+            c.targetType[ti] = t
+            c.checkValue(st.expr, t, "to initialize " + tg.name)
+            c.targetVar[ti] = c.declare(tg.name, t, VarKind.Local, tg.pos)
+        case TargetKind.Discard:
+            c.checkExpr(st.expr)
+            int dt = c.typeOf(st.expr)
+            if (dt == tyVoid) {
+                c.notValue(st.expr)
+            } else if (dt != tyInvalid && c.types.isTuple(dt)) {
+                c.errorHint(st.pos, c.describe(st.expr) + " returns " + c.types.count(dt).string() + " values", "write one target per value, using _ for the ones you discard")
+            }
+        case TargetKind.Place:
+            c.checkLvalue(tg.expr)
+            int lt = c.typeOf(tg.expr)
+            c.targetType[ti] = lt
+            c.checkValue(st.expr, lt, "in the assignment to " + c.describe(tg.expr))
+            c.killAssign(c.pathKey(tg.expr))
+        }
+        return
+    }
+    c.checkExpr(st.expr)
+    int rt = c.typeOf(st.expr)
+    if (rt == tyInvalid) {
+        c.declareTargetsAnyway(s)
+        return
+    }
+    if (!c.types.isTuple(rt) || c.types.count(rt) != n) {
+        if (c.types.isTuple(rt)) {
+            c.error(st.pos, n.string() + " targets but " + c.describe(st.expr) + " returns " + c.types.count(rt).string() + " values")
+        } else {
+            c.error(st.pos, n.string() + " targets but the right side is a single value of type " + c.typeName(rt))
+        }
+        c.declareTargetsAnyway(s)
+        return
+    }
+    Target last = c.ast.targets[c.ast.at(st.list, n - 1)]
+    bool errSlot = c.ast.exprs[st.expr].kind == ExprKind.Call && c.types.part(rt, n - 1) == tyError && last.kind == TargetKind.Discard
+    c.stmtDiscard[s] = errSlot
+    for (int i = 0; i < n; i++) {
+        int ti2 = c.ast.at(st.list, i)
+        Target tg2 = c.ast.targets[ti2]
+        int slot = c.types.part(rt, i)
+        int tt = tyInvalid
+        string what = tg2.name
+        if (tg2.kind == TargetKind.Discard) {
+            continue
+        }
+        if (tg2.kind == TargetKind.Decl) {
+            tt = c.resolve(tg2.typeExpr)
+        } else {
+            c.checkLvalue(tg2.expr)
+            tt = c.typeOf(tg2.expr)
+            what = c.describe(tg2.expr)
+        }
+        c.targetType[ti2] = tt
+        if (tt == tyInvalid) {
+            continue
+        }
+        if (!c.assignable(slot, tt)) {
+            c.error(tg2.pos, "value " + (i + 1).string() + " has type " + c.typeName(slot) + ", which cannot be assigned to " + what + " (type " + c.typeName(tt) + ")")
+            continue
+        }
+        if (errSlot && i < n - 1 && !c.types.isOpt(tt) && tt != tyError) {
+            c.errorHint(tg2.pos, "the error is discarded with _, so " + what + " may be null and must be declared as " + c.typeName(tt) + "?", "and checked against null before use")
+        }
+    }
+    for (int j = 0; j < n; j++) {
+        int ti3 = c.ast.at(st.list, j)
+        Target tg3 = c.ast.targets[ti3]
+        if (tg3.kind == TargetKind.Decl) {
+            for (int k = 0; k < j; k++) {
+                Target prev = c.ast.targets[c.ast.at(st.list, k)]
+                if (prev.kind == TargetKind.Decl && prev.name == tg3.name) {
+                    c.error(tg3.pos, tg3.name + " is declared twice")
+                }
+            }
+            c.targetVar[ti3] = c.declare(tg3.name, c.targetType[ti3], VarKind.Local, tg3.pos)
+        } else if (tg3.kind == TargetKind.Place) {
+            c.killAssign(c.pathKey(tg3.expr))
+        }
+    }
+}
+
+// After an error on the right side, still declare the typed targets so that
+// later uses do not report them as undefined.
+fn (Checker c) mut declareTargetsAnyway(int s) {
+    Stmt st = c.ast.stmts[s]
+    for (int i = 0; i < st.count; i++) {
+        int ti = c.ast.at(st.list, i)
+        Target tg = c.ast.targets[ti]
+        if (tg.kind == TargetKind.Decl) {
+            int t = c.resolve(tg.typeExpr)
+            c.targetType[ti] = t
+            c.targetVar[ti] = c.declare(tg.name, t, VarKind.Local, tg.pos)
+        }
+    }
+}
+
+fn (Checker c) mut checkSwitch(Stmt st) {
+    c.checkExpr(st.expr)
+    if (!c.isValue(st.expr)) {
+        for (int i = 0; i < st.count; i++) {
+            c.pushScope()
+            c.checkBlock(c.ast.cases[c.ast.at(st.list, i)].body)
+            c.popScope()
+        }
+        return
+    }
+    int t = c.typeOf(st.expr)
+    if (c.kindOf(t) == Kind.Enum) {
+        c.checkEnumSwitch(st, t)
+        return
+    }
+    Pos vpos = c.ast.exprs[st.expr].pos
+    if (t != tyInt && t != tyByte && t != tyString && t != tyBool) {
+        if (c.types.isOpt(t)) {
+            c.errorHint(vpos, c.describe(st.expr) + " is nullable (" + c.typeName(t) + ")", "check " + c.describe(st.expr) + " != null first")
+        } else {
+            c.error(vpos, "cannot switch on " + c.typeName(t) + "; switch works on enums, int, byte, string and bool")
+        }
+        return
+    }
+    bool hasDefault = false
+    for (int j = 0; j < st.count; j++) {
+        Case cs = c.ast.cases[c.ast.at(st.list, j)]
+        if (cs.isDefault) {
+            if (hasDefault) {
+                c.error(cs.pos, "switch has two default cases")
+            }
+            hasDefault = true
+        }
+        for (int k = 0; k < cs.labelCount; k++) {
+            Label l = c.ast.labels[c.ast.at(cs.labels, k)]
+            if (l.parens) {
+                c.error(l.pos, c.typeName(t) + " is not an enum, so case patterns with bindings cannot be used")
+                continue
+            }
+            c.checkValue(l.expr, t, "as a case value")
+        }
+        c.pushScope()
+        c.checkBlock(cs.body)
+        c.popScope()
+    }
+    if (!hasDefault) {
+        c.errorHint(st.pos, "a switch over " + c.typeName(t) + " must end with a default case", "add  default:  for the values not listed")
+    }
+}
+
+fn (Checker c) mut checkEnumSwitch(Stmt st, int t) {
+    int d = c.types.decl(t)
+    TypeDecl td = c.ast.typeDecls[d]
+    []bool seen = []bool{}
+    for (int i = 0; i < td.caseCount; i++) {
+        seen.push(false)
+    }
+    for (int j = 0; j < st.count; j++) {
+        Case cs = c.ast.cases[c.ast.at(st.list, j)]
+        if (cs.isDefault) {
+            c.errorHint(cs.pos, "a switch over the enum " + td.name + " cannot have default", "list every case, so that adding a case later shows every switch to update")
+        }
+        c.pushScope()
+        for (int k = 0; k < cs.labelCount; k++) {
+            int li = c.ast.at(cs.labels, k)
+            Label l = c.ast.labels[li]
+            if (!l.isPattern) {
+                string first = ""
+                if (td.caseCount > 0) {
+                    first = c.enumCase(d, 0).name
+                }
+                c.error(l.pos, "expected a case of " + td.name + ", like  case " + td.name + "." + first + ":")
+                continue
+            }
+            if (l.typeName != td.name || l.pkg != "") {
+                c.error(l.pos, l.typeName + "." + l.caseName + " is not a case of " + td.name)
+                continue
+            }
+            int ci = c.findCase(d, l.caseName)
+            if (ci < 0) {
+                c.unknownCase(l.pos, d, l.caseName)
+                continue
+            }
+            if (seen[ci]) {
+                c.error(l.pos, "case " + td.name + "." + l.caseName + " is listed twice")
+            }
+            seen[ci] = true
+            c.labelCase[li] = ci
+            EnumCase ec = c.enumCase(d, ci)
+            if (!l.parens) {
+                continue
+            }
+            if (cs.labelCount > 1 && l.paramCount > 0) {
+                c.error(l.pos, "a case with bindings must be the only label in its case")
+            }
+            if (l.paramCount != ec.paramCount) {
+                string s = "s"
+                if (ec.paramCount == 1) {
+                    s = ""
+                }
+                c.error(l.pos, td.name + "." + ec.name + " carries " + ec.paramCount.string() + " value" + s + " but the pattern binds " + l.paramCount.string())
+                continue
+            }
+            for (int m = 0; m < l.paramCount; m++) {
+                int pi = c.ast.at(l.params, m)
+                Param p = c.ast.params[pi]
+                int pt = c.resolve(p.typeExpr)
+                int want = c.caseParamType(d, ci, m)
+                if (pt != tyInvalid && want != tyInvalid && pt != want) {
+                    c.error(p.pos, td.name + "." + ec.name + " field " + (m + 1).string() + " has type " + c.typeName(want) + ", not " + c.typeName(pt))
+                }
+                c.paramVar[pi] = c.declare(p.name, pt, VarKind.Local, p.pos)
+            }
+        }
+        c.checkBlock(cs.body)
+        c.popScope()
+    }
+    for (int n = 0; n < td.caseCount; n++) {
+        if (!seen[n]) {
+            c.errorHint(st.pos, "switch over " + td.name + " does not handle case " + td.name + "." + c.enumCase(d, n).name, "add a case for it; a switch over an enum must list every case")
+        }
+    }
+}

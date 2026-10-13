@@ -1,0 +1,202 @@
+// The `seed` command line.
+//
+//   seed c [--strict] <file.sd>...       write the C program to stdout
+//   seed build -o <out> <file.sd>...     compile to an executable
+//   seed run <file.sd>... [-- args...]   compile and run, passing the exit code
+//   seed ast <file.sd>...                print the syntax tree (for debugging)
+//
+// All files given together form one package.
+package main
+
+import "errors"
+import "fmt"
+import "fs"
+import "os"
+
+// The C compiler and its flags, used by build and run.
+const string cCompiler = "cc"
+const []string cFlags = []string{"-std=c11", "-O2", "-w"}
+const []string cLibs = []string{"-lm"}
+
+const string usage = "usage:\n  seed c [--strict] <file.sd>...\n  seed build -o <out> <file.sd>...\n  seed run <file.sd>... [-- args...]\n  seed ast <file.sd>...\n"
+
+fn main([]string args) error {
+    if (args.len() < 2) {
+        fmt.eprint(usage)
+        os.exit(2)
+    }
+    string cmd = args[1]
+    string root = rootDir(args[0])
+    if (cmd == "c") {
+        []string files = args.slice(2, args.len())
+        bool strict = files.len() > 0 && files[0] == "--strict"
+        if (strict) {
+            files.remove(0)
+        }
+        if (files.len() == 0) {
+            fmt.eprint(usage)
+            os.exit(2)
+        }
+        string program = try compileFiles(files, root, strict)
+        fmt.print(program)
+        return null
+    }
+    if (cmd == "ast") {
+        Parser p = try parseFiles(args.slice(2, args.len()))
+        fmt.print(p.ast.dump())
+        return null
+    }
+    if (cmd == "build") {
+        if (args.len() < 5 || args[2] != "-o") {
+            fmt.eprint(usage)
+            os.exit(2)
+        }
+        string out = args[3]
+        try build(args.slice(4, args.len()), root, out)
+        return null
+    }
+    if (cmd == "run") {
+        []string files = []string{}
+        []string progArgs = []string{}
+        bool rest = false
+        for (int i = 2; i < args.len(); i++) {
+            if (rest) {
+                progArgs.push(args[i])
+            } else if (args[i] == "--") {
+                rest = true
+            } else {
+                files.push(args[i])
+            }
+        }
+        if (files.len() == 0) {
+            fmt.eprint(usage)
+            os.exit(2)
+        }
+        int code = try run(files, root, progArgs)
+        os.exit(code)
+    }
+    fmt.eprint("seed: unknown command " + cmd + "\n" + usage)
+    os.exit(2)
+}
+
+// The directory that contains compiler/runtime0.c: $SEED_ROOT, or the parent
+// of the directory of the binary (which is <root>/build/seedN).
+fn rootDir(string argv0) string {
+    string? env = os.env("SEED_ROOT")
+    if (env != null && env != "") {
+        return env
+    }
+    return dirName(dirName(argv0))
+}
+
+fn dirName(string path) string {
+    int slash = -1
+    for (int i = 0; i < path.len(); i++) {
+        if (path[i] == '/') {
+            slash = i
+        }
+    }
+    if (slash < 0) {
+        return "."
+    }
+    if (slash == 0) {
+        return "/"
+    }
+    return path.slice(0, slash)
+}
+
+fn baseName(string path) string {
+    int slash = -1
+    for (int i = 0; i < path.len(); i++) {
+        if (path[i] == '/') {
+            slash = i
+        }
+    }
+    string base = path.slice(slash + 1, path.len())
+    if (base.endsWith(".sd")) {
+        return base.slice(0, base.len() - 3)
+    }
+    return base
+}
+
+// Compiles the files to C. Compile errors are printed to stderr and end the
+// process with exit code 1.
+fn compileFiles([]string files, string root, bool strict) (string, error) {
+    Parser p = try parseFiles(files)
+    Checker c = newChecker(p.ast, p.diags, strict)
+    c.checkProgram()
+    if (c.diags.count() > 0) {
+        c.diags.print()
+        os.exit(1)
+    }
+    string runtime = try readRuntime(root)
+    Gen g = newGen(c)
+    string program = g.genProgram()
+    return runtime + program, null
+}
+
+// Parses the files into one tree. Syntax errors are printed to stderr and
+// end the process with exit code 1.
+fn parseFiles([]string files) (Parser, error) {
+    Parser p = newParser(newDiags())
+    for (int i = 0; i < files.len(); i++) {
+        string src = try fs.read(files[i])
+        int file = p.diags.addFile(files[i], src)
+        p.parseFile(file)
+    }
+    if (p.diags.count() > 0) {
+        p.diags.print()
+        os.exit(1)
+    }
+    return p, null
+}
+
+fn tempDir() string {
+    string? t = os.env("TMPDIR")
+    if (t != null && t != "") {
+        if (t.endsWith("/")) {
+            return t.slice(0, t.len() - 1)
+        }
+        return t
+    }
+    return "/tmp"
+}
+
+// Compiles the files into the executable out, through a C file in the
+// temporary directory.
+fn build([]string files, string root, string out) error {
+    string program = try compileFiles(files, root, false)
+    string dir = tempDir() + "/seed-build-" + baseName(out)
+    try fs.mkdir(dir)
+    string cfile = dir + "/" + baseName(out) + ".c"
+    try fs.write(cfile, program)
+    []string argv = []string{cCompiler}
+    for (int i = 0; i < cFlags.len(); i++) {
+        argv.push(cFlags[i])
+    }
+    argv.push("-o")
+    argv.push(out)
+    argv.push(cfile)
+    for (int j = 0; j < cLibs.len(); j++) {
+        argv.push(cLibs[j])
+    }
+    int code = try os.run(argv)
+    if (code != 0) {
+        return errors.new("the C compiler failed (exit code " + code.string() + ") on " + cfile)
+    }
+    return null
+}
+
+// Builds the files into a temporary executable, runs it with args and
+// returns its exit code.
+fn run([]string files, string root, []string args) (int, error) {
+    string dir = tempDir() + "/seed-run-" + baseName(files[0])
+    try fs.mkdir(dir)
+    string exe = dir + "/" + baseName(files[0])
+    try build(files, root, exe)
+    []string argv = []string{exe}
+    for (int i = 0; i < args.len(); i++) {
+        argv.push(args[i])
+    }
+    return os.run(argv)
+}

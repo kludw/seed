@@ -1,0 +1,710 @@
+// The checker, continued: expressions, places and conversions between T
+// and T?.
+package main
+
+// Reports that a void or multi-value expression is used as a value.
+fn (Checker c) mut notValue(int e) {
+    int t = c.typeOf(e)
+    if (t == tyVoid) {
+        c.error(c.ast.exprs[e].pos, c.describe(e) + " does not return a value")
+    } else if (c.types.isTuple(t)) {
+        c.errorHint(c.ast.exprs[e].pos, c.describe(e) + " returns " + c.types.count(t).string() + " values " + c.typeName(t), "assign them with a declaration like  T a, error err = ...")
+    }
+}
+
+// Whether e (already checked) is a single value; reports it if not.
+fn (Checker c) mut isValue(int e) bool {
+    int t = c.typeOf(e)
+    if (t == tyInvalid) {
+        return false
+    }
+    if (t == tyVoid || c.types.isTuple(t)) {
+        c.notValue(e)
+        c.setType(e, tyInvalid)
+        return false
+    }
+    return true
+}
+
+// Makes the checked expression e usable as a value of type want: a T is
+// wrapped into a T?, null takes the nullable type it is used as, and a
+// narrowed T? read as T goes back to being a T?.
+fn (Checker c) mut coerce(int e, int want, string context) {
+    int t = c.typeOf(e)
+    if (t == want || t == tyInvalid || want == tyInvalid) {
+        return
+    }
+    if (t == tyVoid || c.types.isTuple(t)) {
+        c.notValue(e)
+        c.setType(e, tyInvalid)
+        return
+    }
+    bool wantOpt = c.types.isOpt(want)
+    if (t == tyNull && (wantOpt || want == tyError)) {
+        c.setType(e, want)
+        return
+    }
+    if (wantOpt && t == c.types.elem(want)) {
+        if (c.info[e].narrowed && c.info[e].orig == want) {
+            c.info[e].narrowed = false
+            c.setType(e, want)
+            return
+        }
+        c.info[e].wrap = true
+        c.info[e].inner = t
+        c.setType(e, want)
+        return
+    }
+    Pos pos = c.ast.exprs[e].pos
+    if (t == tyNull) {
+        c.errorHint(pos, "null cannot be used as " + c.typeName(want) + " " + context + ": only nullable types (T?) and error can be null", "declare it as " + c.typeName(want) + "? if it may be missing")
+    } else if (c.types.isOpt(t) && c.types.elem(t) == want) {
+        c.errorHint(pos, c.describe(e) + " is nullable (" + c.typeName(t) + ") and cannot be used as " + c.typeName(want) + " " + context, "check " + c.describe(e) + " != null first")
+    } else {
+        c.error(pos, "cannot use " + c.describe(e) + " (type " + c.typeName(t) + ") as " + c.typeName(want) + " " + context + "; there are no implicit conversions")
+    }
+    c.setType(e, tyInvalid)
+}
+
+fn (Checker c) mut checkValue(int e, int want, string context) {
+    c.checkExpr(e)
+    c.coerce(e, want, context)
+}
+
+// Checks the arguments of a call against parameter types.
+fn (Checker c) mut checkArgs(int call, []int params, string what) {
+    Expr x = c.ast.exprs[call]
+    if (x.count != params.len()) {
+        string s = "s"
+        if (params.len() == 1) {
+            s = ""
+        }
+        string verb = "were"
+        if (x.count == 1) {
+            verb = "was"
+        }
+        c.error(x.pos, what + " takes " + params.len().string() + " argument" + s + " but " + x.count.string() + " " + verb + " given")
+        for (int i = 0; i < x.count; i++) {
+            c.checkExpr(c.ast.at(x.list, i))
+        }
+        c.setType(call, tyInvalid)
+        return
+    }
+    for (int j = 0; j < x.count; j++) {
+        c.checkValue(c.ast.at(x.list, j), params[j], "as argument " + (j + 1).string() + " of " + what)
+    }
+}
+
+// A T? path that is known not to be null is read as a T.
+fn (Checker c) mut applyNarrowing(int e) {
+    int t = c.typeOf(e)
+    if (!c.types.isOpt(t)) {
+        return
+    }
+    string key = c.pathKey(e)
+    if (key != "" && c.isNarrowed(key)) {
+        c.info[e].narrowed = true
+        c.info[e].orig = t
+        c.setType(e, c.types.elem(t))
+    }
+}
+
+// The type declaration named by e when it is a type name used as a value
+// (in Type.Case and Type{...}), or -1.
+fn (Checker c) typeNamed(int e) int {
+    Expr x = c.ast.exprs[e]
+    if (x.kind != ExprKind.Ident || c.lookupVar(x.text) >= 0) {
+        return -1
+    }
+    int? g = c.globals[x.text]
+    if (g != null && c.globalList[g].kind == GlobalKind.Type) {
+        return c.globalList[g].index
+    }
+    return -1
+}
+
+// Whether e names a core package (fmt, os, fs, errors).
+fn (Checker c) pkgNamed(int e) bool {
+    Expr x = c.ast.exprs[e]
+    return x.kind == ExprKind.Ident && c.lookupVar(x.text) < 0 && c.globals[x.text] == null && isCorePackage(x.text)
+}
+
+// Checks that e (already checked) is a place that may be modified: a local
+// variable, or a field or element path that starts at one.
+fn (Checker c) mut requireMutable(int e, string what) {
+    int r = e
+    for (;;) {
+        Expr x = c.ast.exprs[r]
+        Res res = c.info[r].res
+        if (x.kind == ExprKind.Ident) {
+            break
+        }
+        if (x.kind == ExprKind.Field && res == Res.Field) {
+            r = x.a
+            continue
+        }
+        if (x.kind == ExprKind.Index && (res == Res.ListIndex || (res == Res.MapIndex && r == e))) {
+            r = x.a
+            continue
+        }
+        if (x.kind == ExprKind.Index && res == Res.StringIndex) {
+            c.error(c.ast.exprs[e].pos, "strings are immutable; build a new string instead")
+            return
+        }
+        c.errorHint(c.ast.exprs[e].pos, "cannot " + what + " a temporary value", "store it in a local variable first")
+        return
+    }
+    Pos pos = c.ast.exprs[e].pos
+    if (c.info[r].res == Res.Const) {
+        c.error(pos, "cannot " + what + " the constant " + c.ast.exprs[r].text)
+        return
+    }
+    if (c.info[r].res != Res.Local) {
+        return
+    }
+    Var v = c.vars[c.info[r].ref]
+    if (v.kind == VarKind.Param || v.kind == VarKind.Recv) {
+        c.errorHint(pos, "cannot " + what + " " + c.describe(e) + ": parameters are read-only", "copy it into a local variable first, or make the method mut")
+    } else if (v.kind == VarKind.LocalConst) {
+        c.error(pos, "cannot " + what + " the constant " + v.name)
+    }
+}
+
+// Checks the target of an assignment or ++/--.
+fn (Checker c) mut checkLvalue(int e) {
+    Expr x = c.ast.exprs[e]
+    Pos pos = x.pos
+    switch (x.kind) {
+    case ExprKind.Ident:
+        int v = c.lookupVar(x.text)
+        if (v < 0) {
+            int? g = c.globals[x.text]
+            if (g != null && c.globalList[g].kind == GlobalKind.Const) {
+                c.error(pos, "cannot assign to the constant " + x.text)
+            } else {
+                c.undefinedName(e)
+            }
+            return
+        }
+        c.info[e].res = Res.Local
+        c.info[e].ref = v
+        c.setType(e, c.vars[v].ty)
+    case ExprKind.Field:
+        if (c.typeNamed(x.a) >= 0) {
+            c.error(pos, "cannot assign to an enum case")
+            return
+        }
+        c.checkExpr(x.a)
+        if (!c.isValue(x.a)) {
+            return
+        }
+        int bt = c.typeOf(x.a)
+        if (c.types.isOpt(bt)) {
+            c.errorHint(c.ast.exprs[x.a].pos, c.describe(x.a) + " is nullable (" + c.typeName(bt) + ")", "check " + c.describe(x.a) + " != null first")
+            return
+        }
+        if (c.kindOf(bt) != Kind.Struct) {
+            c.error(pos, c.typeName(bt) + " has no field " + x.text)
+            return
+        }
+        int d = c.types.decl(bt)
+        int fi = c.findField(d, x.text)
+        if (fi < 0) {
+            c.unknownField(pos, d, x.text)
+            return
+        }
+        c.info[e].res = Res.Field
+        c.info[e].sub = fi
+        c.setType(e, c.fieldType(d, fi))
+    case ExprKind.Index:
+        c.checkExpr(x.a)
+        if (!c.isValue(x.a)) {
+            return
+        }
+        int lt = c.typeOf(x.a)
+        Kind k = c.kindOf(lt)
+        if (k == Kind.List) {
+            c.info[e].res = Res.ListIndex
+            c.checkValue(x.b, tyInt, "as a list index")
+            c.setType(e, c.types.elem(lt))
+        } else if (k == Kind.Map) {
+            c.info[e].res = Res.MapIndex
+            c.checkValue(x.b, c.types.key(lt), "as a map key")
+            c.setType(e, c.types.elem(lt))
+        } else if (k == Kind.String) {
+            c.error(pos, "strings are immutable; build a new string instead")
+            return
+        } else if (k == Kind.Opt) {
+            c.errorHint(c.ast.exprs[x.a].pos, c.describe(x.a) + " is nullable (" + c.typeName(lt) + ")", "check " + c.describe(x.a) + " != null first")
+            return
+        } else {
+            c.error(pos, "cannot index " + c.typeName(lt))
+            return
+        }
+    case ExprKind.Bad:
+        return
+    case ExprKind.IntLit, ExprKind.FloatLit, ExprKind.ByteLit, ExprKind.StringLit, ExprKind.BoolLit, ExprKind.NullLit:
+        c.error(pos, "cannot assign to this expression")
+        return
+    case ExprKind.Call, ExprKind.Unary, ExprKind.Binary, ExprKind.Try, ExprKind.ListLit, ExprKind.MapLit, ExprKind.Entry:
+        c.error(pos, "cannot assign to this expression")
+        return
+    case ExprKind.StructLit, ExprKind.FieldInit, ExprKind.ChanMake, ExprKind.Group:
+        c.error(pos, "cannot assign to this expression")
+        return
+    }
+    c.requireMutable(e, "assign to")
+}
+
+fn (Checker c) mut undefinedName(int e) {
+    Expr x = c.ast.exprs[e]
+    Suggest s = newSuggest(x.text)
+    for (int i = c.scope.len() - 1; i >= 0; i--) {
+        s.consider(c.vars[c.scope[i]].name)
+    }
+    for (int j = 0; j < c.ast.consts.len(); j++) {
+        s.consider(c.ast.consts[j].name)
+    }
+    c.errorHint(x.pos, "undefined: " + x.text, s.hint())
+    c.setType(e, tyInvalid)
+}
+
+fn (Checker c) mut checkExpr(int e) {
+    Expr x = c.ast.exprs[e]
+    switch (x.kind) {
+    case ExprKind.Bad:
+        c.setType(e, tyInvalid)
+    case ExprKind.IntLit:
+        int v, bool fits = negatedLiteral(x.raw)
+        if (!fits || (!x.neg && v == minInt)) {
+            c.error(x.pos, "integer literal " + x.raw + " is too large for seed0's 64-bit int")
+            c.setType(e, tyInvalid)
+            return
+        }
+        c.setType(e, tyInt)
+    case ExprKind.FloatLit:
+        c.setType(e, tyFloat)
+    case ExprKind.ByteLit:
+        c.setType(e, tyByte)
+    case ExprKind.StringLit:
+        c.setType(e, tyString)
+    case ExprKind.BoolLit:
+        c.setType(e, tyBool)
+    case ExprKind.NullLit:
+        c.setType(e, tyNull)
+    case ExprKind.Ident:
+        c.checkIdent(e)
+    case ExprKind.Field:
+        c.checkField(e)
+    case ExprKind.Index:
+        c.checkIndex(e)
+    case ExprKind.Call:
+        c.checkCall(e)
+    case ExprKind.Unary:
+        c.checkExpr(x.a)
+        if (!c.isValue(x.a)) {
+            c.setType(e, tyInvalid)
+            return
+        }
+        int ut = c.typeOf(x.a)
+        if (x.op == Tok.Minus && ut != tyInt && ut != tyFloat) {
+            c.error(x.pos, "unary - needs an int or float, not " + c.typeName(ut))
+            c.setType(e, tyInvalid)
+            return
+        }
+        if (x.op == Tok.Not && ut != tyBool) {
+            c.error(x.pos, "! needs a bool, not " + c.typeName(ut))
+            c.setType(e, tyInvalid)
+            return
+        }
+        c.setType(e, ut)
+    case ExprKind.Binary:
+        c.checkBinary(e)
+    case ExprKind.Try:
+        c.checkTry(e)
+    case ExprKind.ListLit:
+        int el = c.resolve(x.typeExpr)
+        for (int i = 0; i < x.count; i++) {
+            c.checkValue(c.ast.at(x.list, i), el, "as a list element")
+        }
+        c.setType(e, c.types.listOf(el))
+    case ExprKind.MapLit:
+        c.checkMapLit(e)
+    case ExprKind.StructLit:
+        c.checkStructLit(e)
+    case ExprKind.Entry, ExprKind.FieldInit:
+        c.setType(e, tyInvalid)
+    case ExprKind.ChanMake:
+        c.unsupported(x.pos, "chan")
+        c.setType(e, tyInvalid)
+    case ExprKind.Group:
+        c.unsupported(x.pos, "group")
+        c.setType(e, tyInvalid)
+    }
+}
+
+fn (Checker c) mut checkIdent(int e) {
+    Expr x = c.ast.exprs[e]
+    string n = x.text
+    if (n == "_") {
+        c.error(x.pos, "_ can only be assigned to, not read")
+        c.setType(e, tyInvalid)
+        return
+    }
+    int v = c.lookupVar(n)
+    if (v >= 0) {
+        c.info[e].res = Res.Local
+        c.info[e].ref = v
+        c.vars[v].used = true
+        c.setType(e, c.vars[v].ty)
+        c.applyNarrowing(e)
+        return
+    }
+    int? g = c.globals[n]
+    if (g != null) {
+        Global gl = c.globalList[g]
+        switch (gl.kind) {
+        case GlobalKind.Const:
+            c.checkConst(gl.index)
+            c.info[e].res = Res.Const
+            c.info[e].ref = gl.index
+            c.setType(e, c.constType[gl.index])
+            return
+        case GlobalKind.Fn:
+            c.unsupported(x.pos, "using a function as a value")
+        case GlobalKind.Type:
+            c.error(x.pos, n + " is a type, not a value")
+        }
+        c.setType(e, tyInvalid)
+        return
+    }
+    if (isCorePackage(n)) {
+        c.error(x.pos, n + " is a package; use it as " + n + ".name(...)")
+        c.setType(e, tyInvalid)
+        return
+    }
+    c.undefinedName(e)
+}
+
+fn (Checker c) mut checkField(int e) {
+    Expr x = c.ast.exprs[e]
+    int d = c.typeNamed(x.a)
+    if (d >= 0) {
+        TypeDecl td = c.ast.typeDecls[d]
+        if (td.kind != DeclKind.Enum) {
+            c.error(x.pos, td.name + " is a struct type; it has no case " + x.text)
+            c.setType(e, tyInvalid)
+            return
+        }
+        int ci = c.findCase(d, x.text)
+        if (ci < 0) {
+            c.unknownCase(x.pos, d, x.text)
+            c.setType(e, tyInvalid)
+            return
+        }
+        if (c.enumCase(d, ci).paramCount > 0) {
+            c.errorHint(x.pos, td.name + "." + x.text + " carries data", "create it with " + td.name + "." + x.text + "(...)")
+            c.setType(e, tyInvalid)
+            return
+        }
+        c.info[e].res = Res.EnumVal
+        c.info[e].ref = d
+        c.info[e].sub = ci
+        c.setType(e, c.declType[d])
+        return
+    }
+    if (c.pkgNamed(x.a)) {
+        c.error(x.pos, c.ast.exprs[x.a].text + "." + x.text + " is a function; call it")
+        c.setType(e, tyInvalid)
+        return
+    }
+    c.checkExpr(x.a)
+    if (!c.isValue(x.a)) {
+        c.setType(e, tyInvalid)
+        return
+    }
+    int bt = c.typeOf(x.a)
+    if (c.types.isOpt(bt)) {
+        c.errorHint(c.ast.exprs[x.a].pos, c.describe(x.a) + " is nullable (" + c.typeName(bt) + ")", "check " + c.describe(x.a) + " != null before reading ." + x.text)
+        c.setType(e, tyInvalid)
+        return
+    }
+    if (c.kindOf(bt) != Kind.Struct) {
+        c.error(x.pos, c.typeName(bt) + " has no field " + x.text)
+        c.setType(e, tyInvalid)
+        return
+    }
+    int sd = c.types.decl(bt)
+    int fi = c.findField(sd, x.text)
+    if (fi < 0) {
+        if (c.methods[c.ast.typeDecls[sd].name + "." + x.text] != null) {
+            c.errorHint(x.pos, x.text + " is a method, not a field", "call it with " + x.text + "()")
+        } else {
+            c.unknownField(x.pos, sd, x.text)
+        }
+        c.setType(e, tyInvalid)
+        return
+    }
+    c.info[e].res = Res.Field
+    c.info[e].sub = fi
+    c.setType(e, c.fieldType(sd, fi))
+    c.applyNarrowing(e)
+}
+
+fn (Checker c) mut checkIndex(int e) {
+    Expr x = c.ast.exprs[e]
+    c.checkExpr(x.a)
+    if (!c.isValue(x.a)) {
+        c.checkExpr(x.b)
+        c.setType(e, tyInvalid)
+        return
+    }
+    int bt = c.typeOf(x.a)
+    Kind k = c.kindOf(bt)
+    if (k == Kind.List) {
+        c.info[e].res = Res.ListIndex
+        c.checkValue(x.b, tyInt, "as a list index")
+        c.setType(e, c.types.elem(bt))
+    } else if (k == Kind.String) {
+        c.info[e].res = Res.StringIndex
+        c.checkValue(x.b, tyInt, "as a string index")
+        c.setType(e, tyByte)
+    } else if (k == Kind.Map) {
+        c.info[e].res = Res.MapIndex
+        c.checkValue(x.b, c.types.key(bt), "as a map key")
+        c.setType(e, c.types.optOf(c.types.elem(bt)))
+    } else if (k == Kind.Opt) {
+        c.errorHint(c.ast.exprs[x.a].pos, c.describe(x.a) + " is nullable (" + c.typeName(bt) + ")", "check " + c.describe(x.a) + " != null before indexing")
+        c.setType(e, tyInvalid)
+    } else {
+        c.error(x.pos, "cannot index a value of type " + c.typeName(bt))
+        c.setType(e, tyInvalid)
+    }
+}
+
+fn isComparison(Tok op) bool {
+    return binaryPrecedence(op) == 3
+}
+
+fn (Checker c) mut checkBinary(int e) {
+    Expr x = c.ast.exprs[e]
+    Tok op = x.op
+    string ops = op.text()
+    if (op == Tok.AndAnd || op == Tok.OrOr) {
+        c.checkValue(x.a, tyBool, "with " + ops)
+        c.narrowMarks.push(c.narrows.len())
+        c.narrowOn(x.a, op == Tok.AndAnd)
+        c.checkValue(x.b, tyBool, "with " + ops)
+        int? mark = c.narrowMarks.pop()
+        if (mark != null) {
+            c.truncateNarrows(mark)
+        }
+        c.setType(e, tyBool)
+        return
+    }
+    c.checkExpr(x.a)
+    c.checkExpr(x.b)
+    int a = x.a
+    int b = x.b
+    bool aNull = c.ast.exprs[a].kind == ExprKind.NullLit
+    bool bNull = c.ast.exprs[b].kind == ExprKind.NullLit
+    if ((op == Tok.Eq || op == Tok.Ne) && (aNull || bNull)) {
+        c.setType(e, tyBool)
+        int other = a
+        int nul = b
+        if (aNull) {
+            other = b
+            nul = a
+        }
+        if (aNull && bNull) {
+            c.error(x.pos, "comparing null with null")
+            return
+        }
+        if (!c.isValue(other)) {
+            return
+        }
+        if (c.info[other].narrowed) {
+            c.info[other].narrowed = false
+            c.setType(other, c.info[other].orig)
+        }
+        int ot = c.typeOf(other)
+        if (!c.types.isOpt(ot) && ot != tyError) {
+            c.error(c.ast.exprs[other].pos, c.describe(other) + " has type " + c.typeName(ot) + ", which is never null")
+            return
+        }
+        c.setType(nul, ot)
+        return
+    }
+    if (!c.isValue(a) || !c.isValue(b)) {
+        c.setType(e, tyInvalid)
+        return
+    }
+    int at = c.typeOf(a)
+    int bt = c.typeOf(b)
+    if (op == Tok.Eq || op == Tok.Ne) {
+        c.setType(e, tyBool)
+        if (at != bt) {
+            if ((c.types.isOpt(at) && c.types.elem(at) == bt) || (c.types.isOpt(bt) && c.types.elem(bt) == at)) {
+                c.errorHint(x.pos, "a nullable value can only be compared with null", "check it against null first")
+            } else {
+                c.error(x.pos, "mismatched types " + c.typeName(at) + " and " + c.typeName(bt) + " for " + ops)
+            }
+            return
+        }
+        if (c.types.isOpt(at)) {
+            c.errorHint(x.pos, "a nullable value (" + c.typeName(at) + ") can only be compared with null", "check it against null first")
+        }
+        return
+    }
+    if (at != bt) {
+        if (c.types.isOpt(at) && c.types.elem(at) == bt) {
+            c.errorHint(c.ast.exprs[a].pos, c.describe(a) + " is nullable (" + c.typeName(at) + ")", "check " + c.describe(a) + " != null first")
+        } else if (c.types.isOpt(bt) && c.types.elem(bt) == at) {
+            c.errorHint(c.ast.exprs[b].pos, c.describe(b) + " is nullable (" + c.typeName(bt) + ")", "check " + c.describe(b) + " != null first")
+        } else {
+            c.errorHint(x.pos, "mismatched types " + c.typeName(at) + " and " + c.typeName(bt) + " for " + ops, "there are no implicit conversions; use float(x), int(x), x.string(), ...")
+        }
+        c.setType(e, tyInvalid)
+        return
+    }
+    bool ok = false
+    if (op == Tok.Plus) {
+        ok = at == tyInt || at == tyFloat || at == tyString
+    } else if (op == Tok.Minus || op == Tok.Star || op == Tok.Slash) {
+        ok = at == tyInt || at == tyFloat
+    } else if (op == Tok.Percent) {
+        ok = at == tyInt
+    } else if (op == Tok.Amp || op == Tok.Pipe || op == Tok.Caret || op == Tok.Shl || op == Tok.Shr) {
+        ok = at == tyInt || at == tyByte
+    } else {
+        ok = at == tyInt || at == tyFloat || at == tyString || at == tyByte
+    }
+    if (!ok) {
+        if (c.types.isOpt(at)) {
+            c.errorHint(x.pos, c.describe(a) + " is nullable (" + c.typeName(at) + ")", "check " + c.describe(a) + " != null first")
+        } else {
+            c.error(x.pos, "operator " + ops + " is not defined on " + c.typeName(at))
+        }
+        c.setType(e, tyInvalid)
+        return
+    }
+    if (isComparison(op)) {
+        c.setType(e, tyBool)
+    } else {
+        c.setType(e, at)
+    }
+}
+
+fn (Checker c) mut checkTry(int e) {
+    Expr x = c.ast.exprs[e]
+    c.checkExpr(x.a)
+    int t = c.typeOf(x.a)
+    c.setType(e, tyInvalid)
+    if (t == tyInvalid) {
+        return
+    }
+    if (c.ast.exprs[x.a].kind != ExprKind.Call || !c.types.endsWithError(t)) {
+        c.error(x.pos, "try needs a call that returns an error as its last result; " + c.describe(x.a) + " returns " + c.typeName(t))
+        return
+    }
+    if (c.curFn < 0) {
+        c.error(x.pos, "try cannot be used in a constant")
+        return
+    }
+    int ret = c.fnRet[c.curFn]
+    if (c.types.lastResult(ret) != tyError) {
+        c.errorHint(x.pos, "try can only be used in a function whose last result is error", "handle the error here instead: T v, error err = ...")
+        return
+    }
+    if (t == tyError) {
+        c.setType(e, tyVoid)
+    } else if (c.types.count(t) == 2) {
+        c.setType(e, c.types.part(t, 0))
+    } else {
+        []int rest = []int{}
+        for (int i = 0; i < c.types.count(t) - 1; i++) {
+            rest.push(c.types.part(t, i))
+        }
+        c.setType(e, c.types.tupleOf(rest))
+    }
+}
+
+fn (Checker c) mut checkMapLit(int e) {
+    Expr x = c.ast.exprs[e]
+    int k = c.resolve(x.typeExpr)
+    int v = c.resolve(x.typeExpr2)
+    int mt = tyInvalid
+    if (k != tyInvalid && k != tyInt && k != tyByte && k != tyBool && k != tyString) {
+        c.error(c.ast.typeExprs[x.typeExpr].pos, "map keys must be int, byte, bool or string, not " + c.typeName(k))
+    } else if (v != tyInvalid && c.types.isOpt(v)) {
+        c.error(c.ast.typeExprs[x.typeExpr2].pos, "map values cannot be nullable")
+    } else {
+        mt = c.types.mapOf(k, v)
+    }
+    for (int i = 0; i < x.count; i++) {
+        Expr en = c.ast.exprs[c.ast.at(x.list, i)]
+        c.checkValue(en.a, k, "as a map key")
+        c.checkValue(en.b, v, "as a map value")
+    }
+    c.setType(e, mt)
+}
+
+fn (Checker c) mut checkStructLit(int e) {
+    Expr x = c.ast.exprs[e]
+    c.setType(e, tyInvalid)
+    if (x.pkg != "") {
+        c.errorHint(x.pos, "unknown type " + x.pkg + "." + x.text, "types from other packages are not implemented yet")
+        return
+    }
+    int? g = c.globals[x.text]
+    if (g == null || c.globalList[g].kind != GlobalKind.Type) {
+        Suggest s = newSuggest(x.text)
+        for (int i = 0; i < c.ast.typeDecls.len(); i++) {
+            s.consider(c.ast.typeDecls[i].name)
+        }
+        c.errorHint(x.pos, "unknown struct type " + x.text, s.hint())
+        return
+    }
+    int d = c.globalList[g].index
+    TypeDecl td = c.ast.typeDecls[d]
+    if (td.kind != DeclKind.Struct) {
+        c.errorHint(x.pos, td.name + " is not a struct", "create an enum value with " + td.name + ".Case")
+        return
+    }
+    bool ok = true
+    for (int j = 0; j < x.count; j++) {
+        int fe = c.ast.at(x.list, j)
+        Expr f = c.ast.exprs[fe]
+        int fi = c.findField(d, f.text)
+        if (fi < 0) {
+            c.unknownField(f.pos, d, f.text)
+            c.checkExpr(f.a)
+            ok = false
+            continue
+        }
+        for (int k = 0; k < j; k++) {
+            if (c.ast.exprs[c.ast.at(x.list, k)].text == f.text) {
+                c.error(f.pos, "field " + f.text + " is set twice")
+                ok = false
+            }
+        }
+        c.info[fe].sub = fi
+        c.checkValue(f.a, c.fieldType(d, fi), "for field " + f.text)
+    }
+    for (int m = 0; m < td.fieldCount; m++) {
+        string name = c.fieldName(d, m)
+        bool found = false
+        for (int n = 0; n < x.count; n++) {
+            if (c.ast.exprs[c.ast.at(x.list, n)].text == name) {
+                found = true
+            }
+        }
+        if (!found) {
+            c.errorHint(x.pos, "missing field " + name + " in " + td.name + " literal", "a struct literal must set every field")
+            ok = false
+        }
+    }
+    if (ok) {
+        c.setType(e, c.declType[d])
+    }
+}

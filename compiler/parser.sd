@@ -1,0 +1,986 @@
+// The parser: recursive descent over the tokens of one file at a time,
+// building the arenas in Ast. It covers the whole grammar of
+// docs/grammar.md, including the parts that later phases do not support yet.
+//
+// Error recovery: the first syntax error in a statement sets `failed`; every
+// parse function then returns quickly without reporting more. The block
+// loop skips to the end of the statement and carries on, and the top-level
+// loop skips to the next declaration, so one run reports many errors.
+//
+// Statements and expressions are in this file; declarations and types are in
+// parse_decl.sd.
+package main
+
+type Parser struct {
+    Ast ast
+    Diags diags
+    []Token toks
+    int pos
+    int file
+    bool failed
+}
+
+fn newParser(Diags diags) Parser {
+    return Parser{ast: newAst(), diags: diags, toks: []Token{}, pos: 0, file: 0, failed: false}
+}
+
+// ---- tokens ----
+
+fn (Parser p) kind() Tok {
+    return p.toks[p.pos].kind
+}
+
+fn (Parser p) kindAt(int i) Tok {
+    if (i >= p.toks.len()) {
+        return Tok.Eof
+    }
+    return p.toks[i].kind
+}
+
+fn (Parser p) peek(int ahead) Tok {
+    return p.kindAt(p.pos + ahead)
+}
+
+fn (Parser p) here() Pos {
+    return p.toks[p.pos].pos
+}
+
+fn (Parser p) mut next() Token {
+    Token t = p.toks[p.pos]
+    if (t.kind != Tok.Eof) {
+        p.pos++
+    }
+    return t
+}
+
+fn (Parser p) mut accept(Tok k) bool {
+    if (p.kind() == k) {
+        p.pos++
+        return true
+    }
+    return false
+}
+
+fn (Parser p) mut skipNewlines() {
+    for (; p.kind() == Tok.Newline; ) {
+        p.pos++
+    }
+}
+
+// How a token is shown in messages.
+fn tokenDesc(Token t) string {
+    Tok k = t.kind
+    if (k == Tok.Ident) {
+        return "'" + t.text + "'"
+    }
+    if (k == Tok.Newline || k == Tok.Eof) {
+        return k.text()
+    }
+    if (k == Tok.Int || k == Tok.Float || k == Tok.String || k == Tok.Byte) {
+        return k.text() + " literal " + t.raw
+    }
+    return "'" + k.text() + "'"
+}
+
+// Reports a syntax error unless one was already reported for this statement.
+fn (Parser p) mut errorAt(Pos pos, string message) {
+    p.errorHint(pos, message, "")
+}
+
+fn (Parser p) mut errorHint(Pos pos, string message, string hint) {
+    if (!p.failed) {
+        p.diags.errorHint(pos, message, hint)
+    }
+    p.failed = true
+}
+
+fn (Parser p) mut expect(Tok k, string context) {
+    if (p.kind() == k) {
+        p.pos++
+        return
+    }
+    if (p.failed) {
+        return
+    }
+    Token t = p.toks[p.pos]
+    if (k == Tok.Newline) {
+        p.errorHint(t.pos, "expected the end of the statement" + context + ", found " + tokenDesc(t), "put one statement per line")
+    } else {
+        p.errorAt(t.pos, "expected '" + k.text() + "'" + context + ", found " + tokenDesc(t))
+    }
+}
+
+// Like expect, and returns whether the token was there.
+fn (Parser p) mut expectTok(Tok k, string context) bool {
+    bool found = p.kind() == k
+    p.expect(k, context)
+    return found
+}
+
+fn (Parser p) mut expectIdent(string context) string {
+    if (p.kind() == Tok.Ident) {
+        return p.next().text
+    }
+    if (!p.failed) {
+        Token t = p.toks[p.pos]
+        p.errorAt(t.pos, "expected a name " + context + ", found " + tokenDesc(t))
+    }
+    return ""
+}
+
+// After a syntax error inside a block: skip to the end of the statement (a
+// newline outside brackets) or to the `}` that closes the block.
+fn (Parser p) mut syncStatement() {
+    int depth = 0
+    for (;;) {
+        Tok k = p.kind()
+        if (k == Tok.Eof) {
+            break
+        }
+        if (depth == 0 && k == Tok.RBrace) {
+            break
+        }
+        if (depth == 0 && k == Tok.Newline) {
+            p.pos++
+            break
+        }
+        if (k == Tok.LBrace || k == Tok.LParen || k == Tok.LBrack) {
+            depth++
+        } else if (k == Tok.RBrace || k == Tok.RParen || k == Tok.RBrack) {
+            depth--
+        }
+        p.pos++
+    }
+    p.failed = false
+}
+
+// ---- types (scanning) ----
+
+// Returns the token index just after a type that starts at token i, or -1
+// if no type starts there. It builds nothing: it decides whether a statement
+// is a declaration. See parseType for `named`.
+fn (Parser p) scanType(int i, bool named) int {
+    int end = p.scanBaseType(i, named)
+    if (end < 0) {
+        return -1
+    }
+    if (p.kindAt(end) == Tok.Question) {
+        return end + 1
+    }
+    return end
+}
+
+fn (Parser p) scanBaseType(int i, bool named) int {
+    Tok k = p.kindAt(i)
+    if (k == Tok.Ident) {
+        if (p.kindAt(i + 1) == Tok.Dot && p.kindAt(i + 2) == Tok.Ident) {
+            return i + 3
+        }
+        return i + 1
+    }
+    if (k == Tok.LBrack) {
+        if (p.kindAt(i + 1) != Tok.RBrack) {
+            return -1
+        }
+        return p.scanBaseType(i + 2, named)
+    }
+    if (k == Tok.KwMap) {
+        if (p.kindAt(i + 1) != Tok.LBrack) {
+            return -1
+        }
+        int keyEnd = p.scanType(i + 2, false)
+        if (keyEnd < 0 || p.kindAt(keyEnd) != Tok.RBrack) {
+            return -1
+        }
+        return p.scanBaseType(keyEnd + 1, named)
+    }
+    if (k == Tok.KwChan) {
+        return p.scanBaseType(i + 1, named)
+    }
+    if (k == Tok.LParen) {
+        int inner = p.scanType(i + 1, false)
+        if (inner < 0 || p.kindAt(inner) != Tok.RParen) {
+            return -1
+        }
+        return inner + 1
+    }
+    if (k == Tok.KwFn) {
+        if (p.kindAt(i + 1) != Tok.LParen) {
+            return -1
+        }
+        int j = i + 2
+        if (p.kindAt(j) != Tok.RParen) {
+            for (;;) {
+                j = p.scanType(j, false)
+                if (j < 0) {
+                    return -1
+                }
+                if (p.kindAt(j) != Tok.Comma) {
+                    break
+                }
+                j++
+            }
+            if (p.kindAt(j) != Tok.RParen) {
+                return -1
+            }
+        }
+        j++
+        if (!p.fnHasResult(j, named)) {
+            return j
+        }
+        if (p.kindAt(j) == Tok.LParen && p.scanType(j + 1, false) >= 0) {
+            int r = j + 1
+            for (;;) {
+                r = p.scanType(r, false)
+                if (r < 0) {
+                    return -1
+                }
+                if (p.kindAt(r) != Tok.Comma) {
+                    break
+                }
+                r++
+            }
+            if (p.kindAt(r) != Tok.RParen) {
+                return -1
+            }
+            return r + 1
+        }
+        return p.scanType(j, named)
+    }
+    return -1
+}
+
+// Whether a function type whose `)` ends just before token j has a result
+// type. In a `Type name` position (named), `fn(int) f` has no result while
+// `fn(int) bool f` has one.
+fn (Parser p) fnHasResult(int j, bool named) bool {
+    Tok k = p.kindAt(j)
+    if (k == Tok.LBrack || k == Tok.KwMap || k == Tok.KwChan || k == Tok.KwFn || k == Tok.LParen) {
+        return true
+    }
+    if (k != Tok.Ident) {
+        return false
+    }
+    if (!named) {
+        return true
+    }
+    Tok after = p.kindAt(j + 1)
+    return after == Tok.Ident || after == Tok.Dot || after == Tok.Question
+}
+
+// Whether a declaration (`Type name`) starts at the current token.
+fn (Parser p) atDeclaration() bool {
+    Tok k = p.kind()
+    if (k != Tok.Ident && k != Tok.LBrack && k != Tok.KwMap && k != Tok.KwChan && k != Tok.KwFn && k != Tok.LParen) {
+        return false
+    }
+    int end = p.scanType(p.pos, true)
+    return end >= 0 && p.kindAt(end) == Tok.Ident
+}
+
+// ---- statements ----
+
+fn (Parser p) mut parseBlock(string context) int {
+    Pos start = p.here()
+    if (!p.expectTok(Tok.LBrace, context)) {
+        p.ast.blocks.push(Block{pos: start, end: start, list: 0, count: 0})
+        return p.ast.blocks.len() - 1
+    }
+    p.skipNewlines()
+    []int stmts = []int{}
+    for (; p.kind() != Tok.RBrace && p.kind() != Tok.Eof; ) {
+        stmts.push(p.parseStmt())
+        if (!p.failed && p.kind() != Tok.RBrace) {
+            p.expect(Tok.Newline, "")
+        }
+        if (p.failed) {
+            p.syncStatement()
+        }
+        p.skipNewlines()
+    }
+    Pos end = p.here()
+    if (p.kind() == Tok.Eof) {
+        p.errorAt(end, "unexpected end of file: missing '}'")
+    } else {
+        p.pos++
+    }
+    p.ast.blocks.push(Block{pos: start, end: end, list: p.ast.addList(stmts), count: stmts.len()})
+    return p.ast.blocks.len() - 1
+}
+
+fn (Parser p) mut parseStmt() int {
+    Token t = p.toks[p.pos]
+    Tok k = t.kind
+    if (k == Tok.KwIf) {
+        return p.parseIf()
+    }
+    if (k == Tok.KwFor) {
+        return p.parseFor()
+    }
+    if (k == Tok.KwSwitch) {
+        return p.parseSwitch()
+    }
+    if (k == Tok.KwSelect) {
+        return p.parseSelect()
+    }
+    if (k == Tok.KwReturn) {
+        p.pos++
+        Stmt r = newStmt(StmtKind.Return, t.pos)
+        []int values = []int{}
+        if (p.kind() != Tok.Newline && p.kind() != Tok.RBrace && p.kind() != Tok.Eof) {
+            for (;;) {
+                values.push(p.parseExpr())
+                if (p.failed || !p.accept(Tok.Comma)) {
+                    break
+                }
+                p.skipNewlines()
+            }
+        }
+        r.list = p.ast.addList(values)
+        r.count = values.len()
+        return p.ast.addStmt(r)
+    }
+    if (k == Tok.KwBreak) {
+        p.pos++
+        return p.ast.addStmt(newStmt(StmtKind.Break, t.pos))
+    }
+    if (k == Tok.KwContinue) {
+        p.pos++
+        return p.ast.addStmt(newStmt(StmtKind.Continue, t.pos))
+    }
+    if (k == Tok.KwConst) {
+        p.pos++
+        Stmt c = newStmt(StmtKind.Const, t.pos)
+        c.typeExpr = p.parseType(true)
+        c.namePos = p.here()
+        c.name = p.expectIdent("for the constant")
+        p.expect(Tok.Assign, " after the constant name (a constant needs a value)")
+        p.skipNewlines()
+        c.expr = p.parseExpr()
+        return p.ast.addStmt(c)
+    }
+    if (k == Tok.KwDefer || k == Tok.KwSpawn) {
+        p.pos++
+        Stmt d = newStmt(StmtKind.Defer, t.pos)
+        if (k == Tok.KwSpawn) {
+            d.kind = StmtKind.Spawn
+        }
+        d.expr = p.parseExpr()
+        return p.ast.addStmt(d)
+    }
+    if (k == Tok.KwAssert) {
+        p.pos++
+        Stmt a = newStmt(StmtKind.Assert, t.pos)
+        p.expect(Tok.LParen, " after assert (it is written assert(condition))")
+        a.expr = p.parseExpr()
+        p.expect(Tok.RParen, " to close the assert")
+        return p.ast.addStmt(a)
+    }
+    if (k == Tok.KwElse) {
+        p.errorAt(t.pos, "else must be on the same line as the closing '}' of the if")
+    } else if (k == Tok.KwCase || k == Tok.KwDefault) {
+        p.errorAt(t.pos, k.text() + " outside of a switch or select")
+    } else if (k == Tok.LBrace) {
+        p.errorAt(t.pos, "unexpected '{': a block must belong to an if, for, switch or select")
+    } else {
+        return p.parseSimple()
+    }
+    return p.ast.addStmt(newStmt(StmtKind.Bad, t.pos))
+}
+
+// A declaration, assignment, ++/-- or expression statement.
+fn (Parser p) mut parseSimple() int {
+    Pos start = p.here()
+    []int targets = []int{}
+    for (;;) {
+        Pos tpos = p.here()
+        if (p.atDeclaration()) {
+            int te = p.parseType(true)
+            Pos npos = p.here()
+            string name = p.expectIdent("for the variable")
+            p.ast.targets.push(Target{kind: TargetKind.Decl, pos: npos, typeExpr: te, name: name, expr: -1})
+        } else {
+            int e = p.parseExpr()
+            Expr x = p.ast.exprs[e]
+            if (x.kind == ExprKind.Ident && x.text == "_") {
+                p.ast.targets.push(Target{kind: TargetKind.Discard, pos: tpos, typeExpr: -1, name: "_", expr: -1})
+            } else {
+                p.ast.targets.push(Target{kind: TargetKind.Place, pos: tpos, typeExpr: -1, name: "", expr: e})
+            }
+        }
+        targets.push(p.ast.targets.len() - 1)
+        if (p.failed || !p.accept(Tok.Comma)) {
+            break
+        }
+    }
+    if (p.failed) {
+        return p.ast.addStmt(newStmt(StmtKind.Bad, start))
+    }
+    if (p.accept(Tok.Assign)) {
+        p.skipNewlines()
+        Stmt s = newStmt(StmtKind.Assign, start)
+        s.list = p.ast.addList(targets)
+        s.count = targets.len()
+        s.expr = p.parseExpr()
+        return p.ast.addStmt(s)
+    }
+    Target first = p.ast.targets[targets[0]]
+    if (targets.len() > 1 || first.kind == TargetKind.Decl) {
+        p.errorHint(p.here(), "expected '=' in the declaration or assignment, found " + tokenDesc(p.toks[p.pos]), "every declaration needs a value, for example  int count = 0")
+        return p.ast.addStmt(newStmt(StmtKind.Bad, start))
+    }
+    if (first.kind == TargetKind.Discard) {
+        p.errorAt(p.here(), "expected '=' after _")
+        return p.ast.addStmt(newStmt(StmtKind.Bad, start))
+    }
+    if (p.kind() == Tok.Inc || p.kind() == Tok.Dec) {
+        Stmt s2 = newStmt(StmtKind.IncDec, start)
+        s2.inc = p.next().kind == Tok.Inc
+        s2.expr = first.expr
+        return p.ast.addStmt(s2)
+    }
+    Stmt s3 = newStmt(StmtKind.ExprStmt, start)
+    s3.expr = first.expr
+    return p.ast.addStmt(s3)
+}
+
+fn (Parser p) mut parseIf() int {
+    Stmt s = newStmt(StmtKind.If, p.next().pos)
+    p.expect(Tok.LParen, " after if (conditions are always in parentheses)")
+    s.expr = p.parseExpr()
+    p.expect(Tok.RParen, " to close the if condition")
+    s.body = p.parseBlock(" to open the if body (braces go on the same line)")
+    if (!p.failed && p.accept(Tok.KwElse)) {
+        if (p.kind() == Tok.KwIf) {
+            s.elseIf = p.parseIf()
+        } else {
+            s.els = p.parseBlock(" after else")
+        }
+    }
+    return p.ast.addStmt(s)
+}
+
+fn (Parser p) mut parseFor() int {
+    Stmt s = newStmt(StmtKind.For, p.next().pos)
+    p.expect(Tok.LParen, " after for (a loop looks like for (int i = 0; i < n; i++))")
+    if (p.kind() != Tok.Semi && !p.failed) {
+        s.init = p.parseSimple()
+    }
+    p.expect(Tok.Semi, " after the loop initializer")
+    if (p.kind() != Tok.Semi && !p.failed) {
+        s.expr = p.parseExpr()
+    }
+    p.expect(Tok.Semi, " after the loop condition")
+    if (p.kind() != Tok.RParen && !p.failed) {
+        s.post = p.parseSimple()
+    }
+    p.expect(Tok.RParen, " to close the for header")
+    if (!p.failed && s.init >= 0 && p.ast.stmts[s.init].kind != StmtKind.Assign) {
+        p.errorAt(p.ast.stmts[s.init].pos, "the loop initializer must be a declaration or an assignment")
+    }
+    if (!p.failed && s.post >= 0 && p.ast.stmts[s.post].kind == StmtKind.ExprStmt) {
+        p.errorAt(p.ast.stmts[s.post].pos, "the loop post statement must be an assignment, ++ or --")
+    }
+    s.body = p.parseBlock(" to open the loop body (braces go on the same line)")
+    return p.ast.addStmt(s)
+}
+
+fn (Parser p) mut parseSwitch() int {
+    Stmt s = newStmt(StmtKind.Switch, p.next().pos)
+    p.expect(Tok.LParen, " after switch (the value is always in parentheses)")
+    s.expr = p.parseExpr()
+    p.expect(Tok.RParen, " to close the switch value")
+    p.expect(Tok.LBrace, " to open the switch body")
+    p.skipNewlines()
+    []int cases = []int{}
+    for (; !p.failed && (p.kind() == Tok.KwCase || p.kind() == Tok.KwDefault); ) {
+        Token ct = p.next()
+        []int labels = []int{}
+        if (ct.kind == Tok.KwCase) {
+            for (;;) {
+                labels.push(p.parseLabel())
+                if (p.failed || !p.accept(Tok.Comma)) {
+                    break
+                }
+                p.skipNewlines()
+            }
+        }
+        p.expect(Tok.Colon, " after the case")
+        int body = p.parseCaseBody(ct.pos)
+        p.ast.cases.push(Case{
+            pos: ct.pos,
+            isDefault: ct.kind == Tok.KwDefault,
+            labels: p.ast.addList(labels),
+            labelCount: labels.len(),
+            comm: -1,
+            body: body,
+        })
+        cases.push(p.ast.cases.len() - 1)
+    }
+    p.expect(Tok.RBrace, " to close the switch (expected case, default or '}')")
+    s.list = p.ast.addList(cases)
+    s.count = cases.len()
+    return p.ast.addStmt(s)
+}
+
+// The statements of a case, up to the next case, default or `}`.
+fn (Parser p) mut parseCaseBody(Pos start) int {
+    if (p.failed) {
+        p.syncStatement()
+    }
+    p.skipNewlines()
+    []int stmts = []int{}
+    for (; p.kind() != Tok.KwCase && p.kind() != Tok.KwDefault && p.kind() != Tok.RBrace && p.kind() != Tok.Eof; ) {
+        stmts.push(p.parseStmt())
+        if (!p.failed && p.kind() != Tok.RBrace) {
+            p.expect(Tok.Newline, "")
+        }
+        if (p.failed) {
+            p.syncStatement()
+        }
+        p.skipNewlines()
+    }
+    p.ast.blocks.push(Block{pos: start, end: p.here(), list: p.ast.addList(stmts), count: stmts.len()})
+    return p.ast.blocks.len() - 1
+}
+
+// A case label: an enum pattern (`Shape.Circle(float r)`, `Color.Red`,
+// `pkg.Shape.Circle(float r)`) or a value expression.
+fn (Parser p) mut parseLabel() int {
+    Pos pos = p.here()
+    Label l = Label{
+        pos: pos,
+        isPattern: false,
+        parens: false,
+        pkg: "",
+        typeName: "",
+        caseName: "",
+        expr: -1,
+        params: 0,
+        paramCount: 0,
+    }
+    if (p.kind() == Tok.Ident && p.peek(1) == Tok.Dot && p.peek(2) == Tok.Ident) {
+        int j = p.pos + 3
+        bool qualified = false
+        if (p.kindAt(j) == Tok.Dot && p.kindAt(j + 1) == Tok.Ident) {
+            qualified = true
+            j = j + 2
+        }
+        Tok after = p.kindAt(j)
+        if (after == Tok.Colon || after == Tok.Comma) {
+            l.isPattern = true
+            l = p.labelNames(l, qualified)
+            l.expr = p.parseExpr()
+            p.ast.labels.push(l)
+            return p.ast.labels.len() - 1
+        }
+        if (after == Tok.LParen) {
+            bool pattern = p.kindAt(j + 1) == Tok.RParen
+            if (!pattern) {
+                int end = p.scanType(j + 1, true)
+                pattern = end >= 0 && p.kindAt(end) == Tok.Ident
+            }
+            if (pattern) {
+                l.isPattern = true
+                l.parens = true
+                l = p.labelNames(l, qualified)
+                p.pos = j + 1
+                []int params = p.parseParams("for the binding")
+                l.params = p.ast.addList(params)
+                l.paramCount = params.len()
+                p.ast.labels.push(l)
+                return p.ast.labels.len() - 1
+            }
+        }
+    }
+    l.expr = p.parseExpr()
+    p.ast.labels.push(l)
+    return p.ast.labels.len() - 1
+}
+
+// Returns l with the pkg, type and case names of a pattern label filled in
+// from the tokens at the current position, which it does not consume.
+fn (Parser p) labelNames(Label l, bool qualified) Label {
+    Label r = l
+    int i = p.pos
+    if (qualified) {
+        r.pkg = p.toks[i].text
+        i = i + 2
+    }
+    r.typeName = p.toks[i].text
+    r.caseName = p.toks[i + 2].text
+    return r
+}
+
+fn (Parser p) mut parseSelect() int {
+    Stmt s = newStmt(StmtKind.Select, p.next().pos)
+    p.expect(Tok.LBrace, " to open the select body")
+    p.skipNewlines()
+    []int cases = []int{}
+    for (; !p.failed && (p.kind() == Tok.KwCase || p.kind() == Tok.KwDefault); ) {
+        Token ct = p.next()
+        int comm = -1
+        if (ct.kind == Tok.KwDefault) {
+            p.errorHint(ct.pos, "select has no default case", "select always waits; use a timeout channel such as time.after(...) instead")
+        } else {
+            comm = p.parseSimple()
+        }
+        p.expect(Tok.Colon, " after the select case")
+        int body = p.parseCaseBody(ct.pos)
+        p.ast.cases.push(Case{pos: ct.pos, isDefault: false, labels: 0, labelCount: 0, comm: comm, body: body})
+        cases.push(p.ast.cases.len() - 1)
+    }
+    p.expect(Tok.RBrace, " to close the select (expected case or '}')")
+    s.list = p.ast.addList(cases)
+    s.count = cases.len()
+    return p.ast.addStmt(s)
+}
+
+// ---- expressions ----
+
+fn binaryPrecedence(Tok k) int {
+    if (k == Tok.OrOr) {
+        return 1
+    }
+    if (k == Tok.AndAnd) {
+        return 2
+    }
+    if (k == Tok.Eq || k == Tok.Ne || k == Tok.Lt || k == Tok.Le || k == Tok.Gt || k == Tok.Ge) {
+        return 3
+    }
+    if (k == Tok.Plus || k == Tok.Minus || k == Tok.Pipe || k == Tok.Caret) {
+        return 4
+    }
+    if (k == Tok.Star || k == Tok.Slash || k == Tok.Percent || k == Tok.Shl || k == Tok.Shr || k == Tok.Amp) {
+        return 5
+    }
+    return 0
+}
+
+fn (Parser p) mut parseExpr() int {
+    return p.parseBinary(1)
+}
+
+fn (Parser p) mut badExpr() int {
+    return p.ast.addExpr(newExpr(ExprKind.Bad, p.here()))
+}
+
+fn (Parser p) mut parseBinary(int minPrec) int {
+    int left = p.parseUnary()
+    for (; !p.failed; ) {
+        Token t = p.toks[p.pos]
+        int prec = binaryPrecedence(t.kind)
+        if (prec == 0 || prec < minPrec) {
+            break
+        }
+        Expr l = p.ast.exprs[left]
+        if (prec == 3 && l.kind == ExprKind.Binary && binaryPrecedence(l.op) == 3 && !l.paren) {
+            p.errorHint(t.pos, "comparison operators do not chain", "use && to combine comparisons: a < b && b < c")
+            break
+        }
+        p.pos++
+        Token after = p.toks[p.pos]
+        if (after.kind == Tok.Assign && after.pos.line == t.pos.line && after.pos.col == t.pos.col + t.kind.text().len()) {
+            p.errorHint(t.pos, "there is no compound assignment operator " + t.kind.text() + "=", "write it out: x = x " + t.kind.text() + " y")
+            break
+        }
+        p.skipNewlines()
+        int right = p.parseBinary(prec + 1)
+        Expr b = newExpr(ExprKind.Binary, t.pos)
+        b.op = t.kind
+        b.a = left
+        b.b = right
+        left = p.ast.addExpr(b)
+    }
+    return left
+}
+
+fn (Parser p) mut parseUnary() int {
+    Token t = p.toks[p.pos]
+    if (t.kind == Tok.Minus || t.kind == Tok.Not) {
+        p.pos++
+        int operand = p.parseUnary()
+        Expr x = p.ast.exprs[operand]
+        if (t.kind == Tok.Minus && x.kind == ExprKind.IntLit && !x.paren && !x.neg) {
+            // Fold the sign into the literal, so the smallest int can be written.
+            p.ast.exprs[operand].neg = true
+            p.ast.exprs[operand].pos = t.pos
+            if (x.intValue != minInt) {
+                p.ast.exprs[operand].intValue = -x.intValue
+            }
+            return operand
+        }
+        Expr u = newExpr(ExprKind.Unary, t.pos)
+        u.op = t.kind
+        u.a = operand
+        return p.ast.addExpr(u)
+    }
+    if (t.kind == Tok.KwTry) {
+        p.pos++
+        Expr tr = newExpr(ExprKind.Try, t.pos)
+        tr.a = p.parseUnary()
+        return p.ast.addExpr(tr)
+    }
+    return p.parsePostfix()
+}
+
+const int minInt = -9223372036854775808
+
+// The negated value of an int literal (decimal or 0x hex), and whether it
+// fits in 64 bits. Accumulating the negated value makes minInt
+// representable: `-9223372036854775808` is valid, while
+// `9223372036854775808` alone is reported by the checker (it sees an IntLit
+// that is not negated and whose value is minInt). Literals that do not fit
+// at all are also left to the checker, because the full language will have
+// integers that grow.
+fn negatedLiteral(string raw) (int, bool) {
+    int base = 10
+    int start = 0
+    if (raw.startsWith("0x") || raw.startsWith("0X")) {
+        base = 16
+        start = 2
+    }
+    int acc = 0
+    for (int i = start; i < raw.len(); i++) {
+        int d = hexValue(raw[i])
+        if (d < 0) {
+            return 0, false
+        }
+        if (acc < (minInt + d) / base) {
+            return 0, false
+        }
+        acc = acc * base - d
+    }
+    return acc, true
+}
+
+fn (Parser p) mut parsePostfix() int {
+    int e = p.parsePrimary()
+    for (; !p.failed; ) {
+        Token t = p.toks[p.pos]
+        if (t.kind == Tok.Dot) {
+            p.pos++
+            Pos npos = p.here()
+            string name = p.expectIdent("after '.'")
+            Expr base = p.ast.exprs[e]
+            if (p.kind() == Tok.LBrace && base.kind == ExprKind.Ident && !base.paren) {
+                // pkg.Type{...}
+                e = p.parseStructLit(base.pos, base.text, name)
+                continue
+            }
+            Expr f = newExpr(ExprKind.Field, npos)
+            f.a = e
+            f.text = name
+            e = p.ast.addExpr(f)
+        } else if (t.kind == Tok.LBrack) {
+            p.pos++
+            p.skipNewlines()
+            Expr ix = newExpr(ExprKind.Index, t.pos)
+            ix.a = e
+            ix.b = p.parseExpr()
+            p.skipNewlines()
+            p.expect(Tok.RBrack, " to close the index")
+            e = p.ast.addExpr(ix)
+        } else if (t.kind == Tok.LParen) {
+            p.pos++
+            Expr c = newExpr(ExprKind.Call, p.ast.exprs[e].pos)
+            c.a = e
+            []int args = p.parseExprList(Tok.RParen, " to close the argument list")
+            c.list = p.ast.addList(args)
+            c.count = args.len()
+            e = p.ast.addExpr(c)
+        } else {
+            break
+        }
+    }
+    return e
+}
+
+// Comma-separated expressions up to `close`. Newlines are allowed after the
+// opening bracket, after commas and before the closing bracket, and a
+// trailing comma is optional.
+fn (Parser p) mut parseExprList(Tok close, string context) []int {
+    []int xs = []int{}
+    p.skipNewlines()
+    for (; !p.failed && p.kind() != close; ) {
+        xs.push(p.parseExpr())
+        p.skipNewlines()
+        if (!p.accept(Tok.Comma)) {
+            break
+        }
+        p.skipNewlines()
+    }
+    p.skipNewlines()
+    p.expect(close, context)
+    return xs
+}
+
+fn (Parser p) mut parsePrimary() int {
+    Token t = p.toks[p.pos]
+    Tok k = t.kind
+    if (k == Tok.Int) {
+        p.pos++
+        Expr i = newExpr(ExprKind.IntLit, t.pos)
+        i.raw = t.raw
+        i.text = t.raw
+        int negated, bool fits = negatedLiteral(t.raw)
+        if (!fits || negated == minInt) {
+            i.intValue = minInt
+        } else {
+            i.intValue = -negated
+        }
+        return p.ast.addExpr(i)
+    }
+    if (k == Tok.Float) {
+        p.pos++
+        Expr f = newExpr(ExprKind.FloatLit, t.pos)
+        f.raw = t.raw
+        f.text = t.raw
+        return p.ast.addExpr(f)
+    }
+    if (k == Tok.Byte) {
+        p.pos++
+        Expr b = newExpr(ExprKind.ByteLit, t.pos)
+        b.raw = t.raw
+        b.text = t.text
+        if (t.text.len() > 0) {
+            b.intValue = int(t.text[0])
+        }
+        return p.ast.addExpr(b)
+    }
+    if (k == Tok.String) {
+        p.pos++
+        Expr s = newExpr(ExprKind.StringLit, t.pos)
+        s.raw = t.raw
+        s.text = t.text
+        return p.ast.addExpr(s)
+    }
+    if (k == Tok.KwTrue || k == Tok.KwFalse) {
+        p.pos++
+        Expr bl = newExpr(ExprKind.BoolLit, t.pos)
+        bl.raw = t.raw
+        if (k == Tok.KwTrue) {
+            bl.intValue = 1
+        }
+        return p.ast.addExpr(bl)
+    }
+    if (k == Tok.KwNull) {
+        p.pos++
+        return p.ast.addExpr(newExpr(ExprKind.NullLit, t.pos))
+    }
+    if (k == Tok.Ident) {
+        p.pos++
+        if (p.kind() == Tok.LBrace) {
+            return p.parseStructLit(t.pos, "", t.text)
+        }
+        Expr id = newExpr(ExprKind.Ident, t.pos)
+        id.text = t.text
+        return p.ast.addExpr(id)
+    }
+    if (k == Tok.LParen) {
+        p.pos++
+        p.skipNewlines()
+        int inner = p.parseExpr()
+        p.skipNewlines()
+        p.expect(Tok.RParen, " to close the parenthesis")
+        p.ast.exprs[inner].paren = true
+        return inner
+    }
+    if (k == Tok.LBrack) {
+        Expr l = newExpr(ExprKind.ListLit, t.pos)
+        int lt = p.parseBaseType(false)
+        if (lt >= 0) {
+            l.typeExpr = p.ast.typeExprs[lt].a
+        }
+        p.expect(Tok.LBrace, " after the list type (a list literal looks like []int{1, 2})")
+        if (p.failed) {
+            return p.badExpr()
+        }
+        []int elems = p.parseExprList(Tok.RBrace, " to close the list literal")
+        l.list = p.ast.addList(elems)
+        l.count = elems.len()
+        return p.ast.addExpr(l)
+    }
+    if (k == Tok.KwMap) {
+        return p.parseMapLit()
+    }
+    if (k == Tok.KwChan) {
+        p.pos++
+        Expr ch = newExpr(ExprKind.ChanMake, t.pos)
+        ch.typeExpr = p.parseBaseType(false)
+        p.expect(Tok.LParen, " after the channel type (a channel is made with chan int(10))")
+        ch.a = p.parseExpr()
+        p.expect(Tok.RParen, " to close the channel size")
+        return p.ast.addExpr(ch)
+    }
+    if (k == Tok.KwGroup) {
+        p.pos++
+        Expr g = newExpr(ExprKind.Group, t.pos)
+        g.block = p.parseBlock(" after group")
+        return p.ast.addExpr(g)
+    }
+    if (k == Tok.KwFn) {
+        p.errorHint(t.pos, "there are no anonymous functions", "declare a named function and use its name as the value")
+    } else {
+        p.errorAt(t.pos, "expected an expression, found " + tokenDesc(t))
+    }
+    return p.badExpr()
+}
+
+fn (Parser p) mut parseMapLit() int {
+    Expr m = newExpr(ExprKind.MapLit, p.here())
+    int mt = p.parseBaseType(false)
+    if (mt >= 0) {
+        m.typeExpr = p.ast.typeExprs[mt].a
+        m.typeExpr2 = p.ast.typeExprs[mt].b
+    }
+    p.expect(Tok.LBrace, " after the map type (a map literal looks like map[string]int{\"a\": 1})")
+    p.skipNewlines()
+    []int entries = []int{}
+    for (; !p.failed && p.kind() != Tok.RBrace; ) {
+        Expr en = newExpr(ExprKind.Entry, p.here())
+        en.a = p.parseExpr()
+        p.expect(Tok.Colon, " between a map key and its value")
+        p.skipNewlines()
+        en.b = p.parseExpr()
+        entries.push(p.ast.addExpr(en))
+        p.skipNewlines()
+        if (!p.accept(Tok.Comma)) {
+            break
+        }
+        p.skipNewlines()
+    }
+    p.skipNewlines()
+    p.expect(Tok.RBrace, " to close the map literal")
+    m.list = p.ast.addList(entries)
+    m.count = entries.len()
+    return p.ast.addExpr(m)
+}
+
+// `Type{field: value, ...}` with the current token at `{`.
+fn (Parser p) mut parseStructLit(Pos pos, string pkg, string name) int {
+    Expr s = newExpr(ExprKind.StructLit, pos)
+    s.pkg = pkg
+    s.text = name
+    p.pos++
+    p.skipNewlines()
+    []int fields = []int{}
+    for (; !p.failed && p.kind() != Tok.RBrace; ) {
+        Expr f = newExpr(ExprKind.FieldInit, p.here())
+        f.text = p.expectIdent("for a struct field")
+        p.expect(Tok.Colon, " after the field name")
+        p.skipNewlines()
+        f.a = p.parseExpr()
+        fields.push(p.ast.addExpr(f))
+        p.skipNewlines()
+        if (!p.accept(Tok.Comma)) {
+            break
+        }
+        p.skipNewlines()
+    }
+    p.skipNewlines()
+    p.expect(Tok.RBrace, " to close the struct literal")
+    s.list = p.ast.addList(fields)
+    s.count = fields.len()
+    return p.ast.addExpr(s)
+}

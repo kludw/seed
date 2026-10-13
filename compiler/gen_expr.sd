@@ -1,0 +1,758 @@
+// The C generator, continued: expressions.
+package main
+
+// A list of generated operands, and C statements (pre) that must run first.
+type GenList struct {
+    []string vals
+    string pre
+}
+
+fn (Gen g) info(int e) ExprInfo {
+    return g.c.info[e]
+}
+
+fn (Gen g) typeOf(int e) int {
+    return g.c.info[e].ty
+}
+
+// The type the expression itself produces, before any wrapping into T?.
+fn (Gen g) coreType(int e) int {
+    ExprInfo i = g.c.info[e]
+    if (i.wrap) {
+        return i.inner
+    }
+    return i.ty
+}
+
+fn (Gen g) expr(int e) Expr {
+    return g.c.ast.exprs[e]
+}
+
+fn (Gen g) arg(int e, int i) int {
+    return g.c.ast.at(g.c.ast.exprs[e].list, i)
+}
+
+fn (Gen g) argList(int e) []int {
+    Expr x = g.c.ast.exprs[e]
+    []int xs = []int{}
+    for (int i = 0; i < x.count; i++) {
+        xs.push(g.c.ast.at(x.list, i))
+    }
+    return xs
+}
+
+fn isMutBuiltin(Builtin b) bool {
+    return b == Builtin.Push || b == Builtin.Pop || b == Builtin.Insert || b == Builtin.Remove || b == Builtin.Reverse || b == Builtin.Sort || b == Builtin.Delete
+}
+
+// Whether evaluating e may have side effects (or depend on them), which
+// forces left-to-right evaluation through temporaries.
+fn (Gen g) hasEffects(int e) bool {
+    if (e < 0) {
+        return false
+    }
+    Expr x = g.c.ast.exprs[e]
+    ExprInfo i = g.c.info[e]
+    if (x.kind == ExprKind.Try) {
+        return true
+    }
+    if (x.kind == ExprKind.Call) {
+        if (i.res == Res.Func || i.res == Res.Method || i.res == Res.Pkg) {
+            return true
+        }
+        if (i.res == Res.Builtin) {
+            if (isMutBuiltin(i.builtin)) {
+                return true
+            }
+            if (g.hasEffects(g.c.ast.exprs[x.a].a)) {
+                return true
+            }
+        }
+    } else if (g.hasEffects(x.a) || g.hasEffects(x.b)) {
+        return true
+    }
+    for (int j = 0; j < x.count; j++) {
+        if (g.hasEffects(g.c.ast.at(x.list, j))) {
+            return true
+        }
+    }
+    return false
+}
+
+// Whether the value of e still lives in a place (so copying it must raise
+// counts), as opposed to being freshly made.
+fn (Gen g) isBorrowed(int e) bool {
+    Expr x = g.c.ast.exprs[e]
+    ExprInfo i = g.c.info[e]
+    if (x.kind == ExprKind.Ident) {
+        return true
+    }
+    if (x.kind == ExprKind.Field) {
+        return i.res == Res.Field
+    }
+    if (x.kind == ExprKind.Index) {
+        if (i.res == Res.ListIndex) {
+            return true
+        }
+        int t = g.coreType(e)
+        return i.res == Res.MapIndex && g.c.types.isOpt(t) && g.kindOf(g.elemOf(t)) != Kind.Struct
+    }
+    return false
+}
+
+// A value that will be stored somewhere: retained if it is still held
+// elsewhere.
+fn (Gen g) mut gowned(int e) string {
+    int t = g.typeOf(e)
+    if (!g.needsRt(t)) {
+        return g.gexpr(e)
+    }
+    if (g.c.info[e].wrap) {
+        return g.wrapVal(t, g.gownedCore(e))
+    }
+    return g.gownedCore(e)
+}
+
+fn (Gen g) mut gownedCore(int e) string {
+    int t = g.coreType(e)
+    if (!g.needsRt(t)) {
+        return g.gcore(e)
+    }
+    if (g.isBorrowed(e)) {
+        return g.rtFn(t) + "(" + g.gcore(e) + ")"
+    }
+    return g.gcore(e)
+}
+
+// Generates expressions in order. When more than one has side effects (or
+// force is set), they are evaluated into temporaries first.
+fn (Gen g) mut genList([]int es, bool owned, bool force) GenList {
+    int effects = 0
+    for (int i = 0; i < es.len(); i++) {
+        if (g.hasEffects(es[i])) {
+            effects++
+        }
+    }
+    bool hoist = force || effects >= 2
+    []string vals = []string{}
+    []string pre = []string{}
+    for (int j = 0; j < es.len(); j++) {
+        string v = ""
+        if (owned) {
+            v = g.gowned(es[j])
+        } else {
+            v = g.gexpr(es[j])
+        }
+        if (hoist) {
+            string t = g.tmp()
+            pre.push(g.ctype(g.typeOf(es[j])) + " " + t + " = " + v + "; ")
+            vals.push(t)
+        } else {
+            vals.push(v)
+        }
+    }
+    return GenList{vals: vals, pre: pre.join("")}
+}
+
+fn withPre(string pre, string e) string {
+    if (pre == "") {
+        return e
+    }
+    return "({ " + pre + e + "; })"
+}
+
+// `return err` from the current function, with the other results empty.
+fn (Gen g) errReturn(string err) string {
+    int r = g.c.fnRet[g.curFn]
+    if (r == tyError) {
+        return err
+    }
+    return "(" + g.ctype(r) + "){.r" + (g.c.types.count(r) - 1).string() + " = " + err + "}"
+}
+
+fn (Gen g) varValue(int e) string {
+    ExprInfo i = g.c.info[e]
+    if (i.res == Res.Const) {
+        return "sd_c_" + g.c.ast.consts[i.ref].name + "()"
+    }
+    Var v = g.c.vars[i.ref]
+    if (v.kind == VarKind.MutRecv) {
+        return "(*l_" + v.name + ")"
+    }
+    return "l_" + v.name
+}
+
+// A C pointer to the place e (a variable, or a field or element path that
+// starts at one), making every container on the way unique.
+fn (Gen g) mut gplace(int e) string {
+    Expr x = g.c.ast.exprs[e]
+    ExprInfo i = g.c.info[e]
+    string p = ""
+    if (x.kind == ExprKind.Ident) {
+        Var v = g.c.vars[i.ref]
+        if (v.kind == VarKind.MutRecv) {
+            p = "l_" + v.name
+        } else {
+            p = "(&l_" + v.name + ")"
+        }
+    } else if (x.kind == ExprKind.Field) {
+        p = "(&(" + g.gplace(x.a) + ")->f_" + x.text + ")"
+    } else if (x.kind == ExprKind.Index) {
+        int el = i.ty
+        if (i.narrowed) {
+            el = i.orig
+        }
+        string ct = g.ctype(el)
+        if (g.hasEffects(x.b)) {
+            string ix = g.tmp()
+            string idx = g.gexpr(x.b)
+            p = "({ int64_t " + ix + " = " + idx + "; (" + ct + "*)sd_list_at_mut(" + g.gplace(x.a) + ", " + ix + ", sizeof(" + ct + "), " + g.rtpFn(el) + "); })"
+        } else {
+            string base = g.gplace(x.a)
+            p = "((" + ct + "*)sd_list_at_mut(" + base + ", " + g.gexpr(x.b) + ", sizeof(" + ct + "), " + g.rtpFn(el) + "))"
+        }
+    } else {
+        p = "/* internal error: not a place */"
+    }
+    if (i.narrowed) {
+        return g.unwrapPlace(i.orig, p)
+    }
+    return p
+}
+
+// Converts a pointer to an element (or NULL) into a T?.
+fn (Gen g) mut optFromPtr(int opt, string p, bool borrowed) string {
+    int el = g.elemOf(opt)
+    string v = "(*" + p + ")"
+    if (g.kindOf(el) == Kind.Struct && borrowed && g.needsRt(el)) {
+        v = g.rtFn(el) + "(" + v + ")"
+    }
+    return "(" + p + " ? " + g.wrapVal(opt, v) + " : " + g.nullOf(opt) + ")"
+}
+
+// A call of a runtime function that returns its value through an out
+// parameter and its error as the result, packed into a (T, error) tuple.
+fn (Gen g) mut tupleOut(int tt, string valueType, string fnName, string arg) string {
+    string v = g.tmp()
+    string er = g.tmp()
+    return "({ " + valueType + " " + v + "; sd_err *" + er + " = " + fnName + "(" + arg + ", &" + v + "); (" + g.ctype(tt) + "){" + v + ", " + er + "}; })"
+}
+
+fn builtinFn(Builtin b) string {
+    switch (b) {
+    case Builtin.SSlice:
+        return "sd_str_slice"
+    case Builtin.SContains:
+        return "sd_str_contains"
+    case Builtin.SIndex:
+        return "sd_str_index"
+    case Builtin.SStarts:
+        return "sd_str_starts"
+    case Builtin.SEnds:
+        return "sd_str_ends"
+    case Builtin.Split:
+        return "sd_str_split"
+    case Builtin.Trim:
+        return "sd_str_trim"
+    case Builtin.Replace:
+        return "sd_str_replace"
+    case Builtin.Upper:
+        return "sd_str_upper"
+    case Builtin.Lower:
+        return "sd_str_lower"
+    case Builtin.Bytes:
+        return "sd_str_bytes"
+    case Builtin.Join:
+        return "sd_list_join"
+    case Builtin.Message:
+        return "sd_err_message"
+    case Builtin.None, Builtin.Len, Builtin.String, Builtin.ToInt, Builtin.ToFloat, Builtin.Push, Builtin.Pop:
+        return ""
+    case Builtin.Insert, Builtin.Remove, Builtin.LContains, Builtin.LIndex, Builtin.LSlice, Builtin.Reverse:
+        return ""
+    case Builtin.Sort, Builtin.Delete, Builtin.Keys:
+        return ""
+    }
+}
+
+fn (Gen g) mut gbuiltin(int e) string {
+    Expr x = g.c.ast.exprs[e]
+    int r = g.c.ast.exprs[x.a].a
+    int rt = g.typeOf(r)
+    []int args = g.argList(e)
+    Builtin b = g.c.info[e].builtin
+    switch (b) {
+    case Builtin.Len:
+        if (rt == tyString) {
+            return "(" + g.gexpr(r) + ").len"
+        }
+        return "(" + g.gexpr(r) + ")->len"
+    case Builtin.String:
+        Kind k = g.kindOf(rt)
+        if (k == Kind.Int) {
+            return "sd_int_str(" + g.gexpr(r) + ")"
+        }
+        if (k == Kind.Float) {
+            return "sd_float_str(" + g.gexpr(r) + ")"
+        }
+        if (k == Kind.Bool) {
+            return "sd_bool_str(" + g.gexpr(r) + ")"
+        }
+        if (k == Kind.Byte) {
+            return "sd_int_str((int64_t)(" + g.gexpr(r) + "))"
+        }
+        return g.gexpr(r)
+    case Builtin.ToInt:
+        return g.tupleOut(g.coreType(e), "int64_t", "sd_str_toint", g.gexpr(r))
+    case Builtin.ToFloat:
+        return g.tupleOut(g.coreType(e), "double", "sd_str_tofloat", g.gexpr(r))
+    case Builtin.SSlice, Builtin.SContains, Builtin.SIndex, Builtin.SStarts, Builtin.SEnds, Builtin.Split, Builtin.Trim:
+        return g.gbuiltinCall(builtinFn(b), r, args)
+    case Builtin.Replace, Builtin.Upper, Builtin.Lower, Builtin.Bytes, Builtin.Join, Builtin.Message:
+        return g.gbuiltinCall(builtinFn(b), r, args)
+    case Builtin.LSlice:
+        []int all = []int{r, args[0], args[1]}
+        GenList gl = g.genList(all, false, false)
+        int el = g.elemOf(rt)
+        return withPre(gl.pre, "sd_list_slice(" + gl.vals[0] + ", " + gl.vals[1] + ", " + gl.vals[2] + ", sizeof(" + g.ctype(el) + "), " + g.rtpFn(el) + ")")
+    case Builtin.LContains, Builtin.LIndex:
+        int le = g.elemOf(rt)
+        string l = g.tmp()
+        string v = g.tmp()
+        string i = g.tmp()
+        string find = "sd_list_find(" + l + ", &" + v + ", sizeof(" + g.ctype(le) + "), " + g.eqpFn(le) + ")"
+        string head = "({ sd_list *" + l + " = " + g.gexpr(r) + "; " + g.ctype(le) + " " + v + " = " + g.gexpr(args[0]) + "; "
+        if (b == Builtin.LContains) {
+            return head + find + " >= 0; })"
+        }
+        return head + "int64_t " + i + " = " + find + "; " + i + " < 0 ? (sd_O_i){0} : (sd_O_i){true, " + i + "}; })"
+    case Builtin.Keys:
+        int kt = g.c.types.key(rt)
+        string code = "3"
+        if (kt == tyInt) {
+            code = "0"
+        } else if (kt == tyByte) {
+            code = "1"
+        } else if (kt == tyBool) {
+            code = "2"
+        }
+        return "sd_map_keys(" + g.gexpr(r) + ", " + code + ")"
+    case Builtin.Push:
+        int pe = g.elemOf(rt)
+        string pv = g.tmp()
+        string val = g.gowned(args[0])
+        string pct = g.ctype(pe)
+        return "({ " + pct + " " + pv + " = " + val + "; *(" + pct + "*)sd_list_push(" + g.gplace(r) + ", sizeof(" + pct + "), " + g.rtpFn(pe) + ") = " + pv + "; })"
+    case Builtin.Pop:
+        int ope = g.elemOf(rt)
+        string pp = g.tmp()
+        string oct = g.ctype(ope)
+        string place = g.gplace(r)
+        string rtp = g.rtpFn(ope)
+        return "({ " + oct + " *" + pp + " = (" + oct + "*)sd_list_pop(" + place + ", sizeof(" + oct + "), " + rtp + "); " + g.optFromPtr(g.coreType(e), pp, false) + "; })"
+    case Builtin.Insert:
+        int ie = g.elemOf(rt)
+        string ii = g.tmp()
+        string iv = g.tmp()
+        string ict = g.ctype(ie)
+        string idx = g.gexpr(args[0])
+        string ival = g.gowned(args[1])
+        return "({ int64_t " + ii + " = " + idx + "; " + ict + " " + iv + " = " + ival + "; *(" + ict + "*)sd_list_insert(" + g.gplace(r) + ", " + ii + ", sizeof(" + ict + "), " + g.rtpFn(ie) + ") = " + iv + "; })"
+    case Builtin.Remove:
+        int re = g.elemOf(rt)
+        string ri = g.tmp()
+        string ridx = g.gexpr(args[0])
+        return "({ int64_t " + ri + " = " + ridx + "; sd_list_remove(" + g.gplace(r) + ", " + ri + ", sizeof(" + g.ctype(re) + "), " + g.rtpFn(re) + "); })"
+    case Builtin.Reverse:
+        int ve = g.elemOf(rt)
+        return "sd_list_reverse(" + g.gplace(r) + ", sizeof(" + g.ctype(ve) + "), " + g.rtpFn(ve) + ")"
+    case Builtin.Sort:
+        int se = g.elemOf(rt)
+        string cmp = "sd_cmp_y"
+        if (se == tyInt) {
+            cmp = "sd_cmp_i"
+        } else if (se == tyFloat) {
+            cmp = "sd_cmp_f"
+        } else if (se == tyString) {
+            cmp = "sd_cmp_s"
+        }
+        return "sd_list_sort(" + g.gplace(r) + ", sizeof(" + g.ctype(se) + "), NULL, " + cmp + ")"
+    case Builtin.Delete:
+        int dk = g.c.types.key(rt)
+        string kv = g.tmp()
+        string key = g.gexpr(args[0])
+        return "({ " + g.ctype(dk) + " " + kv + " = " + key + "; sd_map_del_" + g.keySuffix(dk) + "(" + g.gplace(r) + ", " + g.keyArg(dk, kv) + ", " + g.rtpFn(g.elemOf(rt)) + "); })"
+    case Builtin.None:
+        return "/* internal error: unresolved builtin */"
+    }
+}
+
+// fn(receiver, args...) for the string and list built-ins that map directly
+// onto a runtime function.
+fn (Gen g) mut gbuiltinCall(string name, int recv, []int args) string {
+    []int all = []int{recv}
+    for (int i = 0; i < args.len(); i++) {
+        all.push(args[i])
+    }
+    GenList gl = g.genList(all, false, false)
+    return withPre(gl.pre, name + "(" + gl.vals.join(", ") + ")")
+}
+
+fn (Gen g) mut gpkg(int e) string {
+    GenList gl = g.genList(g.argList(e), false, false)
+    string a = gl.vals[0]
+    string r = ""
+    PkgFn f = g.c.info[e].pkgFn
+    switch (f) {
+    case PkgFn.Print:
+        r = "sd_print(" + a + ")"
+    case PkgFn.Println:
+        r = "sd_println(" + a + ")"
+    case PkgFn.Eprint:
+        r = "sd_eprint(" + a + ")"
+    case PkgFn.Eprintln:
+        r = "sd_eprintln(" + a + ")"
+    case PkgFn.Exit:
+        r = "sd_os_exit(" + a + ")"
+    case PkgFn.Env:
+        r = "sd_os_env(" + a + ")"
+    case PkgFn.Run:
+        r = g.tupleOut(g.coreType(e), "int64_t", "sd_os_run", a)
+    case PkgFn.Read:
+        r = g.tupleOut(g.coreType(e), "sd_str", "sd_fs_read", a)
+    case PkgFn.Write:
+        r = "sd_fs_write(" + a + ", " + gl.vals[1] + ")"
+    case PkgFn.Exists:
+        r = "sd_fs_exists(" + a + ")"
+    case PkgFn.IsDir:
+        r = "sd_fs_isdir(" + a + ")"
+    case PkgFn.List:
+        r = g.tupleOut(g.coreType(e), "sd_list*", "sd_fs_list", a)
+    case PkgFn.Mkdir:
+        r = "sd_fs_mkdir(" + a + ")"
+    case PkgFn.Remove:
+        r = "sd_fs_remove(" + a + ")"
+    case PkgFn.ErrNew:
+        r = "sd_err_new(" + a + ")"
+    case PkgFn.None:
+        r = "/* internal error: unresolved package function */"
+    }
+    return withPre(gl.pre, r)
+}
+
+fn (Gen g) mut gcall(int e) string {
+    Expr x = g.c.ast.exprs[e]
+    ExprInfo i = g.c.info[e]
+    switch (i.res) {
+    case Res.Func:
+        GenList gl = g.genList(g.argList(e), false, false)
+        return withPre(gl.pre, g.c.fnCName[i.ref] + "(" + gl.vals.join(", ") + ")")
+    case Res.Method:
+        FnDecl m = g.c.ast.fns[i.ref]
+        int recv = g.c.ast.exprs[x.a].a
+        if (m.recvMut) {
+            // Arguments first (retained: the method may change what they
+            // alias), then the receiver's place.
+            GenList ml = g.genList(g.argList(e), true, true)
+            []string margs = []string{g.gplace(recv)}
+            for (int j = 0; j < ml.vals.len(); j++) {
+                margs.push(ml.vals[j])
+            }
+            return withPre(ml.pre, g.c.fnCName[i.ref] + "(" + margs.join(", ") + ")")
+        }
+        []int all = []int{recv}
+        []int args = g.argList(e)
+        for (int k = 0; k < args.len(); k++) {
+            all.push(args[k])
+        }
+        GenList al = g.genList(all, false, false)
+        return withPre(al.pre, g.c.fnCName[i.ref] + "(" + al.vals.join(", ") + ")")
+    case Res.EnumNew:
+        GenList el = g.genList(g.argList(e), true, false)
+        TypeDecl td = g.c.ast.typeDecls[i.ref]
+        return withPre(el.pre, "sd_mk_" + td.name + "__" + g.c.enumCase(i.ref, i.sub).name + "(" + el.vals.join(", ") + ")")
+    case Res.Conv:
+        int arg = g.arg(e, 0)
+        int from = g.typeOf(arg)
+        int to = g.coreType(e)
+        string v = g.gexpr(arg)
+        if (from == to) {
+            return v
+        }
+        if (to == tyInt) {
+            if (from == tyFloat) {
+                return "sd_f2i(" + v + ")"
+            }
+            return "((int64_t)(" + v + "))"
+        }
+        if (to == tyFloat) {
+            return "((double)(" + v + "))"
+        }
+        if (to == tyByte) {
+            return "sd_i2y(" + v + ")"
+        }
+        if (to == tyString) {
+            return "sd_str_from_bytes(" + v + ")"
+        }
+        return v
+    case Res.Pkg:
+        return g.gpkg(e)
+    case Res.Builtin:
+        return g.gbuiltin(e)
+    case Res.None, Res.Local, Res.Const, Res.EnumVal, Res.Field, Res.ListIndex, Res.StringIndex, Res.MapIndex:
+        return "/* internal error: unresolved call */"
+    }
+}
+
+fn (Gen g) mut gbinary(int e) string {
+    Expr x = g.c.ast.exprs[e]
+    Tok op = x.op
+    if (op == Tok.AndAnd) {
+        return "(" + g.gexpr(x.a) + " && " + g.gexpr(x.b) + ")"
+    }
+    if (op == Tok.OrOr) {
+        return "(" + g.gexpr(x.a) + " || " + g.gexpr(x.b) + ")"
+    }
+    bool aNull = g.c.ast.exprs[x.a].kind == ExprKind.NullLit
+    bool bNull = g.c.ast.exprs[x.b].kind == ExprKind.NullLit
+    if ((op == Tok.Eq || op == Tok.Ne) && (aNull || bNull)) {
+        int other = x.a
+        if (aNull) {
+            other = x.b
+        }
+        string n = g.isNull(g.typeOf(other), g.gexpr(other))
+        if (op == Tok.Eq) {
+            return n
+        }
+        return "(!" + n + ")"
+    }
+    GenList gl = g.genList([]int{x.a, x.b}, false, false)
+    string a = gl.vals[0]
+    string b = gl.vals[1]
+    int t = g.typeOf(x.a)
+    bool isInt = t == tyInt
+    bool isByte = t == tyByte
+    string ops = op.text()
+    string r = ""
+    if (op == Tok.Eq) {
+        r = g.eqExpr(t, a, b)
+    } else if (op == Tok.Ne) {
+        r = "(!" + g.eqExpr(t, a, b) + ")"
+    } else if (op == Tok.Lt || op == Tok.Le || op == Tok.Gt || op == Tok.Ge) {
+        if (t == tyString) {
+            r = "(sd_str_cmp(" + a + ", " + b + ") " + ops + " 0)"
+        } else {
+            r = "((" + a + ") " + ops + " (" + b + "))"
+        }
+    } else if (op == Tok.Plus) {
+        if (isInt) {
+            r = "sd_add(" + a + ", " + b + ")"
+        } else if (t == tyString) {
+            r = "sd_cat(" + a + ", " + b + ")"
+        } else {
+            r = "((" + a + ") + (" + b + "))"
+        }
+    } else if (op == Tok.Minus || op == Tok.Star || op == Tok.Slash) {
+        if (isInt) {
+            string fname = "sd_sub"
+            if (op == Tok.Star) {
+                fname = "sd_mul"
+            } else if (op == Tok.Slash) {
+                fname = "sd_div"
+            }
+            r = fname + "(" + a + ", " + b + ")"
+        } else {
+            r = "((" + a + ") " + ops + " (" + b + "))"
+        }
+    } else if (op == Tok.Percent) {
+        r = "sd_mod(" + a + ", " + b + ")"
+    } else if (op == Tok.Amp || op == Tok.Pipe || op == Tok.Caret) {
+        if (isByte) {
+            r = "((uint8_t)((" + a + ") " + ops + " (" + b + ")))"
+        } else {
+            r = "((" + a + ") " + ops + " (" + b + "))"
+        }
+    } else if (op == Tok.Shl) {
+        if (isByte) {
+            r = "sd_shl_y(" + a + ", " + b + ")"
+        } else {
+            r = "sd_shl(" + a + ", " + b + ")"
+        }
+    } else if (op == Tok.Shr) {
+        if (isByte) {
+            r = "sd_shr_y(" + a + ", " + b + ")"
+        } else {
+            r = "sd_shr(" + a + ", " + b + ")"
+        }
+    } else {
+        r = "/* internal error: operator */"
+    }
+    return withPre(gl.pre, r)
+}
+
+// The C expression for e, including the conversion to T? when the checker
+// asked for one.
+fn (Gen g) mut gexpr(int e) string {
+    ExprInfo i = g.c.info[e]
+    if (i.wrap) {
+        return g.wrapVal(i.ty, g.gcore(e))
+    }
+    return g.gcore(e)
+}
+
+// The C expression for e itself, of type coreType(e).
+fn (Gen g) mut gcore(int e) string {
+    Expr x = g.c.ast.exprs[e]
+    ExprInfo i = g.c.info[e]
+    switch (x.kind) {
+    case ExprKind.IntLit:
+        if (x.intValue == minInt) {
+            return "INT64_MIN"
+        }
+        return "INT64_C(" + x.intValue.string() + ")"
+    case ExprKind.FloatLit:
+        return x.raw
+    case ExprKind.ByteLit:
+        return "((uint8_t)" + x.intValue.string() + ")"
+    case ExprKind.StringLit:
+        return "((sd_str){" + cString(x.text) + ", " + x.text.len().string() + "})"
+    case ExprKind.BoolLit:
+        if (x.intValue != 0) {
+            return "true"
+        }
+        return "false"
+    case ExprKind.NullLit:
+        if (g.c.types.isOpt(i.ty) || i.ty == tyError) {
+            return g.nullOf(i.ty)
+        }
+        return g.zeroOf(i.ty)
+    case ExprKind.Ident:
+        string v = g.varValue(e)
+        if (i.narrowed) {
+            return g.unwrapVal(i.orig, v)
+        }
+        return v
+    case ExprKind.Field:
+        if (i.res == Res.EnumVal) {
+            TypeDecl td = g.c.ast.typeDecls[i.ref]
+            return "(&sd_k_" + td.name + "__" + g.c.enumCase(i.ref, i.sub).name + ")"
+        }
+        string fv = "(" + g.gexpr(x.a) + ").f_" + x.text
+        if (i.narrowed) {
+            return g.unwrapVal(i.orig, fv)
+        }
+        return fv
+    case ExprKind.Index:
+        return g.gindex(e)
+    case ExprKind.Call:
+        return g.gcall(e)
+    case ExprKind.Unary:
+        if (x.op == Tok.Not) {
+            return "(!" + g.gexpr(x.a) + ")"
+        }
+        if (g.coreType(e) == tyInt) {
+            return "sd_neg(" + g.gexpr(x.a) + ")"
+        }
+        return "(-(" + g.gexpr(x.a) + "))"
+    case ExprKind.Binary:
+        return g.gbinary(e)
+    case ExprKind.Try:
+        return g.gtry(e)
+    case ExprKind.ListLit:
+        int el = g.elemOf(g.coreType(e))
+        string ct = g.ctype(el)
+        if (x.count == 0) {
+            return "sd_list_new(sizeof(" + ct + "), 0)"
+        }
+        string l = g.tmp()
+        string d = g.tmp()
+        []string b = []string{"({ sd_list *" + l + " = sd_list_new(sizeof(" + ct + "), " + x.count.string() + "); " + ct + " *" + d + " = (" + ct + "*)" + l + "->data; "}
+        for (int j = 0; j < x.count; j++) {
+            b.push(d + "[" + j.string() + "] = " + g.gowned(g.arg(e, j)) + "; ")
+        }
+        b.push(l + "->len = " + x.count.string() + "; " + l + "; })")
+        return b.join("")
+    case ExprKind.MapLit:
+        int mt = g.coreType(e)
+        int kt = g.c.types.key(mt)
+        int vt = g.elemOf(mt)
+        string m = g.tmp()
+        string skey = "0"
+        if (kt == tyString) {
+            skey = "1"
+        }
+        []string mb = []string{"({ sd_map *" + m + " = sd_map_new(" + skey + ", sizeof(" + g.ctype(vt) + ")); "}
+        for (int k = 0; k < x.count; k++) {
+            Expr en = g.c.ast.exprs[g.arg(e, k)]
+            string kv = g.tmp()
+            string vv = g.tmp()
+            string kc = g.gexpr(en.a)
+            string vc = g.gowned(en.b)
+            mb.push("{ " + g.ctype(kt) + " " + kv + " = " + kc + "; " + g.ctype(vt) + " " + vv + " = " + vc + "; *(" + g.ctype(vt) + "*)sd_map_slot_" + g.keySuffix(kt) + "(&" + m + ", " + g.keyArg(kt, kv) + ", NULL) = " + vv + "; } ")
+        }
+        mb.push(m + "; })")
+        return mb.join("")
+    case ExprKind.StructLit:
+        string sct = g.ctype(g.coreType(e))
+        if (x.count == 0) {
+            return "((" + sct + "){0})"
+        }
+        string sv = g.tmp()
+        []string sb = []string{"({ " + sct + " " + sv + "; "}
+        for (int f = 0; f < x.count; f++) {
+            Expr fi = g.c.ast.exprs[g.arg(e, f)]
+            sb.push(sv + ".f_" + fi.text + " = " + g.gowned(fi.a) + "; ")
+        }
+        sb.push(sv + "; })")
+        return sb.join("")
+    case ExprKind.Bad, ExprKind.Entry, ExprKind.FieldInit, ExprKind.ChanMake, ExprKind.Group:
+        return "/* internal error: expression */"
+    }
+}
+
+fn (Gen g) mut gindex(int e) string {
+    Expr x = g.c.ast.exprs[e]
+    ExprInfo i = g.c.info[e]
+    GenList gl = g.genList([]int{x.a, x.b}, false, false)
+    if (i.res == Res.StringIndex) {
+        return withPre(gl.pre, "sd_str_at(" + gl.vals[0] + ", " + gl.vals[1] + ")")
+    }
+    if (i.res == Res.ListIndex) {
+        int el = i.ty
+        if (i.narrowed) {
+            el = i.orig
+        }
+        string ct = g.ctype(el)
+        string v = "(*(" + ct + "*)sd_list_at(" + gl.vals[0] + ", " + gl.vals[1] + ", sizeof(" + ct + ")))"
+        if (i.narrowed) {
+            return withPre(gl.pre, g.unwrapVal(i.orig, v))
+        }
+        return withPre(gl.pre, v)
+    }
+    int mt = g.typeOf(x.a)
+    int vt = g.elemOf(mt)
+    int kt = g.c.types.key(mt)
+    string p = g.tmp()
+    string pre = gl.pre + g.ctype(vt) + " *" + p + " = (" + g.ctype(vt) + "*)sd_map_get_" + g.keySuffix(kt) + "(" + gl.vals[0] + ", " + g.keyArg(kt, gl.vals[1]) + "); "
+    return withPre(pre, g.optFromPtr(g.coreType(e), p, true))
+}
+
+fn (Gen g) mut gtry(int e) string {
+    Expr x = g.c.ast.exprs[e]
+    int ct = g.typeOf(x.a)
+    string t = g.tmp()
+    if (ct == tyError) {
+        return "({ sd_err *" + t + " = " + g.gexpr(x.a) + "; if (" + t + ") return " + g.errReturn(t) + "; })"
+    }
+    int n = g.c.types.count(ct)
+    string err = t + ".r" + (n - 1).string()
+    string call = g.gexpr(x.a)
+    if (n == 2) {
+        return "({ " + g.ctype(ct) + " " + t + " = " + call + "; if (" + err + ") return " + g.errReturn(err) + "; " + t + ".r0; })"
+    }
+    []string parts = []string{}
+    for (int i = 0; i < n - 1; i++) {
+        parts.push(t + ".r" + i.string())
+    }
+    return "({ " + g.ctype(ct) + " " + t + " = " + call + "; if (" + err + ") return " + g.errReturn(err) + "; (" + g.ctype(g.coreType(e)) + "){" + parts.join(", ") + "}; })"
+}

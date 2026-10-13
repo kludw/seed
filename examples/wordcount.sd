@@ -1,0 +1,84 @@
+// Counts the words read from stdin and prints the most common ones.
+//
+//     seed run examples/wordcount.sd 5 < book.txt
+package main
+
+import "errors"
+import "fmt"
+import "io"
+import "math"
+import "strings"
+
+type WordCount struct {
+    string word
+    int count
+}
+
+// Keeps letters, digits, apostrophes and non-ASCII bytes, so "Don't," and
+// "don't" count as the same word.
+fn normalize(string word) string {
+    []byte kept = []byte{}
+    for (int i = 0; i < word.len(); i++) {
+        byte b = word[i]
+        if (strings.isLetter(b) || strings.isDigit(b) || b == '\'' || b >= '\x80') {
+            kept.push(b)
+        }
+    }
+    return string(kept).toLower()
+}
+
+fn moreFrequent(WordCount a, WordCount b) bool {
+    if (a.count != b.count) {
+        return a.count > b.count
+    }
+    return a.word < b.word
+}
+
+fn main([]string args) error {
+    int top = 10
+    if (args.len() > 2) {
+        return errors.new("usage: wordcount [how-many]")
+    }
+    if (args.len() == 2) {
+        top = try args[1].toInt()
+    }
+    map[string]int counts = map[string]int{}
+    int lines = 0
+    int words = 0
+    for (;;) {
+        string? line = try io.readLine()
+        if (line == null) {
+            break
+        }
+        lines++
+        []string found = strings.fields(line)
+        for (int i = 0; i < found.len(); i++) {
+            string word = normalize(found[i])
+            if (word == "") {
+                continue
+            }
+            words++
+            int? seen = counts[word]
+            if (seen == null) {
+                counts[word] = 1
+            } else {
+                counts[word] = seen + 1
+            }
+        }
+    }
+    []WordCount ranked = []WordCount{}
+    []string keys = counts.keys()
+    for (int i = 0; i < keys.len(); i++) {
+        int? n = counts[keys[i]]
+        if (n != null) {
+            ranked.push(WordCount{word: keys[i], count: n})
+        }
+    }
+    ranked.sortBy(moreFrequent)
+    int shown = math.minInt(top, ranked.len())
+    for (int i = 0; i < shown; i++) {
+        fmt.println(strings.padLeft(ranked[i].count.string(), 8, ' ') + "  " + ranked[i].word)
+    }
+    fmt.println(lines.string() + " lines, " + words.string() + " words, " + ranked.len().string() + " distinct")
+    return null
+}

@@ -1,0 +1,139 @@
+// A small HTTP server.
+//
+//     seed run examples/server.sd :8080
+//
+//     curl localhost:8080/
+//     curl localhost:8080/time
+//     curl localhost:8080/counter
+//     curl -X POST 'localhost:8080/counter?by=5'
+//     curl -d '{"name": "Ada"}' localhost:8080/greet
+//
+// Handlers can't share variables, so the counter lives in its own goroutine
+// (store), and handlers talk to it over a channel. Each request sends a
+// reply channel along with its operation.
+package main
+
+import "errors"
+import "fmt"
+import "http"
+import "json"
+import "time"
+
+type Op enum {
+    Get(chan int reply)
+    Add(int n, chan int reply)
+}
+
+// Owns the counter. Runs until the server's group is stopped.
+fn store(chan Op ops) error {
+    int value = 0
+    for (;;) {
+        Op? op = ops.receive()
+        if (op == null) {
+            return null
+        }
+        switch (op) {
+        case Op.Get(chan int reply):
+            reply.send(value)
+        case Op.Add(int n, chan int reply):
+            value = value + n
+            reply.send(value)
+        }
+    }
+}
+
+// Every request gets a copy of App, so its fields are read-only
+// configuration: a channel to the store and the time the server started.
+type App struct implements http.Handler {
+    chan Op ops
+    int started
+}
+
+fn (App app) handle(http.Request req) (http.Response, error) {
+    string path = req.path()
+    switch (path) {
+    case "/":
+        return http.textResponse(http.statusOk, "hello from seed\n"), null
+    case "/time":
+        return app.clock(), null
+    case "/counter":
+        return app.counter(req)
+    case "/greet":
+        return greet(req), null
+    default:
+        return http.textResponse(http.statusNotFound, "not found: " + path + "\n"), null
+    }
+}
+
+fn (App app) clock() http.Response {
+    float uptime = float(time.monotonic() - app.started) / float(time.second)
+    json.Value body = json.Value.Object(map[string]json.Value{
+        "now": json.Value.String(time.format(time.now())),
+        "uptimeSeconds": json.Value.Number(uptime),
+    })
+    return http.jsonResponse(http.statusOk, body)
+}
+
+fn (App app) counter(http.Request req) (http.Response, error) {
+    chan int reply = chan int(1)
+    switch (req.method) {
+    case "GET":
+        app.ops.send(Op.Get(reply))
+    case "POST":
+        int n = 1
+        string? by = req.query()["by"]
+        if (by != null) {
+            int parsed, error err = by.toInt()
+            if (err != null) {
+                return http.textResponse(http.statusBadRequest, "by must be a whole number\n"), null
+            }
+            n = parsed
+        }
+        app.ops.send(Op.Add(n, reply))
+    default:
+        return http.textResponse(http.statusMethodNotAllowed, "use GET or POST\n"), null
+    }
+    int? value = reply.receive()
+    if (value == null) {
+        // The server answers 500 and logs this message.
+        return null, errors.new("counter store stopped")
+    }
+    json.Value body = json.Value.Object(map[string]json.Value{
+        "value": json.Value.Number(float(value)),
+    })
+    return http.jsonResponse(http.statusOk, body), null
+}
+
+fn greet(http.Request req) http.Response {
+    if (req.method != "POST") {
+        return http.textResponse(http.statusMethodNotAllowed, "use POST\n")
+    }
+    json.Value doc, error err = json.parse(req.body)
+    if (err != null) {
+        return http.textResponse(http.statusBadRequest, err.message() + "\n")
+    }
+    string? name = doc.get("name").asString()
+    if (name == null) {
+        return http.textResponse(http.statusBadRequest, "expected {\"name\": \"...\"}\n")
+    }
+    json.Value body = json.Value.Object(map[string]json.Value{
+        "greeting": json.Value.String("hello, " + name),
+    })
+    return http.jsonResponse(http.statusOk, body)
+}
+
+fn main([]string args) error {
+    string addr = ":8080"
+    if (args.len() > 1) {
+        addr = args[1]
+    }
+    chan Op ops = chan Op(16)
+    App app = App{ops: ops, started: time.monotonic()}
+    fmt.println("listening on " + addr)
+    // If serve fails (the port is taken, say), the group stops the store
+    // and main returns the error.
+    return group {
+        spawn store(ops)
+        spawn http.serve(addr, app)
+    }
+}

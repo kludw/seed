@@ -1,0 +1,1018 @@
+// The checker: resolves names and types and records the results in lists
+// parallel to the Ast arenas (info for expressions, targetVar for targets,
+// and so on). The tree itself is never changed.
+//
+// After an error, the offending expression gets the type `invalid`, and every
+// check that sees an invalid operand stays quiet, so one mistake produces one
+// message. Checking continues with the next statement and function.
+//
+// This file has the program-level passes, type resolution, scopes and
+// narrowing. Expressions are in check_expr.sd and check_call.sd, statements
+// in check_stmt.sd.
+package main
+
+type GlobalKind enum {
+    Fn
+    Type
+    Const
+}
+
+type Global struct {
+    GlobalKind kind
+    int index
+    Pos pos
+}
+
+type VarKind enum {
+    Local
+    Param
+    Recv
+    MutRecv
+    LocalConst
+}
+
+type Var struct {
+    string name
+    int ty
+    VarKind kind
+    Pos pos
+    bool used
+}
+
+// A narrowed path (see pathKey). dead marks a path that was assigned after
+// it was narrowed.
+type Narrow struct {
+    string key
+    bool dead
+}
+
+// What an expression resolved to.
+//
+//   Local       ref = variable           Const     ref = const decl
+//   Func        ref = fn decl            Method    ref = fn decl
+//   Builtin     builtin                  Pkg       pkgFn
+//   Conv        a conversion such as int(x)
+//   EnumNew     ref = type decl, sub = case (Type.Case(args))
+//   EnumVal     ref = type decl, sub = case (Type.Case)
+//   Field       a struct field
+//   ListIndex, StringIndex, MapIndex
+type Res enum {
+    None
+    Local
+    Const
+    Func
+    Method
+    Builtin
+    Pkg
+    Conv
+    EnumNew
+    EnumVal
+    Field
+    ListIndex
+    StringIndex
+    MapIndex
+}
+
+type Builtin enum {
+    None
+    Len
+    String
+    SSlice
+    SContains
+    SIndex
+    SStarts
+    SEnds
+    Split
+    Trim
+    Replace
+    Upper
+    Lower
+    ToInt
+    ToFloat
+    Bytes
+    Push
+    Pop
+    Insert
+    Remove
+    LContains
+    LIndex
+    LSlice
+    Reverse
+    Sort
+    Join
+    Delete
+    Keys
+    Message
+}
+
+type PkgFn enum {
+    None
+    Print
+    Println
+    Eprint
+    Eprintln
+    Exit
+    Env
+    Run
+    Read
+    Write
+    Exists
+    IsDir
+    List
+    Mkdir
+    Remove
+    ErrNew
+}
+
+// The checker's result for one expression.
+//
+// type is the type the parent sees. When wrap is set, the expression itself
+// produces `inner` (a T) and is converted to type (a T?). When narrowed is
+// set, the expression is stored as `orig` (a T?) and read as type (a T).
+type ExprInfo struct {
+    int ty
+    int inner
+    bool wrap
+    bool narrowed
+    int orig
+    Res res
+    int ref
+    int sub
+    Builtin builtin
+    PkgFn pkgFn
+}
+
+fn newInfo() ExprInfo {
+    return ExprInfo{
+        ty: tyInvalid,
+        inner: -1,
+        wrap: false,
+        narrowed: false,
+        orig: -1,
+        res: Res.None,
+        ref: -1,
+        sub: -1,
+        builtin: Builtin.None,
+        pkgFn: PkgFn.None,
+    }
+}
+
+type Checker struct {
+    Ast ast
+    Diags diags
+    Types types
+    map[string]int globals
+    []Global globalList
+    map[string]bool imported
+    map[string]bool usedImports
+    map[string]int methods
+    map[string]bool mutNames
+    []int declType
+    []int teType
+    []int fnRet
+    []int fnRecv
+    []string fnCName
+    []int recvVar
+    []int constType
+    []int constState
+    []ExprInfo info
+    []int targetVar
+    []int targetType
+    []int stmtVar
+    []bool stmtDiscard
+    []int labelCase
+    []int paramVar
+    []Var vars
+    []int scope
+    []int scopeMarks
+    []Narrow narrows
+    []int narrowMarks
+    int curFn
+    int loopDepth
+    bool strict
+}
+
+// strict turns on the pedantic checks that seed0 does not have and that some
+// seed0-era programs fail: unused variables and imports, and locals that
+// shadow package-level names. They will become the default once every
+// program in the test suites passes them.
+fn newChecker(Ast ast, Diags diags, bool strict) Checker {
+    Checker c = Checker{
+        ast: ast,
+        diags: diags,
+        types: newTypes(),
+        globals: map[string]int{},
+        globalList: []Global{},
+        imported: map[string]bool{},
+        usedImports: map[string]bool{},
+        methods: map[string]int{},
+        mutNames: map[string]bool{},
+        declType: []int{},
+        teType: []int{},
+        fnRet: []int{},
+        fnRecv: []int{},
+        fnCName: []string{},
+        recvVar: []int{},
+        constType: []int{},
+        constState: []int{},
+        info: []ExprInfo{},
+        targetVar: []int{},
+        targetType: []int{},
+        stmtVar: []int{},
+        stmtDiscard: []bool{},
+        labelCase: []int{},
+        paramVar: []int{},
+        vars: []Var{},
+        scope: []int{},
+        scopeMarks: []int{},
+        narrows: []Narrow{},
+        narrowMarks: []int{},
+        curFn: -1,
+        loopDepth: 0,
+        strict: strict,
+    }
+    for (int i = 0; i < ast.exprs.len(); i++) {
+        c.info.push(newInfo())
+    }
+    for (int j = 0; j < ast.typeExprs.len(); j++) {
+        c.teType.push(-1)
+    }
+    for (int k = 0; k < ast.targets.len(); k++) {
+        c.targetVar.push(-1)
+        c.targetType.push(tyInvalid)
+    }
+    for (int s = 0; s < ast.stmts.len(); s++) {
+        c.stmtVar.push(-1)
+        c.stmtDiscard.push(false)
+    }
+    for (int l = 0; l < ast.labels.len(); l++) {
+        c.labelCase.push(-1)
+    }
+    for (int p = 0; p < ast.params.len(); p++) {
+        c.paramVar.push(-1)
+    }
+    return c
+}
+
+// ---- reporting ----
+
+fn (Checker c) mut error(Pos pos, string message) {
+    c.diags.errorHint(pos, message, "")
+}
+
+fn (Checker c) mut errorHint(Pos pos, string message, string hint) {
+    c.diags.errorHint(pos, message, hint)
+}
+
+// For the features that the parser accepts but this compiler cannot
+// translate yet.
+fn (Checker c) mut unsupported(Pos pos, string what) {
+    c.errorHint(pos, what + " is not supported by seed0, and this compiler does not implement it yet", "see docs/seed0.md for the supported subset")
+}
+
+// ---- small accessors ----
+
+fn (Checker c) typeOf(int e) int {
+    return c.info[e].ty
+}
+
+fn (Checker c) kindOf(int t) Kind {
+    return c.types.kind(t)
+}
+
+fn (Checker c) typeName(int t) string {
+    return c.types.name(t)
+}
+
+fn (Checker c) describe(int e) string {
+    return c.ast.describe(e)
+}
+
+fn (Checker c) mut setType(int e, int t) {
+    c.info[e].ty = t
+}
+
+// ---- program ----
+
+// Checks the whole program in c.ast. Errors end up in c.diags.
+fn (Checker c) mut checkProgram() {
+    c.collectGlobals()
+    if (c.strict) {
+        c.checkDeclNames()
+    }
+    c.checkImports()
+    for (int i = 0; i < c.ast.typeDecls.len(); i++) {
+        TypeDecl td = c.ast.typeDecls[i]
+        Kind kind = Kind.Struct
+        if (td.kind == DeclKind.Enum) {
+            kind = Kind.Enum
+        } else if (td.kind == DeclKind.Interface) {
+            kind = Kind.Interface
+        }
+        c.declType.push(c.types.declared(kind, i, td.name))
+    }
+    for (int j = 0; j < c.ast.typeDecls.len(); j++) {
+        c.resolveTypeDecl(j)
+    }
+    for (int k = 0; k < c.ast.typeDecls.len(); k++) {
+        c.checkStructCycles(k, []int{})
+    }
+    for (int f = 0; f < c.ast.fns.len(); f++) {
+        c.resolveSignature(f)
+        c.recvVar.push(-1)
+    }
+    c.checkMain()
+    for (int n = 0; n < c.ast.consts.len(); n++) {
+        c.constType.push(tyInvalid)
+        c.constState.push(0)
+    }
+    for (int m = 0; m < c.ast.consts.len(); m++) {
+        c.checkConst(m)
+    }
+    for (int b = 0; b < c.ast.fns.len(); b++) {
+        c.checkFnBody(b)
+    }
+    for (int t = 0; t < c.ast.tests.len(); t++) {
+        c.unsupported(c.ast.tests[t].pos, "test")
+    }
+    if (c.strict) {
+        c.checkUnusedImports()
+    }
+}
+
+fn (Checker c) mut addGlobal(string name, GlobalKind kind, int index, Pos pos) {
+    if (name == "") {
+        return
+    }
+    int? old = c.globals[name]
+    if (old != null) {
+        Pos op = c.globalList[old].pos
+        c.error(pos, name + " is already declared at " + c.diags.paths[op.file] + ":" + op.line.string() + ":" + op.col.string())
+        return
+    }
+    c.globalList.push(Global{kind: kind, index: index, pos: pos})
+    c.globals[name] = c.globalList.len() - 1
+}
+
+fn (Checker c) mut collectGlobals() {
+    string pkg = ""
+    for (int f = 0; f < c.ast.files.len(); f++) {
+        SourceFile sf = c.ast.files[f]
+        if (pkg == "") {
+            pkg = sf.pkg
+        } else if (sf.pkg != pkg) {
+            c.error(sf.pkgPos, "all files must belong to one package: found " + sf.pkg + ", expected " + pkg)
+        }
+    }
+    for (int i = 0; i < c.ast.typeDecls.len(); i++) {
+        TypeDecl td = c.ast.typeDecls[i]
+        c.addGlobal(td.name, GlobalKind.Type, i, td.pos)
+    }
+    for (int j = 0; j < c.ast.fns.len(); j++) {
+        FnDecl fd = c.ast.fns[j]
+        if (!fd.isMethod) {
+            c.addGlobal(fd.name, GlobalKind.Fn, j, fd.pos)
+        }
+    }
+    for (int k = 0; k < c.ast.consts.len(); k++) {
+        ConstDecl cd = c.ast.consts[k]
+        c.addGlobal(cd.name, GlobalKind.Const, k, cd.pos)
+    }
+}
+
+fn isCorePackage(string name) bool {
+    return name == "fmt" || name == "os" || name == "fs" || name == "errors"
+}
+
+// Imports are per file: a package must be imported in the file that uses it.
+fn (Checker c) mut checkImports() {
+    for (int i = 0; i < c.ast.imports.len(); i++) {
+        Import im = c.ast.imports[i]
+        if (!isCorePackage(im.path)) {
+            c.errorHint(im.pos, "this compiler can only import the core packages fmt, os, fs and errors, not \"" + im.path + "\"", "user packages are not implemented yet")
+            continue
+        }
+        string key = im.file.string() + ":" + im.path
+        if (c.imported[key] != null) {
+            c.error(im.pos, "\"" + im.path + "\" is imported twice")
+        }
+        c.imported[key] = true
+    }
+}
+
+fn (Checker c) isImported(int file, string pkg) bool {
+    return c.imported[file.string() + ":" + pkg] != null
+}
+
+fn (Checker c) mut resolveTypeDecl(int d) {
+    TypeDecl td = c.ast.typeDecls[d]
+    if (td.kind == DeclKind.Interface) {
+        c.unsupported(td.pos, "interface")
+        return
+    }
+    if (td.implCount > 0) {
+        c.unsupported(c.ast.typeExprs[c.ast.at(td.impls, 0)].pos, "implements")
+    }
+    for (int i = 0; i < td.fieldCount; i++) {
+        Param f = c.ast.params[c.ast.at(td.fields, i)]
+        c.resolveType(f.typeExpr)
+        for (int j = 0; j < i; j++) {
+            if (c.ast.params[c.ast.at(td.fields, j)].name == f.name) {
+                c.error(f.pos, "field " + f.name + " is declared twice")
+            }
+        }
+    }
+    for (int k = 0; k < td.caseCount; k++) {
+        EnumCase ec = c.ast.enumCases[c.ast.at(td.cases, k)]
+        for (int m = 0; m < k; m++) {
+            if (c.ast.enumCases[c.ast.at(td.cases, m)].name == ec.name) {
+                c.error(ec.pos, "case " + ec.name + " is declared twice")
+            }
+        }
+        for (int n = 0; n < ec.paramCount; n++) {
+            c.resolveType(c.ast.params[c.ast.at(ec.params, n)].typeExpr)
+        }
+    }
+}
+
+// A struct that contains itself by value (directly or through other
+// structs) would be infinitely large.
+fn (Checker c) mut checkStructCycles(int d, []int path) {
+    TypeDecl td = c.ast.typeDecls[d]
+    if (td.kind != DeclKind.Struct) {
+        return
+    }
+    if (path.contains(d)) {
+        if (path[0] == d) {
+            c.errorHint(td.pos, "struct " + td.name + " contains itself", "use a nullable field (" + td.name + "?) or a list to break the cycle")
+        }
+        return
+    }
+    []int next = path.slice(0, path.len())
+    next.push(d)
+    for (int i = 0; i < td.fieldCount; i++) {
+        int t = c.fieldType(d, i)
+        if (c.kindOf(t) == Kind.Struct) {
+            c.checkStructCycles(c.types.decl(t), next)
+        }
+    }
+}
+
+fn (Checker c) mut resolveSignature(int f) {
+    FnDecl fd = c.ast.fns[f]
+    for (int i = 0; i < fd.paramCount; i++) {
+        c.resolveType(c.ast.params[c.ast.at(fd.params, i)].typeExpr)
+    }
+    []int rs = []int{}
+    for (int j = 0; j < fd.resultCount; j++) {
+        rs.push(c.resolve(c.ast.at(fd.results, j)))
+    }
+    if (rs.len() == 0) {
+        c.fnRet.push(tyVoid)
+    } else if (rs.len() == 1) {
+        c.fnRet.push(rs[0])
+    } else {
+        c.fnRet.push(c.types.tupleOf(rs))
+    }
+    if (!fd.isMethod) {
+        c.fnRecv.push(-1)
+        c.fnCName.push("sd_f_" + fd.name)
+        return
+    }
+    TypeExpr rte = c.ast.typeExprs[fd.recvType]
+    int? g = null
+    if (rte.kind == TypeExprKind.Name && rte.pkg == "") {
+        g = c.globals[rte.name]
+    }
+    if (g == null || c.globalList[g].kind != GlobalKind.Type) {
+        if (c.resolve(fd.recvType) != tyInvalid) {
+            c.error(rte.pos, "methods can only be declared on struct and enum types of this package, not " + c.ast.typeExprText(fd.recvType))
+        }
+        c.fnRecv.push(-1)
+        c.fnCName.push("sd_m_invalid__" + fd.name)
+        return
+    }
+    int d = c.globalList[g].index
+    TypeDecl td = c.ast.typeDecls[d]
+    c.teType[fd.recvType] = c.declType[d]
+    c.fnRecv.push(d)
+    c.fnCName.push("sd_m_" + td.name + "__" + fd.name)
+    string key = td.name + "." + fd.name
+    if (c.methods[key] != null) {
+        c.error(fd.pos, "method " + key + " is declared twice")
+        return
+    }
+    c.methods[key] = f
+    if (fd.recvMut) {
+        c.mutNames[fd.name] = true
+    }
+}
+
+fn (Checker c) mut checkMain() {
+    int? g = c.globals["main"]
+    if (g == null || c.globalList[g].kind != GlobalKind.Fn) {
+        Pos p = Pos{file: 0, line: 1, col: 1}
+        c.errorHint(p, "missing fn main([]string args) error", "every program starts at main")
+        return
+    }
+    int f = c.globalList[g].index
+    FnDecl fd = c.ast.fns[f]
+    bool ok = fd.paramCount == 1 && c.fnRet[f] == tyError
+    if (ok) {
+        int pt = c.teType[c.ast.params[c.ast.at(fd.params, 0)].typeExpr]
+        ok = pt == c.types.listOf(tyString)
+    }
+    if (!ok) {
+        c.error(fd.pos, "main must be declared as fn main([]string args) error")
+    }
+}
+
+// ---- declarations used by expressions ----
+
+fn (Checker c) fieldType(int d, int i) int {
+    TypeDecl td = c.ast.typeDecls[d]
+    return c.teType[c.ast.params[c.ast.at(td.fields, i)].typeExpr]
+}
+
+fn (Checker c) fieldName(int d, int i) string {
+    TypeDecl td = c.ast.typeDecls[d]
+    return c.ast.params[c.ast.at(td.fields, i)].name
+}
+
+// The index of a field by name, or -1.
+fn (Checker c) findField(int d, string name) int {
+    TypeDecl td = c.ast.typeDecls[d]
+    for (int i = 0; i < td.fieldCount; i++) {
+        if (c.ast.params[c.ast.at(td.fields, i)].name == name) {
+            return i
+        }
+    }
+    return -1
+}
+
+fn (Checker c) findCase(int d, string name) int {
+    TypeDecl td = c.ast.typeDecls[d]
+    for (int i = 0; i < td.caseCount; i++) {
+        if (c.ast.enumCases[c.ast.at(td.cases, i)].name == name) {
+            return i
+        }
+    }
+    return -1
+}
+
+fn (Checker c) enumCase(int d, int i) EnumCase {
+    return c.ast.enumCases[c.ast.at(c.ast.typeDecls[d].cases, i)]
+}
+
+fn (Checker c) caseParamType(int d, int ci, int k) int {
+    EnumCase ec = c.enumCase(d, ci)
+    return c.teType[c.ast.params[c.ast.at(ec.params, k)].typeExpr]
+}
+
+fn (Checker c) paramType(int f, int i) int {
+    FnDecl fd = c.ast.fns[f]
+    return c.teType[c.ast.params[c.ast.at(fd.params, i)].typeExpr]
+}
+
+fn (Checker c) resultType(int f, int i) int {
+    return c.teType[c.ast.at(c.ast.fns[f].results, i)]
+}
+
+fn (Checker c) mut unknownCase(Pos pos, int d, string name) {
+    TypeDecl td = c.ast.typeDecls[d]
+    Suggest s = newSuggest(name)
+    for (int i = 0; i < td.caseCount; i++) {
+        s.consider(c.enumCase(d, i).name)
+    }
+    c.errorHint(pos, "enum " + td.name + " has no case " + name, s.hint())
+}
+
+fn (Checker c) mut unknownField(Pos pos, int d, string name) {
+    TypeDecl td = c.ast.typeDecls[d]
+    Suggest s = newSuggest(name)
+    for (int i = 0; i < td.fieldCount; i++) {
+        s.consider(c.fieldName(d, i))
+    }
+    c.errorHint(pos, "struct " + td.name + " has no field " + name, s.hint())
+}
+
+// ---- type expressions ----
+
+fn isBuiltinTypeName(string n) bool {
+    return n == "int" || n == "float" || n == "bool" || n == "byte" || n == "string" || n == "error"
+}
+
+fn builtinType(string n) int {
+    if (n == "int") {
+        return tyInt
+    }
+    if (n == "float") {
+        return tyFloat
+    }
+    if (n == "bool") {
+        return tyBool
+    }
+    if (n == "byte") {
+        return tyByte
+    }
+    if (n == "string") {
+        return tyString
+    }
+    return tyError
+}
+
+// Resolves a type expression and caches the result in teType.
+fn (Checker c) mut resolveType(int te) {
+    if (te >= 0 && c.teType[te] < 0) {
+        c.teType[te] = c.resolveUncached(te)
+    }
+}
+
+// The type a type expression stands for (resolving it if needed).
+fn (Checker c) mut resolve(int te) int {
+    if (te < 0) {
+        return tyInvalid
+    }
+    c.resolveType(te)
+    return c.teType[te]
+}
+
+fn (Checker c) mut resolveUncached(int te) int {
+    TypeExpr x = c.ast.typeExprs[te]
+    switch (x.kind) {
+    case TypeExprKind.Name:
+        if (x.pkg != "") {
+            c.errorHint(x.pos, "unknown type " + x.pkg + "." + x.name, "types from other packages are not implemented yet")
+            return tyInvalid
+        }
+        if (isBuiltinTypeName(x.name)) {
+            return builtinType(x.name)
+        }
+        int? g = c.globals[x.name]
+        if (g != null) {
+            Global gl = c.globalList[g]
+            if (gl.kind == GlobalKind.Type) {
+                return c.declType[gl.index]
+            }
+            c.error(x.pos, x.name + " is not a type")
+            return tyInvalid
+        }
+        Suggest s = newSuggest(x.name)
+        s.consider("int")
+        s.consider("float")
+        s.consider("bool")
+        s.consider("byte")
+        s.consider("string")
+        s.consider("error")
+        for (int i = 0; i < c.ast.typeDecls.len(); i++) {
+            s.consider(c.ast.typeDecls[i].name)
+        }
+        c.errorHint(x.pos, "unknown type " + x.name, s.hint())
+        return tyInvalid
+    case TypeExprKind.List:
+        return c.types.listOf(c.resolve(x.a))
+    case TypeExprKind.Map:
+        int k = c.resolve(x.a)
+        int v = c.resolve(x.b)
+        if (k != tyInvalid && k != tyInt && k != tyByte && k != tyBool && k != tyString) {
+            c.error(c.ast.typeExprs[x.a].pos, "map keys must be int, byte, bool or string, not " + c.typeName(k))
+            return tyInvalid
+        }
+        if (v != tyInvalid && c.types.isOpt(v)) {
+            c.errorHint(c.ast.typeExprs[x.b].pos, "map values cannot be nullable", "m[k] already returns " + c.typeName(v) + "?, which would be " + c.typeName(v) + "?")
+            return tyInvalid
+        }
+        return c.types.mapOf(k, v)
+    case TypeExprKind.Optional:
+        int inner = c.resolve(x.a)
+        if (inner == tyError) {
+            c.error(x.pos, "error is already nullable; write error instead of error?")
+            return tyInvalid
+        }
+        if (inner != tyInvalid && c.types.isOpt(inner)) {
+            c.error(x.pos, "T?? is not a valid type")
+            return tyInvalid
+        }
+        return c.types.optOf(inner)
+    case TypeExprKind.Paren:
+        return c.resolve(x.a)
+    case TypeExprKind.Chan:
+        c.unsupported(x.pos, "chan")
+        return tyInvalid
+    case TypeExprKind.Func:
+        c.unsupported(x.pos, "a function type")
+        return tyInvalid
+    }
+}
+
+// ---- constants and function bodies ----
+
+fn (Checker c) mut checkConst(int i) {
+    int state = c.constState[i]
+    if (state == 2) {
+        return
+    }
+    ConstDecl cd = c.ast.consts[i]
+    if (state == 1) {
+        c.error(cd.pos, "constant " + cd.name + " depends on itself")
+        return
+    }
+    c.constState[i] = 1
+    int t = c.resolve(cd.typeExpr)
+    c.constType[i] = t
+    int savedFn = c.curFn
+    []int savedScope = c.scope
+    c.curFn = -1
+    c.scope = []int{}
+    c.checkValue(cd.expr, t, "to initialize " + cd.name)
+    c.curFn = savedFn
+    c.scope = savedScope
+    c.constState[i] = 2
+}
+
+fn (Checker c) mut checkFnBody(int f) {
+    FnDecl fd = c.ast.fns[f]
+    c.curFn = f
+    c.scope = []int{}
+    c.scopeMarks = []int{}
+    c.narrows = []Narrow{}
+    c.narrowMarks = []int{}
+    c.loopDepth = 0
+    int firstVar = c.vars.len()
+    c.pushScope()
+    if (fd.isMethod && c.fnRecv[f] >= 0) {
+        VarKind rk = VarKind.Recv
+        if (fd.recvMut) {
+            rk = VarKind.MutRecv
+        }
+        c.recvVar[f] = c.declare(fd.recvName, c.declType[c.fnRecv[f]], rk, fd.recvPos)
+    }
+    for (int i = 0; i < fd.paramCount; i++) {
+        int pi = c.ast.at(fd.params, i)
+        Param p = c.ast.params[pi]
+        c.paramVar[pi] = c.declare(p.name, c.teType[p.typeExpr], VarKind.Param, p.pos)
+    }
+    c.checkBlock(fd.body)
+    if (fd.resultCount > 0 && !c.blockExits(fd.body)) {
+        c.errorHint(c.ast.blocks[fd.body].end, "missing return at the end of " + fd.name, "every path through a function with results must end in return")
+    }
+    c.popScope()
+    c.curFn = -1
+    if (c.strict) {
+        c.checkUnusedVars(firstVar)
+    }
+}
+
+// ---- scopes ----
+
+fn (Checker c) mut pushScope() {
+    c.scopeMarks.push(c.scope.len())
+    c.narrowMarks.push(c.narrows.len())
+}
+
+fn (Checker c) mut popScope() {
+    int? s = c.scopeMarks.pop()
+    int? n = c.narrowMarks.pop()
+    if (s != null && n != null) {
+        c.truncateScope(s)
+        c.truncateNarrows(n)
+    }
+}
+
+fn (Checker c) mut truncateScope(int n) {
+    if (c.scope.len() > n) {
+        c.scope = c.scope.slice(0, n)
+    }
+}
+
+fn (Checker c) mut truncateNarrows(int n) {
+    if (c.narrows.len() > n) {
+        c.narrows = c.narrows.slice(0, n)
+    }
+}
+
+// The innermost variable with this name, or -1.
+fn (Checker c) lookupVar(string name) int {
+    for (int i = c.scope.len() - 1; i >= 0; i--) {
+        int v = c.scope[i]
+        if (c.vars[v].name == name) {
+            return v
+        }
+    }
+    return -1
+}
+
+// Declares a variable in the current scope and returns it (-1 for `_`).
+fn (Checker c) mut declare(string name, int t, VarKind kind, Pos pos) int {
+    if (name == "_" || name == "") {
+        return -1
+    }
+    if (kind == VarKind.Param) {
+        c.checkCamel(name, pos, "the parameter")
+    } else if (kind == VarKind.Recv || kind == VarKind.MutRecv) {
+        c.checkCamel(name, pos, "the receiver")
+    } else {
+        c.checkCamel(name, pos, "the variable")
+    }
+    if (c.strict && c.globals[name] != null) {
+        c.errorHint(pos, name + " is already declared at the package level; shadowing is not allowed", "choose another name")
+    }
+    int old = c.lookupVar(name)
+    if (old >= 0) {
+        c.errorHint(pos, name + " is already declared at line " + c.vars[old].pos.line.string() + "; shadowing is not allowed", "assign with = instead, or choose another name")
+    }
+    c.vars.push(Var{name: name, ty: t, kind: kind, pos: pos, used: false})
+    int v = c.vars.len() - 1
+    c.scope.push(v)
+    return v
+}
+
+// ---- narrowing ----
+
+// A key for a narrowable path: a variable followed by struct fields, such as
+// "v12.email". "" for anything else.
+fn (Checker c) pathKey(int e) string {
+    Expr x = c.ast.exprs[e]
+    if (x.kind == ExprKind.Ident) {
+        int v = -1
+        if (c.info[e].res == Res.Local) {
+            v = c.info[e].ref
+        } else {
+            v = c.lookupVar(x.text)
+        }
+        if (v < 0) {
+            return ""
+        }
+        return "v" + v.string()
+    }
+    if (x.kind == ExprKind.Field && c.info[e].res != Res.EnumVal) {
+        string base = c.pathKey(x.a)
+        if (base == "") {
+            return ""
+        }
+        return base + "." + x.text
+    }
+    return ""
+}
+
+fn (Checker c) isNarrowed(string key) bool {
+    for (int i = c.narrows.len() - 1; i >= 0; i--) {
+        if (c.narrows[i].key == key) {
+            return !c.narrows[i].dead
+        }
+    }
+    return false
+}
+
+fn (Checker c) mut addNarrow(string key) {
+    c.narrows.push(Narrow{key: key, dead: false})
+}
+
+// Whether key is prefix or a path under it (or only under it, if strict).
+fn keyExtends(string key, string prefix, bool strict) bool {
+    if (!key.startsWith(prefix)) {
+        return false
+    }
+    if (key.len() == prefix.len()) {
+        return !strict
+    }
+    return key[prefix.len()] == '.'
+}
+
+// The path was assigned: it and everything under it may be null again.
+fn (Checker c) mut killAssign(string key) {
+    if (key == "") {
+        return
+    }
+    for (int i = 0; i < c.narrows.len(); i++) {
+        if (keyExtends(c.narrows[i].key, key, false)) {
+            c.narrows[i].dead = true
+        }
+    }
+}
+
+// A mut method was called on the path: everything under it may change.
+fn (Checker c) mut killMut(string key) {
+    if (key == "") {
+        return
+    }
+    for (int i = 0; i < c.narrows.len(); i++) {
+        if (keyExtends(c.narrows[i].key, key, true)) {
+            c.narrows[i].dead = true
+        }
+    }
+}
+
+// The paths that are known not to be null when cond is `when`.
+fn (Checker c) condKeys(int cond, bool when, []string out) []string {
+    []string keys = out
+    Expr x = c.ast.exprs[cond]
+    if (x.kind == ExprKind.Binary) {
+        if ((x.op == Tok.Ne && when) || (x.op == Tok.Eq && !when)) {
+            int other = -1
+            if (c.ast.exprs[x.a].kind == ExprKind.NullLit) {
+                other = x.b
+            } else if (c.ast.exprs[x.b].kind == ExprKind.NullLit) {
+                other = x.a
+            }
+            if (other >= 0) {
+                string k = c.pathKey(other)
+                if (k != "") {
+                    keys.push(k)
+                }
+            }
+        } else if ((x.op == Tok.AndAnd && when) || (x.op == Tok.OrOr && !when)) {
+            keys = c.condKeys(x.a, when, keys)
+            keys = c.condKeys(x.b, when, keys)
+        }
+    } else if (x.kind == ExprKind.Unary && x.op == Tok.Not) {
+        keys = c.condKeys(x.a, !when, keys)
+    }
+    return keys
+}
+
+fn (Checker c) mut narrowOn(int cond, bool when) {
+    []string keys = c.condKeys(cond, when, []string{})
+    for (int i = 0; i < keys.len(); i++) {
+        c.addNarrow(keys[i])
+    }
+}
+
+fn isBuiltinMutName(string n) bool {
+    return n == "push" || n == "pop" || n == "insert" || n == "remove" || n == "reverse" || n == "sort" || n == "delete"
+}
+
+// Before a loop: any path the loop assigns or mutates is not narrowed at its
+// start, because the loop may come around again.
+fn (Checker c) mut scanStmtKills(int s) {
+    if (s < 0) {
+        return
+    }
+    Stmt st = c.ast.stmts[s]
+    switch (st.kind) {
+    case StmtKind.Assign:
+        for (int i = 0; i < st.count; i++) {
+            Target tg = c.ast.targets[c.ast.at(st.list, i)]
+            if (tg.kind == TargetKind.Place) {
+                c.killAssign(c.pathKey(tg.expr))
+                c.scanExprKills(tg.expr)
+            }
+        }
+        c.scanExprKills(st.expr)
+    case StmtKind.IncDec:
+        c.killAssign(c.pathKey(st.expr))
+    case StmtKind.ExprStmt, StmtKind.Const, StmtKind.Defer, StmtKind.Spawn, StmtKind.Assert:
+        c.scanExprKills(st.expr)
+    case StmtKind.Return:
+        for (int j = 0; j < st.count; j++) {
+            c.scanExprKills(c.ast.at(st.list, j))
+        }
+    case StmtKind.If:
+        c.scanExprKills(st.expr)
+        c.scanBlockKills(st.body)
+        c.scanBlockKills(st.els)
+        c.scanStmtKills(st.elseIf)
+    case StmtKind.For:
+        c.scanStmtKills(st.init)
+        c.scanExprKills(st.expr)
+        c.scanStmtKills(st.post)
+        c.scanBlockKills(st.body)
+    case StmtKind.Switch, StmtKind.Select:
+        c.scanExprKills(st.expr)
+        for (int k = 0; k < st.count; k++) {
+            Case cs = c.ast.cases[c.ast.at(st.list, k)]
+            c.scanStmtKills(cs.comm)
+            c.scanBlockKills(cs.body)
+        }
+    case StmtKind.Bad, StmtKind.Break, StmtKind.Continue:
+        return
+    }
+}
+
+fn (Checker c) mut scanBlockKills(int b) {
+    if (b < 0) {
+        return
+    }
+    Block bl = c.ast.blocks[b]
+    for (int i = 0; i < bl.count; i++) {
+        c.scanStmtKills(c.ast.at(bl.list, i))
+    }
+}
+
+fn (Checker c) mut scanExprKills(int e) {
+    if (e < 0) {
+        return
+    }
+    Expr x = c.ast.exprs[e]
+    if (x.kind == ExprKind.Call) {
+        Expr callee = c.ast.exprs[x.a]
+        if (callee.kind == ExprKind.Field && (isBuiltinMutName(callee.text) || c.mutNames[callee.text] != null)) {
+            c.killMut(c.pathKey(callee.a))
+        }
+    }
+    c.scanExprKills(x.a)
+    c.scanExprKills(x.b)
+    for (int i = 0; i < x.count; i++) {
+        c.scanExprKills(c.ast.at(x.list, i))
+    }
+}

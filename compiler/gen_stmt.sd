@@ -1,0 +1,348 @@
+// The C generator, continued: statements.
+package main
+
+fn (Gen g) mut genBlock(int b) {
+    if (b < 0) {
+        return
+    }
+    Block bl = g.c.ast.blocks[b]
+    for (int i = 0; i < bl.count; i++) {
+        g.genStmt(g.c.ast.at(bl.list, i))
+    }
+}
+
+// Stores an owned value into the place lv (an lvalue checked by checkLvalue).
+fn (Gen g) mut gstore(int lv, string val) {
+    Expr x = g.c.ast.exprs[lv]
+    ExprInfo i = g.c.info[lv]
+    if (x.kind == ExprKind.Index && i.res == Res.MapIndex) {
+        int mt = g.typeOf(x.a)
+        int vt = g.elemOf(mt)
+        int kt = g.c.types.key(mt)
+        string v = g.tmp()
+        string k = g.tmp()
+        string key = g.gexpr(x.b)
+        string vct = g.ctype(vt)
+        g.emit("{ " + vct + " " + v + " = " + val + "; " + g.ctype(kt) + " " + k + " = " + key + "; *(" + vct + "*)sd_map_slot_" + g.keySuffix(kt) + "(" + g.gplace(x.a) + ", " + g.keyArg(kt, k) + ", " + g.rtpFn(vt) + ") = " + v + "; }")
+        return
+    }
+    int t = i.ty
+    if (x.kind == ExprKind.Ident && g.c.vars[i.ref].kind != VarKind.MutRecv && !g.needsRt(t)) {
+        g.emit("l_" + g.c.vars[i.ref].name + " = " + val + ";")
+        return
+    }
+    string tv = g.tmp()
+    string tp = g.tmp()
+    string ct = g.ctype(t)
+    if (g.needsRt(t)) {
+        g.emit("{ " + ct + " " + tv + " = " + val + "; " + ct + " *" + tp + " = " + g.gplace(lv) + "; " + g.rlFn(t) + "(*" + tp + "); *" + tp + " = " + tv + "; }")
+    } else {
+        g.emit("{ " + ct + " " + tv + " = " + val + "; " + ct + " *" + tp + " = " + g.gplace(lv) + "; *" + tp + " = " + tv + "; }")
+    }
+}
+
+fn (Gen g) mut genAssign(int s) {
+    Stmt st = g.c.ast.stmts[s]
+    int n = st.count
+    if (n == 1) {
+        int ti = g.c.ast.at(st.list, 0)
+        Target tg = g.c.ast.targets[ti]
+        switch (tg.kind) {
+        case TargetKind.Decl:
+            if (g.c.targetVar[ti] >= 0) {
+                g.emit(g.ctype(g.c.targetType[ti]) + " l_" + tg.name + " = " + g.gowned(st.expr) + ";")
+            } else {
+                g.emit("(void)(" + g.gexpr(st.expr) + ");")
+            }
+        case TargetKind.Discard:
+            g.emit("(void)(" + g.gexpr(st.expr) + ");")
+        case TargetKind.Place:
+            g.gstore(tg.expr, g.gowned(st.expr))
+        }
+        return
+    }
+    int rt = g.typeOf(st.expr)
+    for (int i = 0; i < n; i++) {
+        int di = g.c.ast.at(st.list, i)
+        if (g.c.ast.targets[di].kind == TargetKind.Decl && g.c.targetVar[di] >= 0) {
+            g.emit(g.ctype(g.c.targetType[di]) + " l_" + g.c.ast.targets[di].name + ";")
+        }
+    }
+    g.emit("{")
+    g.indent++
+    string t = g.tmp()
+    g.emit(g.ctype(rt) + " " + t + " = " + g.gexpr(st.expr) + ";")
+    for (int j = 0; j < n; j++) {
+        int ti2 = g.c.ast.at(st.list, j)
+        Target tg2 = g.c.ast.targets[ti2]
+        if (tg2.kind == TargetKind.Discard || (tg2.kind == TargetKind.Decl && g.c.targetVar[ti2] < 0)) {
+            continue
+        }
+        int tt = g.c.targetType[ti2]
+        string val = t + ".r" + j.string()
+        if (tt != g.c.types.part(rt, j)) {
+            val = g.wrapVal(tt, val)
+        }
+        if (g.c.stmtDiscard[s]) {
+            val = "(" + t + ".r" + (n - 1).string() + " ? " + g.nullOf(tt) + " : " + val + ")"
+        }
+        if (tg2.kind == TargetKind.Decl) {
+            g.emit("l_" + tg2.name + " = " + val + ";")
+        } else {
+            g.gstore(tg2.expr, val)
+        }
+    }
+    g.indent--
+    g.emit("}")
+}
+
+fn (Gen g) mentionsVar(int e, int v) bool {
+    if (e < 0) {
+        return false
+    }
+    Expr x = g.c.ast.exprs[e]
+    if (x.kind == ExprKind.Ident && g.c.info[e].res == Res.Local && g.c.info[e].ref == v) {
+        return true
+    }
+    if (g.mentionsVar(x.a, v) || g.mentionsVar(x.b, v)) {
+        return true
+    }
+    for (int i = 0; i < x.count; i++) {
+        if (g.mentionsVar(g.c.ast.at(x.list, i), v)) {
+            return true
+        }
+    }
+    return false
+}
+
+// A returned local variable dies with the frame, so it can be moved out
+// without raising its counts.
+fn (Gen g) mut returnValue(Stmt st, int idx) string {
+    int e = g.c.ast.at(st.list, idx)
+    Expr x = g.c.ast.exprs[e]
+    ExprInfo i = g.c.info[e]
+    if (x.kind == ExprKind.Ident && i.res == Res.Local && g.c.vars[i.ref].kind == VarKind.Local && !i.narrowed) {
+        bool once = true
+        for (int j = 0; j < st.count; j++) {
+            if (j != idx && g.mentionsVar(g.c.ast.at(st.list, j), i.ref)) {
+                once = false
+            }
+        }
+        if (once) {
+            return g.gexpr(e)
+        }
+    }
+    return g.gowned(e)
+}
+
+// Generates a statement into a single line (for the post statement of a
+// C for loop).
+fn (Gen g) mut captureStmt(int s) string {
+    []string saved = g.out
+    int savedIndent = g.indent
+    g.out = []string{}
+    g.indent = 0
+    g.genStmt(s)
+    string text = g.out.join("").replace("\n", " ")
+    g.out = saved
+    g.indent = savedIndent
+    return text
+}
+
+fn (Gen g) mut genSwitch(Stmt st) {
+    int t = g.typeOf(st.expr)
+    bool isEnum = g.kindOf(t) == Kind.Enum
+    string sv = g.tmp()
+    g.emit("{")
+    g.indent++
+    g.emit(g.ctype(t) + " " + sv + " = " + g.gexpr(st.expr) + ";")
+    bool first = true
+    int def = -1
+    for (int i = 0; i < st.count; i++) {
+        Case cs = g.c.ast.cases[g.c.ast.at(st.list, i)]
+        if (cs.isDefault) {
+            def = cs.body
+            continue
+        }
+        []string conds = []string{}
+        for (int j = 0; j < cs.labelCount; j++) {
+            int li = g.c.ast.at(cs.labels, j)
+            if (isEnum) {
+                conds.push(sv + "->tag == " + g.c.labelCase[li].string())
+            } else {
+                conds.push(g.eqExpr(t, sv, g.gexpr(g.c.ast.labels[li].expr)))
+            }
+        }
+        string prefix = "} else "
+        if (first) {
+            prefix = ""
+        }
+        g.emit(prefix + "if (" + conds.join(" || ") + ") {")
+        first = false
+        g.indent++
+        if (isEnum && cs.labelCount == 1) {
+            int l0 = g.c.ast.at(cs.labels, 0)
+            Label l = g.c.ast.labels[l0]
+            int d = g.c.types.decl(t)
+            EnumCase ec = g.c.enumCase(d, g.c.labelCase[l0])
+            for (int k = 0; k < l.paramCount; k++) {
+                int pi = g.c.ast.at(l.params, k)
+                if (g.c.paramVar[pi] < 0) {
+                    continue
+                }
+                int pt = g.c.vars[g.c.paramVar[pi]].ty
+                string v = sv + "->u.c_" + ec.name + ".f" + k.string()
+                if (g.needsRt(pt)) {
+                    v = g.rtFn(pt) + "(" + v + ")"
+                }
+                g.emit(g.ctype(pt) + " l_" + g.c.ast.params[pi].name + " = " + v + ";")
+            }
+        }
+        g.genBlock(cs.body)
+        g.indent--
+    }
+    if (def >= 0) {
+        if (first) {
+            g.emit("{")
+        } else {
+            g.emit("} else {")
+        }
+        g.indent++
+        g.genBlock(def)
+        g.indent--
+        g.emit("}")
+    } else if (!first) {
+        g.emit("}")
+    }
+    g.indent--
+    g.emit("}")
+}
+
+fn (Gen g) mut genReturn(Stmt st) {
+    int n = g.c.ast.fns[g.curFn].resultCount
+    if (n == 0) {
+        g.emit("return;")
+        return
+    }
+    if (st.count == 1 && n == 1) {
+        g.emit("return " + g.returnValue(st, 0) + ";")
+        return
+    }
+    if (st.count == 1) {
+        g.emit("return " + g.gexpr(g.c.ast.at(st.list, 0)) + ";")
+        return
+    }
+    string rct = g.ctype(g.c.fnRet[g.curFn])
+    int effects = 0
+    for (int i = 0; i < n; i++) {
+        if (g.hasEffects(g.c.ast.at(st.list, i))) {
+            effects++
+        }
+    }
+    []string fields = []string{}
+    if (effects >= 2) {
+        g.emit("{")
+        g.indent++
+        for (int j = 0; j < n; j++) {
+            string t = g.tmp()
+            g.emit(g.ctype(g.typeOf(g.c.ast.at(st.list, j))) + " " + t + " = " + g.returnValue(st, j) + ";")
+            fields.push(".r" + j.string() + " = " + t)
+        }
+        g.emit("return (" + rct + "){" + fields.join(", ") + "};")
+        g.indent--
+        g.emit("}")
+        return
+    }
+    for (int k = 0; k < n; k++) {
+        fields.push(".r" + k.string() + " = " + g.returnValue(st, k))
+    }
+    g.emit("return (" + rct + "){" + fields.join(", ") + "};")
+}
+
+fn (Gen g) mut genStmt(int s) {
+    Stmt st = g.c.ast.stmts[s]
+    switch (st.kind) {
+    case StmtKind.ExprStmt:
+        g.emit(g.gexpr(st.expr) + ";")
+    case StmtKind.Assign:
+        g.genAssign(s)
+    case StmtKind.IncDec:
+        int lv = st.expr
+        ExprInfo i = g.c.info[lv]
+        string fname = "sd_sub"
+        string op = "-"
+        if (st.inc) {
+            fname = "sd_add"
+            op = "+"
+        }
+        Expr x = g.c.ast.exprs[lv]
+        if (x.kind == ExprKind.Ident && g.c.vars[i.ref].kind != VarKind.MutRecv) {
+            string name = "l_" + g.c.vars[i.ref].name
+            if (i.ty == tyInt) {
+                g.emit(name + " = " + fname + "(" + name + ", 1);")
+            } else {
+                g.emit(name + " = " + name + " " + op + " 1.0;")
+            }
+            return
+        }
+        string p = g.tmp()
+        if (i.ty == tyInt) {
+            g.emit("{ int64_t *" + p + " = " + g.gplace(lv) + "; *" + p + " = " + fname + "(*" + p + ", 1); }")
+        } else {
+            g.emit("{ double *" + p + " = " + g.gplace(lv) + "; *" + p + " = *" + p + " " + op + " 1.0; }")
+        }
+    case StmtKind.Const:
+        int v = g.c.stmtVar[s]
+        if (v >= 0) {
+            g.emit(g.ctype(g.c.vars[v].ty) + " l_" + st.name + " = " + g.gowned(st.expr) + ";")
+        }
+    case StmtKind.If:
+        g.emit("if (" + g.gexpr(st.expr) + ") {")
+        g.indent++
+        g.genBlock(st.body)
+        g.indent--
+        if (st.elseIf >= 0) {
+            g.emit("} else {")
+            g.indent++
+            g.genStmt(st.elseIf)
+            g.indent--
+        } else if (st.els >= 0) {
+            g.emit("} else {")
+            g.indent++
+            g.genBlock(st.els)
+            g.indent--
+        }
+        g.emit("}")
+    case StmtKind.For:
+        g.emit("{")
+        g.indent++
+        if (st.init >= 0) {
+            g.genStmt(st.init)
+        }
+        string post = ""
+        if (st.post >= 0) {
+            post = "({ " + g.captureStmt(st.post) + "})"
+        }
+        string cond = ""
+        if (st.expr >= 0) {
+            cond = g.gexpr(st.expr)
+        }
+        g.emit("for (; " + cond + "; " + post + ") {")
+        g.indent++
+        g.genBlock(st.body)
+        g.indent--
+        g.emit("}")
+        g.indent--
+        g.emit("}")
+    case StmtKind.Switch:
+        g.genSwitch(st)
+    case StmtKind.Return:
+        g.genReturn(st)
+    case StmtKind.Break:
+        g.emit("break;")
+    case StmtKind.Continue:
+        g.emit("continue;")
+    case StmtKind.Bad, StmtKind.Select, StmtKind.Defer, StmtKind.Spawn, StmtKind.Assert:
+        g.emit("/* internal error: statement */")
+    }
+}

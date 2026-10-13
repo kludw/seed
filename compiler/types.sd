@@ -1,0 +1,251 @@
+// Types: an interned arena. A type is an int index into Types.list, and two
+// types are equal exactly when their indices are equal, because every
+// constructor looks the type up by its mangled name first.
+package main
+
+type Kind enum {
+    Void
+    Int
+    Float
+    Bool
+    Byte
+    String
+    Error
+    Null
+    Invalid
+    List
+    Map
+    Opt
+    Struct
+    Enum
+    Interface
+    Tuple
+    Func
+    Chan
+}
+
+// One type:
+//
+//   List, Opt, Chan   elem
+//   Map               key, elem (the value type)
+//   Struct, Enum,     decl (index into Ast.typeDecls)
+//   Interface
+//   Tuple             parts/count (in Types.parts)
+//   Func              parts/count (parameter types), elem (the result: void,
+//                     one type or a tuple)
+//
+// name is the type as written in Seed, mangle a unique C-identifier-safe
+// key. rt and helpers are scratch space for the C generator: rt caches
+// whether values of the type hold reference counts (-1 unknown, 0 no, 1 yes,
+// 2 being computed), and helpers records which helper functions were
+// requested.
+type Type struct {
+    Kind kind
+    int elem
+    int key
+    int decl
+    int parts
+    int count
+    string name
+    string mangle
+    int rt
+    int helpers
+}
+
+type Types struct {
+    []Type list
+    map[string]int byMangle
+    []int parts
+}
+
+// The basic types are created first, in this order, so their ids are fixed.
+const int tyVoid = 0
+const int tyInt = 1
+const int tyFloat = 2
+const int tyBool = 3
+const int tyByte = 4
+const int tyString = 5
+const int tyError = 6
+const int tyNull = 7
+const int tyInvalid = 8
+
+fn newTypes() Types {
+    Types ts = Types{list: []Type{}, byMangle: map[string]int{}, parts: []int{}}
+    ts.basic(Kind.Void, "v", "void")
+    ts.basic(Kind.Int, "i", "int")
+    ts.basic(Kind.Float, "f", "float")
+    ts.basic(Kind.Bool, "b", "bool")
+    ts.basic(Kind.Byte, "y", "byte")
+    ts.basic(Kind.String, "s", "string")
+    ts.basic(Kind.Error, "e", "error")
+    ts.basic(Kind.Null, "n", "null")
+    ts.basic(Kind.Invalid, "x", "invalid")
+    return ts
+}
+
+fn (Types ts) mut basic(Kind kind, string mangle, string name) {
+    ts.list.push(Type{kind: kind, elem: -1, key: -1, decl: -1, parts: 0, count: 0, name: name, mangle: mangle, rt: -1, helpers: 0})
+    ts.byMangle[mangle] = ts.list.len() - 1
+}
+
+// Returns the id of t, adding it when no type has its mangled name yet.
+fn (Types ts) mut intern(Type t) int {
+    int? id = ts.byMangle[t.mangle]
+    if (id != null) {
+        return id
+    }
+    ts.list.push(t)
+    int n = ts.list.len() - 1
+    ts.byMangle[t.mangle] = n
+    return n
+}
+
+fn (Types ts) kind(int t) Kind {
+    return ts.list[t].kind
+}
+
+fn (Types ts) name(int t) string {
+    return ts.list[t].name
+}
+
+fn (Types ts) mangle(int t) string {
+    return ts.list[t].mangle
+}
+
+fn (Types ts) elem(int t) int {
+    return ts.list[t].elem
+}
+
+fn (Types ts) key(int t) int {
+    return ts.list[t].key
+}
+
+fn (Types ts) decl(int t) int {
+    return ts.list[t].decl
+}
+
+fn (Types ts) count(int t) int {
+    return ts.list[t].count
+}
+
+// The i-th part of a tuple (or parameter of a function type).
+fn (Types ts) part(int t, int i) int {
+    return ts.parts[ts.list[t].parts + i]
+}
+
+fn (Types ts) isOpt(int t) bool {
+    return ts.list[t].kind == Kind.Opt
+}
+
+fn (Types ts) isTuple(int t) bool {
+    return ts.list[t].kind == Kind.Tuple
+}
+
+fn (Types ts) mut compound(Kind kind, int elem, int key, string mangle, string name) int {
+    if (elem == tyInvalid || key == tyInvalid) {
+        return tyInvalid
+    }
+    return ts.intern(Type{kind: kind, elem: elem, key: key, decl: -1, parts: 0, count: 0, name: name, mangle: mangle, rt: -1, helpers: 0})
+}
+
+fn (Types ts) mut listOf(int e) int {
+    string name = "[]" + ts.name(e)
+    if (ts.isOpt(e)) {
+        name = "[](" + ts.name(e) + ")"
+    }
+    return ts.compound(Kind.List, e, -1, "L" + ts.mangle(e), name)
+}
+
+fn (Types ts) mut mapOf(int k, int v) int {
+    return ts.compound(Kind.Map, v, k, "M" + ts.mangle(k) + ts.mangle(v), "map[" + ts.name(k) + "]" + ts.name(v))
+}
+
+fn (Types ts) mut optOf(int e) int {
+    return ts.compound(Kind.Opt, e, -1, "O" + ts.mangle(e), ts.name(e) + "?")
+}
+
+fn (Types ts) mut chanOf(int e) int {
+    return ts.compound(Kind.Chan, e, -1, "C" + ts.mangle(e), "chan " + ts.name(e))
+}
+
+// A struct, enum or interface type for a declaration.
+fn (Types ts) mut declared(Kind kind, int decl, string name) int {
+    string prefix = "S"
+    if (kind == Kind.Enum) {
+        prefix = "E"
+    } else if (kind == Kind.Interface) {
+        prefix = "I"
+    }
+    string mangle = prefix + name.len().string() + name
+    return ts.intern(Type{kind: kind, elem: -1, key: -1, decl: decl, parts: 0, count: 0, name: name, mangle: mangle, rt: -1, helpers: 0})
+}
+
+// The type of several results, such as (int, error).
+fn (Types ts) mut tupleOf([]int parts) int {
+    string mangle = "T" + parts.len().string()
+    []string names = []string{}
+    for (int i = 0; i < parts.len(); i++) {
+        if (parts[i] == tyInvalid) {
+            return tyInvalid
+        }
+        mangle = mangle + ts.mangle(parts[i])
+        names.push(ts.name(parts[i]))
+    }
+    int? existing = ts.byMangle[mangle]
+    if (existing != null) {
+        return existing
+    }
+    int start = ts.parts.len()
+    for (int j = 0; j < parts.len(); j++) {
+        ts.parts.push(parts[j])
+    }
+    string name = "(" + names.join(", ") + ")"
+    return ts.intern(Type{kind: Kind.Tuple, elem: -1, key: -1, decl: -1, parts: start, count: parts.len(), name: name, mangle: mangle, rt: -1, helpers: 0})
+}
+
+fn (Types ts) mut tuple2(int a, int b) int {
+    return ts.tupleOf([]int{a, b})
+}
+
+// A function type: fn(params) result.
+fn (Types ts) mut funcOf([]int params, int result) int {
+    string mangle = "F" + params.len().string()
+    []string names = []string{}
+    for (int i = 0; i < params.len(); i++) {
+        if (params[i] == tyInvalid) {
+            return tyInvalid
+        }
+        mangle = mangle + ts.mangle(params[i])
+        names.push(ts.name(params[i]))
+    }
+    mangle = mangle + "_" + ts.mangle(result)
+    int? existing = ts.byMangle[mangle]
+    if (existing != null) {
+        return existing
+    }
+    int start = ts.parts.len()
+    for (int j = 0; j < params.len(); j++) {
+        ts.parts.push(params[j])
+    }
+    string name = "fn(" + names.join(", ") + ")"
+    if (result != tyVoid) {
+        name = name + " " + ts.name(result)
+    }
+    return ts.intern(Type{kind: Kind.Func, elem: result, key: -1, decl: -1, parts: start, count: params.len(), name: name, mangle: mangle, rt: -1, helpers: 0})
+}
+
+// The last part of a tuple, or the type itself.
+fn (Types ts) lastResult(int t) int {
+    if (ts.isTuple(t)) {
+        return ts.part(t, ts.count(t) - 1)
+    }
+    return t
+}
+
+// Whether a call result ends with an error: error itself or (..., error).
+fn (Types ts) endsWithError(int t) bool {
+    if (t == tyError) {
+        return true
+    }
+    return ts.isTuple(t) && ts.part(t, ts.count(t) - 1) == tyError
+}

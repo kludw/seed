@@ -1,0 +1,527 @@
+// The syntax tree, stored as arenas.
+//
+// Seed has no pointers, so every node lives in a list inside Ast and is
+// addressed by its index. A child is an int index (-1 means "none"). A list
+// of children is a run of indices in Ast.lists, written as (start, count).
+// Nodes only hold ints, strings, bools and enums, so copying one is cheap.
+//
+// The checker never changes the tree: its results live in lists parallel to
+// these arenas (see check.sd).
+package main
+
+type ExprKind enum {
+    Bad
+    IntLit
+    FloatLit
+    ByteLit
+    StringLit
+    BoolLit
+    NullLit
+    Ident
+    Field
+    Index
+    Call
+    Unary
+    Binary
+    Try
+    ListLit
+    MapLit
+    Entry
+    StructLit
+    FieldInit
+    ChanMake
+    Group
+}
+
+// An expression. Which fields are used depends on the kind:
+//
+//   IntLit      intValue (already negated when neg), raw
+//   FloatLit    raw (the literal as written)
+//   ByteLit     intValue, raw
+//   StringLit   text (decoded bytes), raw
+//   BoolLit     intValue (1 or 0)
+//   Ident       text
+//   Field       a (base), text (field name)
+//   Index       a (base), b (index)
+//   Call        a (callee), list/count (arguments)
+//   Unary       op, a
+//   Binary      op, a, b
+//   Try         a (the call)
+//   ListLit     typeExpr (element type), list/count (elements)
+//   MapLit      typeExpr (key), typeExpr2 (value), list/count (Entry nodes)
+//   Entry       a (key), b (value)
+//   StructLit   pkg, text (type name), list/count (FieldInit nodes)
+//   FieldInit   text (field name), a (value)
+//   ChanMake    typeExpr (element type), a (buffer size)
+//   Group       block
+type Expr struct {
+    ExprKind kind
+    Pos pos
+    Tok op
+    string text
+    string raw
+    string pkg
+    int a
+    int b
+    int list
+    int count
+    int typeExpr
+    int typeExpr2
+    int block
+    int intValue
+    bool neg
+    bool paren
+}
+
+type StmtKind enum {
+    Bad
+    ExprStmt
+    Assign
+    IncDec
+    If
+    For
+    Switch
+    Select
+    Return
+    Defer
+    Spawn
+    Break
+    Continue
+    Assert
+    Const
+}
+
+// A statement:
+//
+//   ExprStmt    expr
+//   Assign      list/count (Target nodes), expr (the value). This covers
+//               declarations too: a target with a type declares a name.
+//   IncDec      expr (the place), inc
+//   If          expr (condition), body, els (else block) or elseIf (stmt)
+//   For         init (stmt), expr (condition), post (stmt), body
+//   Switch      expr, list/count (Case nodes)
+//   Select      list/count (Case nodes, each with a comm statement)
+//   Return      list/count (values)
+//   Defer       expr
+//   Spawn       expr
+//   Assert      expr
+//   Const       typeExpr, name, namePos, expr
+type Stmt struct {
+    StmtKind kind
+    Pos pos
+    int expr
+    int list
+    int count
+    int body
+    int els
+    int elseIf
+    int init
+    int post
+    bool inc
+    int typeExpr
+    string name
+    Pos namePos
+}
+
+type TargetKind enum {
+    Decl
+    Place
+    Discard
+}
+
+// One target on the left of `=`: `Type name`, a place, or `_`.
+type Target struct {
+    TargetKind kind
+    Pos pos
+    int typeExpr
+    string name
+    int expr
+}
+
+// A list of statements. For braced blocks, pos is the `{` and end the `}`.
+type Block struct {
+    Pos pos
+    Pos end
+    int list
+    int count
+}
+
+// A `case` or `default` clause of a switch or select.
+type Case struct {
+    Pos pos
+    bool isDefault
+    int labels
+    int labelCount
+    int comm
+    int body
+}
+
+// A case label. A label that looks like `Type.Case` or `Type.Case(params)` is
+// a pattern (isPattern); one without parentheses is also parsed as an
+// expression (expr), so it can be used in a value switch too.
+type Label struct {
+    Pos pos
+    bool isPattern
+    bool parens
+    string pkg
+    string typeName
+    string caseName
+    int expr
+    int params
+    int paramCount
+}
+
+type TypeExprKind enum {
+    Name
+    List
+    Map
+    Chan
+    Func
+    Optional
+    Paren
+}
+
+// A type as written:
+//
+//   Name        pkg (may be empty), name
+//   List        a (element)
+//   Map         a (key), b (value)
+//   Chan        a (element)
+//   Func        list/count (parameter types), results/resultCount
+//   Optional    a
+//   Paren       a
+type TypeExpr struct {
+    TypeExprKind kind
+    Pos pos
+    string pkg
+    string name
+    int a
+    int b
+    int list
+    int count
+    int results
+    int resultCount
+}
+
+// `Type name`: a function parameter, struct field, enum case field or a
+// binding in a case pattern.
+type Param struct {
+    Pos pos
+    int typeExpr
+    string name
+}
+
+type FnDecl struct {
+    Pos pos
+    Pos start
+    int file
+    bool isPub
+    string name
+    bool isMethod
+    int recvType
+    string recvName
+    Pos recvPos
+    bool recvMut
+    int params
+    int paramCount
+    int results
+    int resultCount
+    int body
+}
+
+type DeclKind enum {
+    Struct
+    Enum
+    Interface
+}
+
+type TypeDecl struct {
+    Pos pos
+    int file
+    bool isPub
+    string name
+    DeclKind kind
+    int impls
+    int implCount
+    int fields
+    int fieldCount
+    int cases
+    int caseCount
+    int methods
+    int methodCount
+}
+
+type EnumCase struct {
+    Pos pos
+    string name
+    bool parens
+    int params
+    int paramCount
+}
+
+// A method in an interface.
+type MethodSig struct {
+    Pos pos
+    bool isMut
+    string name
+    int params
+    int paramCount
+    int results
+    int resultCount
+}
+
+type ConstDecl struct {
+    Pos pos
+    int file
+    bool isPub
+    string name
+    int typeExpr
+    int expr
+}
+
+type TestDecl struct {
+    Pos pos
+    int file
+    string name
+    int body
+}
+
+type Import struct {
+    Pos pos
+    int file
+    string path
+}
+
+type TopKind enum {
+    Fn
+    Type
+    Const
+    Test
+}
+
+// A top-level declaration, in source order (for tools such as `seed fmt`).
+type TopDecl struct {
+    TopKind kind
+    int index
+}
+
+type SourceFile struct {
+    string path
+    string pkg
+    Pos pkgPos
+    int imports
+    int importCount
+    int tops
+    int topCount
+}
+
+type Ast struct {
+    []SourceFile files
+    []Expr exprs
+    []Stmt stmts
+    []Block blocks
+    []Target targets
+    []Case cases
+    []Label labels
+    []TypeExpr typeExprs
+    []Param params
+    []FnDecl fns
+    []TypeDecl typeDecls
+    []EnumCase enumCases
+    []MethodSig methodSigs
+    []ConstDecl consts
+    []TestDecl tests
+    []Import imports
+    []TopDecl tops
+    []Comment comments
+    []int lists
+}
+
+fn newAst() Ast {
+    return Ast{
+        files: []SourceFile{},
+        exprs: []Expr{},
+        stmts: []Stmt{},
+        blocks: []Block{},
+        targets: []Target{},
+        cases: []Case{},
+        labels: []Label{},
+        typeExprs: []TypeExpr{},
+        params: []Param{},
+        fns: []FnDecl{},
+        typeDecls: []TypeDecl{},
+        enumCases: []EnumCase{},
+        methodSigs: []MethodSig{},
+        consts: []ConstDecl{},
+        tests: []TestDecl{},
+        imports: []Import{},
+        tops: []TopDecl{},
+        comments: []Comment{},
+        lists: []int{},
+    }
+}
+
+fn newExpr(ExprKind kind, Pos pos) Expr {
+    return Expr{
+        kind: kind,
+        pos: pos,
+        op: Tok.Eof,
+        text: "",
+        raw: "",
+        pkg: "",
+        a: -1,
+        b: -1,
+        list: 0,
+        count: 0,
+        typeExpr: -1,
+        typeExpr2: -1,
+        block: -1,
+        intValue: 0,
+        neg: false,
+        paren: false,
+    }
+}
+
+fn newStmt(StmtKind kind, Pos pos) Stmt {
+    return Stmt{
+        kind: kind,
+        pos: pos,
+        expr: -1,
+        list: 0,
+        count: 0,
+        body: -1,
+        els: -1,
+        elseIf: -1,
+        init: -1,
+        post: -1,
+        inc: false,
+        typeExpr: -1,
+        name: "",
+        namePos: pos,
+    }
+}
+
+fn newTypeExpr(TypeExprKind kind, Pos pos) TypeExpr {
+    return TypeExpr{
+        kind: kind,
+        pos: pos,
+        pkg: "",
+        name: "",
+        a: -1,
+        b: -1,
+        list: 0,
+        count: 0,
+        results: 0,
+        resultCount: 0,
+    }
+}
+
+// Appends a run of indices to ast.lists and returns where it starts.
+fn (Ast a) mut addList([]int xs) int {
+    int start = a.lists.len()
+    for (int i = 0; i < xs.len(); i++) {
+        a.lists.push(xs[i])
+    }
+    return start
+}
+
+fn (Ast a) mut addExpr(Expr e) int {
+    a.exprs.push(e)
+    return a.exprs.len() - 1
+}
+
+fn (Ast a) mut addStmt(Stmt s) int {
+    a.stmts.push(s)
+    return a.stmts.len() - 1
+}
+
+fn (Ast a) mut addTypeExpr(TypeExpr t) int {
+    a.typeExprs.push(t)
+    return a.typeExprs.len() - 1
+}
+
+// The i-th child of a list that starts at start.
+fn (Ast a) at(int start, int i) int {
+    return a.lists[start + i]
+}
+
+// Text for an expression in messages: `x`, `u.name`, `xs.len()`, or "".
+fn (Ast a) exprText(int e) string {
+    if (e < 0) {
+        return ""
+    }
+    Expr x = a.exprs[e]
+    switch (x.kind) {
+    case ExprKind.Ident:
+        return x.text
+    case ExprKind.Field:
+        string base = a.exprText(x.a)
+        if (base == "") {
+            return ""
+        }
+        return base + "." + x.text
+    case ExprKind.Call:
+        string callee = a.exprText(x.a)
+        if (callee == "") {
+            return ""
+        }
+        return callee + "()"
+    case ExprKind.Bad, ExprKind.IntLit, ExprKind.FloatLit, ExprKind.ByteLit, ExprKind.StringLit, ExprKind.BoolLit:
+        return ""
+    case ExprKind.NullLit, ExprKind.Index, ExprKind.Unary, ExprKind.Binary, ExprKind.Try, ExprKind.ListLit:
+        return ""
+    case ExprKind.MapLit, ExprKind.Entry, ExprKind.StructLit, ExprKind.FieldInit, ExprKind.ChanMake, ExprKind.Group:
+        return ""
+    }
+}
+
+// Like exprText, but never empty.
+fn (Ast a) describe(int e) string {
+    string t = a.exprText(e)
+    if (t == "") {
+        return "the value"
+    }
+    return t
+}
+
+// A type expression as source text, for messages.
+fn (Ast a) typeExprText(int t) string {
+    if (t < 0) {
+        return "?"
+    }
+    TypeExpr x = a.typeExprs[t]
+    switch (x.kind) {
+    case TypeExprKind.Name:
+        if (x.pkg != "") {
+            return x.pkg + "." + x.name
+        }
+        return x.name
+    case TypeExprKind.List:
+        return "[]" + a.typeExprText(x.a)
+    case TypeExprKind.Map:
+        return "map[" + a.typeExprText(x.a) + "]" + a.typeExprText(x.b)
+    case TypeExprKind.Chan:
+        return "chan " + a.typeExprText(x.a)
+    case TypeExprKind.Func:
+        []string ps = []string{}
+        for (int i = 0; i < x.count; i++) {
+            ps.push(a.typeExprText(a.at(x.list, i)))
+        }
+        string s = "fn(" + ps.join(", ") + ")"
+        if (x.resultCount == 1) {
+            return s + " " + a.typeExprText(a.at(x.results, 0))
+        }
+        if (x.resultCount > 1) {
+            []string rs = []string{}
+            for (int j = 0; j < x.resultCount; j++) {
+                rs.push(a.typeExprText(a.at(x.results, j)))
+            }
+            return s + " (" + rs.join(", ") + ")"
+        }
+        return s
+    case TypeExprKind.Optional:
+        return a.typeExprText(x.a) + "?"
+    case TypeExprKind.Paren:
+        return "(" + a.typeExprText(x.a) + ")"
+    }
+}

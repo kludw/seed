@@ -1,0 +1,253 @@
+// Diagnostics: collecting errors and printing them with the source line, a
+// caret under the column and an optional hint.
+package main
+
+import "fmt"
+
+const int maxErrors = 20
+
+// A position in a source file. file indexes Diags.paths (and Ast.files);
+// line and col start at 1, and col counts bytes.
+type Pos struct {
+    int file
+    int line
+    int col
+}
+
+type Diag struct {
+    Pos pos
+    string message
+    string hint
+}
+
+type Diags struct {
+    []string paths
+    []string sources
+    []Diag list
+    bool overflow
+}
+
+fn newDiags() Diags {
+    return Diags{paths: []string{}, sources: []string{}, list: []Diag{}, overflow: false}
+}
+
+fn (Diags d) mut addFile(string path, string source) int {
+    d.paths.push(path)
+    d.sources.push(source)
+    return d.paths.len() - 1
+}
+
+fn (Diags d) mut error(Pos pos, string message) {
+    d.errorHint(pos, message, "")
+}
+
+// Records an error. Errors after the first maxErrors are counted as overflow
+// and not shown. An error at the same position as an earlier one is dropped,
+// since it is almost always a consequence of the first.
+fn (Diags d) mut errorHint(Pos pos, string message, string hint) {
+    for (int i = 0; i < d.list.len(); i++) {
+        if (d.list[i].pos == pos) {
+            return
+        }
+    }
+    if (d.list.len() >= maxErrors) {
+        d.overflow = true
+        return
+    }
+    d.list.push(Diag{pos: pos, message: message, hint: hint})
+}
+
+fn (Diags d) count() int {
+    return d.list.len()
+}
+
+fn (Diags d) full() bool {
+    return d.list.len() >= maxErrors
+}
+
+// Returns line number `line` (1-based) of a source text, without the newline.
+fn sourceLine(string src, int line) string {
+    int cur = 1
+    int start = 0
+    int n = src.len()
+    for (int i = 0; i < n; i++) {
+        if (cur == line) {
+            start = i
+            break
+        }
+        if (src[i] == '\n') {
+            cur++
+            if (cur == line) {
+                start = i + 1
+                break
+            }
+        }
+    }
+    if (cur != line) {
+        return ""
+    }
+    int end = start
+    for (; end < n && src[end] != '\n'; ) {
+        end++
+    }
+    string text = src.slice(start, end)
+    if (text.endsWith("\r")) {
+        return text.slice(0, text.len() - 1)
+    }
+    return text
+}
+
+fn (Diags d) render(Diag g) string {
+    string path = "<input>"
+    string src = ""
+    if (g.pos.file >= 0 && g.pos.file < d.paths.len()) {
+        path = d.paths[g.pos.file]
+        src = d.sources[g.pos.file]
+    }
+    []string out = []string{}
+    out.push(path + ":" + g.pos.line.string() + ":" + g.pos.col.string() + ": error: " + g.message + "\n")
+    string text = sourceLine(src, g.pos.line)
+    if (text != "") {
+        string num = g.pos.line.string()
+        string gutter = spaces(5 - num.len())
+        out.push(gutter + num + " | " + text + "\n")
+        []byte caret = []byte{}
+        for (int i = 0; i < g.pos.col - 1 && i < text.len(); i++) {
+            if (text[i] == '\t') {
+                caret.push('\t')
+            } else {
+                caret.push(' ')
+            }
+        }
+        caret.push('^')
+        out.push(spaces(gutter.len() + num.len()) + " | " + string(caret) + "\n")
+    }
+    if (g.hint != "") {
+        out.push("    hint: " + g.hint + "\n")
+    }
+    return out.join("")
+}
+
+fn spaces(int n) string {
+    []byte b = []byte{}
+    for (int i = 0; i < n; i++) {
+        b.push(' ')
+    }
+    return string(b)
+}
+
+fn posBefore(Pos a, Pos b) bool {
+    if (a.file != b.file) {
+        return a.file < b.file
+    }
+    if (a.line != b.line) {
+        return a.line < b.line
+    }
+    return a.col < b.col
+}
+
+// The errors in source order (a stable insertion sort; there are at most
+// maxErrors of them).
+fn (Diags d) sorted() []Diag {
+    []Diag out = []Diag{}
+    for (int i = 0; i < d.list.len(); i++) {
+        Diag g = d.list[i]
+        int j = out.len()
+        for (; j > 0 && posBefore(g.pos, out[j - 1].pos); ) {
+            j--
+        }
+        out.insert(j, g)
+    }
+    return out
+}
+
+// Prints every collected error to stderr, in source order.
+fn (Diags d) print() {
+    []Diag all = d.sorted()
+    for (int i = 0; i < all.len(); i++) {
+        fmt.eprint(d.render(all[i]))
+    }
+    if (d.overflow) {
+        fmt.eprintln("too many errors; only the first " + maxErrors.string() + " are shown")
+    }
+}
+
+// ---- "did you mean" suggestions ----
+
+fn lowerByte(byte c) byte {
+    if (c >= 'A' && c <= 'Z') {
+        return c | byte(32)
+    }
+    return c
+}
+
+// Case-insensitive Levenshtein distance; 99 for very long names.
+fn editDistance(string a, string b) int {
+    int la = a.len()
+    int lb = b.len()
+    if (la > 64 || lb > 64) {
+        return 99
+    }
+    int w = lb + 1
+    []int d = []int{}
+    for (int k = 0; k < (la + 1) * w; k++) {
+        d.push(0)
+    }
+    for (int i = 0; i <= la; i++) {
+        d[i * w] = i
+    }
+    for (int j = 0; j <= lb; j++) {
+        d[j] = j
+    }
+    for (int i = 1; i <= la; i++) {
+        for (int j = 1; j <= lb; j++) {
+            int cost = 1
+            if (lowerByte(a[i - 1]) == lowerByte(b[j - 1])) {
+                cost = 0
+            }
+            int c = d[(i - 1) * w + j - 1] + cost
+            if (d[(i - 1) * w + j] + 1 < c) {
+                c = d[(i - 1) * w + j] + 1
+            }
+            if (d[i * w + j - 1] + 1 < c) {
+                c = d[i * w + j - 1] + 1
+            }
+            d[i * w + j] = c
+        }
+    }
+    return d[la * w + lb]
+}
+
+// Finds the closest known name to a misspelt one.
+type Suggest struct {
+    string name
+    string best
+    int dist
+}
+
+fn newSuggest(string name) Suggest {
+    return Suggest{name: name, best: "", dist: 99}
+}
+
+fn (Suggest s) mut consider(string cand) {
+    if (cand == "" || cand == "_" || cand == s.name) {
+        return
+    }
+    int d = editDistance(s.name, cand)
+    int limit = s.name.len() / 3 + 1
+    if (limit > 3) {
+        limit = 3
+    }
+    if (d <= limit && d < s.dist) {
+        s.dist = d
+        s.best = cand
+    }
+}
+
+// "did you mean x?", or "" when nothing is close.
+fn (Suggest s) hint() string {
+    if (s.best == "") {
+        return ""
+    }
+    return "did you mean " + s.best + "?"
+}

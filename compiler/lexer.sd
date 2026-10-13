@@ -1,0 +1,645 @@
+// The lexer: turns a source file into tokens, inserting Newline tokens with
+// Go's rule (docs/grammar.md), and keeps every comment with its position so
+// that a formatter can put it back.
+package main
+
+type Tok enum {
+    Eof
+    Newline
+    Ident
+    Int
+    Float
+    Byte
+    String
+    KwPackage
+    KwImport
+    KwPub
+    KwFn
+    KwType
+    KwStruct
+    KwEnum
+    KwInterface
+    KwImplements
+    KwConst
+    KwIf
+    KwElse
+    KwFor
+    KwSwitch
+    KwCase
+    KwDefault
+    KwBreak
+    KwContinue
+    KwReturn
+    KwDefer
+    KwTry
+    KwNull
+    KwTrue
+    KwFalse
+    KwMut
+    KwTest
+    KwAssert
+    KwSelect
+    KwSpawn
+    KwGroup
+    KwChan
+    KwMap
+    Plus
+    Minus
+    Star
+    Slash
+    Percent
+    Amp
+    Pipe
+    Caret
+    Shl
+    Shr
+    Eq
+    Ne
+    Lt
+    Le
+    Gt
+    Ge
+    AndAnd
+    OrOr
+    Not
+    Assign
+    Inc
+    Dec
+    LParen
+    RParen
+    LBrack
+    RBrack
+    LBrace
+    RBrace
+    Comma
+    Semi
+    Colon
+    Dot
+    Question
+}
+
+// The source spelling of a token kind (or a description for the ones that
+// have no fixed spelling).
+fn (Tok k) text() string {
+    switch (k) {
+    case Tok.Eof:
+        return "end of file"
+    case Tok.Newline:
+        return "newline"
+    case Tok.Ident:
+        return "identifier"
+    case Tok.Int:
+        return "integer"
+    case Tok.Float:
+        return "float"
+    case Tok.Byte:
+        return "byte"
+    case Tok.String:
+        return "string"
+    case Tok.KwPackage:
+        return "package"
+    case Tok.KwImport:
+        return "import"
+    case Tok.KwPub:
+        return "pub"
+    case Tok.KwFn:
+        return "fn"
+    case Tok.KwType:
+        return "type"
+    case Tok.KwStruct:
+        return "struct"
+    case Tok.KwEnum:
+        return "enum"
+    case Tok.KwInterface:
+        return "interface"
+    case Tok.KwImplements:
+        return "implements"
+    case Tok.KwConst:
+        return "const"
+    case Tok.KwIf:
+        return "if"
+    case Tok.KwElse:
+        return "else"
+    case Tok.KwFor:
+        return "for"
+    case Tok.KwSwitch:
+        return "switch"
+    case Tok.KwCase:
+        return "case"
+    case Tok.KwDefault:
+        return "default"
+    case Tok.KwBreak:
+        return "break"
+    case Tok.KwContinue:
+        return "continue"
+    case Tok.KwReturn:
+        return "return"
+    case Tok.KwDefer:
+        return "defer"
+    case Tok.KwTry:
+        return "try"
+    case Tok.KwNull:
+        return "null"
+    case Tok.KwTrue:
+        return "true"
+    case Tok.KwFalse:
+        return "false"
+    case Tok.KwMut:
+        return "mut"
+    case Tok.KwTest:
+        return "test"
+    case Tok.KwAssert:
+        return "assert"
+    case Tok.KwSelect:
+        return "select"
+    case Tok.KwSpawn:
+        return "spawn"
+    case Tok.KwGroup:
+        return "group"
+    case Tok.KwChan:
+        return "chan"
+    case Tok.KwMap:
+        return "map"
+    case Tok.Plus:
+        return "+"
+    case Tok.Minus:
+        return "-"
+    case Tok.Star:
+        return "*"
+    case Tok.Slash:
+        return "/"
+    case Tok.Percent:
+        return "%"
+    case Tok.Amp:
+        return "&"
+    case Tok.Pipe:
+        return "|"
+    case Tok.Caret:
+        return "^"
+    case Tok.Shl:
+        return "<<"
+    case Tok.Shr:
+        return ">>"
+    case Tok.Eq:
+        return "=="
+    case Tok.Ne:
+        return "!="
+    case Tok.Lt:
+        return "<"
+    case Tok.Le:
+        return "<="
+    case Tok.Gt:
+        return ">"
+    case Tok.Ge:
+        return ">="
+    case Tok.AndAnd:
+        return "&&"
+    case Tok.OrOr:
+        return "||"
+    case Tok.Not:
+        return "!"
+    case Tok.Assign:
+        return "="
+    case Tok.Inc:
+        return "++"
+    case Tok.Dec:
+        return "--"
+    case Tok.LParen:
+        return "("
+    case Tok.RParen:
+        return ")"
+    case Tok.LBrack:
+        return "["
+    case Tok.RBrack:
+        return "]"
+    case Tok.LBrace:
+        return "{"
+    case Tok.RBrace:
+        return "}"
+    case Tok.Comma:
+        return ","
+    case Tok.Semi:
+        return ";"
+    case Tok.Colon:
+        return ":"
+    case Tok.Dot:
+        return "."
+    case Tok.Question:
+        return "?"
+    }
+}
+
+const map[string]Tok keywords = map[string]Tok{
+    "package": Tok.KwPackage,
+    "import": Tok.KwImport,
+    "pub": Tok.KwPub,
+    "fn": Tok.KwFn,
+    "type": Tok.KwType,
+    "struct": Tok.KwStruct,
+    "enum": Tok.KwEnum,
+    "interface": Tok.KwInterface,
+    "implements": Tok.KwImplements,
+    "const": Tok.KwConst,
+    "if": Tok.KwIf,
+    "else": Tok.KwElse,
+    "for": Tok.KwFor,
+    "switch": Tok.KwSwitch,
+    "case": Tok.KwCase,
+    "default": Tok.KwDefault,
+    "break": Tok.KwBreak,
+    "continue": Tok.KwContinue,
+    "return": Tok.KwReturn,
+    "defer": Tok.KwDefer,
+    "try": Tok.KwTry,
+    "null": Tok.KwNull,
+    "true": Tok.KwTrue,
+    "false": Tok.KwFalse,
+    "mut": Tok.KwMut,
+    "test": Tok.KwTest,
+    "assert": Tok.KwAssert,
+    "select": Tok.KwSelect,
+    "spawn": Tok.KwSpawn,
+    "group": Tok.KwGroup,
+    "chan": Tok.KwChan,
+    "map": Tok.KwMap,
+}
+
+// A token. For identifiers text is the name, for string and byte literals
+// it is the decoded bytes, and for numbers it is the literal as written.
+// raw is always the exact source text.
+type Token struct {
+    Tok kind
+    Pos pos
+    string text
+    string raw
+}
+
+// A `//` comment. text includes the slashes; ownLine is true when nothing
+// but whitespace comes before it on its line.
+type Comment struct {
+    Pos pos
+    string text
+    bool ownLine
+}
+
+// After one of these tokens, a newline ends the statement.
+fn endsStatement(Tok k) bool {
+    return k == Tok.Ident || k == Tok.Int || k == Tok.Float || k == Tok.Byte || k == Tok.String ||
+        k == Tok.KwTrue || k == Tok.KwFalse || k == Tok.KwNull || k == Tok.KwReturn || k == Tok.KwBreak ||
+        k == Tok.KwContinue || k == Tok.RParen || k == Tok.RBrack || k == Tok.RBrace || k == Tok.Question ||
+        k == Tok.Inc || k == Tok.Dec
+}
+
+fn isLetter(byte c) bool {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_'
+}
+
+fn isDigit(byte c) bool {
+    return c >= '0' && c <= '9'
+}
+
+// The value of a hexadecimal digit, or -1.
+fn hexValue(byte c) int {
+    if (c >= '0' && c <= '9') {
+        return int(c) - 48
+    }
+    if (c >= 'a' && c <= 'f') {
+        return int(c) - 87
+    }
+    if (c >= 'A' && c <= 'F') {
+        return int(c) - 55
+    }
+    return -1
+}
+
+type Lexer struct {
+    int file
+    string src
+    int i
+    int line
+    int col
+    Tok last
+    bool lineHasToken
+    []Token tokens
+    []Comment comments
+    []Diag errors
+}
+
+// Lexes one file. Errors are collected in the result's errors list; the
+// lexer skips the offending character and continues.
+fn lex(int file, string src) Lexer {
+    Lexer lx = Lexer{
+        file: file,
+        src: src,
+        i: 0,
+        line: 1,
+        col: 1,
+        last: Tok.Newline,
+        lineHasToken: false,
+        tokens: []Token{},
+        comments: []Comment{},
+        errors: []Diag{},
+    }
+    lx.run()
+    return lx
+}
+
+fn (Lexer lx) here() Pos {
+    return Pos{file: lx.file, line: lx.line, col: lx.col}
+}
+
+fn (Lexer lx) mut fail(Pos pos, string message) {
+    lx.errors.push(Diag{pos: pos, message: message, hint: ""})
+}
+
+fn (Lexer lx) mut add(Tok kind, Pos pos, string text, int start) {
+    lx.tokens.push(Token{kind: kind, pos: pos, text: text, raw: lx.src.slice(start, lx.i)})
+    lx.col = lx.col + (lx.i - start)
+    lx.last = kind
+    lx.lineHasToken = true
+}
+
+fn (Lexer lx) peekByte(int ahead) byte {
+    if (lx.i + ahead < lx.src.len()) {
+        return lx.src[lx.i + ahead]
+    }
+    return byte(0)
+}
+
+fn (Lexer lx) mut run() {
+    int n = lx.src.len()
+    for (; lx.i < n; ) {
+        byte c = lx.src[lx.i]
+        if (c == '\n') {
+            if (endsStatement(lx.last)) {
+                lx.tokens.push(Token{kind: Tok.Newline, pos: lx.here(), text: "", raw: ""})
+                lx.last = Tok.Newline
+            }
+            lx.i++
+            lx.line++
+            lx.col = 1
+            lx.lineHasToken = false
+            continue
+        }
+        if (c == ' ' || c == '\t' || c == '\r') {
+            lx.i++
+            lx.col++
+            continue
+        }
+        if (c == '/' && lx.peekByte(1) == '/') {
+            int cstart = lx.i
+            for (; lx.i < n && lx.src[lx.i] != '\n'; ) {
+                lx.i++
+            }
+            string ctext = lx.src.slice(cstart, lx.i)
+            if (ctext.endsWith("\r")) {
+                ctext = ctext.slice(0, ctext.len() - 1)
+            }
+            lx.comments.push(Comment{pos: lx.here(), text: ctext, ownLine: !lx.lineHasToken})
+            lx.col = lx.col + (lx.i - cstart)
+            continue
+        }
+        if (isLetter(c)) {
+            lx.lexWord()
+        } else if (isDigit(c)) {
+            lx.lexNumber()
+        } else if (c == '"' || c == '\'') {
+            lx.lexQuoted(c)
+        } else {
+            lx.lexOperator(c)
+        }
+    }
+    if (endsStatement(lx.last)) {
+        lx.tokens.push(Token{kind: Tok.Newline, pos: lx.here(), text: "", raw: ""})
+    }
+    lx.tokens.push(Token{kind: Tok.Eof, pos: lx.here(), text: "", raw: ""})
+}
+
+fn (Lexer lx) mut lexWord() {
+    int start = lx.i
+    Pos pos = lx.here()
+    int n = lx.src.len()
+    for (; lx.i < n && (isLetter(lx.src[lx.i]) || isDigit(lx.src[lx.i])); ) {
+        lx.i++
+    }
+    string word = lx.src.slice(start, lx.i)
+    Tok? kw = keywords[word]
+    if (kw != null) {
+        lx.add(kw, pos, word, start)
+    } else {
+        lx.add(Tok.Ident, pos, word, start)
+    }
+}
+
+fn (Lexer lx) mut lexNumber() {
+    int start = lx.i
+    Pos pos = lx.here()
+    int n = lx.src.len()
+    Tok kind = Tok.Int
+    if (lx.src[lx.i] == '0' && (lx.peekByte(1) == 'x' || lx.peekByte(1) == 'X')) {
+        lx.i = lx.i + 2
+        int digits = 0
+        for (; lx.i < n && hexValue(lx.src[lx.i]) >= 0; ) {
+            lx.i++
+            digits++
+        }
+        if (digits == 0) {
+            lx.fail(pos, "hexadecimal literal needs digits after 0x")
+        }
+    } else {
+        for (; lx.i < n && isDigit(lx.src[lx.i]); ) {
+            lx.i++
+        }
+        if (lx.peekByte(0) == '.' && isDigit(lx.peekByte(1))) {
+            lx.i++
+            for (; lx.i < n && isDigit(lx.src[lx.i]); ) {
+                lx.i++
+            }
+            if (lx.peekByte(0) == 'e' || lx.peekByte(0) == 'E') {
+                int j = lx.i + 1
+                if (j < n && (lx.src[j] == '+' || lx.src[j] == '-')) {
+                    j++
+                }
+                if (j < n && isDigit(lx.src[j])) {
+                    lx.i = j
+                    for (; lx.i < n && isDigit(lx.src[lx.i]); ) {
+                        lx.i++
+                    }
+                }
+            }
+            kind = Tok.Float
+        }
+    }
+    if (lx.i < n && (isLetter(lx.src[lx.i]) || isDigit(lx.src[lx.i]))) {
+        lx.fail(pos, "invalid number literal (a float needs a '.', for example 1.0e9)")
+        for (; lx.i < n && (isLetter(lx.src[lx.i]) || isDigit(lx.src[lx.i])); ) {
+            lx.i++
+        }
+    }
+    string raw = lx.src.slice(start, lx.i)
+    lx.add(kind, pos, raw, start)
+}
+
+// Lexes a string ("...") or byte ('.') literal, decoding escapes.
+fn (Lexer lx) mut lexQuoted(byte quote) {
+    int start = lx.i
+    Pos pos = lx.here()
+    int n = lx.src.len()
+    string what = "string"
+    if (quote == '\'') {
+        what = "byte"
+    }
+    lx.i++
+    []byte buf = []byte{}
+    bool closed = false
+    for (; lx.i < n; ) {
+        byte c = lx.src[lx.i]
+        if (c == quote) {
+            closed = true
+            lx.i++
+            break
+        }
+        if (c == '\n') {
+            break
+        }
+        if (c != '\\') {
+            buf.push(c)
+            lx.i++
+            continue
+        }
+        Pos epos = Pos{file: lx.file, line: lx.line, col: lx.col + (lx.i - start)}
+        lx.i++
+        if (lx.i >= n) {
+            break
+        }
+        byte e = lx.src[lx.i]
+        lx.i++
+        if (e == 'n') {
+            buf.push('\n')
+        } else if (e == 't') {
+            buf.push('\t')
+        } else if (e == 'r') {
+            buf.push('\r')
+        } else if (e == '0') {
+            buf.push(byte(0))
+        } else if (e == '\\' || e == '"' || e == '\'') {
+            buf.push(e)
+        } else if (e == 'x') {
+            int h1 = hexValue(lx.peekByte(0))
+            int h2 = hexValue(lx.peekByte(1))
+            if (h1 < 0 || h2 < 0) {
+                lx.fail(epos, "\\x needs two hex digits")
+            } else {
+                buf.push(byte(h1 * 16 + h2))
+                lx.i = lx.i + 2
+            }
+        } else {
+            lx.fail(epos, "unknown escape sequence '\\" + string([]byte{e}) + "'")
+        }
+    }
+    if (!closed) {
+        lx.fail(pos, "unterminated " + what + " literal")
+    }
+    if (quote == '"') {
+        lx.add(Tok.String, pos, string(buf), start)
+        return
+    }
+    if (closed && buf.len() != 1) {
+        lx.fail(pos, "a byte literal must hold exactly one byte")
+    }
+    lx.add(Tok.Byte, pos, string(buf), start)
+}
+
+fn (Lexer lx) mut lexOperator(byte c) {
+    int start = lx.i
+    Pos pos = lx.here()
+    byte d = lx.peekByte(1)
+    Tok kind = Tok.Eof
+    int size = 2
+    if (c == '<' && d == '<') {
+        kind = Tok.Shl
+    } else if (c == '>' && d == '>') {
+        kind = Tok.Shr
+    } else if (c == '=' && d == '=') {
+        kind = Tok.Eq
+    } else if (c == '!' && d == '=') {
+        kind = Tok.Ne
+    } else if (c == '<' && d == '=') {
+        kind = Tok.Le
+    } else if (c == '>' && d == '=') {
+        kind = Tok.Ge
+    } else if (c == '&' && d == '&') {
+        kind = Tok.AndAnd
+    } else if (c == '|' && d == '|') {
+        kind = Tok.OrOr
+    } else if (c == '+' && d == '+') {
+        kind = Tok.Inc
+    } else if (c == '-' && d == '-') {
+        kind = Tok.Dec
+    } else {
+        size = 1
+        kind = singleCharToken(c)
+    }
+    if (kind == Tok.Eof) {
+        lx.fail(pos, "unexpected character '" + string([]byte{c}) + "'")
+        lx.i++
+        lx.col++
+        return
+    }
+    lx.i = lx.i + size
+    lx.add(kind, pos, "", start)
+}
+
+// The token for a one-character operator, or Tok.Eof if there is none.
+fn singleCharToken(byte c) Tok {
+    switch (c) {
+    case '+':
+        return Tok.Plus
+    case '-':
+        return Tok.Minus
+    case '*':
+        return Tok.Star
+    case '/':
+        return Tok.Slash
+    case '%':
+        return Tok.Percent
+    case '&':
+        return Tok.Amp
+    case '|':
+        return Tok.Pipe
+    case '^':
+        return Tok.Caret
+    case '<':
+        return Tok.Lt
+    case '>':
+        return Tok.Gt
+    case '!':
+        return Tok.Not
+    case '=':
+        return Tok.Assign
+    case '(':
+        return Tok.LParen
+    case ')':
+        return Tok.RParen
+    case '[':
+        return Tok.LBrack
+    case ']':
+        return Tok.RBrack
+    case '{':
+        return Tok.LBrace
+    case '}':
+        return Tok.RBrace
+    case ',':
+        return Tok.Comma
+    case ';':
+        return Tok.Semi
+    case ':':
+        return Tok.Colon
+    case '.':
+        return Tok.Dot
+    case '?':
+        return Tok.Question
+    default:
+        return Tok.Eof
+    }
+}

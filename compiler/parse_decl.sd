@@ -1,0 +1,450 @@
+// The parser, continued: files, top-level declarations and types.
+package main
+
+// Lexes and parses one file into p.ast. The file must already be registered
+// in p.diags (its index is `file`).
+fn (Parser p) mut parseFile(int file) {
+    Lexer lx = lex(file, p.diags.sources[file])
+    for (int i = 0; i < lx.errors.len(); i++) {
+        p.diags.errorHint(lx.errors[i].pos, lx.errors[i].message, lx.errors[i].hint)
+    }
+    for (int j = 0; j < lx.comments.len(); j++) {
+        p.ast.comments.push(lx.comments[j])
+    }
+    p.toks = lx.tokens
+    p.pos = 0
+    p.file = file
+    p.failed = false
+    SourceFile sf = SourceFile{
+        path: p.diags.paths[file],
+        pkg: "",
+        pkgPos: p.here(),
+        imports: p.ast.imports.len(),
+        importCount: 0,
+        tops: p.ast.tops.len(),
+        topCount: 0,
+    }
+    p.skipNewlines()
+    p.expect(Tok.KwPackage, " at the start of the file (every file starts with  package name)")
+    sf.pkgPos = p.here()
+    sf.pkg = p.expectIdent("for the package")
+    p.expect(Tok.Newline, " after the package name")
+    if (p.failed && p.kind() != Tok.KwImport) {
+        p.syncStatement()
+    }
+    p.failed = false
+    p.skipNewlines()
+    for (; p.kind() == Tok.KwImport; ) {
+        Pos ipos = p.next().pos
+        Token path = p.toks[p.pos]
+        if (p.expectTok(Tok.String, " after import (imports look like  import \"fmt\")")) {
+            p.ast.imports.push(Import{pos: ipos, file: file, path: path.text})
+            sf.importCount++
+        }
+        p.expect(Tok.Newline, " after the import")
+        if (p.failed) {
+            p.syncStatement()
+        }
+        p.skipNewlines()
+    }
+    for (; p.kind() != Tok.Eof; ) {
+        if (p.failed) {
+            p.syncTop()
+            continue
+        }
+        p.parseTopDecl()
+        if (!p.failed && p.kind() != Tok.Eof) {
+            p.expect(Tok.Newline, "")
+        }
+        p.skipNewlines()
+    }
+    sf.topCount = p.ast.tops.len() - sf.tops
+    p.ast.files.push(sf)
+}
+
+// After a syntax error at the top level: skip to the next line that starts
+// a declaration. It always moves past the current token, which may be the
+// one that caused the error.
+fn (Parser p) mut syncTop() {
+    if (p.kind() != Tok.Eof) {
+        p.pos++
+    }
+    for (; p.kind() != Tok.Eof; ) {
+        Token t = p.toks[p.pos]
+        Tok k = t.kind
+        if (t.pos.col == 1 && (k == Tok.KwFn || k == Tok.KwType || k == Tok.KwConst || k == Tok.KwTest || k == Tok.KwPub || k == Tok.KwImport)) {
+            break
+        }
+        p.pos++
+    }
+    p.failed = false
+}
+
+fn (Parser p) mut parseTopDecl() {
+    Token t = p.toks[p.pos]
+    bool isPub = p.accept(Tok.KwPub)
+    Tok k = p.kind()
+    if (k == Tok.KwFn) {
+        p.parseFn(isPub, t.pos)
+    } else if (k == Tok.KwType) {
+        p.parseTypeDecl(isPub)
+    } else if (k == Tok.KwConst) {
+        p.parseConstDecl(isPub)
+    } else if (k == Tok.KwTest) {
+        if (isPub) {
+            p.errorAt(t.pos, "a test cannot be pub")
+        }
+        p.parseTest()
+    } else if (k == Tok.KwImport) {
+        p.errorAt(p.here(), "imports must come before every declaration")
+    } else {
+        p.errorAt(p.here(), "expected fn, type, const or test at the top level, found " + tokenDesc(p.toks[p.pos]))
+    }
+}
+
+fn (Parser p) mut addTop(TopKind kind, int index) {
+    p.ast.tops.push(TopDecl{kind: kind, index: index})
+}
+
+// FnDecl = "fn" [ Receiver ] Ident "(" [ Params ] ")" [ Result ] Block .
+fn (Parser p) mut parseFn(bool isPub, Pos start) {
+    p.pos++
+    FnDecl f = FnDecl{
+        pos: start,
+        start: start,
+        file: p.file,
+        isPub: isPub,
+        name: "",
+        isMethod: false,
+        recvType: -1,
+        recvName: "",
+        recvPos: start,
+        recvMut: false,
+        params: 0,
+        paramCount: 0,
+        results: 0,
+        resultCount: 0,
+        body: -1,
+    }
+    if (p.accept(Tok.LParen)) {
+        f.isMethod = true
+        f.recvPos = p.here()
+        f.recvType = p.parseType(true)
+        f.recvName = p.expectIdent("for the receiver")
+        p.expect(Tok.RParen, " after the receiver")
+        f.recvMut = p.accept(Tok.KwMut)
+    }
+    f.pos = p.here()
+    f.name = p.expectIdent("for the function")
+    p.expect(Tok.LParen, " after the function name")
+    []int params = p.parseParams("for the parameter (parameters are written  Type name)")
+    f.params = p.ast.addList(params)
+    f.paramCount = params.len()
+    []int results = p.parseResult()
+    f.results = p.ast.addList(results)
+    f.resultCount = results.len()
+    f.body = p.parseBlock(" to open the function body (braces go on the same line)")
+    p.ast.fns.push(f)
+    p.addTop(TopKind.Fn, p.ast.fns.len() - 1)
+}
+
+// Parameters up to and including the closing `)`; the `(` is already read.
+fn (Parser p) mut parseParams(string context) []int {
+    []int ps = []int{}
+    p.skipNewlines()
+    for (; !p.failed && p.kind() != Tok.RParen; ) {
+        int te = p.parseType(true)
+        Pos npos = p.here()
+        string name = p.expectIdent(context)
+        p.ast.params.push(Param{pos: npos, typeExpr: te, name: name})
+        ps.push(p.ast.params.len() - 1)
+        p.skipNewlines()
+        if (!p.accept(Tok.Comma)) {
+            break
+        }
+        p.skipNewlines()
+    }
+    p.expect(Tok.RParen, " to close the parameter list")
+    return ps
+}
+
+// Result = Type | "(" Type { "," Type } ")" . Nothing when the next token
+// is `{` or ends the declaration.
+fn (Parser p) mut parseResult() []int {
+    []int rs = []int{}
+    Tok k = p.kind()
+    if (k == Tok.LBrace || k == Tok.Newline || k == Tok.RBrace || k == Tok.Eof || p.failed) {
+        return rs
+    }
+    if (k == Tok.LParen) {
+        p.pos++
+        for (;;) {
+            rs.push(p.parseType(false))
+            if (p.failed || !p.accept(Tok.Comma)) {
+                break
+            }
+        }
+        p.expect(Tok.RParen, " to close the result list")
+        return rs
+    }
+    rs.push(p.parseType(false))
+    return rs
+}
+
+// TypeDecl = "type" Ident ( StructType | EnumType | InterfaceType ) .
+fn (Parser p) mut parseTypeDecl(bool isPub) {
+    p.pos++
+    TypeDecl td = TypeDecl{
+        pos: p.here(),
+        file: p.file,
+        isPub: isPub,
+        name: "",
+        kind: DeclKind.Struct,
+        impls: 0,
+        implCount: 0,
+        fields: 0,
+        fieldCount: 0,
+        cases: 0,
+        caseCount: 0,
+        methods: 0,
+        methodCount: 0,
+    }
+    td.name = p.expectIdent("for the type")
+    Token k = p.toks[p.pos]
+    if (k.kind == Tok.KwStruct) {
+        td.kind = DeclKind.Struct
+    } else if (k.kind == Tok.KwEnum) {
+        td.kind = DeclKind.Enum
+    } else if (k.kind == Tok.KwInterface) {
+        td.kind = DeclKind.Interface
+    } else {
+        p.errorAt(k.pos, "expected struct, enum or interface after the type name, found " + tokenDesc(k))
+        return
+    }
+    p.pos++
+    if (p.kind() == Tok.KwImplements) {
+        Pos ipos = p.next().pos
+        if (td.kind == DeclKind.Interface) {
+            p.errorAt(ipos, "an interface cannot implement other interfaces")
+        }
+        []int impls = []int{}
+        for (;;) {
+            impls.push(p.parseTypeName())
+            if (p.failed || !p.accept(Tok.Comma)) {
+                break
+            }
+        }
+        td.impls = p.ast.addList(impls)
+        td.implCount = impls.len()
+    }
+    p.expect(Tok.LBrace, " to open the type body")
+    p.skipNewlines()
+    []int members = []int{}
+    for (; !p.failed && p.kind() != Tok.RBrace && p.kind() != Tok.Eof; ) {
+        if (td.kind == DeclKind.Struct) {
+            int te = p.parseType(true)
+            Pos npos = p.here()
+            string name = p.expectIdent("for the field (fields are written  Type name)")
+            p.ast.params.push(Param{pos: npos, typeExpr: te, name: name})
+            members.push(p.ast.params.len() - 1)
+        } else if (td.kind == DeclKind.Enum) {
+            EnumCase c = EnumCase{pos: p.here(), name: "", parens: false, params: 0, paramCount: 0}
+            c.name = p.expectIdent("for the enum case")
+            if (p.accept(Tok.LParen)) {
+                c.parens = true
+                []int cps = p.parseParams("for the case field")
+                c.params = p.ast.addList(cps)
+                c.paramCount = cps.len()
+            }
+            p.ast.enumCases.push(c)
+            members.push(p.ast.enumCases.len() - 1)
+        } else {
+            members.push(p.parseMethodSig())
+        }
+        if (!p.failed && p.kind() != Tok.RBrace) {
+            p.expect(Tok.Newline, "")
+        }
+        p.skipNewlines()
+    }
+    p.expect(Tok.RBrace, " to close the type body")
+    int start = p.ast.addList(members)
+    if (td.kind == DeclKind.Struct) {
+        td.fields = start
+        td.fieldCount = members.len()
+    } else if (td.kind == DeclKind.Enum) {
+        td.cases = start
+        td.caseCount = members.len()
+    } else {
+        td.methods = start
+        td.methodCount = members.len()
+    }
+    p.ast.typeDecls.push(td)
+    p.addTop(TopKind.Type, p.ast.typeDecls.len() - 1)
+}
+
+// MethodSig = [ "mut" ] Ident "(" [ Params ] ")" [ Result ] .
+fn (Parser p) mut parseMethodSig() int {
+    MethodSig m = MethodSig{pos: p.here(), isMut: false, name: "", params: 0, paramCount: 0, results: 0, resultCount: 0}
+    m.isMut = p.accept(Tok.KwMut)
+    m.pos = p.here()
+    m.name = p.expectIdent("for the method")
+    p.expect(Tok.LParen, " after the method name")
+    []int ps = p.parseParams("for the parameter (parameters are written  Type name)")
+    m.params = p.ast.addList(ps)
+    m.paramCount = ps.len()
+    []int rs = p.parseResult()
+    m.results = p.ast.addList(rs)
+    m.resultCount = rs.len()
+    p.ast.methodSigs.push(m)
+    return p.ast.methodSigs.len() - 1
+}
+
+// ConstDecl = "const" Type Ident "=" Expr .
+fn (Parser p) mut parseConstDecl(bool isPub) {
+    p.pos++
+    ConstDecl c = ConstDecl{pos: p.here(), file: p.file, isPub: isPub, name: "", typeExpr: -1, expr: -1}
+    c.typeExpr = p.parseType(true)
+    c.pos = p.here()
+    c.name = p.expectIdent("for the constant")
+    p.expect(Tok.Assign, " after the constant name (a constant needs a value)")
+    p.skipNewlines()
+    c.expr = p.parseExpr()
+    p.ast.consts.push(c)
+    p.addTop(TopKind.Const, p.ast.consts.len() - 1)
+}
+
+// TestDecl = "test" String Block .
+fn (Parser p) mut parseTest() {
+    Pos pos = p.next().pos
+    Token name = p.toks[p.pos]
+    p.expect(Tok.String, " after test (a test looks like  test \"what it checks\" { ... })")
+    int body = p.parseBlock(" to open the test body")
+    p.ast.tests.push(TestDecl{pos: pos, file: p.file, name: name.text, body: body})
+    p.addTop(TopKind.Test, p.ast.tests.len() - 1)
+}
+
+// ---- types ----
+
+// Type = BaseType [ "?" ] .
+//
+// `named` is true where the type is followed by a name (`Type name`), which
+// decides whether `fn(int) f` has a result type (see fnHasResult).
+fn (Parser p) mut parseType(bool named) int {
+    int base = p.parseBaseType(named)
+    if (p.kind() == Tok.Question && base >= 0) {
+        Pos q = p.next().pos
+        if (p.kind() == Tok.Question) {
+            p.errorAt(p.here(), "T?? is not a valid type")
+        }
+        TypeExpr o = newTypeExpr(TypeExprKind.Optional, q)
+        o.a = base
+        return p.ast.addTypeExpr(o)
+    }
+    return base
+}
+
+// TypeName = Ident [ "." Ident ] .
+fn (Parser p) mut parseTypeName() int {
+    TypeExpr t = newTypeExpr(TypeExprKind.Name, p.here())
+    t.name = p.expectIdent("for the type")
+    if (p.kind() == Tok.Dot && p.peek(1) == Tok.Ident) {
+        p.pos++
+        t.pkg = t.name
+        t.name = p.next().text
+    }
+    if (p.failed) {
+        return -1
+    }
+    return p.ast.addTypeExpr(t)
+}
+
+fn (Parser p) mut parseBaseType(bool named) int {
+    Token t = p.toks[p.pos]
+    Tok k = t.kind
+    if (k == Tok.Ident) {
+        return p.parseTypeName()
+    }
+    if (k == Tok.LBrack) {
+        p.pos++
+        if (!p.expectTok(Tok.RBrack, " in the list type (a list type looks like []int)")) {
+            return -1
+        }
+        TypeExpr l = newTypeExpr(TypeExprKind.List, t.pos)
+        l.a = p.parseBaseType(named)
+        return p.ast.addTypeExpr(l)
+    }
+    if (k == Tok.KwMap) {
+        p.pos++
+        TypeExpr m = newTypeExpr(TypeExprKind.Map, t.pos)
+        p.expect(Tok.LBrack, " after map (a map type looks like map[string]int)")
+        m.a = p.parseType(false)
+        p.expect(Tok.RBrack, " after the map key type")
+        m.b = p.parseBaseType(named)
+        return p.ast.addTypeExpr(m)
+    }
+    if (k == Tok.KwChan) {
+        p.pos++
+        TypeExpr c = newTypeExpr(TypeExprKind.Chan, t.pos)
+        c.a = p.parseBaseType(named)
+        return p.ast.addTypeExpr(c)
+    }
+    if (k == Tok.LParen) {
+        p.pos++
+        TypeExpr pt = newTypeExpr(TypeExprKind.Paren, t.pos)
+        pt.a = p.parseType(false)
+        p.expect(Tok.RParen, " to close the type")
+        return p.ast.addTypeExpr(pt)
+    }
+    if (k == Tok.KwFn) {
+        p.pos++
+        TypeExpr f = newTypeExpr(TypeExprKind.Func, t.pos)
+        p.expect(Tok.LParen, " after fn in a function type (it looks like fn(int, int) bool)")
+        []int ps = []int{}
+        for (; !p.failed && p.kind() != Tok.RParen; ) {
+            ps.push(p.parseType(false))
+            if (!p.accept(Tok.Comma)) {
+                break
+            }
+        }
+        p.expect(Tok.RParen, " to close the parameter types")
+        f.list = p.ast.addList(ps)
+        f.count = ps.len()
+        []int rs = []int{}
+        if (!p.failed && p.fnHasResult(p.pos, named)) {
+            if (p.kind() == Tok.LParen && p.scanType(p.pos + 1, false) >= 0 && p.closesResultList(p.pos + 1)) {
+                p.pos++
+                for (;;) {
+                    rs.push(p.parseType(false))
+                    if (p.failed || !p.accept(Tok.Comma)) {
+                        break
+                    }
+                }
+                p.expect(Tok.RParen, " to close the result list")
+            } else {
+                rs.push(p.parseType(named))
+            }
+        }
+        f.results = p.ast.addList(rs)
+        f.resultCount = rs.len()
+        return p.ast.addTypeExpr(f)
+    }
+    p.errorAt(t.pos, "expected a type, found " + tokenDesc(t))
+    return -1
+}
+
+// Whether the tokens from i form `Type {, Type} )`: a parenthesised result
+// list of a function type.
+fn (Parser p) closesResultList(int i) bool {
+    int j = i
+    for (;;) {
+        j = p.scanType(j, false)
+        if (j < 0) {
+            return false
+        }
+        if (p.kindAt(j) != Tok.Comma) {
+            break
+        }
+        j++
+    }
+    return p.kindAt(j) == Tok.RParen
+}

@@ -1,0 +1,156 @@
+// The pedantic checks of --strict mode (see newChecker): unused variables,
+// imports and results, unreachable code, shadowing of package-level names
+// and the naming rules. seed0 has none of them, and some programs in the
+// seed0-era test suites fail them, so they are opt-in for now. The compiler
+// itself is always built with --strict.
+package main
+
+// Every local variable must be read somewhere (assigning to it is not
+// enough). Parameters and receivers are exempt.
+fn (Checker c) mut checkUnusedVars(int first) {
+    for (int v = first; v < c.vars.len(); v++) {
+        Var x = c.vars[v]
+        if (!x.used && (x.kind == VarKind.Local || x.kind == VarKind.LocalConst)) {
+            c.errorHint(x.pos, x.name + " is declared but never used", "remove it, or use _ where a value must be discarded")
+        }
+    }
+}
+
+// Every import must be used in its file.
+fn (Checker c) mut checkUnusedImports() {
+    for (int i = 0; i < c.ast.imports.len(); i++) {
+        Import im = c.ast.imports[i]
+        if (isCorePackage(im.path) && c.usedImports[im.file.string() + ":" + im.path] == null) {
+            c.errorHint(im.pos, "\"" + im.path + "\" is imported but not used", "remove the import")
+        }
+    }
+}
+
+// ---- naming ----
+
+fn isUpper(byte b) bool {
+    return b >= 'A' && b <= 'Z'
+}
+
+fn isLower(byte b) bool {
+    return b >= 'a' && b <= 'z'
+}
+
+// camelCase: starts with a lowercase letter and has no underscores.
+fn isCamelCase(string name) bool {
+    return name.len() > 0 && isLower(name[0]) && !name.contains("_")
+}
+
+// PascalCase: starts with an uppercase letter and has no underscores.
+fn isPascalCase(string name) bool {
+    return name.len() > 0 && isUpper(name[0]) && !name.contains("_")
+}
+
+fn upperByte(byte b) byte {
+    if (isLower(b)) {
+        return b & byte(0xdf)
+    }
+    return b
+}
+
+// Converts names such as add_numbers, MAX_USERS, TotalCount or point into
+// camelCase (pascal false) or PascalCase (pascal true).
+fn convertCase(string name, bool pascal) string {
+    []string words = name.split("_")
+    []byte out = []byte{}
+    for (int i = 0; i < words.len(); i++) {
+        string w = words[i]
+        if (w == "") {
+            continue
+        }
+        bool allUpper = true
+        for (int j = 0; j < w.len(); j++) {
+            if (isLower(w[j])) {
+                allUpper = false
+            }
+        }
+        for (int k = 0; k < w.len(); k++) {
+            byte b = w[k]
+            if (allUpper && k > 0) {
+                b = lowerByte(b)
+            }
+            if (k == 0) {
+                if (out.len() == 0 && !pascal) {
+                    b = lowerByte(b)
+                } else {
+                    b = upperByte(b)
+                }
+            }
+            out.push(b)
+        }
+    }
+    return string(out)
+}
+
+fn (Checker c) mut checkCamel(string name, Pos pos, string what) {
+    if (!c.strict || name == "_" || name == "" || isCamelCase(name)) {
+        return
+    }
+    c.errorHint(pos, what + " " + name + " must be written in camelCase", "rename it to " + convertCase(name, false))
+}
+
+fn (Checker c) mut checkPascal(string name, Pos pos, string what) {
+    if (!c.strict || name == "" || isPascalCase(name)) {
+        return
+    }
+    c.errorHint(pos, what + " " + name + " must be written in PascalCase", "rename it to " + convertCase(name, true))
+}
+
+// The names of package-level declarations, fields and enum cases. Local
+// names are checked when they are declared.
+fn (Checker c) mut checkDeclNames() {
+    for (int i = 0; i < c.ast.typeDecls.len(); i++) {
+        TypeDecl td = c.ast.typeDecls[i]
+        c.checkPascal(td.name, td.pos, "the type")
+        for (int j = 0; j < td.fieldCount; j++) {
+            Param f = c.ast.params[c.ast.at(td.fields, j)]
+            c.checkCamel(f.name, f.pos, "the field")
+        }
+        for (int k = 0; k < td.caseCount; k++) {
+            EnumCase ec = c.ast.enumCases[c.ast.at(td.cases, k)]
+            c.checkPascal(ec.name, ec.pos, "the enum case")
+            for (int m = 0; m < ec.paramCount; m++) {
+                Param cp = c.ast.params[c.ast.at(ec.params, m)]
+                c.checkCamel(cp.name, cp.pos, "the case field")
+            }
+        }
+        for (int n = 0; n < td.methodCount; n++) {
+            MethodSig ms = c.ast.methodSigs[c.ast.at(td.methods, n)]
+            c.checkCamel(ms.name, ms.pos, "the method")
+        }
+    }
+    for (int f = 0; f < c.ast.fns.len(); f++) {
+        FnDecl fd = c.ast.fns[f]
+        string what = "the function"
+        if (fd.isMethod) {
+            what = "the method"
+        }
+        c.checkCamel(fd.name, fd.pos, what)
+    }
+    for (int k2 = 0; k2 < c.ast.consts.len(); k2++) {
+        ConstDecl cd = c.ast.consts[k2]
+        c.checkCamel(cd.name, cd.pos, "the constant")
+    }
+}
+
+// ---- results and reachability ----
+
+// A call used as a statement must not return a value that is dropped.
+fn (Checker c) mut checkUnusedResult(int e) {
+    int t = c.typeOf(e)
+    if (!c.strict || t == tyVoid || t == tyInvalid || c.types.endsWithError(t)) {
+        return
+    }
+    c.errorHint(c.ast.exprs[e].pos, "the result of " + c.describe(e) + " is not used", "assign it to a variable, or change the function to return nothing")
+}
+
+fn (Checker c) mut reportUnreachable(int s) {
+    if (c.strict) {
+        c.errorHint(c.ast.stmts[s].pos, "unreachable code", "the statement before it always returns, breaks, continues or exits")
+    }
+}

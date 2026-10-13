@@ -1,0 +1,292 @@
+// `seed ast`: prints the syntax tree as S-expressions, one top-level
+// declaration per line group. It exists to debug the parser and to show
+// what it builds; nothing else depends on the format.
+package main
+
+fn (Ast a) dumpType(int t) string {
+    if (t < 0) {
+        return "?"
+    }
+    TypeExpr x = a.typeExprs[t]
+    switch (x.kind) {
+    case TypeExprKind.Name:
+        if (x.pkg != "") {
+            return x.pkg + "." + x.name
+        }
+        return x.name
+    case TypeExprKind.List:
+        return "(list " + a.dumpType(x.a) + ")"
+    case TypeExprKind.Map:
+        return "(map " + a.dumpType(x.a) + " " + a.dumpType(x.b) + ")"
+    case TypeExprKind.Chan:
+        return "(chan " + a.dumpType(x.a) + ")"
+    case TypeExprKind.Func:
+        []string ps = []string{}
+        for (int i = 0; i < x.count; i++) {
+            ps.push(a.dumpType(a.at(x.list, i)))
+        }
+        []string rs = []string{}
+        for (int j = 0; j < x.resultCount; j++) {
+            rs.push(a.dumpType(a.at(x.results, j)))
+        }
+        return "(fn (" + ps.join(" ") + ") (" + rs.join(" ") + "))"
+    case TypeExprKind.Optional:
+        return "(opt " + a.dumpType(x.a) + ")"
+    case TypeExprKind.Paren:
+        return a.dumpType(x.a)
+    }
+}
+
+fn (Ast a) dumpParams(int start, int count) string {
+    []string ps = []string{}
+    for (int i = 0; i < count; i++) {
+        Param p = a.params[a.at(start, i)]
+        ps.push("(" + a.dumpType(p.typeExpr) + " " + p.name + ")")
+    }
+    return "(" + ps.join(" ") + ")"
+}
+
+fn (Ast a) dumpTypes(int start, int count) string {
+    []string ts = []string{}
+    for (int i = 0; i < count; i++) {
+        ts.push(a.dumpType(a.at(start, i)))
+    }
+    return "(" + ts.join(" ") + ")"
+}
+
+fn (Ast a) dumpExprs(int start, int count) string {
+    []string es = []string{}
+    for (int i = 0; i < count; i++) {
+        es.push(a.dumpExpr(a.at(start, i)))
+    }
+    return es.join(" ")
+}
+
+fn (Ast a) dumpExpr(int e) string {
+    if (e < 0) {
+        return "_"
+    }
+    Expr x = a.exprs[e]
+    switch (x.kind) {
+    case ExprKind.Bad:
+        return "(bad)"
+    case ExprKind.IntLit:
+        return x.intValue.string()
+    case ExprKind.FloatLit, ExprKind.ByteLit, ExprKind.StringLit, ExprKind.BoolLit:
+        return x.raw
+    case ExprKind.NullLit:
+        return "null"
+    case ExprKind.Ident:
+        return x.text
+    case ExprKind.Field:
+        return "(. " + a.dumpExpr(x.a) + " " + x.text + ")"
+    case ExprKind.Index:
+        return "(index " + a.dumpExpr(x.a) + " " + a.dumpExpr(x.b) + ")"
+    case ExprKind.Call:
+        return "(call " + a.dumpExpr(x.a) + " " + a.dumpExprs(x.list, x.count) + ")"
+    case ExprKind.Unary, ExprKind.Binary:
+        string ops = x.op.text()
+        if (x.kind == ExprKind.Unary) {
+            return "(" + ops + " " + a.dumpExpr(x.a) + ")"
+        }
+        return "(" + ops + " " + a.dumpExpr(x.a) + " " + a.dumpExpr(x.b) + ")"
+    case ExprKind.Try:
+        return "(try " + a.dumpExpr(x.a) + ")"
+    case ExprKind.ListLit:
+        return "(list-lit " + a.dumpType(x.typeExpr) + " " + a.dumpExprs(x.list, x.count) + ")"
+    case ExprKind.MapLit:
+        return "(map-lit " + a.dumpType(x.typeExpr) + " " + a.dumpType(x.typeExpr2) + " " + a.dumpExprs(x.list, x.count) + ")"
+    case ExprKind.Entry:
+        return "(" + a.dumpExpr(x.a) + " : " + a.dumpExpr(x.b) + ")"
+    case ExprKind.StructLit:
+        string name = x.text
+        if (x.pkg != "") {
+            name = x.pkg + "." + x.text
+        }
+        return "(struct-lit " + name + " " + a.dumpExprs(x.list, x.count) + ")"
+    case ExprKind.FieldInit:
+        return "(" + x.text + ": " + a.dumpExpr(x.a) + ")"
+    case ExprKind.ChanMake:
+        return "(make-chan " + a.dumpType(x.typeExpr) + " " + a.dumpExpr(x.a) + ")"
+    case ExprKind.Group:
+        return "(group " + a.dumpBlock(x.block, "") + ")"
+    }
+}
+
+fn (Ast a) dumpBlock(int b, string indent) string {
+    if (b < 0) {
+        return "_"
+    }
+    Block bl = a.blocks[b]
+    []string ss = []string{"{"}
+    for (int i = 0; i < bl.count; i++) {
+        ss.push("\n" + indent + "  " + a.dumpStmt(a.at(bl.list, i), indent + "  "))
+    }
+    ss.push("}")
+    return ss.join("")
+}
+
+fn (Ast a) dumpTarget(int t) string {
+    Target tg = a.targets[t]
+    switch (tg.kind) {
+    case TargetKind.Decl:
+        return "(decl " + a.dumpType(tg.typeExpr) + " " + tg.name + ")"
+    case TargetKind.Place:
+        return a.dumpExpr(tg.expr)
+    case TargetKind.Discard:
+        return "_"
+    }
+}
+
+fn (Ast a) dumpCase(int c, string indent) string {
+    Case cs = a.cases[c]
+    []string ls = []string{}
+    for (int i = 0; i < cs.labelCount; i++) {
+        Label l = a.labels[a.at(cs.labels, i)]
+        if (l.isPattern && l.parens) {
+            ls.push("(pattern " + l.typeName + "." + l.caseName + " " + a.dumpParams(l.params, l.paramCount) + ")")
+        } else if (l.isPattern) {
+            ls.push("(pattern " + l.typeName + "." + l.caseName + ")")
+        } else {
+            ls.push(a.dumpExpr(l.expr))
+        }
+    }
+    string head = "(case (" + ls.join(" ") + ")"
+    if (cs.isDefault) {
+        head = "(default"
+    }
+    if (cs.comm >= 0) {
+        head = "(case " + a.dumpStmt(cs.comm, indent)
+    }
+    return head + " " + a.dumpBlock(cs.body, indent) + ")"
+}
+
+fn (Ast a) dumpStmt(int s, string indent) string {
+    Stmt st = a.stmts[s]
+    switch (st.kind) {
+    case StmtKind.Bad:
+        return "(bad)"
+    case StmtKind.ExprStmt:
+        return a.dumpExpr(st.expr)
+    case StmtKind.Assign:
+        []string ts = []string{}
+        for (int i = 0; i < st.count; i++) {
+            ts.push(a.dumpTarget(a.at(st.list, i)))
+        }
+        return "(= (" + ts.join(" ") + ") " + a.dumpExpr(st.expr) + ")"
+    case StmtKind.IncDec:
+        if (st.inc) {
+            return "(++ " + a.dumpExpr(st.expr) + ")"
+        }
+        return "(-- " + a.dumpExpr(st.expr) + ")"
+    case StmtKind.If:
+        string r = "(if " + a.dumpExpr(st.expr) + " " + a.dumpBlock(st.body, indent)
+        if (st.elseIf >= 0) {
+            r = r + " else " + a.dumpStmt(st.elseIf, indent)
+        } else if (st.els >= 0) {
+            r = r + " else " + a.dumpBlock(st.els, indent)
+        }
+        return r + ")"
+    case StmtKind.For:
+        string init = "_"
+        if (st.init >= 0) {
+            init = a.dumpStmt(st.init, indent)
+        }
+        string post = "_"
+        if (st.post >= 0) {
+            post = a.dumpStmt(st.post, indent)
+        }
+        return "(for " + init + " " + a.dumpExpr(st.expr) + " " + post + " " + a.dumpBlock(st.body, indent) + ")"
+    case StmtKind.Switch, StmtKind.Select:
+        []string cs = []string{}
+        for (int j = 0; j < st.count; j++) {
+            cs.push("\n" + indent + "  " + a.dumpCase(a.at(st.list, j), indent + "  "))
+        }
+        if (st.kind == StmtKind.Select) {
+            return "(select" + cs.join("") + ")"
+        }
+        return "(switch " + a.dumpExpr(st.expr) + cs.join("") + ")"
+    case StmtKind.Return:
+        return "(return " + a.dumpExprs(st.list, st.count) + ")"
+    case StmtKind.Defer:
+        return "(defer " + a.dumpExpr(st.expr) + ")"
+    case StmtKind.Spawn:
+        return "(spawn " + a.dumpExpr(st.expr) + ")"
+    case StmtKind.Break:
+        return "(break)"
+    case StmtKind.Continue:
+        return "(continue)"
+    case StmtKind.Assert:
+        return "(assert " + a.dumpExpr(st.expr) + ")"
+    case StmtKind.Const:
+        return "(const " + a.dumpType(st.typeExpr) + " " + st.name + " " + a.dumpExpr(st.expr) + ")"
+    }
+}
+
+fn (Ast a) dumpTop(TopDecl t) string {
+    switch (t.kind) {
+    case TopKind.Fn:
+        FnDecl f = a.fns[t.index]
+        string recv = ""
+        if (f.isMethod) {
+            recv = "(recv " + a.dumpType(f.recvType) + " " + f.recvName
+            if (f.recvMut) {
+                recv = recv + " mut"
+            }
+            recv = recv + ") "
+        }
+        return "(fn " + recv + f.name + " " + a.dumpParams(f.params, f.paramCount) + " " + a.dumpTypes(f.results, f.resultCount) + " " + a.dumpBlock(f.body, "") + ")"
+    case TopKind.Type:
+        TypeDecl td = a.typeDecls[t.index]
+        string impls = ""
+        if (td.implCount > 0) {
+            impls = " (implements " + a.dumpTypes(td.impls, td.implCount) + ")"
+        }
+        switch (td.kind) {
+        case DeclKind.Struct:
+            return "(struct " + td.name + impls + " " + a.dumpParams(td.fields, td.fieldCount) + ")"
+        case DeclKind.Enum:
+            []string cs = []string{}
+            for (int i = 0; i < td.caseCount; i++) {
+                EnumCase ec = a.enumCases[a.at(td.cases, i)]
+                cs.push("(" + ec.name + " " + a.dumpParams(ec.params, ec.paramCount) + ")")
+            }
+            return "(enum " + td.name + impls + " " + cs.join(" ") + ")"
+        case DeclKind.Interface:
+            []string ms = []string{}
+            for (int j = 0; j < td.methodCount; j++) {
+                MethodSig m = a.methodSigs[a.at(td.methods, j)]
+                string prefix = ""
+                if (m.isMut) {
+                    prefix = "mut "
+                }
+                ms.push("(" + prefix + m.name + " " + a.dumpParams(m.params, m.paramCount) + " " + a.dumpTypes(m.results, m.resultCount) + ")")
+            }
+            return "(interface " + td.name + " " + ms.join(" ") + ")"
+        }
+    case TopKind.Const:
+        ConstDecl c = a.consts[t.index]
+        return "(const " + a.dumpType(c.typeExpr) + " " + c.name + " " + a.dumpExpr(c.expr) + ")"
+    case TopKind.Test:
+        TestDecl td2 = a.tests[t.index]
+        return "(test \"" + td2.name + "\" " + a.dumpBlock(td2.body, "") + ")"
+    }
+}
+
+// The whole tree, file by file.
+fn (Ast a) dump() string {
+    []string out = []string{}
+    for (int f = 0; f < a.files.len(); f++) {
+        SourceFile sf = a.files[f]
+        out.push("(file " + sf.path + " (package " + sf.pkg + ")\n")
+        for (int i = 0; i < sf.importCount; i++) {
+            out.push("(import \"" + a.imports[sf.imports + i].path + "\")\n")
+        }
+        for (int j = 0; j < sf.topCount; j++) {
+            out.push(a.dumpTop(a.tops[sf.tops + j]) + "\n")
+        }
+        out.push(")\n")
+    }
+    out.push("(comments " + a.comments.len().string() + ")\n")
+    return out.join("")
+}

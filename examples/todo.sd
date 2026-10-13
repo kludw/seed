@@ -1,0 +1,124 @@
+// A to-do list kept in a JSON file.
+//
+//     seed run examples/todo.sd add buy milk
+//     seed run examples/todo.sd list
+//     seed run examples/todo.sd done 1
+//     seed run examples/todo.sd remove 1
+//
+// The list is stored in ./todo.json, or in the file named by $TODO_FILE.
+package main
+
+import "errors"
+import "fmt"
+import "fs"
+import "json"
+import "os"
+import "strings"
+
+const string usage = "usage: todo list | add TEXT... | done N | remove N"
+
+type Todo struct {
+    string title
+    bool done
+}
+
+fn load(string file) ([]Todo, error) {
+    []Todo todos = []Todo{}
+    if (!fs.exists(file)) {
+        return todos, null
+    }
+    string text = try fs.read(file)
+    json.Value doc, error err = json.parse(text)
+    if (err != null) {
+        return null, errors.wrap(err, file)
+    }
+    []json.Value? items = doc.asArray()
+    if (items == null) {
+        return null, errors.new(file + ": expected a JSON array")
+    }
+    for (int i = 0; i < items.len(); i++) {
+        string? title = items[i].get("title").asString()
+        if (title == null) {
+            return null, errors.new(file + ": item " + i.string() + ": \"title\" must be a string")
+        }
+        bool? done = items[i].get("done").asBool()
+        if (done == null) {
+            return null, errors.new(file + ": item " + i.string() + ": \"done\" must be true or false")
+        }
+        todos.push(Todo{title: title, done: done})
+    }
+    return todos, null
+}
+
+fn save(string file, []Todo todos) error {
+    []json.Value items = []json.Value{}
+    for (int i = 0; i < todos.len(); i++) {
+        items.push(json.Value.Object(map[string]json.Value{
+            "title": json.Value.String(todos[i].title),
+            "done": json.Value.Bool(todos[i].done),
+        }))
+    }
+    return fs.write(file, json.Value.Array(items).pretty() + "\n")
+}
+
+// Reads the item number in args[2] and returns it as a list index.
+fn position([]string args, int count) (int, error) {
+    if (args.len() != 3) {
+        return null, errors.new(usage)
+    }
+    int n = try args[2].toInt()
+    if (n < 1 || n > count) {
+        return null, errors.new("there is no item " + n.string() + "; the list has " + count.string())
+    }
+    return n - 1, null
+}
+
+fn show([]Todo todos) {
+    if (todos.len() == 0) {
+        fmt.println("nothing to do")
+        return
+    }
+    for (int i = 0; i < todos.len(); i++) {
+        string mark = "[ ]"
+        if (todos[i].done) {
+            mark = "[x]"
+        }
+        fmt.println(strings.padLeft((i + 1).string(), 3, ' ') + ". " + mark + " " + todos[i].title)
+    }
+}
+
+fn main([]string args) error {
+    if (args.len() < 2) {
+        return errors.new(usage)
+    }
+    string file = "todo.json"
+    string? custom = os.env("TODO_FILE")
+    if (custom != null) {
+        file = custom
+    }
+    []Todo todos = try load(file)
+    switch (args[1]) {
+    case "list":
+        show(todos)
+    case "add":
+        if (args.len() < 3) {
+            return errors.new(usage)
+        }
+        todos.push(Todo{title: args.slice(2, args.len()).join(" "), done: false})
+        try save(file, todos)
+        fmt.println("added item " + todos.len().string())
+    case "done":
+        int finished = try position(args, todos.len())
+        todos[finished].done = true
+        try save(file, todos)
+        show(todos)
+    case "remove":
+        int removed = try position(args, todos.len())
+        todos.remove(removed)
+        try save(file, todos)
+        show(todos)
+    default:
+        return errors.new(usage)
+    }
+    return null
+}

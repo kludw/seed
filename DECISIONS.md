@@ -25,3 +25,12 @@ You asked not to be woken up, so these are the language decisions I made without
 
 14. **The bootstrap compiler `seed0` implements `int` as 64-bit** with overflow detection. Only the real compiler has integers that grow.
 15. **The runtime is written in C** and lives in `runtime/`. Generated programs are C files compiled by the system C compiler.
+
+## The compiler in Seed (compiler/)
+
+Details are in [compiler/README.md](compiler/README.md#decisions). The ones that touch the language:
+
+16. **Imports are per file.** A core package must be imported in the file that uses it (seed0 treats imports as package-wide).
+17. **`fn(int) f` vs `fn(int) bool f`.** Where a type is followed by a name, an identifier right after a function type's `)` is its result type only if another name, `.` or `?` follows it. Elsewhere it is always the result type.
+18. **`select` with `default` is a syntax error**, with a hint to use a timeout channel.
+19. **The pedantic checks are opt-in for now** (`seed c --strict`): unused variables, imports and results, unreachable code, locals shadowing package-level names, and the naming rules. Some seed0-era test programs fail them; the compiler's own source is always built with `--strict`.
