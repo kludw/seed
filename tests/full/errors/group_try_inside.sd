@@ -1,0 +1,20 @@
+// expect-error: try is not allowed inside a group block
+// try would return from the function before the group waits.
+package main
+
+import "fs"
+
+fn work() error {
+    return null
+}
+
+fn main([]string args) error {
+    error err = group {
+        spawn work()
+        string text = try fs.read("x")
+        if (text == "") {
+            spawn work()
+        }
+    }
+    return err
+}

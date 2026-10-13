@@ -1,0 +1,13 @@
+// expect-error: is nullable
+// receive() returns T?, which must be checked against null.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    chan int ch = chan int(1)
+    ch.send(1)
+    int? v = ch.receive()
+    fmt.println((v + 1).string())
+    return null
+}

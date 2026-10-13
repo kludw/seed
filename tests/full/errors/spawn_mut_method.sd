@@ -1,0 +1,20 @@
+// expect-error: spawn cannot call the mut method
+// Goroutines share nothing: a spawned mut method would change a copy.
+package main
+
+type Counter struct {
+    int n
+}
+
+fn (Counter c) mut bump() error {
+    c.n = c.n + 1
+    return null
+}
+
+fn main([]string args) error {
+    Counter c = Counter{n: 0}
+    error err = group {
+        spawn c.bump()
+    }
+    return err
+}

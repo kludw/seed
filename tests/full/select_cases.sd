@@ -1,0 +1,90 @@
+// The forms of select cases: send, receive with a new variable, receive
+// that ignores the value (with or without _), struct values, closed
+// channels, and break/continue in a case reaching the enclosing loop.
+package main
+
+import "fmt"
+
+type Point struct {
+    int x
+    int y
+}
+
+fn label(Point? p) string {
+    if (p == null) {
+        return "closed"
+    }
+    return "(" + p.x.string() + ", " + p.y.string() + ")"
+}
+
+fn main([]string args) error {
+    chan Point points = chan Point(2)
+    chan int signal = chan int(1)
+    points.send(Point{x: 1, y: 2})
+    select {
+    case Point? p = points.receive():
+        fmt.println("point " + label(p))
+    case signal.receive():
+        fmt.println("signal")
+    }
+    signal.send(1)
+    select {
+    case Point? p = points.receive():
+        fmt.println("point " + label(p))
+    case _ = signal.receive():
+        fmt.println("signal")
+    }
+
+    // A closed channel is always ready and gives null.
+    points.close()
+    select {
+    case Point? p = points.receive():
+        fmt.println("point " + label(p))
+    }
+
+    // Sending a struct: the receiver gets a copy.
+    chan Point copies = chan Point(1)
+    Point q = Point{x: 3, y: 4}
+    select {
+    case copies.send(q):
+        q.x = 30
+    }
+    fmt.println("sent " + label(copies.receive()) + ", kept " + label(q))
+
+    // break and continue inside a case apply to the loop around the select.
+    chan int numbers = chan int(10)
+    for (int i = 1; i <= 10; i++) {
+        numbers.send(i)
+    }
+    int sum = 0
+    for (;;) {
+        select {
+        case int? n = numbers.receive():
+            if (n == null) {
+                break
+            }
+            if (n % 2 == 0) {
+                continue
+            }
+            if (n > 7) {
+                break
+            }
+            sum = sum + n
+        }
+    }
+    fmt.println("odd sum below 8: " + sum.string())
+
+    // A select whose every case returns ends the function.
+    fmt.println(first(numbers))
+    return null
+}
+
+fn first(chan int numbers) string {
+    select {
+    case int? n = numbers.receive():
+        if (n == null) {
+            return "empty"
+        }
+        return "next " + n.string()
+    }
+}

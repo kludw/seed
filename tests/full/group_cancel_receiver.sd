@@ -1,0 +1,74 @@
+// When a goroutine fails, its siblings are stopped wherever they wait: in a
+// receive, a send, a select or time.sleep. Their defers run before the
+// group returns, and the program does not wait for the hour-long sleep.
+package main
+
+import "errors"
+import "fmt"
+import "time"
+
+fn receiver(chan int ready, chan int never) error {
+    defer fmt.println("stopped")
+    ready.send(1)
+    int? v = never.receive()
+    if (v != null) {
+        return errors.new("unexpected value")
+    }
+    return null
+}
+
+fn sender(chan int ready, chan int full) error {
+    defer fmt.println("stopped")
+    ready.send(1)
+    for (;;) {
+        full.send(1)
+    }
+}
+
+fn selecter(chan int ready, chan int never, chan int nobody) error {
+    defer fmt.println("stopped")
+    ready.send(1)
+    select {
+    case int? v = never.receive():
+        if (v != null) {
+            return errors.new("unexpected value")
+        }
+    case nobody.send(2):
+        return errors.new("unexpected send")
+    }
+    return null
+}
+
+fn sleeper(chan int ready) error {
+    defer fmt.println("stopped")
+    ready.send(1)
+    time.sleep(time.hour)
+    return null
+}
+
+// Fails once all the others are waiting.
+fn failing(chan int ready, int others) error {
+    for (int i = 0; i < others; i++) {
+        _ = ready.receive()
+    }
+    return errors.new("worker failed")
+}
+
+fn main([]string args) error {
+    chan int ready = chan int(0)
+    chan int never = chan int(0)
+    chan int full = chan int(1)
+    chan int nobody = chan int(0)
+    error err = group {
+        spawn receiver(ready, never)
+        spawn receiver(ready, never)
+        spawn sender(ready, full)
+        spawn selecter(ready, never, nobody)
+        spawn sleeper(ready)
+        spawn failing(ready, 5)
+    }
+    if (err != null) {
+        fmt.println("group: " + err.message())
+    }
+    return null
+}

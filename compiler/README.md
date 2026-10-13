@@ -21,9 +21,8 @@ make test0      # tests/lang, tests/seed0 and tests/seed0/only with seed0
 
 `tests/seed0/only` holds what only seed0 does (64-bit ints that crash on
 overflow, rejecting interfaces); the real compiler's ints grow
-(`tests/full/int_*`). In `make test-full` the concurrency tests (`chan_*`,
-`group_*`, `select_*`, `parallel_word_count`) fail until the next phase,
-and `errors/unformatted_code` needs `seed fmt`.
+(`tests/full/int_*`). In `make test-full`, `errors/unformatted_code` fails
+until compiling checks formatting (`seed fmt --check` does it today).
 
 Because stage 1 is built by seed0, the compiler source may only use the
 seed0 subset (docs/seed0.md) until a snapshot replaces seed0 (see "Adding a
@@ -70,12 +69,12 @@ are the constants `cCompiler`, `cFlags` and `cLibs` at the top of `main.sd`
 | `check_expr.sd` | check | expressions, places (lvalues), T/T? conversions |
 | `check_call.sd` | check | calls: functions, methods, function values, interface methods, built-ins, core packages, conversions |
 | `check_iface.sd` | check | interfaces, `implements`, which types have `==` |
-| `check_stmt.sd` | check | statements, switch, assignment, defer, "always exits" analysis, error guards |
+| `check_stmt.sd` | check | statements, switch, assignment, defer, "always exits" analysis, error guards, select, group, spawn |
 | `check_style.sd` | check | `--strict` checks: unused names/results, unreachable code, naming |
 | `gen.sd` | gen | `Gen`, program layout, C types, retain/release, descriptors, type definitions, vtables, constants, the runtime |
-| `gen_expr.sd` | gen | temporaries and slots, evaluation order, expressions, operators, `try` |
+| `gen_expr.sd` | gen | temporaries and slots, evaluation order, expressions, operators, `try`, `group` |
 | `gen_call.sd` | gen | calls, places, built-in methods, package functions, conversions |
-| `gen_stmt.sd` | gen | statements, scopes, return, `defer` |
+| `gen_stmt.sd` | gen | statements, scopes, return, `defer`, `spawn`, `select` |
 
 ## Data structures
 
@@ -279,9 +278,35 @@ Function values: a function name used as a value has `Res.Func` and type
 (`comparable`). `xs.sortBy(f)` takes `fn(T, T) bool`.
 
 `defer f(args)` must be a call of a function, method, function value,
-interface method or package function, not a mut method (the deferred call
-runs after the function's variables are released); an error result must be
-discarded with `defer _ = f(args)` (`Stmt.discard`).
+interface method or package function, or `ch.close()`, not a mut method
+(the deferred call runs after the function's variables are released); an
+error result must be discarded with `defer _ = f(args)` (`Stmt.discard`).
+
+Concurrency (SPEC.md, "Concurrency"):
+
+- `chan T` is `Kind.Chan` (`chanOf`); nullable elements are rejected in
+  `resolveUncached`. `ch.send(v)`, `ch.receive()` and `ch.close()` are
+  built-in methods (`Builtin.Send/Receive/Close`), not mut, so they work on
+  parameters. `receive` returns `T?` (or `error` for `chan error`).
+- `group {...}` (`checkGroup`) has type `error`. It is only accepted where
+  the caller set `Checker.allowGroup` to that expression: the value of a
+  one-target assignment or declaration, of a one-value `return`, or the
+  operand of `try`; a bare group statement gets the unhandled-error message.
+  Inside the block `groupDepth > 0`: `return` and `try` are errors, and
+  `break`/`continue` are errors when `loopDepth == groupLoop` (the loop
+  depth at the innermost group), i.e. when they would leave the block.
+- `spawn` (`checkSpawn`) needs `groupDepth > 0` and a call of a function,
+  non-mut method, function value, non-mut interface method or package
+  function whose result is `error` or void.
+- `select` (`checkSelect`): each case's comm statement must be an
+  expression statement `ch.send(v)`/`ch.receive()`, or a one-target
+  assignment of `ch.receive()` to a new variable of exactly the receive
+  type, or to `_`. Each case has its own scope. A select whose cases all
+  exit, exits (`stmtExits`).
+- Package constants cannot hold channels (`hasChan`), because constants are
+  cached per goroutine.
+- `time` is a core package: `time.after`/`time.sleep` are `PkgFn`s, and the
+  duration constants are `Res.PkgConst` with the value in `ExprInfo.sub`.
 
 `--strict` adds the pedantic checks of the full language that seed0 lacks
 (check_style.sd): unused variables, imports and call results, unreachable
@@ -290,10 +315,10 @@ code, locals that shadow package-level names, the naming rules
 They are off by default because some seed0-era test programs fail them; the
 compiler itself is always built with `--strict`.
 
-Features that parse but are not implemented (`chan`, `select`, `group`,
-`spawn`, `test`, `assert`) are rejected in checking with "X is not
-implemented by this compiler yet"; imports of user packages say that only
-the core packages can be imported.
+Features that parse but are not implemented (`test`, `assert`) are rejected
+in checking with "X is not implemented by this compiler yet"; imports of
+user packages say that only the core packages (`fmt`, `os`, `fs`, `errors`,
+`time`) can be imported.
 
 **C generation** targets the runtime in `runtime/` (runtime/README.md is
 the reference for every representation and ownership rule):
@@ -309,6 +334,7 @@ the reference for every representation and ownership rule):
 | enum `E`, `E?` | `sd_box *` holding `sd_E_E {int32_t tag; union {...} u}`; cases without data are static immortal boxes `sd_k_E__Case` |
 | interface `I`, `I?`, `error` | `sd_iface` / `sd_err` `{vt, obj}`: a vtable `sd_V_I` and a box with the value |
 | `fn(A) R` | a C function pointer `sd_fn_<mangle>` |
+| `chan T`, `(chan T)?` | `sd_chan *` (atomic count, shared between goroutines); null is `NULL` |
 | several results | `sd_T_<mangle>` with fields `r0, r1, ...` |
 | mut receiver | pointer to the caller's place |
 
@@ -349,7 +375,9 @@ generated.
 - `x = x + a + b` on a local string appends in place (`sd_str_append`);
   other string `+` chains are one `sd_str_concat_n`.
 - Constants are functions returning a borrowed value cached in a
-  `_Thread_local` static (literals are returned directly).
+  `_Thread_local` static `sd_cv_<name>` (literals are returned directly).
+  A counted value registers `sd_cf_<name>` with `sd_goroutine_atexit`, so a
+  goroutine releases the constants it computed when it ends.
 - `defer f(args)` evaluates the callee, receiver and arguments into an
   environment (owned), pushed with `sd_defer_push`; the thunk `sd_dN` calls
   `f` and releases the environment and the result. A function with defers
@@ -360,6 +388,41 @@ generated.
   _cN:; post }` so that the condition and post statement can have
   temporaries and `continue` reaches the post statement.
 
+*Concurrency* (runtime/README.md sections 10 and 11):
+
+- `chan T(n)` is `sd_chan_new(<descriptor of T>, n)`; `ch.send(v)` is
+  `sd_chan_send(ch, &v)` (borrowed; the receiver gets a deep copy);
+  `T? x = ch.receive()` is `T o; bool ok = sd_chan_receive(ch, &o);` and
+  then `ok ? o : null` (wrapped into a box for a struct, `{true, o}` for
+  `float?`/`bool?`/`byte?`; `okOpt`, shared with `pop`); `ch.close()` is
+  `sd_chan_close(ch)`. They count as side effects for evaluation order.
+- `group {...}` (`ggroup`) is
+  `sd_err _tR = SD_ERR_NULL; { sd_group *_tG = sd_group_begin(); <block>;
+  _tR = sd_group_wait(_tG); }`, and `_tR` is an owned temporary of the
+  statement, used like any call's error (moved into `err`, released by
+  `_ =`, tested by `try`). `Gen.groups` is the stack of the C names of the
+  enclosing groups; `spawn` uses the innermost. Nothing jumps out of the
+  block (the checker forbids it); a crash unwinds through the runtime,
+  which stops and waits for the group.
+- `spawn f(args)` (`genSpawn`) evaluates the same operands as `defer`
+  (`callOperands`: function value or receiver, then arguments) into a
+  struct `sd_gN_args` with a field descriptor `sd_gN_type`, and calls
+  `sd_spawn(group, sd_gN, &sd_gN_type, &args)`; the values are borrowed,
+  because `sd_spawn` deep-copies them for the goroutine. The trampoline
+  `static sd_err sd_gN(void *p)` calls `f` with the goroutine's copy and
+  returns its error (or null for a void function).
+- `select` (`genSelect`) evaluates every case's channel and value to send,
+  in order (`operands`), declares an uninitialised receive buffer per
+  receive case, and builds `sd_select_case cs[] = {{ch, SD_RECV, &buf,
+  false}, {ch2, SD_SEND, (void *)&v, false}}`. The chosen index from
+  `sd_select` is dispatched with an `if`/`else if` chain (a C `switch`
+  would catch `break`). A receive case declares its variable from
+  `cs[i].ok` and the buffer, or releases the buffer when it has none.
+- `time.after(d)` is `sd_time_after(d)` (a `chan int` temporary),
+  `time.sleep(d)` is `sd_time_sleep(d)`, `time.second` is `SD_INT(1000000000)`.
+- `defer ch.close()` uses the defer machinery with the channel as the one
+  operand.
+
 Per-type helpers (`sd_rt_`/`sd_rl_` retain and release for structs and
 tuples, `sd_eq_` for struct `==`, `sd_less_` sortBy adapters) are requested
 on demand through a queue (`Gen.helper`) and generated at the end. Each
@@ -368,8 +431,8 @@ methods on the payload of the interface's box.
 
 The output is: the runtime, type definitions (forward typedefs, function
 pointer typedefs, structs, enum payloads, tuples, descriptors, vtable
-types, static enum boxes), prototypes, helpers, vtables and defer thunks,
-constants, functions, `main` (which calls `sd_main`).
+types, static enum boxes), prototypes, helpers, vtables, defer thunks and
+spawn trampolines, constants, functions, `main` (which calls `sd_main`).
 
 ## The formatter (`seed fmt`)
 
@@ -532,6 +595,30 @@ teaching may need a `--strict`-style switch until all test programs pass it.
 - **`seed run`/`seed build`** put the C file and executable in
   `$TMPDIR/seed-run-<name>` / `$TMPDIR/seed-build-<name>`.
 - **`seed ast`** exists only for debugging the parser.
+- **Concurrency** (the language decisions are DECISIONS.md 38-47):
+  `group` is an expression of type `error`, used only whole (assigned,
+  returned, discarded or with `try`); its block cannot `return`, `try`, or
+  `break`/`continue` out of it; `spawn` takes the calls `defer` takes,
+  returning `error` or nothing, never a mut method; select cases are send,
+  receive, `_ =` receive or a receive into a new `T?` variable; channel
+  elements are not nullable; constants cannot hold channels; `defer
+  ch.close()` is allowed; `time` (after, sleep, constants) is a core
+  package.
+- **select dispatches with `if`/`else if`**, not a C `switch`, so that
+  `break` and `continue` in a case reach the enclosing loop.
+- **spawn arguments are borrowed** (`sd_spawn` deep-copies them), and one
+  trampoline is generated per `spawn` statement.
+- **time.after sends the wall-clock time and closes its channel**, as
+  docs/stdlib.md specifies (the runtime's timer used to send the monotonic
+  time and leave the channel open). `sd_chan_retain` became NULL-safe, for
+  copies of a null `(chan T)?`.
+- **Goroutines release the constants they computed** (`sd_goroutine_atexit`,
+  added to the runtime); before, every goroutine that used a list constant
+  leaked it.
+- **`tests/full/NAME.leaks`** marks a test that is expected to leak because
+  a goroutine crashes inside a group and the program goes on (the crash
+  leaks the locals of the unwound frames); `tests/leaks.sh` reports it with
+  the crashing programs.
 - **`seed fmt` prints tokens, not the tree** (see "The formatter"). Style
   decisions not fixed by the task are listed in docs/formatting.md: no line
   length limit, `{}` for empty blocks, trailing comments not aligned,
@@ -541,11 +628,24 @@ teaching may need a `--strict`-style switch until all test programs pass it.
 ## Known limitations
 
 - Not implemented yet (rejected by the checker with a clear message):
-  `chan`/`select`/`group`/`spawn`, `test`/`assert`, user packages and
-  qualified names. The runtime already has everything the concurrency phase
-  needs (runtime/README.md sections 10 and 11).
+  `test`/`assert`, user packages and qualified names.
 - A crash leaks the counted values held by the locals of the unwound C
   frames (runtime/README.md section 15); normal execution leaks nothing.
+  This includes a goroutine that crashes inside a group, and a goroutine
+  stopped while it holds counted locals (the program goes on, so the
+  memory is lost for good).
+- When a group fails, only its goroutines are stopped, not the code of the
+  group block (it is not a goroutine of the group). A block that waits on a
+  channel only the stopped goroutines would have served ends in the
+  deadlock crash; waiting belongs in a goroutine or after the group.
+- A goroutine that is stopped while it waits for an inner group gets that
+  group's result (often null: stopped goroutines report no error) and keeps
+  running until its next stop point.
+- Deadlock detection is global: it only fires when *every* goroutine is
+  blocked and no timer is pending; a goroutine stuck while others run (or
+  sleep) waits forever. Defers do not run on a deadlock.
+- A select case cannot assign the received value to an existing variable;
+  declare a new one in the case.
 - A mut call evaluates its arguments before the receiver's place, so in
   `xs[f()].push(g())` `g` runs before `f`.
 - Formatting is not checked during compilation yet; `seed fmt --check` does

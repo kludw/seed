@@ -1,0 +1,15 @@
+// expect-error: the received value has type int?
+// receive() returns T?, null once the channel is closed.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    chan int ch = chan int(1)
+    ch.send(1)
+    select {
+    case int v = ch.receive():
+        fmt.println(v.string())
+    }
+    return null
+}

@@ -69,6 +69,7 @@ type Guard struct {
 //   ListIndex, StringIndex, MapIndex
 //   ValueCall   a call of a function value (the callee is any expression)
 //   IfaceMethod ref = interface decl, sub = method index (in its methods)
+//   PkgConst    a core package constant such as time.second (sub = value)
 type Res enum {
     None
     Local
@@ -86,6 +87,7 @@ type Res enum {
     MapIndex
     ValueCall
     IfaceMethod
+    PkgConst
 }
 
 type Builtin enum {
@@ -120,6 +122,9 @@ type Builtin enum {
     Message
     Chars
     SortBy
+    Send
+    Receive
+    Close
 }
 
 type PkgFn enum {
@@ -139,6 +144,8 @@ type PkgFn enum {
     Mkdir
     Remove
     ErrNew
+    After
+    Sleep
 }
 
 // The checker's result for one expression.
@@ -222,6 +229,9 @@ type Checker struct {
     []int guardMarks
     int curFn
     int loopDepth
+    int groupDepth
+    int groupLoop
+    int allowGroup
     bool strict
 }
 
@@ -266,6 +276,9 @@ fn newChecker(Ast ast, Diags diags, bool strict) Checker {
         guardMarks: []int{},
         curFn: -1,
         loopDepth: 0,
+        groupDepth: 0,
+        groupLoop: -1,
+        allowGroup: -1,
         strict: strict,
     }
     for (int i = 0; i < ast.exprs.len(); i++) {
@@ -305,13 +318,9 @@ fn (Checker c) mut errorHint(Pos pos, string message, string hint) {
 }
 
 // For the features that the parser accepts but this compiler cannot
-// translate yet: concurrency (chan, select, group, spawn) and tests.
+// translate yet: tests (test and assert).
 fn (Checker c) mut unsupported(Pos pos, string what) {
-    string hint = "concurrency (chan, select, group, spawn) comes with the next version of the compiler"
-    if (what == "test" || what == "assert") {
-        hint = "tests and seed test come with a later version of the compiler"
-    }
-    c.errorHint(pos, what + " is not implemented by this compiler yet", hint)
+    c.errorHint(pos, what + " is not implemented by this compiler yet", "tests and seed test come with a later version of the compiler")
 }
 
 // ---- small accessors ----
@@ -426,7 +435,7 @@ fn (Checker c) mut collectGlobals() {
 }
 
 fn isCorePackage(string name) bool {
-    return name == "fmt" || name == "os" || name == "fs" || name == "errors"
+    return name == "fmt" || name == "os" || name == "fs" || name == "errors" || name == "time"
 }
 
 // Imports are per file: a package must be imported in the file that uses it.
@@ -434,7 +443,7 @@ fn (Checker c) mut checkImports() {
     for (int i = 0; i < c.ast.imports.len(); i++) {
         Import im = c.ast.imports[i]
         if (!isCorePackage(im.path)) {
-            c.errorHint(im.pos, "this compiler can only import the core packages fmt, os, fs and errors, not \"" + im.path + "\"", "user packages are not implemented yet")
+            c.errorHint(im.pos, "this compiler can only import the core packages fmt, os, fs, errors and time, not \"" + im.path + "\"", "user packages are not implemented yet")
             continue
         }
         string key = im.file.string() + ":" + im.path
@@ -761,8 +770,12 @@ fn (Checker c) mut resolveUncached(int te) int {
     case TypeExprKind.Paren:
         return c.resolve(x.a)
     case TypeExprKind.Chan:
-        c.unsupported(x.pos, "chan")
-        return tyInvalid
+        int el = c.resolve(x.a)
+        if (el != tyInvalid && c.types.isOpt(el)) {
+            c.errorHint(c.ast.typeExprs[x.a].pos, "channel elements cannot be nullable", "receive() already returns " + c.typeName(el) + ", null once the channel is closed; send a struct with a nullable field instead")
+            return tyInvalid
+        }
+        return c.types.chanOf(el)
     case TypeExprKind.Func:
         []int ps = []int{}
         for (int j = 0; j < x.count; j++) {
@@ -795,12 +808,18 @@ fn (Checker c) mut checkConst(int i) {
     c.constState[i] = 1
     int t = c.resolve(cd.typeExpr)
     c.constType[i] = t
+    if (t != tyInvalid && c.hasChan(t, []int{})) {
+        c.errorHint(cd.pos, "the constant " + cd.name + " cannot hold a channel (type " + c.typeName(t) + ")", "every goroutine computes the constants it uses for itself, so it would get a channel of its own; make the channel in a function and pass it on")
+    }
     int savedFn = c.curFn
+    int savedGroups = c.groupDepth
     []int savedScope = c.scope
     c.curFn = -1
+    c.groupDepth = 0
     c.scope = []int{}
     c.checkValue(cd.expr, t, "to initialize " + cd.name)
     c.curFn = savedFn
+    c.groupDepth = savedGroups
     c.scope = savedScope
     c.constState[i] = 2
 }
@@ -815,6 +834,9 @@ fn (Checker c) mut checkFnBody(int f) {
     c.guards = []Guard{}
     c.guardMarks = []int{}
     c.loopDepth = 0
+    c.groupDepth = 0
+    c.groupLoop = -1
+    c.allowGroup = -1
     int firstVar = c.vars.len()
     c.pushScope()
     if (fd.isMethod && c.fnRecv[f] >= 0) {
@@ -1118,6 +1140,10 @@ fn (Checker c) mut scanExprKills(int e) {
         return
     }
     Expr x = c.ast.exprs[e]
+    if (x.kind == ExprKind.Group) {
+        c.scanBlockKills(x.block)
+        return
+    }
     if (x.kind == ExprKind.Call) {
         Expr callee = c.ast.exprs[x.a]
         if (callee.kind == ExprKind.Field && (isBuiltinMutName(callee.text) || c.mutNames[callee.text] != null)) {

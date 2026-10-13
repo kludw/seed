@@ -489,8 +489,9 @@ sd_err l_err;
   returns other values too, the trampoline releases them.
 - Code in the group block other than `spawn` runs normally in the parent.
   Don't `return` from inside a group block without `sd_group_wait` (the
-  compiler should forbid it); if it happens anyway, `sd_defer_run` stops and
-  waits for the group.
+  compiler forbids `return`, `try` and `break`/`continue` out of a group
+  block); if it happens anyway, `sd_defer_run` stops and waits for the
+  group.
 - **Failure.** When a goroutine returns an error or crashes, the group records
   the first error and cancels every other goroutine in it. A cancelled
   goroutine stops at its next channel **send, receive or select** (also
@@ -561,10 +562,12 @@ uniformly at random. A send case on a closed channel crashes if chosen.
 Single `send`/`receive` are one-case selects.
 
 **time.** `sd_time_after(ns)` returns a new `chan int` (owned) that receives
-the monotonic time in nanoseconds once, after `ns` nanoseconds (one timer
-thread serves all timers). `sd_time_sleep(ns)` waits (a stopping point for
-cancellation). `sd_time_now()` is the monotonic clock in nanoseconds. A
-`time` package isn't specified yet; these are the primitives it needs.
+the wall-clock time (Unix nanoseconds, `time.now()` in docs/stdlib.md) once,
+after `ns` nanoseconds, and is then closed, so a second receive returns null
+instead of waiting forever (one timer thread serves all timers).
+`sd_time_sleep(ns)` waits (a stopping point for cancellation).
+`sd_time_now()` is the monotonic clock in nanoseconds. The compiler exposes
+them as `time.after` and `time.sleep`.
 
 ## 12. Program entry and exit
 
@@ -592,7 +595,10 @@ Constants: package-level `const` values of counted types must not be shared
 between goroutines unless immortal. Strings and big integers are (use
 `SD_STR_LIT`/`SD_STR_STATIC` and `SD_INT_BIGLIT`). For list/map constants,
 build the value where it is used (a fresh owned value each time), or cache it
-per goroutine with `_Thread_local`.
+per goroutine with `_Thread_local` and register a function that releases the
+cache with `sd_goroutine_atexit(fn)`: the runtime calls it on the
+goroutine's thread when the goroutine ends (never for the main goroutine,
+whose caches live until the program exits).
 
 ## 13. API reference
 
@@ -730,8 +736,9 @@ Arguments are borrowed and results owned unless marked **consumes** or
 | `sd_group *sd_group_begin(void)` | |
 | `void sd_spawn(sd_group *g, sd_task_fn body, const sd_type *args_type, const void *args)` | args deep-copied |
 | `sd_err sd_group_wait(sd_group *g)` | frees `g` |
+| `void sd_goroutine_atexit(void (*fn)(void))` | `fn()` runs on this goroutine's thread when it ends (newest first; not for main) |
 | `sd_chan *sd_chan_new(const sd_type *et, sd_int cap)` | crashes if `cap < 0` |
-| `sd_chan_retain`, `sd_chan_release` | atomic; release is NULL-safe |
+| `sd_chan_retain`, `sd_chan_release` | atomic; NULL-safe (a null `(chan T)?`) |
 | `void sd_chan_send(c, const void *val)` | val borrowed |
 | `bool sd_chan_receive(c, void *out)` | |
 | `void sd_chan_close(c)` | |
@@ -836,8 +843,10 @@ Decisions made while writing the runtime (nobody was available to ask):
     type and value.
 13. **`main` crashes run defers** before printing `crash:` (as Go does).
 14. **`os.exit(n)`** uses `n & 255`; it doesn't run defers.
-15. **time.after** delivers the monotonic time (an `int`) once on a channel with
-    a buffer of one.
+15. **time.after** delivers the wall-clock time (an `int`, Unix nanoseconds)
+    once on a channel with a buffer of one, and then closes the channel (as
+    docs/stdlib.md specifies; it used to send the monotonic time and stay
+    open).
 16. **Freeing never recurses.** (Added with the compiler's switch to this
     runtime, as a bug fix: dropping a 100,000-node linked list of
     `Node? next` boxes overflowed the stack.) A box, list or map whose

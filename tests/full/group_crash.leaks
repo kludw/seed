@@ -1,0 +1,1 @@
+A goroutine crashes on an index out of range, which leaks the list held by its unwound frame (runtime/README.md section 15).

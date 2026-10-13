@@ -92,7 +92,7 @@ DeclTarget  = Type Ident | LValue | "_" .
 Assign      = LValue { "," LValue } "=" Expr .
 LValue      = Ident { "." Ident | "[" Expr "]" } | "_" .
 IncDec      = LValue ( "++" | "--" ) .
-ExprStmt    = Expr .                                      // must be a call, try, or group
+ExprStmt    = Expr .                                      // must be a call or try
 
 If          = "if" "(" Expr ")" Block [ "else" ( If | Block ) ] .
 For         = "for" "(" [ ForInit ] ";" [ Expr ] ";" [ ForPost ] ")" Block .
@@ -105,11 +105,11 @@ CaseLabel   = Expr | EnumPattern .
 EnumPattern = TypeName "." Ident [ "(" Params ")" ] .
 
 Select      = "select" "{" NL { SelectClause } "}" .
-SelectClause = "case" ( VarDecl | Expr ) ":" NL { Stmt NL } .   // a send or receive call
+SelectClause = "case" ( VarDecl | Expr ) ":" NL { Stmt NL } .   // ch.send(v), ch.receive(), _ = ch.receive() or T? v = ch.receive()
 
 Return      = "return" [ Expr { "," Expr } ] .
 Defer       = "defer" Expr .                               // a call
-Spawn       = "spawn" Expr .                               // a call, only inside a group
+Spawn       = "spawn" Expr .                               // a call, only inside a group block
 Assert      = "assert" "(" Expr ")" .                      // only inside a test
 ```
 
@@ -148,3 +148,4 @@ Group       = "group" Block .
 - A conversion looks like a call to a type name: `int(x)`, `float(n)`, `byte(i)`, `string(bytes)`.
 - An enum value is `Type.Case(args)`, or `Type.Case` for a case without data.
 - Conditions in `if`, `for` and `switch` are always parenthesised, so `Name{` is always a struct literal.
+- A `Group` is only used whole: as the value of an assignment (`error err = group {...}`, `err = ...`, `_ = ...`), of `return`, or after `try`.

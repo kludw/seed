@@ -1,0 +1,29 @@
+// A crash in a goroutine becomes its group's error, "crash: <message>",
+// after the goroutine's defers have run. Passed up from main, it ends the
+// program like any other error: "error: crash: ..." and exit code 1.
+package main
+
+import "fmt"
+
+fn divide(int a, int b, chan int out) error {
+    defer fmt.println("divide: cleanup")
+    out.send(a / b)
+    return null
+}
+
+fn main([]string args) error {
+    chan int out = chan int(2)
+    error err = group {
+        spawn divide(10, 2, out)
+    }
+    fmt.println("first: " + (err == null).string())
+    err = group {
+        spawn divide(1, 0, out)
+    }
+    if (err != null) {
+        fmt.println("second: " + err.message())
+    }
+    return group {
+        spawn divide(2, 0, out)
+    }
+}

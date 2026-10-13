@@ -1,0 +1,76 @@
+// 200 goroutines started in a loop, each sending its result on one channel.
+// Each gets its own deep copy of the arguments.
+package main
+
+import "fmt"
+
+type Job struct {
+    int id
+    []int values
+}
+
+fn work(Job job, chan []int results) error {
+    int sum = 0
+    for (int i = 0; i < job.values.len(); i++) {
+        sum = sum + job.values[i]
+    }
+    // A copy of the goroutine's copy: changing it changes nothing in main.
+    []int mine = job.values
+    mine.push(-1)
+    results.send([]int{job.id, sum})
+    return null
+}
+
+fn main([]string args) error {
+    int n = 200
+    chan []int results = chan []int(0)
+    chan int done = chan int(1)
+    []int values = []int{}
+    error err = group {
+        spawn collect(results, n, done)
+        for (int i = 0; i < n; i++) {
+            values.push(i)
+            if (i % 2 == 0) {
+                spawn work(Job{id: i, values: values}, results)
+            } else {
+                spawn work(Job{id: i, values: []int{i}}, results)
+            }
+        }
+    }
+    if (err != null) {
+        return err
+    }
+    int? total = done.receive()
+    if (total != null) {
+        fmt.println("total " + total.string())
+    }
+    fmt.println("main's list still has " + values.len().string() + " values")
+    return null
+}
+
+// Receives n results; checks that every id came exactly once.
+fn collect(chan []int results, int n, chan int done) error {
+    []bool seen = []bool{}
+    for (int i = 0; i < n; i++) {
+        seen.push(false)
+    }
+    int total = 0
+    for (int k = 0; k < n; k++) {
+        []int? r = results.receive()
+        if (r == null) {
+            break
+        }
+        if (seen[r[0]]) {
+            fmt.println("duplicate " + r[0].string())
+        }
+        seen[r[0]] = true
+        total = total + r[1]
+    }
+    for (int j = 0; j < n; j++) {
+        if (!seen[j]) {
+            fmt.println("missing " + j.string())
+        }
+    }
+    done.send(total)
+    return null
+}

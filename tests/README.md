@@ -29,6 +29,9 @@ The format is defined in the header of `run.sh`. For every `NAME.sd`:
   `main` exit with 1 and crashes exit with 2.
 - `NAME.err` is text that must appear somewhere in stderr, such as
   `error: disk full` or `crash:`.
+- `NAME.leaks` (only for `tests/leaks.sh`) says why the program is expected
+  to leak although it exits normally: a goroutine crashes inside a group,
+  which leaks the locals of its unwound frames.
 
 For every `errors/NAME.sd`, compiling must fail, and stderr must contain the
 text after `// expect-error: ` on the file's first line. Most error tests
@@ -51,8 +54,9 @@ with stdin from `/dev/null`, compares the results and prints a pass/fail
 summary. It exits non-zero if anything failed.
 
 `tests/leaks.sh` takes the same arguments and runs every program under
-macOS `leaks --atExit` (`make test-leaks`); programs that crash are expected
-to leak the locals of the frames the crash unwinds.
+macOS `leaks --atExit` (`make test-leaks`); programs that crash (and those
+with a `NAME.leaks` file) are expected to leak the locals of the frames the
+crash unwinds.
 
 ## Notes
 
@@ -62,7 +66,12 @@ to leak the locals of the frames the crash unwinds.
 - `os_run*` tests run `true`, `false` and `sh` from `PATH`. `os_env` expects
   `PATH` to be set.
 - Concurrency tests in `full/` have deterministic output. Only `main` prints,
-  apart from deferred calls whose order the test forces.
+  apart from deferred calls whose order the test forces (or that print the
+  same line). Results that arrive in any order are sorted or summed first.
+- `chan_deadlock` and `group_deadlock` check the runtime's deadlock crash
+  (`crash: deadlock: all goroutines are blocked`, exit code 2).
+  `select_timeout` and `group_cancel_receiver` use timers of a few
+  milliseconds (and an hour-long sleep that must be stopped).
 - Float output avoids values whose text depends on where a formatter switches
   to exponent notation. Only values between 0.001 and 100000 and values with
   three-digit exponents (`1e+300`) are printed.

@@ -1,0 +1,17 @@
+// expect-error: a select case must send or receive on a channel
+// Every select case is a channel operation.
+package main
+
+fn work() error {
+    return null
+}
+
+fn main([]string args) error {
+    chan int ch = chan int(1)
+    select {
+    case ch.receive():
+        return null
+    case work():
+        return null
+    }
+}

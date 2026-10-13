@@ -1,0 +1,137 @@
+// Channels are the one reference type: a channel stored in a struct or an
+// enum and sent over another channel is the same channel, so a server can
+// answer each request on the reply channel that came with it.
+package main
+
+import "errors"
+import "fmt"
+
+type Request struct {
+    string name
+    int n
+    chan int reply
+}
+
+type Command enum {
+    Square(int n, chan int reply)
+    Total(chan int reply)
+    Stop
+}
+
+// Answers requests until the channel is closed.
+fn doubler(chan Request requests) error {
+    for (;;) {
+        Request? r = requests.receive()
+        if (r == null) {
+            return null
+        }
+        r.reply.send(r.n * 2)
+    }
+}
+
+fn client(string name, int n, chan Request requests, chan string results) error {
+    chan int reply = chan int(0)
+    requests.send(Request{name: name, n: n, reply: reply})
+    int? answer = reply.receive()
+    if (answer == null) {
+        return errors.new(name + ": no answer")
+    }
+    results.send(name + " " + answer.string())
+    return null
+}
+
+// A server whose state lives in one goroutine; commands carry their reply
+// channel in an enum case.
+fn counter(chan Command commands) error {
+    int total = 0
+    for (;;) {
+        Command? c = commands.receive()
+        if (c == null) {
+            return null
+        }
+        switch (c) {
+        case Command.Square(int n, chan int reply):
+            total = total + n * n
+            reply.send(n * n)
+        case Command.Total(chan int reply):
+            reply.send(total)
+        case Command.Stop:
+            return null
+        }
+    }
+}
+
+fn useCounter(chan Command commands, chan string out) error {
+    chan int reply = chan int(1)
+    for (int i = 1; i <= 3; i++) {
+        commands.send(Command.Square(i, reply))
+        int? sq = reply.receive()
+        if (sq != null) {
+            out.send("square " + sq.string())
+        }
+    }
+    commands.send(Command.Total(reply))
+    int? total = reply.receive()
+    if (total != null) {
+        out.send("total " + total.string())
+    }
+    commands.send(Command.Stop)
+    return null
+}
+
+// Runs the clients in a group of their own, then closes the request
+// channel so that the server stops.
+fn clients([]string names, chan Request requests, chan string results) error {
+    error err = group {
+        for (int i = 0; i < names.len(); i++) {
+            spawn client(names[i], i + 1, requests, results)
+        }
+    }
+    requests.close()
+    return err
+}
+
+fn main([]string args) error {
+    chan Request requests = chan Request(0)
+    chan string results = chan string(10)
+    // Another handle to the same channel: the server reads from it, and
+    // closing the original ends the server's loop.
+    chan Request copy = requests
+    error err = group {
+        spawn doubler(copy)
+        spawn clients([]string{"a", "b", "c"}, requests, results)
+    }
+    if (err != null) {
+        return err
+    }
+    results.close()
+    []string lines = []string{}
+    for (;;) {
+        string? line = results.receive()
+        if (line == null) {
+            break
+        }
+        lines.push(line)
+    }
+    lines.sort()
+    fmt.println(lines.join(", "))
+
+    chan Command commands = chan Command(0)
+    chan string out = chan string(10)
+    err = group {
+        spawn counter(commands)
+        spawn useCounter(commands, out)
+    }
+    if (err != null) {
+        return err
+    }
+    out.close()
+    for (;;) {
+        string? s = out.receive()
+        if (s == null) {
+            break
+        }
+        fmt.println(s)
+    }
+    return null
+}

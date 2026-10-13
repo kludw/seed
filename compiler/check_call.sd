@@ -461,6 +461,20 @@ fn (Checker c) mut checkBuiltin(int e, int recv, string name) {
             b = Builtin.Message
             res = tyString
         }
+    } else if (k == Kind.Chan) {
+        int ce = c.types.elem(rt)
+        if (name == "send") {
+            b = Builtin.Send
+            ps = []int{ce}
+        } else if (name == "receive") {
+            b = Builtin.Receive
+            res = ce
+            if (ce != tyError) {
+                res = c.types.optOf(ce)
+            }
+        } else if (name == "close") {
+            b = Builtin.Close
+        }
     } else if (k == Kind.Opt) {
         c.errorHint(c.ast.exprs[recv].pos, c.describe(recv) + " is nullable (" + c.typeName(rt) + ")", "check " + c.describe(recv) + " != null before calling " + name + "()")
         c.checkArgsLoosely(e)
@@ -532,6 +546,13 @@ fn (Checker c) mut checkPkgCall(int e, string pkg, string name) {
     } else if (key == "errors.new") {
         f = PkgFn.ErrNew
         res = tyError
+    } else if (key == "time.after") {
+        f = PkgFn.After
+        ps = []int{tyInt}
+        res = c.types.chanOf(tyInt)
+    } else if (key == "time.sleep") {
+        f = PkgFn.Sleep
+        ps = []int{tyInt}
     }
     if (f == PkgFn.None) {
         Suggest s = newSuggest(name)
@@ -562,6 +583,9 @@ fn pkgFunctionNames(string pkg) []string {
     }
     if (pkg == "fs") {
         return []string{"read", "write", "exists", "isDir", "list", "mkdir", "remove"}
+    }
+    if (pkg == "time") {
+        return []string{"after", "sleep"}
     }
     return []string{"new"}
 }

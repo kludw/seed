@@ -1,0 +1,28 @@
+// Two goroutines that wait for each other while main waits for their group:
+// every goroutine is blocked, so the program stops with a deadlock crash.
+package main
+
+import "fmt"
+
+fn ping(chan int in, chan int out) error {
+    int? v = in.receive()
+    if (v != null) {
+        out.send(v + 1)
+    }
+    return null
+}
+
+fn main([]string args) error {
+    chan int a = chan int(0)
+    chan int b = chan int(0)
+    fmt.println("starting")
+    error err = group {
+        spawn ping(a, b)
+        spawn ping(b, a)
+    }
+    if (err != null) {
+        return err
+    }
+    fmt.println("not reached")
+    return null
+}

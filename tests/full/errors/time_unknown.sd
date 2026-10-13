@@ -1,0 +1,11 @@
+// expect-error: package time has no day
+// There is no time.day: a day is not always 24 hours.
+package main
+
+import "fmt"
+import "time"
+
+fn main([]string args) error {
+    fmt.println(time.day.string())
+    return null
+}

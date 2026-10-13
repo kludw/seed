@@ -1,0 +1,4 @@
+total 136
+outer: branch: negative leaf -7
+stuck: cleanup
+outer: failing on purpose

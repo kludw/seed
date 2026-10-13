@@ -76,7 +76,15 @@ fn (Checker c) stmtExits(int s) bool {
             }
         }
         return hasDefault || c.kindOf(c.typeOf(st.expr)) == Kind.Enum
-    case StmtKind.Bad, StmtKind.Assign, StmtKind.IncDec, StmtKind.Select, StmtKind.Defer, StmtKind.Spawn:
+    case StmtKind.Select:
+        // select always runs one of its cases.
+        for (int j = 0; j < st.count; j++) {
+            if (!c.blockExits(c.ast.cases[c.ast.at(st.list, j)].body)) {
+                return false
+            }
+        }
+        return st.count > 0
+    case StmtKind.Bad, StmtKind.Assign, StmtKind.IncDec, StmtKind.Defer, StmtKind.Spawn:
         return false
     case StmtKind.Assert, StmtKind.Const:
         return false
@@ -142,21 +150,26 @@ fn (Checker c) mut checkStmt(int s) {
     case StmtKind.Switch:
         c.checkSwitch(st)
     case StmtKind.Return:
+        if (c.groupDepth > 0) {
+            c.errorHint(st.pos, "return is not allowed inside a group block", "the group must wait for its goroutines first; set a variable in the block and return after it")
+        }
         c.checkReturn(st)
     case StmtKind.Break, StmtKind.Continue:
+        string what = "continue"
+        if (st.kind == StmtKind.Break) {
+            what = "break"
+        }
         if (c.loopDepth == 0) {
-            string what = "continue"
-            if (st.kind == StmtKind.Break) {
-                what = "break"
-            }
             c.error(st.pos, what + " outside of a loop")
+        } else if (c.groupDepth > 0 && c.loopDepth == c.groupLoop) {
+            c.errorHint(st.pos, what + " cannot leave a group block", "the group must wait for its goroutines first; set a variable in the block and " + what + " after it")
         }
     case StmtKind.Select:
-        c.unsupported(st.pos, "select")
+        c.checkSelect(st)
     case StmtKind.Defer:
         c.checkDefer(st)
     case StmtKind.Spawn:
-        c.unsupported(st.pos, "spawn")
+        c.checkSpawn(st)
     case StmtKind.Assert:
         c.unsupported(st.pos, "assert")
     }
@@ -177,10 +190,16 @@ fn (Checker c) mut checkIncDec(Stmt st) {
 
 fn (Checker c) mut checkExprStmt(Stmt st) {
     int e = st.expr
-    c.checkExpr(e)
     Expr x = c.ast.exprs[e]
+    if (x.kind == ExprKind.Group) {
+        c.allowGroup = e
+        c.checkExpr(e)
+        c.errorHint(x.pos, "the error returned by the group is not handled", "use  error err = group {...},  try group {...}  or  _ = group {...}")
+        return
+    }
+    c.checkExpr(e)
     if (x.kind != ExprKind.Call && x.kind != ExprKind.Try) {
-        if (x.kind != ExprKind.Bad && x.kind != ExprKind.Group) {
+        if (x.kind != ExprKind.Bad) {
             c.errorHint(x.pos, "this expression is not used", "only calls can be statements")
         }
         return
@@ -277,6 +296,9 @@ fn (Checker c) mut checkReturn(Stmt st) {
         }
         return
     }
+    if (st.count == 1) {
+        c.allowGroup = c.ast.at(st.list, 0)
+    }
     if (st.count == 1 && n > 1) {
         int only = c.ast.at(st.list, 0)
         c.checkExpr(only)
@@ -324,6 +346,7 @@ fn (Checker c) mut checkAssign(int s) {
     if (n == 1) {
         int ti = c.ast.at(st.list, 0)
         Target tg = c.ast.targets[ti]
+        c.allowGroup = st.expr
         switch (tg.kind) {
         case TargetKind.Decl:
             int t = c.resolve(tg.typeExpr)
@@ -616,6 +639,9 @@ fn (Checker c) mut checkDefer(Stmt st) {
         c.errorHint(x.pos, "defer cannot call the mut method " + c.describe(e), "the deferred call runs after the function's variables are gone; call it before returning instead")
         return
     }
+    if (i.res == Res.Builtin && i.builtin == Builtin.Close) {
+        return
+    }
     if (i.res != Res.Func && i.res != Res.Method && i.res != Res.ValueCall && i.res != Res.IfaceMethod && i.res != Res.Pkg) {
         if (c.typeOf(e) != tyInvalid) {
             c.errorHint(x.pos, "defer needs a call of a function or method, not " + c.describe(e), "write a function that does the work and defer a call of it")
@@ -630,5 +656,134 @@ fn (Checker c) mut checkDefer(Stmt st) {
         c.errorHint(x.pos, "the error returned by " + c.describe(e) + " is not handled", "discard it explicitly:  defer _ = " + c.describe(e))
     } else {
         c.checkUnusedResult(e)
+    }
+}
+
+// ---- concurrency ----
+
+// Whether the checked expression e is ch.receive() (or, when sendOk,
+// ch.send(v)).
+fn (Checker c) isChanOp(int e, bool sendOk) bool {
+    if (c.ast.exprs[e].kind != ExprKind.Call || c.info[e].res != Res.Builtin) {
+        return false
+    }
+    Builtin b = c.info[e].builtin
+    return b == Builtin.Receive || (sendOk && b == Builtin.Send)
+}
+
+// select: every case is a channel operation, ch.send(v), ch.receive() or
+// T? v = ch.receive(), whose operands are evaluated before select waits.
+fn (Checker c) mut checkSelect(Stmt st) {
+    if (st.count == 0) {
+        c.errorHint(st.pos, "select has no cases and would wait forever", "add a case such as  case int? v = ch.receive():")
+    }
+    for (int i = 0; i < st.count; i++) {
+        Case cs = c.ast.cases[c.ast.at(st.list, i)]
+        c.pushScope()
+        c.checkSelectComm(cs.comm)
+        c.checkBlock(cs.body)
+        c.popScope()
+    }
+}
+
+fn (Checker c) mut checkSelectComm(int s) {
+    if (s < 0) {
+        return
+    }
+    Stmt st = c.ast.stmts[s]
+    string hint = "a case is  ch.send(v),  ch.receive()  or  T? v = ch.receive()"
+    if (st.kind == StmtKind.ExprStmt) {
+        c.checkExpr(st.expr)
+        if (c.typeOf(st.expr) != tyInvalid && !c.isChanOp(st.expr, true)) {
+            c.errorHint(c.ast.exprs[st.expr].pos, "a select case must send or receive on a channel", hint)
+        }
+        return
+    }
+    if (st.kind != StmtKind.Assign || st.count != 1) {
+        c.errorHint(st.pos, "a select case must send or receive on a channel", hint)
+        return
+    }
+    int ti = c.ast.at(st.list, 0)
+    Target tg = c.ast.targets[ti]
+    c.checkExpr(st.expr)
+    int rt = c.typeOf(st.expr)
+    if (rt != tyInvalid && !c.isChanOp(st.expr, false)) {
+        c.errorHint(c.ast.exprs[st.expr].pos, "a select case with a variable must receive from a channel", hint)
+        rt = tyInvalid
+    }
+    if (tg.kind == TargetKind.Place) {
+        c.errorHint(tg.pos, "a select case cannot assign to an existing variable", "declare a new one (T? v = ch.receive()) and assign it in the case body")
+        return
+    }
+    if (tg.kind == TargetKind.Discard) {
+        return
+    }
+    int t = c.resolve(tg.typeExpr)
+    c.targetType[ti] = t
+    if (t != tyInvalid && rt != tyInvalid && t != rt) {
+        c.errorHint(tg.pos, "the received value has type " + c.typeName(rt) + ", not " + c.typeName(t), "declare it as  " + c.typeName(rt) + " " + tg.name)
+    }
+    c.targetVar[ti] = c.declare(tg.name, t, VarKind.Local, tg.pos)
+}
+
+// The block of a group expression: ordinary code in which spawn starts
+// goroutines. It may not leave early (return, try, or break/continue of a
+// loop outside it), because the group must wait for its goroutines.
+fn (Checker c) mut checkGroup(int e) {
+    Expr x = c.ast.exprs[e]
+    bool allowed = c.allowGroup == e && c.curFn >= 0
+    c.allowGroup = -1
+    int savedDepth = c.groupDepth
+    int savedLoop = c.groupLoop
+    c.groupDepth++
+    c.groupLoop = c.loopDepth
+    c.checkBlock(x.block)
+    c.groupDepth = savedDepth
+    c.groupLoop = savedLoop
+    if (!allowed) {
+        c.errorHint(x.pos, "a group can only be assigned to an error variable, returned, discarded or used with try", "write  error err = group {...},  err = group {...},  return group {...},  _ = group {...}  or  try group {...}")
+        c.setType(e, tyInvalid)
+        return
+    }
+    c.setType(e, tyError)
+}
+
+// spawn f(args): only inside a group block. The callee and the arguments
+// are evaluated now and deep-copied for the new goroutine, which shares
+// nothing with the one that started it.
+fn (Checker c) mut checkSpawn(Stmt st) {
+    int e = st.expr
+    if (c.groupDepth == 0) {
+        c.errorHint(st.pos, "spawn is only allowed inside a group block", "the group waits for its goroutines:  error err = group { spawn f(...) }")
+    }
+    c.checkExpr(e)
+    Expr x = c.ast.exprs[e]
+    if (x.kind != ExprKind.Call) {
+        if (x.kind != ExprKind.Bad) {
+            c.errorHint(x.pos, "spawn needs a function call", "write  spawn f(args)")
+        }
+        return
+    }
+    int t = c.typeOf(e)
+    if (t == tyInvalid) {
+        return
+    }
+    ExprInfo i = c.info[e]
+    bool isMut = false
+    if (i.res == Res.Method) {
+        isMut = c.ast.fns[i.ref].recvMut
+    } else if (i.res == Res.IfaceMethod) {
+        isMut = c.ifaceMethod(i.ref, i.sub).isMut
+    }
+    if (isMut) {
+        c.errorHint(x.pos, "spawn cannot call the mut method " + c.describe(e), "goroutines share nothing: the goroutine would change its own copy of " + c.describe(c.ast.exprs[x.a].a) + "; send the result back on a channel instead")
+        return
+    }
+    if (i.res != Res.Func && i.res != Res.Method && i.res != Res.ValueCall && i.res != Res.IfaceMethod && i.res != Res.Pkg) {
+        c.errorHint(x.pos, "spawn needs a call of a function or method, not " + c.describe(e), "write a function that does the work and spawn a call of it")
+        return
+    }
+    if (t != tyVoid && t != tyError) {
+        c.errorHint(x.pos, "a spawned function must return error or nothing, but " + c.describe(e) + " returns " + c.typeName(t), "send results back on a channel")
     }
 }

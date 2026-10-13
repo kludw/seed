@@ -1,0 +1,18 @@
+// expect-error: a select case cannot assign to an existing variable
+// A receive case declares a new variable.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    chan int ch = chan int(1)
+    int? v = null
+    select {
+    case v = ch.receive():
+        fmt.println("received")
+    }
+    if (v != null) {
+        fmt.println(v.string())
+    }
+    return null
+}

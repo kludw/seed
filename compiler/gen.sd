@@ -67,9 +67,11 @@ type Gen struct {
     []Slot slots
     []int scopes
     []LoopCtx loops
+    []string groups
     int indent
     int ntmp
     int ndefer
+    int nspawn
     int curFn
     bool defers
 }
@@ -88,9 +90,11 @@ fn newGen(Checker c) Gen {
         slots: []Slot{},
         scopes: []int{},
         loops: []LoopCtx{},
+        groups: []string{},
         indent: 0,
         ntmp: 0,
         ndefer: 0,
+        nspawn: 0,
         curFn: -1,
         defers: false,
     }
@@ -912,18 +916,29 @@ fn (Gen g) mut genConsts() {
             g.consts.push(g.out.join(""))
             continue
         }
+        // A counted value is released when a goroutine that computed it
+        // ends (the main goroutine keeps its values until the program exits).
+        string v = "sd_cv_" + cd.name
+        string st = "sd_cs_" + cd.name
+        g.emit("static _Thread_local " + ct + " " + v + ";")
+        g.emit("static _Thread_local int " + st + ";")
+        string rel = g.releaseCall(t, v)
+        if (rel != "") {
+            g.emit("static void sd_cf_" + cd.name + "(void) { " + rel + "; " + st + " = 0; }")
+        }
         g.emit(head + " {")
         g.indent++
-        g.emit("static _Thread_local " + ct + " v;")
-        g.emit("static _Thread_local int st;")
-        g.emit("if (st == 2) return v;")
-        g.emit("if (st == 1) sd_crash(\"constant " + cd.name + " depends on itself\");")
-        g.emit("st = 1;")
+        g.emit("if (" + st + " == 2) return " + v + ";")
+        g.emit("if (" + st + " == 1) sd_crash(\"constant " + cd.name + " depends on itself\");")
+        g.emit(st + " = 1;")
         string val = g.gexpr(cd.expr)
-        g.emit("v = " + g.ownVal(val, t) + ";")
+        g.emit(v + " = " + g.ownVal(val, t) + ";")
         g.releaseTo(0)
-        g.emit("st = 2;")
-        g.emit("return v;")
+        g.emit(st + " = 2;")
+        if (rel != "") {
+            g.emit("sd_goroutine_atexit(sd_cf_" + cd.name + ");")
+        }
+        g.emit("return " + v + ";")
         g.indent--
         g.emit("}")
         g.consts.push(g.out.join(""))
@@ -962,6 +977,7 @@ fn (Gen g) mut genFn(int f) {
     g.slots = []Slot{}
     g.scopes = []int{}
     g.loops = []LoopCtx{}
+    g.groups = []string{}
     g.ntmp = 0
     g.defers = g.blockHasDefer(fd.body)
     string sig = g.fnSig(f)

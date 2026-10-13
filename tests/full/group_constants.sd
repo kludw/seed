@@ -1,0 +1,50 @@
+// Constants work in goroutines: each goroutine computes the constants it
+// uses for itself (nothing is shared) and frees them when it ends.
+package main
+
+import "fmt"
+
+const []string words = []string{"zero", "one", "two", "three"}
+const string prefix = "word " + "number "
+const int big = 1 << 100
+
+fn name(int i, chan string out) error {
+    out.send(prefix + words[i % words.len()] + " " + (big >> 98 == 4).string())
+    return null
+}
+
+fn main([]string args) error {
+    chan string out = chan string(20)
+    error err = group {
+        for (int i = 0; i < 20; i++) {
+            spawn name(i, out)
+        }
+    }
+    if (err != null) {
+        return err
+    }
+    out.close()
+    map[string]int counts = map[string]int{}
+    for (;;) {
+        string? s = out.receive()
+        if (s == null) {
+            break
+        }
+        int? c = counts[s]
+        if (c == null) {
+            counts[s] = 1
+        } else {
+            counts[s] = c + 1
+        }
+    }
+    []string keys = counts.keys()
+    keys.sort()
+    for (int k = 0; k < keys.len(); k++) {
+        int? n = counts[keys[k]]
+        if (n != null) {
+            fmt.println(keys[k] + ": " + n.string())
+        }
+    }
+    fmt.println(prefix + words[1])
+    return null
+}

@@ -56,9 +56,8 @@ verify: build/stage2.c build/stage3.c
 test: build/seed2
 	tests/run.sh "build/seed2 c" tests/lang tests/seed0
 
-# The features outside the seed0 subset. The concurrency tests are expected
-# to fail until the next phase implements chan, select, group and spawn, and
-# errors/unformatted_code until `seed fmt` exists.
+# The features outside the seed0 subset. errors/unformatted_code is expected
+# to fail until compiling checks formatting (seed fmt --check does today).
 test-full: build/seed2
 	tests/run.sh "build/seed2 c --strict" tests/full
 

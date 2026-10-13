@@ -107,7 +107,11 @@ fn (Gen g) mut genStmt(int s) {
         }
     case StmtKind.Defer:
         g.genDefer(st)
-    case StmtKind.Bad, StmtKind.Select, StmtKind.Spawn, StmtKind.Assert:
+    case StmtKind.Select:
+        g.genSelect(st)
+    case StmtKind.Spawn:
+        g.genSpawn(st)
+    case StmtKind.Bad, StmtKind.Assert:
         g.emit("/* internal error: statement */")
     }
 }
@@ -658,7 +662,13 @@ fn (Gen g) stmtHasDefer(int s) bool {
     if (st.kind == StmtKind.For) {
         return g.blockHasDefer(st.body)
     }
-    if (st.kind == StmtKind.Switch) {
+    if (st.kind == StmtKind.ExprStmt || st.kind == StmtKind.Assign) {
+        return g.groupHasDefer(st.expr)
+    }
+    if (st.kind == StmtKind.Return && st.count == 1) {
+        return g.groupHasDefer(g.c.ast.at(st.list, 0))
+    }
+    if (st.kind == StmtKind.Switch || st.kind == StmtKind.Select) {
         for (int i = 0; i < st.count; i++) {
             if (g.blockHasDefer(g.c.ast.cases[g.c.ast.at(st.list, i)].body)) {
                 return true
@@ -723,4 +733,174 @@ fn (Gen g) mut genDefer(Stmt st) {
         return
     }
     g.thunks.push("typedef struct {" + fields.join("") + " } " + name + "_env;\nstatic void " + name + "(void *p) {\n  " + name + "_env *e_ = p;\n" + body + "}\n")
+}
+
+// Whether e is a group (or try of a group) whose block has a defer.
+fn (Gen g) groupHasDefer(int e) bool {
+    if (e < 0) {
+        return false
+    }
+    Expr x = g.c.ast.exprs[e]
+    if (x.kind == ExprKind.Try) {
+        return g.groupHasDefer(x.a)
+    }
+    return x.kind == ExprKind.Group && g.blockHasDefer(x.block)
+}
+
+// ---- concurrency ----
+
+// spawn f(args) inside a group block: like defer, the callee value,
+// receiver and arguments are evaluated now, into an argument struct with a
+// descriptor; sd_spawn deep-copies it for the new goroutine (borrowing
+// ours), and the trampoline sd_gN calls f with the copy and returns its
+// error (runtime/README.md, section 10).
+fn (Gen g) mut genSpawn(Stmt st) {
+    int mark = g.slots.len()
+    int e = st.expr
+    string grp = g.groups[g.groups.len() - 1]
+    []int ops = g.callOperands(e)
+    []string vals = g.operands(ops)
+    g.nspawn++
+    string name = "sd_g" + g.nspawn.string()
+    []string fields = []string{}
+    []string descs = []string{}
+    []string evals = []string{}
+    bool anyCounted = false
+    for (int i = 0; i < ops.len(); i++) {
+        int t = g.typeOf(ops[i])
+        fields.push(" " + g.ctype(t) + " a" + i.string() + ";")
+        descs.push("SD_FIELD(" + name + "_args, a" + i.string() + ", " + g.desc(t) + ")")
+        evals.push("a_->a" + i.string())
+        if (g.counted(t)) {
+            anyCounted = true
+        }
+    }
+    if (ops.len() == 0) {
+        g.emit("sd_spawn(" + grp + ", " + name + ", NULL, NULL);")
+    } else {
+        g.emit("{ " + name + "_args a_ = {" + vals.join(", ") + "}; sd_spawn(" + grp + ", " + name + ", &" + name + "_type, &a_); }")
+    }
+    g.releaseTo(mark)
+    []string saved = g.out
+    int savedIndent = g.indent
+    g.out = []string{}
+    g.indent = 1
+    string call = g.callFrom(e, evals)
+    if (g.coreType(e) == tyVoid) {
+        g.emit(call + ";")
+        g.emit("return SD_ERR_NULL;")
+    } else {
+        g.emit("return " + call + ";")
+    }
+    string body = g.out.join("")
+    g.out = saved
+    g.indent = savedIndent
+    string head = "static sd_err " + name + "(void *p) {\n"
+    if (ops.len() == 0) {
+        g.thunks.push(head + "  (void)p;\n" + body + "}\n")
+        return
+    }
+    string kind = "SD_STRUCT_TYPE_TRIVIAL"
+    if (anyCounted) {
+        kind = "SD_STRUCT_TYPE"
+    }
+    []string defs = []string{"typedef struct {" + fields.join("") + " } " + name + "_args;\n"}
+    defs.push("static const sd_field " + name + "_fields[] = {" + descs.join(", ") + "};\n")
+    defs.push("static const sd_type " + name + "_type = " + kind + "(" + cString("spawn " + g.c.describe(e)) + ", " + name + "_args, " + name + "_fields);\n")
+    defs.push(head + "  " + name + "_args *a_ = p;\n" + body + "}\n")
+    g.thunks.push(defs.join(""))
+}
+
+// The send or receive call of a select case.
+fn (Gen g) commExpr(int comm) int {
+    return g.c.ast.stmts[comm].expr
+}
+
+// select { case ... } becomes an array of sd_select_case (the channels and
+// the values to send are evaluated first, in order), sd_select, and an
+// if/else chain on the chosen index (not a C switch, so that break and
+// continue in a case reach the loop):
+//
+//   T _tR; sd_select_case _tC[] = {{ch, SD_RECV, &_tR, false}, {ch2, SD_SEND, &v, false}};
+//   int _tK = sd_select(_tC, 2);
+//   if (_tK == 0) { T? l_x = _tC[0].ok ? _tR : null; ... } else if (_tK == 1) { ... }
+fn (Gen g) mut genSelect(Stmt st) {
+    int mark = g.slots.len()
+    g.emit("{")
+    g.indent++
+    []int es = []int{}
+    []int first = []int{}
+    for (int i = 0; i < st.count; i++) {
+        Case cs = g.c.ast.cases[g.c.ast.at(st.list, i)]
+        int e = g.commExpr(cs.comm)
+        first.push(es.len())
+        es.push(g.recvOf(e))
+        if (g.c.info[e].builtin == Builtin.Send) {
+            es.push(g.arg(e, 0))
+        }
+    }
+    []string vals = g.operands(es)
+    []string inits = []string{}
+    []string dests = []string{}
+    for (int j = 0; j < st.count; j++) {
+        Case cj = g.c.ast.cases[g.c.ast.at(st.list, j)]
+        int ej = g.commExpr(cj.comm)
+        string ch = vals[first[j]]
+        if (g.c.info[ej].builtin == Builtin.Send) {
+            string p = g.addr(g.typeOf(g.arg(ej, 0)), vals[first[j] + 1])
+            inits.push("{" + ch + ", SD_SEND, (void *)" + p + ", false}")
+            dests.push("")
+        } else {
+            string d = g.newTmp()
+            g.emit(g.ctype(g.elemOf(g.typeOf(g.recvOf(ej)))) + " " + d + ";")
+            inits.push("{" + ch + ", SD_RECV, &" + d + ", false}")
+            dests.push(d)
+        }
+    }
+    string cases = g.newTmp()
+    string k = g.newTmp()
+    g.emit("sd_select_case " + cases + "[] = {" + inits.join(", ") + "};")
+    g.emit("int " + k + " = sd_select(" + cases + ", " + st.count.string() + ");")
+    for (int m = 0; m < st.count; m++) {
+        Case cm = g.c.ast.cases[g.c.ast.at(st.list, m)]
+        if (m == 0) {
+            g.emit("if (" + k + " == 0) {")
+        } else {
+            g.emit("} else if (" + k + " == " + m.string() + ") {")
+        }
+        g.indent++
+        g.pushScope()
+        if (dests[m] != "") {
+            g.genReceived(cm.comm, cases + "[" + m.string() + "].ok", dests[m])
+        }
+        g.genStmts(cm.body)
+        g.popScope(!g.c.blockExits(cm.body))
+        g.indent--
+    }
+    if (st.count > 0) {
+        g.emit("}")
+    }
+    g.releaseTo(mark)
+    g.indent--
+    g.emit("}")
+}
+
+// The value received by a select case: declared as the case's variable,
+// or released when the case has none.
+fn (Gen g) mut genReceived(int comm, string ok, string d) {
+    Stmt st = g.c.ast.stmts[comm]
+    int e = st.expr
+    int opt = g.typeOf(e)
+    int v = -1
+    if (st.kind == StmtKind.Assign) {
+        v = g.c.targetVar[g.c.ast.at(st.list, 0)]
+    }
+    if (v >= 0) {
+        g.declareLocal(g.c.vars[v].name, opt, g.okOpt(opt, ok, d))
+        return
+    }
+    string rel = g.releaseCall(g.elemOf(g.typeOf(g.recvOf(e))), d)
+    if (rel != "") {
+        g.emit("if (" + ok + ") " + rel + ";")
+    }
 }

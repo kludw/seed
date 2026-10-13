@@ -1,0 +1,17 @@
+// When every goroutine is blocked on a channel (or waits for a group) and no
+// timer is pending, nothing can ever happen again: the program stops with a
+// crash instead of hanging. Defers do not run.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    defer fmt.println("not printed")
+    chan int ch = chan int(0)
+    fmt.println("waiting")
+    int? v = ch.receive()
+    if (v != null) {
+        fmt.println("not reached")
+    }
+    return null
+}

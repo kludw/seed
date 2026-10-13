@@ -281,7 +281,7 @@ defer f.close()
 - Variables bound in a `case` also write their type, like every other declaration **(proposed)**.
 - `break` and `continue` work in loops. There are no labels and no `goto` **(proposed)**.
 - `defer` runs when the enclosing function returns (or its goroutine crashes). Several defers run in reverse order (last first). The call's arguments are evaluated when the `defer` statement runs.
-- `defer` takes a call of a function, method, function value or interface method, but not of a `mut` method: the variable it would change is gone when the call runs.
+- `defer` takes a call of a function, method, function value, interface method or package function, or `ch.close()`, but not of a `mut` method: the variable it would change is gone when the call runs.
 - A deferred call that returns an error must discard it explicitly: `defer _ = f.close()`.
 - `break` and `continue` inside a `switch` apply to the enclosing loop.
 
@@ -324,20 +324,37 @@ if (err != null) {
 
 - `spawn` is only allowed inside a `group` block, and the group waits for every goroutine it started. Goroutines cannot leak.
 - Failures work like Erlang:
-  - When a goroutine returns an error or crashes, the other goroutines in its group are stopped, and the group returns the first error.
-  - A goroutine can only be stopped at a channel send or receive, and its `defer`s still run.
+  - When a goroutine returns an error or crashes, the other goroutines in its group are stopped, and the group returns the first error. A crash becomes the error `crash: <message>`.
+  - A goroutine can only be stopped at a channel send or receive (or `select`), and its `defer`s still run.
   - An error that nothing handles ends up in `main`, and the program exits with a clear message.
 - Goroutines share nothing. Sending a value on a channel copies it, so data races are impossible.
 - A `group` block is ordinary code: `spawn` may appear anywhere inside it, including in loops and `if`s.
 - Besides channel operations, blocking standard-library calls (`time.sleep`, I/O on files and sockets, `io.readLine`, `os.run`, `net.dial`) are also points where a cancelled goroutine stops.
-- Channels are the one reference type. Copying a channel value (into a struct, an enum, another channel) gives another handle to the same channel, which is how reply channels work.
+- Channels are the one reference type. Copying a channel value (into a struct, an enum, a list, another channel) gives another handle to the same channel, which is how reply channels work.
+- When every goroutine is blocked on a channel or waiting for a group, and no timer is pending, nothing can happen any more: the program prints `crash: deadlock: all goroutines are blocked` and exits with code 2, without running `defer`s.
+
+### Groups
+
+- `group { ... }` is an expression of type `error`: null when every goroutine returned null, otherwise the first error. Its result must be handled like any other error, so a group can only be used whole: `error err = group {...}`, `err = group {...}`, `return group {...}`, `_ = group {...}` or `try group {...}`. A `group` on its own as a statement is an unchecked error.
+- The block runs in the goroutine that reaches it, like any other code, and then the group waits for the goroutines the block started. The block cannot leave early: `return` and `try` are not allowed inside it, nor are `break` and `continue` of a loop outside it. Loops inside the block work as usual. A `defer` inside the block belongs to the function, as everywhere else.
+- `spawn` belongs to the innermost group block around it. Groups nest: a spawned function can run groups of its own, and stopping it stops them too.
+- When the group fails, only the goroutines it started are stopped, not the code of the block itself. So a block should only start goroutines; waiting for their results belongs in a goroutine or after the group. (A block that waits for a channel that only stopped goroutines would have served ends in the deadlock crash.)
+
+### Spawn
+
+- `spawn` takes a call of a function, a method, a function value, an interface method or a package function, which must return `error` or nothing. Results come back on channels.
+- The function value, the receiver and the arguments are evaluated when `spawn` runs and deep-copied for the new goroutine, so later changes on either side are not seen by the other (channels inside them are shared, as always).
+- A `mut` method cannot be spawned: the goroutine would only change its own copy of the receiver.
 
 ### Channels
 
 - `chan T(n)` creates a channel with a buffer of `n`, and `n = 0` means unbuffered.
 - `ch.send(v)` sends a value. Sending on a closed channel crashes the goroutine.
-- `ch.receive()` returns `T?`, and returns `null` once the channel is closed and empty.
-- `ch.close()` closes the channel.
+- `ch.receive()` returns `T?`, and returns `null` once the channel is closed and empty. For a `chan error` it returns `error`, which is also null then.
+- `ch.close()` closes the channel. Closing it twice crashes. `close` is not a point where a stopped goroutine stops, so `defer ch.close()` works (it is the one built-in method call that `defer` accepts).
+- `send`, `receive` and `close` are not `mut`: a channel parameter can be used directly.
+- Channel elements cannot be nullable: `receive()` already uses null for "closed". `chan int?` is a nullable channel; a channel of nullable values would be written `chan (int?)` and is rejected.
+- Channels have no `==`, and a package-level constant cannot hold a channel (each goroutine computes the constants it uses for itself).
 
 ### Select
 
@@ -352,9 +369,12 @@ case time.after(5 * time.second).receive():
 }
 ```
 
-- `select` waits until one of its channel operations can proceed, then runs that case.
+- `select` waits until one of its channel operations can proceed, then runs that case. When several can, one is chosen at random.
+- A case is `ch.send(v)`, `ch.receive()`, `_ = ch.receive()` or `T? v = ch.receive()`, which declares a new variable for that case. It cannot assign to an existing variable.
+- The channels and the values to send of every case are evaluated first, in order, before `select` waits.
 - There is no `default` case, so `select` always waits.
-- Timeouts are ordinary channels, such as `time.after(...)`.
+- `break` and `continue` inside a case apply to the enclosing loop.
+- Timeouts are ordinary channels, such as `time.after(...)`, which receives the time once and is then closed.
 
 ## Packages
 

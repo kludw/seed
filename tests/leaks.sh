@@ -6,7 +6,9 @@
 #
 # For example: tests/leaks.sh "build/seed2 c" tests/lang tests/full
 # Programs that crash are expected to leak (the locals of the unwound frames,
-# see runtime/README.md section 15); they are reported separately.
+# see runtime/README.md section 15); they are reported separately. So are
+# programs with a NAME.leaks file, which says why they leak (a goroutine
+# crashes inside a group, and the program goes on).
 CC=${CC:-cc}
 compile=$1; shift
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/seedleaks.XXXXXX")
@@ -24,7 +26,7 @@ for dir in "$@"; do
     case "$summary" in
       *" 0 leaks for"*) clean=$((clean+1)) ;;
       *)
-        if [ -f "$name.exit" ] && [ "$(cat "$name.exit")" = 2 ]; then
+        if [ -f "$name.leaks" ] || { [ -f "$name.exit" ] && [ "$(cat "$name.exit")" = 2 ]; }; then
           crashed=$((crashed+1)); echo "crash (expected to leak) $src: $summary"
         else
           leaky=$((leaky+1)); echo "LEAK $src: $summary"

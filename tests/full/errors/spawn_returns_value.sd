@@ -1,0 +1,14 @@
+// expect-error: a spawned function must return error or nothing
+// A goroutine's results come back on channels, not as return values.
+package main
+
+fn square(int n) int {
+    return n * n
+}
+
+fn main([]string args) error {
+    error err = group {
+        spawn square(3)
+    }
+    return err
+}

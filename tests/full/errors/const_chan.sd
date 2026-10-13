@@ -1,0 +1,11 @@
+// expect-error: cannot hold a channel
+// Each goroutine computes the constants it uses, so a channel constant
+// would not be shared.
+package main
+
+const chan int jobs = chan int(10)
+
+fn main([]string args) error {
+    jobs.close()
+    return null
+}

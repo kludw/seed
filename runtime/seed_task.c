@@ -76,6 +76,8 @@ struct sd_task {
   const sd_type *args_type;
   uint64_t rng;
   void *altstack;
+  void (**atexit_fns)(void); /* sd_goroutine_atexit, run when the goroutine ends */
+  size_t natexit, capatexit;
 };
 
 struct sd_group {
@@ -152,6 +154,7 @@ static void task_free(sd_task *t) {
   pthread_cond_destroy(&t->cv);
   free(t->cl);
   free(t->arena);
+  free(t->atexit_fns);
   free(t->msg_static ? NULL : t->msg);
   free(t);
 }
@@ -299,6 +302,15 @@ static void cl_push(sd_task *t, sd_cleanup e) {
 
 size_t sd_defer_mark(void) { return task_current()->ncl; }
 
+void sd_goroutine_atexit(void (*fn)(void)) {
+  sd_task *t = task_current();
+  if (t->natexit == t->capatexit) {
+    t->capatexit = t->capatexit ? t->capatexit * 2 : 8;
+    t->atexit_fns = sd_realloc(t->atexit_fns, t->capatexit * sizeof *t->atexit_fns);
+  }
+  t->atexit_fns[t->natexit++] = fn;
+}
+
 void sd_defer_push(void (*thunk)(void *env), const void *env, size_t size) {
   sd_task *t = task_current();
   size_t sz = (size + 15) & ~(size_t)15;
@@ -431,6 +443,7 @@ static void *thread_main(void *p) {
     free(t->args);
     t->args = NULL;
   }
+  while (t->natexit > 0) t->atexit_fns[--t->natexit]();
   sd_group *g = t->group;
   pthread_mutex_lock(&g->mu);
   if (!sd_err_is_null(result)) {
@@ -562,7 +575,7 @@ sd_chan *sd_chan_new(const sd_type *et, sd_int cap) {
 }
 
 sd_chan *sd_chan_retain(sd_chan *c) {
-  atomic_fetch_add_explicit(&c->rc, 1, memory_order_relaxed);
+  if (c) atomic_fetch_add_explicit(&c->rc, 1, memory_order_relaxed); /* NULL: a null (chan T)? */
   return c;
 }
 
@@ -650,12 +663,8 @@ static int try_send(sd_chan *c, const void *src) {
   return -1;
 }
 
-void sd_chan_close(sd_chan *c) {
-  pthread_mutex_lock(&c->mu);
-  if (c->closed) {
-    pthread_mutex_unlock(&c->mu);
-    sd_crash("close of closed channel");
-  }
+/* With c locked and not closed: closes it and wakes every waiter. */
+static void close_locked(sd_chan *c) {
   c->closed = true;
   sd_waiter *w;
   while ((w = waitq_claim(&c->recvq))) {
@@ -666,6 +675,15 @@ void sd_chan_close(sd_chan *c) {
     w->result = 0;
     unpark(w->sel->task);
   }
+}
+
+void sd_chan_close(sd_chan *c) {
+  pthread_mutex_lock(&c->mu);
+  if (c->closed) {
+    pthread_mutex_unlock(&c->mu);
+    sd_crash("close of closed channel");
+  }
+  close_locked(c);
   pthread_mutex_unlock(&c->mu);
 }
 
@@ -871,9 +889,12 @@ static void *timer_main(void *p) {
     }
     sd_timer x = timer_pop();
     pthread_mutex_unlock(&timer_mu);
-    sd_int v = sd_int_from_i64(now);
+    struct timespec wall;
+    clock_gettime(CLOCK_REALTIME, &wall);
+    sd_int v = sd_int_from_i64((int64_t)wall.tv_sec * 1000000000 + wall.tv_nsec);
     pthread_mutex_lock(&x.c->mu);
     try_send(x.c, &v); /* buffer of one, sent once: never blocks */
+    close_locked(x.c); /* later receives return null instead of waiting forever */
     pthread_mutex_unlock(&x.c->mu);
     sd_chan_release(x.c);
     running_dec();

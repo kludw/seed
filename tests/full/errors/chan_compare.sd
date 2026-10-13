@@ -1,0 +1,12 @@
+// expect-error: cannot be compared
+// Channels have no ==.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    chan int a = chan int(1)
+    chan int b = a
+    fmt.println((a == b).string())
+    return null
+}

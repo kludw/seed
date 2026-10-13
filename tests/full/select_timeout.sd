@@ -1,0 +1,62 @@
+// select with a timeout: time.after(d) is a channel that receives the time
+// once, d nanoseconds from now, and is then closed.
+package main
+
+import "fmt"
+import "time"
+
+fn main([]string args) error {
+    chan int never = chan int(0)
+    select {
+    case int? v = never.receive():
+        if (v != null) {
+            fmt.println("unexpected " + v.string())
+        }
+    case time.after(20 * time.millisecond).receive():
+        fmt.println("timeout")
+    }
+
+    // A timer that fires first wins over a channel that is never ready, and
+    // its channel is closed after the one value.
+    chan int timer = time.after(time.millisecond)
+    int? first = timer.receive()
+    int? second = timer.receive()
+    fmt.println("first: " + (first != null).string() + ", second: " + (second != null).string())
+
+    // A ready channel is chosen before a long timeout.
+    chan string ready = chan string(1)
+    ready.send("ready")
+    select {
+    case string? s = ready.receive():
+        if (s != null) {
+            fmt.println(s)
+        }
+    case time.after(time.hour).receive():
+        fmt.println("timeout")
+    }
+
+    // A timeout inside a loop: the loop ends once nothing arrives for a
+    // while. (Long enough that the buffered values always win, even on a
+    // busy machine.)
+    chan int ticks = chan int(3)
+    ticks.send(1)
+    ticks.send(2)
+    ticks.send(3)
+    int got = 0
+    bool waiting = true
+    for (; waiting; ) {
+        select {
+        case int? t = ticks.receive():
+            if (t != null) {
+                got = got + t
+            }
+        case time.after(200 * time.millisecond).receive():
+            waiting = false
+        }
+    }
+    fmt.println("got " + got.string())
+
+    time.sleep(time.millisecond)
+    fmt.println("units: " + time.second.string() + " " + (time.minute / time.second).string() + " " + (time.hour / time.minute).string() + " " + (time.millisecond * 1000 == time.second).string() + " " + (time.nanosecond * 1000 == time.microsecond).string())
+    return null
+}

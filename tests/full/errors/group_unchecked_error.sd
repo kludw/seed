@@ -1,0 +1,14 @@
+// expect-error: the error returned by the group is not handled
+// A group returns the first error of its goroutines; it must be handled.
+package main
+
+fn work() error {
+    return null
+}
+
+fn main([]string args) error {
+    group {
+        spawn work()
+    }
+    return null
+}

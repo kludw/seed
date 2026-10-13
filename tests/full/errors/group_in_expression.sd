@@ -1,0 +1,17 @@
+// expect-error: a group can only be assigned to an error variable
+// A group is used as a whole statement's value, not inside expressions.
+package main
+
+import "fmt"
+
+fn work() error {
+    return null
+}
+
+fn main([]string args) error {
+    bool failed = group {
+        spawn work()
+    } != null
+    fmt.println(failed.string())
+    return null
+}

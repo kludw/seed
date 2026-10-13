@@ -1,0 +1,11 @@
+// expect-error: spawn needs a call of a function or method
+// spawn starts a function, not a built-in method.
+package main
+
+fn main([]string args) error {
+    []int xs = []int{1, 2}
+    error err = group {
+        spawn xs.push(3)
+    }
+    return err
+}

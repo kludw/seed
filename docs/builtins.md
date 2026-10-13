@@ -9,6 +9,7 @@ This is part of the language spec ([SPEC.md](../SPEC.md)). It lists every method
 | `main` returns an error | `error: <message>` is printed to stderr, exit code 1. |
 | A crash (index out of range, division by zero, failed conversion, sending on a closed channel, ...) | `crash: <message>` is printed to stderr, exit code 2. Inside a `group`, the crash becomes the group's error instead. |
 | `os.exit(n)` | Exits immediately with code `n`. |
+| Every goroutine is blocked on a channel (or waits for a group) and no timer is pending | `crash: deadlock: all goroutines are blocked` is printed to stderr, exit code 2. Defers do not run. |
 
 ## int
 
@@ -96,9 +97,21 @@ Strings are immutable UTF-8 bytes. Lengths and indexes count bytes.
 
 `error` is an interface with one method, `message() string`.
 
+## Channels `chan T`
+
+`chan T(n)` makes a channel with a buffer of `n` values (`0`: unbuffered, every send waits for a receiver). Crashes if `n` is negative. A channel value is a handle: copies of it (in variables, structs, lists, other channels) all refer to the same channel. `T` cannot be nullable. Channels have no `==`.
+
+| Method | Result |
+|---|---|
+| `ch.send(v)` | Sends a copy of `v`, waiting while the buffer is full. Crashes if the channel is closed (`send on closed channel`). |
+| `ch.receive()` | The next value as `T?`, waiting until there is one; `null` once the channel is closed and empty. For `chan error` the result is `error` (null when closed). |
+| `ch.close()` | Closes the channel: buffered values can still be received. Crashes if it is already closed (`close of closed channel`). |
+
+`send`, `receive` and `select` (and `time.sleep`) are the points where a goroutine whose group has failed stops; `close` is not.
+
 ## Core packages
 
-These exist in every Seed compiler, including the `seed0` bootstrap compiler. The full standard library is in [stdlib.md](stdlib.md).
+These exist in every Seed compiler, including the `seed0` bootstrap compiler (except `time`, which needs goroutines). The full standard library is in [stdlib.md](stdlib.md).
 
 ### errors
 
@@ -134,3 +147,13 @@ These exist in every Seed compiler, including the `seed0` bootstrap compiler. Th
 | `fs.list(string dir) ([]string, error)` | Entry names (not paths), sorted, without `.` and `..`. |
 | `fs.mkdir(string path) error` | Creates the directory and any missing parents. Succeeds if it exists. |
 | `fs.remove(string path) error` | Removes a file or an empty directory. |
+
+### time
+
+Durations are `int` nanoseconds. The full `time` package is in [stdlib.md](stdlib.md#time); the real compiler provides this part as a core package (seed0 does not).
+
+| Function / constant | Result |
+|---|---|
+| `time.nanosecond`, `time.microsecond`, `time.millisecond`, `time.second`, `time.minute`, `time.hour` | `int` constants: 1, 1000, 1000000, 1000000000, 60 seconds, 60 minutes. |
+| `time.after(int d) chan int` | A channel that receives the current time (Unix nanoseconds) once, `d` nanoseconds from now, and is then closed. Meant for timeouts in `select`. |
+| `time.sleep(int d)` | Pauses the goroutine for at least `d` nanoseconds (a stop point, like a receive). |

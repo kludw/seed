@@ -211,3 +211,38 @@ fn (Checker c) comparable(int t, []int seen) bool {
     }
     return true
 }
+
+// Whether values of type t contain a channel.
+fn (Checker c) hasChan(int t, []int seen) bool {
+    Kind k = c.kindOf(t)
+    if (k == Kind.Chan) {
+        return true
+    }
+    if (k == Kind.List || k == Kind.Map || k == Kind.Opt) {
+        return c.hasChan(c.types.elem(t), seen)
+    }
+    if (k != Kind.Struct && k != Kind.Enum) {
+        return false
+    }
+    if (seen.contains(t)) {
+        return false
+    }
+    []int next = seen.slice(0, seen.len())
+    next.push(t)
+    int d = c.types.decl(t)
+    TypeDecl td = c.ast.typeDecls[d]
+    for (int i = 0; i < td.fieldCount; i++) {
+        if (c.hasChan(c.fieldType(d, i), next)) {
+            return true
+        }
+    }
+    for (int j = 0; j < td.caseCount; j++) {
+        EnumCase ec = c.enumCase(d, j)
+        for (int m = 0; m < ec.paramCount; m++) {
+            if (c.hasChan(c.caseParamType(d, j, m), next)) {
+                return true
+            }
+        }
+    }
+    return false
+}

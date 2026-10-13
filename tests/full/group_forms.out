@@ -1,0 +1,7 @@
+all of 1..6 passed
+tryAll 1..6: true
+tryAll 8..19: 14 is a multiple of 7
+returned: 49 is a multiple of 7
+withDefer: group done
+withDefer: deferred call ran
+0 1 5 20 300

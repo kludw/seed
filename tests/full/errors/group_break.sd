@@ -1,0 +1,20 @@
+// expect-error: break cannot leave a group block
+// break and continue may only end loops that are inside the group block.
+package main
+
+fn work() error {
+    return null
+}
+
+fn main([]string args) error {
+    for (int i = 0; i < 3; i++) {
+        error err = group {
+            spawn work()
+            break
+        }
+        if (err != null) {
+            return err
+        }
+    }
+    return null
+}

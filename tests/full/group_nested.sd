@@ -1,0 +1,112 @@
+// Groups nest: a goroutine can run a group of its own. An error inside the
+// inner group comes back to the goroutine, which can pass it up; when the
+// outer group fails, the inner groups are stopped too, so whole trees stop.
+package main
+
+import "errors"
+import "fmt"
+
+fn leaf(int n, chan int out) error {
+    if (n < 0) {
+        return errors.new("negative leaf " + n.string())
+    }
+    out.send(n)
+    return null
+}
+
+// Sums its leaves with an inner group.
+fn branch([]int leaves, chan int sums) error {
+    chan int out = chan int(leaves.len())
+    error err = group {
+        for (int i = 0; i < leaves.len(); i++) {
+            spawn leaf(leaves[i], out)
+        }
+    }
+    if (err != null) {
+        return errors.new("branch: " + err.message())
+    }
+    out.close()
+    int sum = 0
+    for (;;) {
+        int? v = out.receive()
+        if (v == null) {
+            break
+        }
+        sum = sum + v
+    }
+    sums.send(sum)
+    return null
+}
+
+fn waiter(chan int never) error {
+    int? v = never.receive()
+    if (v != null) {
+        return errors.new("unexpected value")
+    }
+    return null
+}
+
+// Waits in an inner group whose goroutines never finish on their own.
+fn stuck(chan int never, chan int started) error {
+    defer fmt.println("stuck: cleanup")
+    error err = group {
+        spawn waiter(never)
+        spawn waiter(never)
+        started.send(1)
+    }
+    return err
+}
+
+fn failAfter(chan int started) error {
+    int? v = started.receive()
+    if (v == null) {
+        return errors.new("started was closed")
+    }
+    return errors.new("failing on purpose")
+}
+
+fn main([]string args) error {
+    chan int sums = chan int(3)
+    error err = group {
+        spawn branch([]int{1, 2, 3}, sums)
+        spawn branch([]int{10, 20}, sums)
+        spawn branch([]int{100}, sums)
+    }
+    if (err != null) {
+        return err
+    }
+    sums.close()
+    int total = 0
+    for (;;) {
+        int? s = sums.receive()
+        if (s == null) {
+            break
+        }
+        total = total + s
+    }
+    fmt.println("total " + total.string())
+
+    // An error deep inside comes back up through both groups.
+    chan int sums2 = chan int(2)
+    err = group {
+        spawn branch([]int{1, 2}, sums2)
+        spawn branch([]int{5, -7}, sums2)
+    }
+    if (err != null) {
+        fmt.println("outer: " + err.message())
+    }
+
+    // The outer group fails while a goroutine waits in an inner group: the
+    // inner goroutines are stopped, the inner group returns, and the
+    // goroutine's defers run before the outer group returns.
+    chan int never = chan int(0)
+    chan int started = chan int(0)
+    err = group {
+        spawn stuck(never, started)
+        spawn failAfter(started)
+    }
+    if (err != null) {
+        fmt.println("outer: " + err.message())
+    }
+    return null
+}

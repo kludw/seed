@@ -1,0 +1,15 @@
+// expect-error: return is not allowed inside a group block
+// The group must wait for its goroutines, so its block cannot return.
+package main
+
+fn work() error {
+    return null
+}
+
+fn main([]string args) error {
+    error err = group {
+        spawn work()
+        return null
+    }
+    return err
+}

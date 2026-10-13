@@ -1,0 +1,9 @@
+// expect-error: channel elements cannot be nullable
+// receive() already returns T?; a nullable element would make null ambiguous.
+package main
+
+fn main([]string args) error {
+    chan (int?) ch = chan (int?)(1)
+    ch.close()
+    return null
+}

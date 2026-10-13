@@ -1,0 +1,129 @@
+// spawn takes a call of a function, a method (not mut), a function value,
+// an interface method or a package function. The callee, the receiver and
+// the arguments are evaluated when spawn runs and deep-copied for the new
+// goroutine; later changes in the spawning goroutine are not seen.
+package main
+
+import "fmt"
+import "time"
+
+type Counter struct {
+    string name
+    []int counts
+}
+
+fn (Counter c) report(chan string out) error {
+    int sum = 0
+    for (int i = 0; i < c.counts.len(); i++) {
+        sum = sum + c.counts[i]
+    }
+    out.send(c.name + " " + sum.string())
+    return null
+}
+
+fn (Counter c) mut add(int n) {
+    c.counts.push(n)
+}
+
+type Greeter interface {
+    greet(chan string out)
+}
+
+type English struct implements Greeter {
+    string name
+}
+
+fn (English e) greet(chan string out) {
+    out.send("hello " + e.name)
+}
+
+fn double(int n, chan string out) error {
+    out.send("double " + (2 * n).string())
+    return null
+}
+
+fn triple(int n, chan string out) error {
+    out.send("triple " + (3 * n).string())
+    return null
+}
+
+fn noArgs() {}
+
+// Closes its channel when it returns, through defer.
+fn produce(chan int out) error {
+    defer out.close()
+    for (int i = 1; i <= 3; i++) {
+        out.send(i)
+    }
+    return null
+}
+
+fn main([]string args) error {
+    chan string out = chan string(10)
+    Counter c = Counter{name: "c", counts: []int{1, 2}}
+    []fn(int, chan string) error fns = []fn(int, chan string) error{double, triple}
+    Greeter g = English{name: "world"}
+    map[string]int m = map[string]int{"a": 1}
+    error err = group {
+        spawn c.report(out)
+        c.add(10)
+        spawn c.report(out)
+        for (int i = 0; i < fns.len(); i++) {
+            spawn fns[i](5, out)
+        }
+        spawn g.greet(out)
+        spawn time.sleep(time.millisecond)
+        spawn noArgs()
+        spawn mapSize(m, out)
+        m["b"] = 2
+    }
+    if (err != null) {
+        return err
+    }
+    out.close()
+    []string lines = []string{}
+    for (;;) {
+        string? s = out.receive()
+        if (s == null) {
+            break
+        }
+        lines.push(s)
+    }
+    lines.sort()
+    for (int k = 0; k < lines.len(); k++) {
+        fmt.println(lines[k])
+    }
+
+    chan int nums = chan int(0)
+    chan int sum = chan int(1)
+    err = group {
+        spawn produce(nums)
+        spawn add(nums, sum)
+    }
+    if (err != null) {
+        return err
+    }
+    int? total = sum.receive()
+    if (total != null) {
+        fmt.println("sum " + total.string())
+    }
+    return null
+}
+
+fn mapSize(map[string]int m, chan string out) error {
+    out.send("map " + m.len().string())
+    return null
+}
+
+fn add(chan int nums, chan int sum) error {
+    int total = 0
+    for (;;) {
+        int? v = nums.receive()
+        if (v == null) {
+            break
+        }
+        total = total + v
+    }
+    sum.send(total)
+    return null
+}

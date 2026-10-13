@@ -1,0 +1,109 @@
+// The ways a group's error can be used: declared, assigned, returned,
+// passed on with try, or discarded with _. A group block is ordinary code:
+// spawn can be in loops, ifs, switches and select cases, defer works, and
+// loops inside the block can break and continue.
+package main
+
+import "errors"
+import "fmt"
+
+fn check(int n) error {
+    if (n % 7 == 0) {
+        return errors.new(n.string() + " is a multiple of 7")
+    }
+    return null
+}
+
+fn tryAll(int from, int to) error {
+    try group {
+        for (int i = from; i < to; i++) {
+            spawn check(i)
+        }
+    }
+    fmt.println("all of " + from.string() + ".." + (to - 1).string() + " passed")
+    return null
+}
+
+fn returned(int n) error {
+    return group {
+        spawn check(n)
+    }
+}
+
+fn withDefer(chan int out) error {
+    error err = group {
+        defer fmt.println("withDefer: deferred call ran")
+        spawn send(out, 1)
+    }
+    fmt.println("withDefer: group done")
+    return err
+}
+
+fn send(chan int out, int v) error {
+    out.send(v)
+    return null
+}
+
+fn main([]string args) error {
+    error err = tryAll(1, 7)
+    fmt.println("tryAll 1..6: " + (err == null).string())
+    err = tryAll(8, 20)
+    if (err != null) {
+        fmt.println("tryAll 8..19: " + err.message())
+    }
+    error r = returned(49)
+    if (r != null) {
+        fmt.println("returned: " + r.message())
+    }
+    _ = group {
+        spawn check(14)
+    }
+    chan int out = chan int(10)
+    err = withDefer(out)
+    if (err != null) {
+        return err
+    }
+    err = group {
+        for (int i = 0; i < 6; i++) {
+            if (i == 1) {
+                continue
+            }
+            if (i == 4) {
+                break
+            }
+            switch (i % 2) {
+            case 0:
+                spawn send(out, 10 * i)
+            default:
+                spawn send(out, 100 * i)
+            }
+        }
+        chan int pick = chan int(1)
+        pick.send(5)
+        select {
+        case int? v = pick.receive():
+            if (v != null) {
+                spawn send(out, v)
+            }
+        }
+    }
+    if (err != null) {
+        return err
+    }
+    out.close()
+    []int got = []int{}
+    for (;;) {
+        int? v = out.receive()
+        if (v == null) {
+            break
+        }
+        got.push(v)
+    }
+    got.sort()
+    []string parts = []string{}
+    for (int k = 0; k < got.len(); k++) {
+        parts.push(got[k].string())
+    }
+    fmt.println(parts.join(" "))
+    return null
+}

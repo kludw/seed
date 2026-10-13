@@ -1,0 +1,6 @@
+point (1, 2)
+signal
+point closed
+sent (3, 4), kept (30, 4)
+odd sum below 8: 16
+next 10

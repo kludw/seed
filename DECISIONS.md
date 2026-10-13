@@ -58,3 +58,16 @@ Details are in [compiler/README.md](compiler/README.md#decisions). The ones that
 35. **A value returned beside an error can be read once the error is known to be null:** inside `if (err == null)`, after `if (err != null) { return ... }`, or right of `err == null &&`. Assigning the value again also lifts the rule; the check is block-scoped.
 36. **A struct field of function type is called directly:** `op.apply(1, 2)`, when the struct has no method of that name.
 37. **A type that implements an interface converts to the nullable interface too** (`Shape? s = Square{...}`), and a type that implements `error` converts to `error`.
+
+## From the compiler's concurrency (compiler/README.md)
+
+38. **`group { ... }` is an expression of type `error`** and is only used whole: `error err = group {...}`, `err = group {...}`, `return group {...}`, `_ = group {...}` or `try group {...}`. A bare `group { ... }` statement is an unchecked error.
+39. **A group block cannot be left early.** `return` and `try` are not allowed inside it, nor `break`/`continue` of a loop outside it, because the group must wait for its goroutines first. (The alternative, waiting on every exit path, hides the wait in a `return`.)
+40. **`spawn` takes the same calls as `defer`** (function, non-`mut` method, function value, interface method, package function) whose result is `error` or nothing. The receiver and the arguments are deep-copied for the goroutine; spawning a `mut` method is an error, because the goroutine would only change its copy.
+41. **Channel elements cannot be nullable** (`chan (int?)`), because `receive()` already uses null for "closed"; `chan int?` is a nullable channel. A `chan error` receives `error` (null when closed).
+42. **Select cases** are `ch.send(v)`, `ch.receive()`, `_ = ch.receive()` and `T? v = ch.receive()`, which declares a new variable; a case cannot assign to an existing one. All channels and values are evaluated, in order, before select waits.
+43. **`defer ch.close()` is allowed** (the only built-in method `defer` accepts), so a producer can close its channel however it ends.
+44. **Package-level constants cannot hold channels:** every goroutine computes the constants it uses for itself, so each would get its own channel.
+45. **`time` is a core package** in the real compiler: `time.after(int d) chan int`, `time.sleep(int d)` and the duration constants `nanosecond` ... `hour`. `time.after` sends the time once and closes the channel, as docs/stdlib.md says.
+46. **Deadlock is a crash:** when every goroutine is blocked and no timer is pending, the program prints `crash: deadlock: all goroutines are blocked` and exits with code 2, without running defers.
+47. **The code of a group block itself is not stopped** when one of the group's goroutines fails: only the spawned goroutines are. The block should spawn work and leave the waiting on channels to goroutines (or to the code after the group); if it waits for a channel that only stopped goroutines would have served, the program ends with the deadlock crash.

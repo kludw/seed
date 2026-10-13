@@ -571,6 +571,11 @@ sd_group *sd_group_begin(void);
 void sd_spawn(sd_group *g, sd_task_fn body, const sd_type *args_type, const void *args);
 sd_err sd_group_wait(sd_group *g);
 
+/* Runs fn on the current goroutine's thread when the goroutine ends (newest
+ * first); never for the main goroutine. Generated code uses it to release
+ * the constants a goroutine computed for itself (_Thread_local caches). */
+void sd_goroutine_atexit(void (*fn)(void));
+
 /* ---- channels ---- (channel handles are shared between goroutines; their
  * count is atomic) */
 sd_chan *sd_chan_new(const sd_type *et, sd_int cap); /* chan T(n); crashes if n < 0 */
@@ -592,7 +597,7 @@ typedef struct sd_select_case {
 int sd_select(sd_select_case *cases, int n);
 
 /* ---- time ---- */
-sd_chan *sd_time_after(sd_int ns);  /* chan int receiving the monotonic time once, after ns */
+sd_chan *sd_time_after(sd_int ns);  /* chan int receiving the wall-clock time once, after ns, then closed */
 void sd_time_sleep(sd_int ns);      /* a cancellation point, like a receive */
 sd_int sd_time_now(void);           /* monotonic nanoseconds */
 

@@ -343,11 +343,15 @@ fn (Checker c) mut checkExpr(int e) {
     case ExprKind.Entry, ExprKind.FieldInit:
         c.setType(e, tyInvalid)
     case ExprKind.ChanMake:
-        c.unsupported(x.pos, "chan")
-        c.setType(e, tyInvalid)
+        int ct = c.resolve(x.typeExpr)
+        c.checkValue(x.a, tyInt, "as the channel's buffer size")
+        if (ct == tyInvalid) {
+            c.setType(e, tyInvalid)
+            return
+        }
+        c.setType(e, c.types.chanOf(ct))
     case ExprKind.Group:
-        c.unsupported(x.pos, "group")
-        c.setType(e, tyInvalid)
+        c.checkGroup(e)
     }
 }
 
@@ -431,8 +435,7 @@ fn (Checker c) mut checkField(int e) {
         return
     }
     if (c.pkgNamed(x.a)) {
-        c.error(x.pos, c.ast.exprs[x.a].text + "." + x.text + " is a function; call it")
-        c.setType(e, tyInvalid)
+        c.checkPkgConst(e)
         return
     }
     c.checkExpr(x.a)
@@ -618,13 +621,19 @@ fn (Checker c) mut checkBinary(int e) {
 
 fn (Checker c) mut checkTry(int e) {
     Expr x = c.ast.exprs[e]
+    c.allowGroup = x.a
     c.checkExpr(x.a)
     int t = c.typeOf(x.a)
     c.setType(e, tyInvalid)
+    if (c.groupDepth > 0) {
+        c.errorHint(x.pos, "try is not allowed inside a group block", "the group must wait for its goroutines first; handle the error here, or return it from a spawned function")
+        return
+    }
     if (t == tyInvalid) {
         return
     }
-    if (c.ast.exprs[x.a].kind != ExprKind.Call || !c.types.endsWithError(t)) {
+    ExprKind ak = c.ast.exprs[x.a].kind
+    if ((ak != ExprKind.Call && ak != ExprKind.Group) || !c.types.endsWithError(t)) {
         c.error(x.pos, "try needs a call that returns an error as its last result; " + c.describe(x.a) + " returns " + c.typeName(t))
         return
     }
@@ -728,4 +737,70 @@ fn (Checker c) mut checkStructLit(int e) {
     if (ok) {
         c.setType(e, c.declType[d])
     }
+}
+
+// time.second and the other constants of the core packages.
+fn (Checker c) mut checkPkgConst(int e) {
+    Expr x = c.ast.exprs[e]
+    string pkg = c.ast.exprs[x.a].text
+    int v = pkgConstValue(pkg, x.text)
+    c.usedImports[x.pos.file.string() + ":" + pkg] = true
+    if (v < 0) {
+        []string known = pkgFunctionNames(pkg)
+        if (known.contains(x.text)) {
+            c.error(x.pos, pkg + "." + x.text + " is a function; call it")
+        } else {
+            Suggest s = newSuggest(x.text)
+            for (int i = 0; i < known.len(); i++) {
+                s.consider(known[i])
+            }
+            []string consts = pkgConstNames(pkg)
+            for (int j = 0; j < consts.len(); j++) {
+                s.consider(consts[j])
+            }
+            c.errorHint(x.pos, "package " + pkg + " has no " + x.text, s.hint())
+        }
+        c.setType(e, tyInvalid)
+        return
+    }
+    if (!c.isImported(x.pos.file, pkg)) {
+        c.errorHint(c.ast.exprs[x.a].pos, "package " + pkg + " is not imported", "add  import \"" + pkg + "\"  at the top of the file")
+    }
+    c.info[e].res = Res.PkgConst
+    c.info[e].sub = v
+    c.setType(e, tyInt)
+}
+
+fn pkgConstNames(string pkg) []string {
+    if (pkg == "time") {
+        return []string{"nanosecond", "microsecond", "millisecond", "second", "minute", "hour"}
+    }
+    return []string{}
+}
+
+// The value of a core package constant, or -1. The time constants are
+// durations in nanoseconds.
+fn pkgConstValue(string pkg, string name) int {
+    if (pkg != "time") {
+        return -1
+    }
+    if (name == "nanosecond") {
+        return 1
+    }
+    if (name == "microsecond") {
+        return 1000
+    }
+    if (name == "millisecond") {
+        return 1000000
+    }
+    if (name == "second") {
+        return 1000000000
+    }
+    if (name == "minute") {
+        return 60000000000
+    }
+    if (name == "hour") {
+        return 3600000000000
+    }
+    return -1
 }

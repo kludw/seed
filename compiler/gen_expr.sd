@@ -182,9 +182,10 @@ fn isIdent(string v) bool {
     return true
 }
 
-// A pointer to the (borrowed) value v of type t.
+// A pointer to the (borrowed) value v of type t. A function value is
+// copied first: v may be the name of a C function.
 fn (Gen g) mut addr(int t, string v) string {
-    if (isIdent(v)) {
+    if (isIdent(v) && g.kindOf(t) != Kind.Func) {
         return "&" + v
     }
     return "&" + g.alias(t, v)
@@ -196,6 +197,12 @@ fn isMutBuiltin(Builtin b) bool {
     return b == Builtin.Push || b == Builtin.Pop || b == Builtin.Insert || b == Builtin.Remove || b == Builtin.Reverse || b == Builtin.Sort || b == Builtin.SortBy || b == Builtin.Delete
 }
 
+// send, receive and close: not mut (a channel is a reference), but they
+// block, crash or hand values to other goroutines, so they are effects.
+fn isChanBuiltin(Builtin b) bool {
+    return b == Builtin.Send || b == Builtin.Receive || b == Builtin.Close
+}
+
 // Whether evaluating e may have side effects (calls, mut built-ins, try),
 // which forces the operands before it to be evaluated first.
 fn (Gen g) hasEffects(int e) bool {
@@ -204,14 +211,14 @@ fn (Gen g) hasEffects(int e) bool {
     }
     Expr x = g.c.ast.exprs[e]
     ExprInfo i = g.c.info[e]
-    if (x.kind == ExprKind.Try) {
+    if (x.kind == ExprKind.Try || x.kind == ExprKind.Group || x.kind == ExprKind.ChanMake) {
         return true
     }
     if (x.kind == ExprKind.Call) {
         if (i.res == Res.Func || i.res == Res.Method || i.res == Res.Pkg || i.res == Res.ValueCall || i.res == Res.IfaceMethod) {
             return true
         }
-        if (i.res == Res.Builtin && isMutBuiltin(i.builtin)) {
+        if (i.res == Res.Builtin && (isMutBuiltin(i.builtin) || isChanBuiltin(i.builtin))) {
             return true
         }
         if (i.res == Res.Builtin && g.hasEffects(g.c.ast.exprs[x.a].a)) {
@@ -236,6 +243,9 @@ fn (Gen g) hasMutEffects(int e) bool {
     }
     Expr x = g.c.ast.exprs[e]
     ExprInfo i = g.c.info[e]
+    if (x.kind == ExprKind.Group) {
+        return true
+    }
     if (x.kind == ExprKind.Call) {
         if (i.res == Res.Method && g.c.ast.fns[i.ref].recvMut) {
             return true
@@ -290,7 +300,7 @@ fn (Gen g) isStable(int e) bool {
     if (isLiteralKind(x.kind) || x.kind == ExprKind.NullLit) {
         return true
     }
-    return (x.kind == ExprKind.Ident && (r == Res.Const || r == Res.Func)) || (x.kind == ExprKind.Field && r == Res.EnumVal)
+    return (x.kind == ExprKind.Ident && (r == Res.Const || r == Res.Func)) || (x.kind == ExprKind.Field && (r == Res.EnumVal || r == Res.PkgConst))
 }
 
 // Generates the operands of an operation, left to right. A borrowed operand
@@ -422,6 +432,9 @@ fn (Gen g) mut gcore(int e) string {
             TypeDecl td = g.c.ast.typeDecls[i.ref]
             return "SD_BOX_REF(sd_k_" + td.name + "__" + g.c.enumCase(i.ref, i.sub).name + ")"
         }
+        if (i.res == Res.PkgConst) {
+            return "SD_INT(" + i.sub.string() + ")"
+        }
         string fv = "(" + g.gexpr(x.a) + ").f_" + x.text
         if (i.narrowed) {
             return g.unwrapVal(i.orig, fv)
@@ -450,7 +463,12 @@ fn (Gen g) mut gcore(int e) string {
         return g.gmap(e)
     case ExprKind.StructLit:
         return g.gstruct(e)
-    case ExprKind.Bad, ExprKind.Entry, ExprKind.FieldInit, ExprKind.ChanMake, ExprKind.Group:
+    case ExprKind.ChanMake:
+        string size = g.gexpr(x.a)
+        return g.temp(g.coreType(e), "sd_chan_new(" + g.desc(g.elemOf(g.coreType(e))) + ", " + size + ")")
+    case ExprKind.Group:
+        return g.ggroup(e)
+    case ExprKind.Bad, ExprKind.Entry, ExprKind.FieldInit:
         return "/* internal error: expression */"
     }
 }
@@ -770,4 +788,32 @@ fn (Gen g) mut gtry(int e) string {
         parts.push(v + ".r" + j.string())
     }
     return g.temp(rt, "(" + g.ctype(rt) + "){" + parts.join(", ") + "}")
+}
+
+// ---- group ----
+
+// error err = group { ... } becomes
+//
+//   sd_err _tR = SD_ERR_NULL;
+//   { sd_group *_tG = sd_group_begin(); ...block...; _tR = sd_group_wait(_tG); }
+//
+// The block cannot leave early (the checker forbids return, try and
+// break/continue out of it); a crash unwinds through the runtime, which
+// stops and waits for the group. spawn uses the innermost group.
+fn (Gen g) mut ggroup(int e) string {
+    Expr x = g.c.ast.exprs[e]
+    string r = g.newTmp()
+    string gv = g.newTmp()
+    g.emit("sd_err " + r + " = SD_ERR_NULL;")
+    g.emit("{")
+    g.indent++
+    g.emit("sd_group *" + gv + " = sd_group_begin();")
+    g.groups.push(gv)
+    g.genBody(x.block)
+    g.groups = g.groups.slice(0, g.groups.len() - 1)
+    g.emit(r + " = sd_group_wait(" + gv + ");")
+    g.indent--
+    g.emit("}")
+    g.slots.push(Slot{name: r, ty: tyError, live: true, temp: true})
+    return r
 }

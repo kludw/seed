@@ -1,0 +1,125 @@
+// Channels of errors, enums, interfaces, function values, lists of channels
+// and channels of channels; a nullable channel; buffer sizes from
+// expressions.
+package main
+
+import "errors"
+import "fmt"
+
+type Shape interface {
+    area() int
+}
+
+type Square struct implements Shape {
+    int side
+}
+
+fn (Square s) area() int {
+    return s.side * s.side
+}
+
+type Color enum {
+    Red
+    Rgb(int r, int g, int b)
+}
+
+type Worker struct {
+    string name
+    (chan string)? log
+}
+
+fn inc(int n) int {
+    return n + 1
+}
+
+fn colorName(Color c) string {
+    switch (c) {
+    case Color.Red:
+        return "red"
+    case Color.Rgb(int r, int g, int b):
+        return "rgb(" + r.string() + "," + g.string() + "," + b.string() + ")"
+    }
+}
+
+fn logTo(Worker w, string msg) {
+    (chan string)? log = w.log
+    if (log != null) {
+        log.send(w.name + ": " + msg)
+    }
+}
+
+fn main([]string args) error {
+    chan error errs = chan error(2)
+    errs.send(errors.new("first"))
+    errs.send(null)
+    errs.close()
+    for (int i = 0; i < 3; i++) {
+        error e = errs.receive()
+        if (e == null) {
+            fmt.println("error: null")
+        } else {
+            fmt.println("error: " + e.message())
+        }
+    }
+
+    chan Color colors = chan Color(2)
+    colors.send(Color.Red)
+    colors.send(Color.Rgb(1, 2, 3))
+    for (int j = 0; j < 2; j++) {
+        Color? c = colors.receive()
+        if (c != null) {
+            fmt.println(colorName(c))
+        }
+    }
+
+    chan Shape shapes = chan Shape(1)
+    shapes.send(Square{side: 3})
+    Shape? s = shapes.receive()
+    if (s != null) {
+        fmt.println("area " + s.area().string())
+    }
+
+    chan fn(int) int fns = chan fn(int) int(1)
+    fns.send(inc)
+    (fn(int) int)? f = fns.receive()
+    if (f != null) {
+        fmt.println("inc(41) = " + f(41).string())
+    }
+
+    // A list of channels, and a channel of channels: all handles to the
+    // same channels.
+    []chan int chans = []chan int{chan int(1), chan int(1)}
+    chan chan int pipes = chan chan int(2)
+    pipes.send(chans[0])
+    pipes.send(chans[1])
+    for (int k = 0; k < 2; k++) {
+        chan int? p = pipes.receive()
+        if (p != null) {
+            p.send(k * 100)
+        }
+    }
+    fmt.println("through the list: " + show(chans[0].receive()) + " " + show(chans[1].receive()))
+
+    chan string log = chan string(2 * 2)
+    Worker quiet = Worker{name: "quiet", log: null}
+    Worker loud = Worker{name: "loud", log: log}
+    logTo(quiet, "one")
+    logTo(loud, "two")
+    log.close()
+    fmt.println(show2(log.receive()) + " / " + show2(log.receive()))
+    return null
+}
+
+fn show(int? v) string {
+    if (v == null) {
+        return "null"
+    }
+    return v.string()
+}
+
+fn show2(string? s) string {
+    if (s == null) {
+        return "null"
+    }
+    return s
+}
