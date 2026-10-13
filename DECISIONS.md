@@ -48,3 +48,13 @@ Details are in [compiler/README.md](compiler/README.md#decisions). The ones that
 28. **Channels are the one reference type.** Copying a channel gives another handle to the same channel (reply channels inside messages).
 29. **Defers run last-first,** like Go. **`break`/`continue` inside a `switch` apply to the loop.** **A struct converts to an interface it `implements` automatically.**
 30. **Map equality ignores insertion order;** errors are equal when their messages are.
+
+## From the compiler's interfaces, function values and defer (compiler/README.md)
+
+31. **A nullable function type is written with parentheses:** `(fn(int) int)?`. `fn(int) int?` is a function that returns `int?` (rule 6 applied to the result type).
+32. **`defer` takes a call of a function, method, function value, interface method or package function.** It cannot call a `mut` method (the variable it would change is gone when the call runs) or a built-in method.
+33. **Interface methods can be `mut`.** Calling one needs a variable (or a part of one), as with any `mut` method; it changes the value inside that interface variable only.
+34. **`implements` requires the exact signature,** including `mut`. Methods cannot be declared on interface types.
+35. **A value returned beside an error can be read once the error is known to be null:** inside `if (err == null)`, after `if (err != null) { return ... }`, or right of `err == null &&`. Assigning the value again also lifts the rule; the check is block-scoped.
+36. **A struct field of function type is called directly:** `op.apply(1, 2)`, when the struct has no method of that name.
+37. **A type that implements an interface converts to the nullable interface too** (`Shape? s = Square{...}`), and a type that implements `error` converts to `error`.

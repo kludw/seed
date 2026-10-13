@@ -364,6 +364,10 @@ fn (Parser p) mut parseStmt() int {
         Stmt d = newStmt(StmtKind.Defer, t.pos)
         if (k == Tok.KwSpawn) {
             d.kind = StmtKind.Spawn
+        } else if (p.kind() == Tok.Ident && p.toks[p.pos].text == "_" && p.peek(1) == Tok.Assign) {
+            // defer _ = f(): the call's error is discarded.
+            p.pos = p.pos + 2
+            d.discard = true
         }
         d.expr = p.parseExpr()
         return p.ast.addStmt(d)
@@ -728,11 +732,9 @@ const int minInt = -9223372036854775808
 
 // The negated value of an int literal (decimal or 0x hex), and whether it
 // fits in 64 bits. Accumulating the negated value makes minInt
-// representable: `-9223372036854775808` is valid, while
-// `9223372036854775808` alone is reported by the checker (it sees an IntLit
-// that is not negated and whose value is minInt). Literals that do not fit
-// at all are also left to the checker, because the full language will have
-// integers that grow.
+// representable. Literals that do not fit (and 9223372036854775808 without
+// a minus) get intValue minInt as a marker; the generator then builds the
+// value from the literal's text, because ints grow.
 fn negatedLiteral(string raw) (int, bool) {
     int base = 10
     int start = 0

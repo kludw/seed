@@ -1,0 +1,116 @@
+// Interface values are values: they are copied (copy-on-write) into lists,
+// maps, struct fields and results, compared with == (same type and equal
+// values), and can be nullable. A mut method changes the value through the
+// interface without touching copies.
+package main
+
+import "fmt"
+
+type Counter interface {
+    mut add(int n)
+    total() int
+    label() string
+}
+
+type Tally struct implements Counter {
+    string name
+    []int items
+}
+
+type Flag enum implements Counter {
+    Off
+    On(int hits)
+}
+
+fn (Tally t) mut add(int n) {
+    t.items.push(n)
+}
+
+fn (Tally t) total() int {
+    int sum = 0
+    for (int i = 0; i < t.items.len(); i++) {
+        sum = sum + t.items[i]
+    }
+    return sum
+}
+
+fn (Tally t) label() string {
+    return t.name
+}
+
+fn (Flag f) mut add(int n) {
+    switch (f) {
+    case Flag.Off:
+        f = Flag.On(n)
+    case Flag.On(int hits):
+        f = Flag.On(hits + n)
+    }
+}
+
+fn (Flag f) total() int {
+    switch (f) {
+    case Flag.Off:
+        return 0
+    case Flag.On(int hits):
+        return hits
+    }
+}
+
+fn (Flag f) label() string {
+    return "flag"
+}
+
+type Board struct {
+    Counter main
+    Counter? spare
+}
+
+fn show(Counter c) string {
+    return c.label() + "=" + c.total().string()
+}
+
+fn pick(bool tally) Counter {
+    if (tally) {
+        return Tally{name: "picked", items: []int{5}}
+    }
+    return Flag.Off
+}
+
+fn main([]string args) error {
+    Counter a = Tally{name: "a", items: []int{1, 2}}
+    Counter b = a
+    b.add(10)
+    fmt.println(show(a) + " " + show(b))
+    []Counter cs = []Counter{a, b, Flag.Off}
+    cs[2].add(4)
+    cs[2].add(3)
+    cs[0].add(100)
+    for (int i = 0; i < cs.len(); i++) {
+        fmt.println(show(cs[i]))
+    }
+    fmt.println(show(a))
+    fmt.println((a == b).string() + " " + (a == cs[1]).string() + " " + (cs[0] == a).string())
+    Counter c = Tally{name: "a", items: []int{1, 2}}
+    fmt.println((a == c).string() + " " + (a != c).string())
+    Counter f1 = Flag.On(7)
+    Counter f2 = Flag.On(7)
+    fmt.println((f1 == f2).string() + " " + (f1 == a).string())
+    map[string]Counter byName = map[string]Counter{"x": a}
+    byName["y"] = Flag.On(1)
+    Counter? found = byName["y"]
+    if (found != null) {
+        fmt.println("found " + show(found))
+    }
+    Counter? missing = byName["z"]
+    fmt.println((missing == null).string())
+    Board board = Board{main: a, spare: null}
+    board.main.add(1)
+    board.spare = Flag.On(9)
+    if (board.spare != null) {
+        board.spare.add(1)
+        fmt.println(show(board.main) + " " + show(board.spare))
+    }
+    fmt.println(show(a))
+    fmt.println(show(pick(true)) + " " + show(pick(false)))
+    return null
+}

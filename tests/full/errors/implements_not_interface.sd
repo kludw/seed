@@ -1,0 +1,15 @@
+// expect-error: Point is not an interface
+// Only interfaces (and error) can be implemented.
+package main
+
+type Point struct {
+    int x
+}
+
+type Place struct implements Point {
+    string name
+}
+
+fn main([]string args) error {
+    return null
+}

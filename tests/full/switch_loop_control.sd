@@ -1,0 +1,54 @@
+// break and continue inside a switch apply to the enclosing loop.
+package main
+
+import "fmt"
+
+type Cmd enum {
+    Skip
+    Stop
+    Say(string text)
+}
+
+fn main([]string args) error {
+    []int xs = []int{1, 2, 3, 4, 5, 6}
+    []string seen = []string{}
+    for (int i = 0; i < xs.len(); i++) {
+        switch (xs[i]) {
+        case 2:
+            continue
+        case 5:
+            break
+        default:
+            seen.push(xs[i].string())
+        }
+        seen.push("|")
+    }
+    fmt.println(seen.join(""))
+    []Cmd cmds = []Cmd{Cmd.Say("a"), Cmd.Skip, Cmd.Say("b"), Cmd.Stop, Cmd.Say("c")}
+    for (int j = 0; j < cmds.len(); j++) {
+        switch (cmds[j]) {
+        case Cmd.Skip:
+            continue
+        case Cmd.Stop:
+            break
+        case Cmd.Say(string text):
+            fmt.println("say " + text)
+        }
+        fmt.println("after " + j.string())
+    }
+    string word = "hello"
+    int vowels = 0
+    for (int k = 0; ; k++) {
+        if (k >= word.len()) {
+            break
+        }
+        switch (word[k]) {
+        case 'a', 'e', 'i', 'o', 'u':
+            vowels++
+            continue
+        default:
+        }
+    }
+    fmt.println(vowels.string())
+    return null
+}

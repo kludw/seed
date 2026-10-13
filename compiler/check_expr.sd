@@ -55,11 +55,25 @@ fn (Checker c) mut coerce(int e, int want, string context) {
         c.setType(e, want)
         return
     }
+    if (c.implementsIface(t, want)) {
+        c.info[e].ifaceFrom = t
+        c.setType(e, want)
+        return
+    }
+    if (wantOpt && c.implementsIface(t, c.types.elem(want))) {
+        c.info[e].ifaceFrom = t
+        c.info[e].wrap = true
+        c.info[e].inner = c.types.elem(want)
+        c.setType(e, want)
+        return
+    }
     Pos pos = c.ast.exprs[e].pos
     if (t == tyNull) {
         c.errorHint(pos, "null cannot be used as " + c.typeName(want) + " " + context + ": only nullable types (T?) and error can be null", "declare it as " + c.typeName(want) + "? if it may be missing")
     } else if (c.types.isOpt(t) && c.types.elem(t) == want) {
         c.errorHint(pos, c.describe(e) + " is nullable (" + c.typeName(t) + ") and cannot be used as " + c.typeName(want) + " " + context, "check " + c.describe(e) + " != null first")
+    } else if ((c.kindOf(want) == Kind.Interface || want == tyError) && (c.kindOf(t) == Kind.Struct || c.kindOf(t) == Kind.Enum)) {
+        c.errorHint(pos, "cannot use " + c.describe(e) + " (type " + c.typeName(t) + ") as " + c.typeName(want) + " " + context + ": " + c.typeName(t) + " does not declare that it implements " + c.typeName(want), "add  implements " + c.typeName(want) + "  to the declaration of " + c.typeName(t))
     } else {
         c.error(pos, "cannot use " + c.describe(e) + " (type " + c.typeName(t) + ") as " + c.typeName(want) + " " + context + "; there are no implicit conversions")
     }
@@ -275,12 +289,6 @@ fn (Checker c) mut checkExpr(int e) {
     case ExprKind.Bad:
         c.setType(e, tyInvalid)
     case ExprKind.IntLit:
-        int v, bool fits = negatedLiteral(x.raw)
-        if (!fits || (!x.neg && v == minInt)) {
-            c.error(x.pos, "integer literal " + x.raw + " is too large for seed0's 64-bit int")
-            c.setType(e, tyInvalid)
-            return
-        }
         c.setType(e, tyInt)
     case ExprKind.FloatLit:
         c.setType(e, tyFloat)
@@ -358,6 +366,12 @@ fn (Checker c) mut checkIdent(int e) {
         c.vars[v].used = true
         c.setType(e, c.vars[v].ty)
         c.applyNarrowing(e)
+        int g = c.guardOf(v)
+        if (g >= 0 && c.strict) {
+            string en = c.guards[g].errName
+            c.errorHint(x.pos, n + " is read before " + en + " is checked; when " + en + " is not null, " + n + " is null", "check " + en + " != null first (and return or handle it), or use try")
+            c.guards[g].dead = true
+        }
         return
     }
     int? g = c.globals[n]
@@ -371,7 +385,10 @@ fn (Checker c) mut checkIdent(int e) {
             c.setType(e, c.constType[gl.index])
             return
         case GlobalKind.Fn:
-            c.unsupported(x.pos, "using a function as a value")
+            c.info[e].res = Res.Func
+            c.info[e].ref = gl.index
+            c.setType(e, c.fnType(gl.index))
+            return
         case GlobalKind.Type:
             c.error(x.pos, n + " is a type, not a value")
         }
@@ -543,6 +560,10 @@ fn (Checker c) mut checkBinary(int e) {
     int bt = c.typeOf(b)
     if (op == Tok.Eq || op == Tok.Ne) {
         c.setType(e, tyBool)
+        if (at == bt && !c.comparable(at, []int{})) {
+            c.errorHint(x.pos, "values of type " + c.typeName(at) + " cannot be compared with " + ops, "function values and channels (and types that contain them) have no ==")
+            return
+        }
         if (at != bt) {
             if ((c.types.isOpt(at) && c.types.elem(at) == bt) || (c.types.isOpt(bt) && c.types.elem(bt) == at)) {
                 c.errorHint(x.pos, "a nullable value can only be compared with null", "check it against null first")

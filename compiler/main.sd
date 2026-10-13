@@ -16,7 +16,7 @@ import "os"
 // The C compiler and its flags, used by build and run.
 const string cCompiler = "cc"
 const []string cFlags = []string{"-std=c11", "-O2", "-w"}
-const []string cLibs = []string{"-lm"}
+const []string cLibs = []string{"-lm", "-lpthread"}
 
 const string usage = "usage:\n  seed c [--strict] <file.sd>...\n  seed build -o <out> <file.sd>...\n  seed run <file.sd>... [-- args...]\n  seed ast <file.sd>...\n"
 
@@ -79,8 +79,8 @@ fn main([]string args) error {
     os.exit(2)
 }
 
-// The directory that contains compiler/runtime0.c: $SEED_ROOT, or the parent
-// of the directory of the binary (which is <root>/build/seedN).
+// The directory that contains runtime/: $SEED_ROOT, or the parent of the
+// directory of the binary (which is <root>/build/seedN).
 fn rootDir(string argv0) string {
     string? env = os.env("SEED_ROOT")
     if (env != null && env != "") {

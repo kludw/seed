@@ -3,13 +3,15 @@ CFLAGS ?= -std=c11 -O2 -Wall
 # Flags for compiling generated C (the compiler stages and test programs).
 # compiler/main.sd has the same flags for `seed build` and `seed run`.
 SEED_CFLAGS = -std=c11 -O2 -w
-SEED_LIBS = -lm
+SEED_LIBS = -lm -lpthread
 
 # The real compiler, in Seed. The order is fixed (sorted) so that every stage
 # sees the declarations in the same order.
 SEED_SRC = $(sort $(wildcard compiler/*.sd))
+# The runtime that the compiler pastes into every generated program.
+RUNTIME_SRC = $(wildcard runtime/*.h runtime/seed_*.c)
 
-.PHONY: all test0 test test-strict verify clean
+.PHONY: all test0 test test-full test-leaks test-strict verify clean
 
 all: build/seed2
 
@@ -22,8 +24,11 @@ build/runtime.inc: seed0/runtime.c
 build/seed0: seed0/seed0.c build/runtime.inc
 	$(CC) $(CFLAGS) -Ibuild -o $@ seed0/seed0.c
 
+# tests/seed0/only checks what only seed0 does: 64-bit ints that crash on
+# overflow, and rejecting interfaces. The real compiler grows ints and has
+# interfaces (tests/full).
 test0: build/seed0
-	tests/run.sh build/seed0 tests/lang tests/seed0
+	tests/run.sh build/seed0 tests/lang tests/seed0 tests/seed0/only
 
 # Bootstrap: seed0 compiles the compiler (stage1), which compiles itself
 # (stage2), which compiles itself again (stage3). stage2.c and stage3.c must
@@ -35,13 +40,13 @@ build/stage1.c: build/seed0 $(SEED_SRC)
 build/seed1: build/stage1.c
 	$(CC) $(SEED_CFLAGS) -o $@ build/stage1.c $(SEED_LIBS)
 
-build/stage2.c: build/seed1 $(SEED_SRC) compiler/runtime0.c
+build/stage2.c: build/seed1 $(SEED_SRC) $(RUNTIME_SRC)
 	build/seed1 c --strict $(SEED_SRC) > $@
 
 build/seed2: build/stage2.c
 	$(CC) $(SEED_CFLAGS) -o $@ build/stage2.c $(SEED_LIBS)
 
-build/stage3.c: build/seed2 $(SEED_SRC) compiler/runtime0.c
+build/stage3.c: build/seed2 $(SEED_SRC) $(RUNTIME_SRC)
 	build/seed2 c --strict $(SEED_SRC) > $@
 
 verify: build/stage2.c build/stage3.c
@@ -50,6 +55,16 @@ verify: build/stage2.c build/stage3.c
 
 test: build/seed2
 	tests/run.sh "build/seed2 c" tests/lang tests/seed0
+
+# The features outside the seed0 subset. The concurrency tests are expected
+# to fail until the next phase implements chan, select, group and spawn, and
+# errors/unformatted_code until `seed fmt` exists.
+test-full: build/seed2
+	tests/run.sh "build/seed2 c --strict" tests/full
+
+# Every test program under macOS `leaks --atExit` (slow: about 3 minutes).
+test-leaks: build/seed2
+	tests/leaks.sh "build/seed2 c" tests/lang tests/seed0 tests/full
 
 # tests/lang is written to pass the full compiler's pedantic checks too.
 test-strict: build/seed2

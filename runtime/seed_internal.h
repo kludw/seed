@@ -46,6 +46,13 @@ sd_bigint *sd_bigint_copy_(const sd_bigint *b);
 /* Lists */
 sd_list *sd_list_new_len_(const sd_type *et, int64_t len); /* len elements, uninitialised */
 
+/* Freeing without recursion (seed_core.c): sd_box_free_, sd_list_free_ and
+ * sd_map_free_ queue the object; the outermost call frees the queue. */
+enum { SD_DEAD_BOX = 1, SD_DEAD_LIST = 2, SD_DEAD_MAP = 3 };
+void sd_free_queued_(void *obj, int kind);
+void sd_list_destroy_(sd_list *l);
+void sd_map_destroy_(sd_map *m);
+
 /* Bytes needed for one value of type t, rounded up to 8. */
 SD_INLINE size_t sd_round8(size_t n) { return (n + 7) & ~(size_t)7; }
 

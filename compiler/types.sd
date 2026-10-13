@@ -161,7 +161,11 @@ fn (Types ts) mut mapOf(int k, int v) int {
 }
 
 fn (Types ts) mut optOf(int e) int {
-    return ts.compound(Kind.Opt, e, -1, "O" + ts.mangle(e), ts.name(e) + "?")
+    string name = ts.name(e) + "?"
+    if (e != tyInvalid && ts.kind(e) == Kind.Func) {
+        name = "(" + ts.name(e) + ")?"
+    }
+    return ts.compound(Kind.Opt, e, -1, "O" + ts.mangle(e), name)
 }
 
 fn (Types ts) mut chanOf(int e) int {

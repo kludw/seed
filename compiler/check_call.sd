@@ -14,10 +14,43 @@ fn (Checker c) mut checkCall(int e) {
         return
     }
     c.checkExpr(x.a)
-    if (c.typeOf(x.a) != tyInvalid) {
-        c.unsupported(x.pos, "calling a function value")
+    c.checkValueCall(e)
+}
+
+// Whether t is a function type or a nullable one.
+fn (Checker c) isFuncType(int t) bool {
+    if (c.types.isOpt(t)) {
+        return c.kindOf(c.types.elem(t)) == Kind.Func
     }
-    c.setType(e, tyInvalid)
+    return c.kindOf(t) == Kind.Func
+}
+
+// A call of a function value: the callee (already checked) has a function
+// type.
+fn (Checker c) mut checkValueCall(int e) {
+    Expr x = c.ast.exprs[e]
+    int ft = c.typeOf(x.a)
+    if (ft == tyInvalid) {
+        c.checkArgsLoosely(e)
+        return
+    }
+    if (c.kindOf(ft) != Kind.Func) {
+        Pos cpos = c.ast.exprs[x.a].pos
+        if (c.types.isOpt(ft) && c.kindOf(c.types.elem(ft)) == Kind.Func) {
+            c.errorHint(cpos, c.describe(x.a) + " is nullable (" + c.typeName(ft) + ")", "check " + c.describe(x.a) + " != null before calling it")
+        } else {
+            c.error(cpos, c.describe(x.a) + " has type " + c.typeName(ft) + ", which cannot be called")
+        }
+        c.checkArgsLoosely(e)
+        return
+    }
+    []int ps = []int{}
+    for (int i = 0; i < c.types.count(ft); i++) {
+        ps.push(c.types.part(ft, i))
+    }
+    c.info[e].res = Res.ValueCall
+    c.setType(e, c.types.elem(ft))
+    c.checkArgs(e, ps, c.describe(x.a))
 }
 
 // f(args) or a conversion such as int(x).
@@ -26,8 +59,14 @@ fn (Checker c) mut checkNamedCall(int e, string n) {
     Pos cpos = c.ast.exprs[x.a].pos
     int v = c.lookupVar(n)
     if (v >= 0) {
-        c.error(cpos, n + " is a variable of type " + c.typeName(c.vars[v].ty) + ", not a function")
-        c.setType(e, tyInvalid)
+        int vt = c.vars[v].ty
+        if (c.isFuncType(vt)) {
+            c.checkExpr(x.a)
+            c.checkValueCall(e)
+            return
+        }
+        c.error(cpos, n + " is a variable of type " + c.typeName(vt) + ", not a function")
+        c.checkArgsLoosely(e)
         return
     }
     int? g = c.globals[n]
@@ -142,8 +181,21 @@ fn (Checker c) mut checkSelectorCall(int e) {
         int rd = c.types.decl(bt)
         TypeDecl td = c.ast.typeDecls[rd]
         int? m = c.methods[td.name + "." + name]
+        int fi = -1
+        if (k == Kind.Struct) {
+            fi = c.findField(rd, name)
+        }
+        if (m == null && fi >= 0 && c.isFuncType(c.fieldType(rd, fi))) {
+            // s.f(args) calls the function value in the field f.
+            c.info[fe].res = Res.Field
+            c.info[fe].sub = fi
+            c.setType(fe, c.fieldType(rd, fi))
+            c.applyNarrowing(fe)
+            c.checkValueCall(e)
+            return
+        }
         if (m == null) {
-            if (k == Kind.Struct && c.findField(rd, name) >= 0) {
+            if (fi >= 0) {
                 c.error(callee.pos, name + " is a field of " + td.name + ", not a method")
             } else {
                 Suggest s = newSuggest(name)
@@ -172,7 +224,47 @@ fn (Checker c) mut checkSelectorCall(int e) {
         c.checkArgs(e, ps, td.name + "." + name + "()")
         return
     }
+    if (k == Kind.Interface) {
+        c.checkIfaceCall(e, base, bt, name)
+        return
+    }
     c.checkBuiltin(e, base, name)
+}
+
+// v.name(args) on a value of an interface type.
+fn (Checker c) mut checkIfaceCall(int e, int base, int it, string name) {
+    Expr x = c.ast.exprs[e]
+    Pos cpos = c.ast.exprs[x.a].pos
+    int d = c.types.decl(it)
+    int mi = c.findIfaceMethod(d, name)
+    if (mi < 0) {
+        Suggest s = newSuggest(name)
+        TypeDecl td = c.ast.typeDecls[d]
+        for (int i = 0; i < td.methodCount; i++) {
+            s.consider(c.ifaceMethod(d, i).name)
+        }
+        c.errorHint(cpos, "interface " + td.name + " has no method " + name, s.hint())
+        c.checkArgsLoosely(e)
+        return
+    }
+    if (c.ifaceMethod(d, mi).isMut) {
+        c.requireMutable(base, "call the mut method " + name + "() on")
+        c.killMut(c.pathKey(base))
+    }
+    int ft = c.ifaceMethodType(d, mi)
+    if (ft == tyInvalid) {
+        c.checkArgsLoosely(e)
+        return
+    }
+    []int ps = []int{}
+    for (int j = 0; j < c.types.count(ft); j++) {
+        ps.push(c.types.part(ft, j))
+    }
+    c.info[e].res = Res.IfaceMethod
+    c.info[e].ref = d
+    c.info[e].sub = mi
+    c.setType(e, c.types.elem(ft))
+    c.checkArgs(e, ps, c.typeName(it) + "." + name + "()")
 }
 
 // Checks the arguments of a call that could not be resolved, so that errors
@@ -286,9 +378,8 @@ fn (Checker c) mut checkBuiltin(int e, int recv, string name) {
             b = Builtin.Bytes
             res = c.types.listOf(tyByte)
         } else if (name == "chars") {
-            c.unsupported(cpos, "string.chars()")
-            c.checkArgsLoosely(e)
-            return
+            b = Builtin.Chars
+            res = c.types.listOf(tyString)
         }
     } else if (k == Kind.List) {
         int el = c.types.elem(rt)
@@ -349,9 +440,9 @@ fn (Checker c) mut checkBuiltin(int e, int recv, string name) {
             ps = []int{tyString}
             res = tyString
         } else if (name == "sortBy") {
-            c.unsupported(cpos, "sortBy (function values)")
-            c.checkArgsLoosely(e)
-            return
+            b = Builtin.SortBy
+            ps = []int{c.types.funcOf([]int{el, el}, tyBool)}
+            isMut = true
         }
     } else if (k == Kind.Map) {
         if (name == "len") {

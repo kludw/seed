@@ -1,0 +1,25 @@
+// Deferred calls also run when the goroutine crashes: every pending defer
+// of every function on the stack runs, newest first, then the program
+// prints the crash and exits with code 2.
+package main
+
+import "fmt"
+
+fn inner([]int xs, int i) int {
+    defer fmt.println("inner deferred")
+    return xs[i]
+}
+
+fn outer(int i) int {
+    defer fmt.println("outer deferred")
+    []int xs = []int{1, 2, 3}
+    return inner(xs, i)
+}
+
+fn main([]string args) error {
+    defer fmt.println("main deferred")
+    fmt.println(outer(1).string())
+    fmt.println(outer(5).string())
+    fmt.println("not reached")
+    return null
+}

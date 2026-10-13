@@ -1,0 +1,86 @@
+// defer evaluates the call's arguments (and receiver) when the defer
+// statement runs; the call runs when the function returns, after the result
+// has been computed. Defers in loops run once per iteration that reached
+// them, last first. `defer _ = f()` discards an error.
+package main
+
+import "errors"
+import "fmt"
+
+type Logger struct {
+    string prefix
+}
+
+fn (Logger l) log(string msg) {
+    fmt.println(l.prefix + msg)
+}
+
+fn closeIt(string name) error {
+    fmt.println("closing " + name)
+    return errors.new("close failed")
+}
+
+fn note(int n) {
+    fmt.println("note " + n.string())
+}
+
+fn counter() int {
+    int n = 1
+    defer note(n)
+    n = n + 1
+    defer note(n)
+    n = n + 1
+    return n * 10
+}
+
+fn loops() {
+    for (int i = 0; i < 3; i++) {
+        if (i == 1) {
+            continue
+        }
+        defer note(100 + i)
+    }
+    fmt.println("loops body done")
+}
+
+fn methods() string {
+    Logger l = Logger{prefix: "[a] "}
+    defer l.log("first deferred")
+    l = Logger{prefix: "[b] "}
+    defer l.log("second deferred")
+    defer _ = closeIt("file")
+    fn(int) f = note
+    defer f(7)
+    return "methods result"
+}
+
+fn early(bool stop) string {
+    defer fmt.println("early cleanup")
+    if (stop) {
+        return "stopped"
+    }
+    []string parts = []string{"went", "on"}
+    return parts.join(" ")
+}
+
+fn inSwitch(int k) {
+    switch (k) {
+    case 1:
+        defer fmt.println("deferred in case 1")
+        fmt.println("case 1")
+    default:
+        fmt.println("default")
+    }
+    fmt.println("after switch")
+}
+
+fn main([]string args) error {
+    fmt.println(counter().string())
+    loops()
+    fmt.println(methods())
+    fmt.println(early(true))
+    fmt.println(early(false))
+    inSwitch(1)
+    inSwitch(2)
+    return null
+}

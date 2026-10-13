@@ -1,0 +1,48 @@
+// A value returned beside an error can be read once the error is known to be
+// null: inside `if (err == null)`, after `if (err != null) { return ... }`,
+// on the right of `err == null &&`, or after assigning the value again.
+package main
+
+import "errors"
+import "fmt"
+
+fn parse(string s) (int, error) {
+    if (s == "") {
+        return null, errors.new("empty")
+    }
+    return s.len(), null
+}
+
+fn twice(string s) (int, error) {
+    int n, error err = parse(s)
+    if (err != null) {
+        return null, err
+    }
+    return n * 2, null
+}
+
+fn main([]string args) error {
+    int a, error e1 = parse("abc")
+    if (e1 == null) {
+        fmt.println("a " + a.string())
+    }
+    int b, error e2 = parse("")
+    if (e2 == null && b > 0) {
+        fmt.println("b " + b.string())
+    } else {
+        b = 7
+    }
+    fmt.println("b now " + b.string())
+    int c, error e3 = twice("hello")
+    if (e3 != null) {
+        return e3
+    }
+    fmt.println("c " + c.string())
+    c, e3 = twice("")
+    if (e3 == null) {
+        fmt.println("c again " + c.string())
+    } else {
+        fmt.println("failed: " + e3.message())
+    }
+    return null
+}

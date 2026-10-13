@@ -1,0 +1,19 @@
+// expect-error: implements_mut_mismatch.sd:13:
+// A method that the interface declares mut must be mut in the type too.
+package main
+
+type Counter interface {
+    mut add(int n)
+}
+
+type Tally struct implements Counter {
+    int total
+}
+
+fn (Tally t) add(int n) {
+    return
+}
+
+fn main([]string args) error {
+    return null
+}

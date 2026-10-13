@@ -1,0 +1,22 @@
+// A nullable function in a struct field is called after a null check.
+package main
+
+import "fmt"
+
+fn twice(int x) int {
+    return x * 2
+}
+
+type Hook struct {
+    (fn(int) int)? f
+}
+
+fn main([]string args) error {
+    Hook h = Hook{f: twice}
+    if (h.f != null) {
+        fmt.println(h.f(4).string())
+    }
+    Hook none = Hook{f: null}
+    fmt.println((none.f == null).string())
+    return null
+}

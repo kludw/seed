@@ -1,0 +1,213 @@
+// The checker, continued: interfaces, `implements`, and which types can be
+// compared with ==.
+//
+// A type satisfies an interface only by declaring it with `implements`. The
+// checker verifies the declaration against the type's methods (name, mut and
+// signature) and records it in Checker.impls; a value of the type then
+// converts to the interface wherever the interface is expected (coerce sets
+// ExprInfo.ifaceFrom). `error` is an interface with one method,
+// message() string, so user types can implement it too.
+package main
+
+// Resolves the method signatures of an interface declaration.
+fn (Checker c) mut resolveInterface(int d) {
+    TypeDecl td = c.ast.typeDecls[d]
+    for (int i = 0; i < td.methodCount; i++) {
+        int mi = c.ast.at(td.methods, i)
+        MethodSig ms = c.ast.methodSigs[mi]
+        for (int j = 0; j < i; j++) {
+            if (c.ast.methodSigs[c.ast.at(td.methods, j)].name == ms.name) {
+                c.error(ms.pos, "method " + ms.name + " is declared twice in " + td.name)
+            }
+        }
+        []int ps = []int{}
+        for (int k = 0; k < ms.paramCount; k++) {
+            ps.push(c.resolve(c.ast.params[c.ast.at(ms.params, k)].typeExpr))
+        }
+        []int rs = []int{}
+        for (int r = 0; r < ms.resultCount; r++) {
+            rs.push(c.resolve(c.ast.at(ms.results, r)))
+        }
+        int result = c.resultOf(rs)
+        if (result != tyInvalid) {
+            c.methodSigType[mi] = c.types.funcOf(ps, result)
+        }
+        if (ms.isMut) {
+            c.mutNames[ms.name] = true
+        }
+    }
+}
+
+// The index (in the interface's method list) of a method, or -1.
+fn (Checker c) findIfaceMethod(int d, string name) int {
+    TypeDecl td = c.ast.typeDecls[d]
+    for (int i = 0; i < td.methodCount; i++) {
+        if (c.ast.methodSigs[c.ast.at(td.methods, i)].name == name) {
+            return i
+        }
+    }
+    return -1
+}
+
+fn (Checker c) ifaceMethod(int d, int i) MethodSig {
+    return c.ast.methodSigs[c.ast.at(c.ast.typeDecls[d].methods, i)]
+}
+
+fn (Checker c) ifaceMethodType(int d, int i) int {
+    return c.methodSigType[c.ast.at(c.ast.typeDecls[d].methods, i)]
+}
+
+// The number of methods of an interface type (error has one).
+fn (Checker c) ifaceMethodCount(int iface) int {
+    if (iface == tyError) {
+        return 1
+    }
+    return c.ast.typeDecls[c.types.decl(iface)].methodCount
+}
+
+fn (Checker c) ifaceMethodName(int iface, int i) string {
+    if (iface == tyError) {
+        return "message"
+    }
+    return c.ifaceMethod(c.types.decl(iface), i).name
+}
+
+fn (Checker c) mut ifaceMethodSig(int iface, int i) int {
+    if (iface == tyError) {
+        return c.types.funcOf([]int{}, tyString)
+    }
+    return c.ifaceMethodType(c.types.decl(iface), i)
+}
+
+fn (Checker c) ifaceMethodMut(int iface, int i) bool {
+    if (iface == tyError) {
+        return false
+    }
+    return c.ifaceMethod(c.types.decl(iface), i).isMut
+}
+
+// Checks every `implements` declaration against the type's methods.
+fn (Checker c) mut checkImplements() {
+    for (int d = 0; d < c.ast.typeDecls.len(); d++) {
+        TypeDecl td = c.ast.typeDecls[d]
+        for (int i = 0; i < td.implCount; i++) {
+            int te = c.ast.at(td.impls, i)
+            int it = c.resolve(te)
+            Pos pos = c.ast.typeExprs[te].pos
+            if (it == tyInvalid) {
+                continue
+            }
+            if (it != tyError && c.kindOf(it) != Kind.Interface) {
+                c.errorHint(pos, c.typeName(it) + " is not an interface", "only interfaces (and error) can be implemented")
+                continue
+            }
+            bool twice = false
+            for (int j = 0; j < i; j++) {
+                if (c.teType[c.ast.at(td.impls, j)] == it) {
+                    twice = true
+                }
+            }
+            if (twice) {
+                c.error(pos, td.name + " declares implements " + c.typeName(it) + " twice")
+                continue
+            }
+            if (c.checkImplementsOne(d, it, pos)) {
+                c.impls.push(Impl{decl: d, iface: it})
+            }
+        }
+    }
+}
+
+// Whether the type declaration d has every method of iface, with the same
+// signature and mut-ness. Reports the first mismatch.
+fn (Checker c) mut checkImplementsOne(int d, int iface, Pos pos) bool {
+    string tname = c.ast.typeDecls[d].name
+    string iname = c.typeName(iface)
+    bool ok = true
+    for (int i = 0; i < c.ifaceMethodCount(iface); i++) {
+        string name = c.ifaceMethodName(iface, i)
+        int want = c.ifaceMethodSig(iface, i)
+        bool wantMut = c.ifaceMethodMut(iface, i)
+        string sig = methodSigText(name, c.typeName(want), wantMut)
+        int? m = c.methods[tname + "." + name]
+        if (m == null) {
+            c.errorHint(pos, tname + " does not implement " + iname + ": it has no method " + sig, "add  fn (" + tname + " v) " + sig + " { ... }")
+            ok = false
+            continue
+        }
+        if (want == tyInvalid) {
+            continue
+        }
+        int have = c.fnType(m)
+        bool haveMut = c.ast.fns[m].recvMut
+        if (have != want || haveMut != wantMut) {
+            c.errorHint(c.ast.fns[m].pos, "method " + tname + "." + methodSigText(name, c.typeName(have), haveMut) + " does not match " + iname + "." + sig, tname + " declares implements " + iname + ", so the signatures must be the same")
+            ok = false
+        }
+    }
+    return ok
+}
+
+// A method signature for messages: "mut add(int) string" for the method
+// add of type fn(int) string.
+fn methodSigText(string name, string fnTypeName, bool isMut) string {
+    string sig = name + fnTypeName.slice(2, fnTypeName.len())
+    if (isMut) {
+        return "mut " + sig
+    }
+    return sig
+}
+
+// Whether the struct or enum type t declares `implements iface`.
+fn (Checker c) implementsIface(int t, int iface) bool {
+    Kind k = c.kindOf(t)
+    if (k != Kind.Struct && k != Kind.Enum) {
+        return false
+    }
+    if (iface != tyError && c.kindOf(iface) != Kind.Interface) {
+        return false
+    }
+    int d = c.types.decl(t)
+    for (int i = 0; i < c.impls.len(); i++) {
+        if (c.impls[i].decl == d && c.impls[i].iface == iface) {
+            return true
+        }
+    }
+    return false
+}
+
+// Whether values of type t can be compared with == (everything except
+// function values and channels, and types that contain them).
+fn (Checker c) comparable(int t, []int seen) bool {
+    Kind k = c.kindOf(t)
+    if (k == Kind.Func || k == Kind.Chan) {
+        return false
+    }
+    if (k == Kind.List || k == Kind.Map || k == Kind.Opt) {
+        return c.comparable(c.types.elem(t), seen)
+    }
+    if (k != Kind.Struct && k != Kind.Enum) {
+        return true
+    }
+    if (seen.contains(t)) {
+        return true
+    }
+    []int next = seen.slice(0, seen.len())
+    next.push(t)
+    int d = c.types.decl(t)
+    TypeDecl td = c.ast.typeDecls[d]
+    for (int i = 0; i < td.fieldCount; i++) {
+        if (!c.comparable(c.fieldType(d, i), next)) {
+            return false
+        }
+    }
+    for (int j = 0; j < td.caseCount; j++) {
+        EnumCase ec = c.enumCase(d, j)
+        for (int m = 0; m < ec.paramCount; m++) {
+            if (!c.comparable(c.caseParamType(d, j, m), next)) {
+                return false
+            }
+        }
+    }
+    return true
+}

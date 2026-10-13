@@ -1,0 +1,46 @@
+// Package-level constants of counted types (lists, maps, structs, big ints,
+// interfaces) are computed once and shared; copies of them are independent.
+package main
+
+import "fmt"
+
+type Greeter interface {
+    greet() string
+}
+
+type English struct implements Greeter {
+    string name
+}
+
+fn (English e) greet() string {
+    return "hello " + e.name
+}
+
+type Point struct {
+    int x
+    int y
+}
+
+const []string colors = []string{"red", "green"}
+const map[string]int sizes = map[string]int{"s": 1, "m": 2}
+const Point origin = Point{x: 0, y: 1 << 65}
+const int huge = 1 << 100
+const int huger = huge * huge
+const Greeter greeter = English{name: "const"}
+
+fn main([]string args) error {
+    []string cs = colors
+    cs.push("blue")
+    fmt.println(cs.join(",") + " / " + colors.join(","))
+    map[string]int ss = sizes
+    ss["l"] = 3
+    fmt.println(ss.len().string() + " " + sizes.len().string())
+    Point p = origin
+    p.x = 5
+    fmt.println(p.x.string() + " " + origin.x.string() + " " + origin.y.string())
+    fmt.println(huger.string())
+    fmt.println(greeter.greet())
+    const []int local = []int{1, 2, 3}
+    fmt.println(local.len().string())
+    return null
+}

@@ -21,7 +21,9 @@ sd_list *sd_list_new_len_(const sd_type *et, int64_t len) {
   return l;
 }
 
-void sd_list_free_(sd_list *l) {
+void sd_list_free_(sd_list *l) { sd_free_queued_(l, SD_DEAD_LIST); }
+
+void sd_list_destroy_(sd_list *l) {
   const sd_type *et = l->et;
   if (!et->trivial) {
     char *d = sd_list_data(l);
@@ -325,7 +327,9 @@ sd_map *sd_map_new(const sd_type *kt, const sd_type *vt) {
 
 sd_int sd_map_len(const sd_map *m) { return SD_INT(m->len); }
 
-void sd_map_free_(sd_map *m) {
+void sd_map_free_(sd_map *m) { sd_free_queued_(m, SD_DEAD_MAP); }
+
+void sd_map_destroy_(sd_map *m) {
   if (!m->kt->trivial || !m->vt->trivial) {
     for (int64_t i = 0; i < m->n; i++) {
       char *e = ENT(m, i);

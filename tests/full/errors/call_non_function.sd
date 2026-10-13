@@ -1,0 +1,9 @@
+// expect-error: not a function
+// Only functions and function values can be called.
+package main
+
+fn main([]string args) error {
+    int count = 3
+    count(1)
+    return null
+}

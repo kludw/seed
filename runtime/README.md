@@ -838,6 +838,14 @@ Decisions made while writing the runtime (nobody was available to ask):
 14. **`os.exit(n)`** uses `n & 255`; it doesn't run defers.
 15. **time.after** delivers the monotonic time (an `int`) once on a channel with
     a buffer of one.
+16. **Freeing never recurses.** (Added with the compiler's switch to this
+    runtime, as a bug fix: dropping a 100,000-node linked list of
+    `Node? next` boxes overflowed the stack.) A box, list or map whose
+    count drops to zero while another one is being freed is queued (through
+    its dead count field) and freed by the outermost release, so dropping
+    long chains or deep trees uses constant stack (`sd_free_queued_` in
+    `seed_core.c`; `test_mem.c` frees a million-node box chain, list nesting
+    and map nesting).
 
 Limitations and things left for later:
 

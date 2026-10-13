@@ -1,0 +1,19 @@
+// expect-error: unchecked_error_else.sd:16:
+// In the branch where the error is not null, the value beside it is null.
+package main
+
+import "errors"
+import "fmt"
+
+fn parse(string s) (int, error) {
+    return null, errors.new("no")
+}
+
+fn main([]string args) error {
+    int n, error err = parse("x")
+    if (err != null) {
+        fmt.println(err.message())
+        fmt.println(n.string())
+    }
+    return null
+}

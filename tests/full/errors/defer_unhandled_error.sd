@@ -1,0 +1,12 @@
+// expect-error: defer _ =
+// A deferred call that returns an error must discard it explicitly.
+package main
+
+fn cleanup() error {
+    return null
+}
+
+fn main([]string args) error {
+    defer cleanup()
+    return null
+}

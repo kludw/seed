@@ -1,0 +1,415 @@
+// The C generator, continued: calls of functions, methods, function values
+// and interface methods, built-in methods, core package functions,
+// conversions, enum constructors, and places (the targets of mut calls and
+// assignments).
+package main
+
+fn (Gen g) mut gcall(int e) string {
+    ExprInfo i = g.c.info[e]
+    switch (i.res) {
+    case Res.Func, Res.ValueCall, Res.Pkg:
+        return g.finishCall(e, g.callFrom(e, g.operands(g.callOperands(e))))
+    case Res.Method:
+        if (g.c.ast.fns[i.ref].recvMut) {
+            return g.gmutCall(e)
+        }
+        return g.finishCall(e, g.callFrom(e, g.operands(g.callOperands(e))))
+    case Res.IfaceMethod:
+        if (g.c.ifaceMethod(i.ref, i.sub).isMut) {
+            return g.gmutCall(e)
+        }
+        return g.finishCall(e, g.callFrom(e, g.operands(g.callOperands(e))))
+    case Res.EnumNew:
+        return g.genumNew(e)
+    case Res.Conv:
+        return g.gconv(e)
+    case Res.Builtin:
+        return g.gbuiltin(e)
+    case Res.None, Res.Local, Res.Const, Res.EnumVal, Res.Field, Res.ListIndex, Res.StringIndex, Res.MapIndex:
+        return "/* internal error: unresolved call */"
+    }
+}
+
+// The receiver of a method call (base.name(args)).
+fn (Gen g) recvOf(int e) int {
+    return g.c.ast.exprs[g.c.ast.exprs[e].a].a
+}
+
+// The expressions a call evaluates, in order: the callee (for a function
+// value) or the receiver (for a method), then the arguments.
+fn (Gen g) callOperands(int e) []int {
+    Res r = g.c.info[e].res
+    []int xs = []int{}
+    if (r == Res.ValueCall) {
+        xs.push(g.c.ast.exprs[e].a)
+    } else if (r == Res.Method || r == Res.IfaceMethod) {
+        xs.push(g.recvOf(e))
+    }
+    []int args = g.argList(e)
+    for (int i = 0; i < args.len(); i++) {
+        xs.push(args[i])
+    }
+    return xs
+}
+
+// The C call for a function, method (not mut), function value, interface
+// method (not mut) or package function, given its evaluated operands
+// (callOperands).
+fn (Gen g) mut callFrom(int e, []string vals) string {
+    ExprInfo i = g.c.info[e]
+    if (i.res == Res.Func || i.res == Res.Method) {
+        return g.c.fnCName[i.ref] + "(" + vals.join(", ") + ")"
+    }
+    if (i.res == Res.ValueCall) {
+        return "(" + vals[0] + ")(" + vals.slice(1, vals.len()).join(", ") + ")"
+    }
+    if (i.res == Res.IfaceMethod) {
+        []string args = []string{"sd_iface_self(" + vals[0] + ")"}
+        for (int k = 1; k < vals.len(); k++) {
+            args.push(vals[k])
+        }
+        string vt = "((const sd_V_" + g.c.ast.typeDecls[i.ref].name + " *)(" + vals[0] + ").vt)"
+        return vt + "->m_" + g.c.ifaceMethod(i.ref, i.sub).name + "(" + args.join(", ") + ")"
+    }
+    return g.pkgCall(e, vals)
+}
+
+// Emits a call whose result is not used as a value (void), or keeps its
+// result in a temporary.
+fn (Gen g) mut finishCall(int e, string call) string {
+    int t = g.coreType(e)
+    if (t == tyVoid) {
+        g.emit(call + ";")
+        return ""
+    }
+    return g.temp(t, call)
+}
+
+// A call of a mut method: the arguments are evaluated (and kept) first,
+// because the call may change what they were read from (bag.addAll(bag)),
+// then the receiver's place.
+fn (Gen g) mut gmutCall(int e) string {
+    ExprInfo i = g.c.info[e]
+    []int args = g.argList(e)
+    []string vals = []string{}
+    for (int k = 0; k < args.len(); k++) {
+        vals.push(g.ownedTemp(args[k]))
+    }
+    string place = g.gplace(g.recvOf(e))
+    if (i.res == Res.Method) {
+        []string margs = []string{place}
+        for (int j = 0; j < vals.len(); j++) {
+            margs.push(vals[j])
+        }
+        return g.finishCall(e, g.c.fnCName[i.ref] + "(" + margs.join(", ") + ")")
+    }
+    string p = g.newTmp()
+    g.emit("sd_iface *" + p + " = " + place + ";")
+    []string iargs = []string{"sd_box_mut(&" + p + "->obj)"}
+    for (int m = 0; m < vals.len(); m++) {
+        iargs.push(vals[m])
+    }
+    string vt = "((const sd_V_" + g.c.ast.typeDecls[i.ref].name + " *)" + p + "->vt)"
+    return g.finishCall(e, vt + "->m_" + g.c.ifaceMethod(i.ref, i.sub).name + "(" + iargs.join(", ") + ")")
+}
+
+// A C pointer to the place e (a variable, or a field or element path that
+// starts at one), making every container on the way unique. The indexes on
+// the way are evaluated now.
+fn (Gen g) mut gplace(int e) string {
+    Expr x = g.c.ast.exprs[e]
+    ExprInfo i = g.c.info[e]
+    string p = ""
+    if (x.kind == ExprKind.Ident) {
+        Var v = g.c.vars[i.ref]
+        if (v.kind == VarKind.MutRecv) {
+            p = "l_" + v.name
+        } else {
+            p = "(&l_" + v.name + ")"
+        }
+    } else if (x.kind == ExprKind.Field) {
+        p = "(&(" + g.gplace(x.a) + ")->f_" + x.text + ")"
+    } else if (x.kind == ExprKind.Index) {
+        int el = i.ty
+        if (i.narrowed) {
+            el = i.orig
+        }
+        string base = g.gplace(x.a)
+        string idx = g.ownedTemp(x.b)
+        p = "((" + g.ctype(el) + " *)sd_list_at_mut(" + base + ", " + idx + "))"
+    } else {
+        p = "/* internal error: not a place */"
+    }
+    if (i.narrowed) {
+        return g.unwrapPlace(i.orig, p)
+    }
+    return p
+}
+
+// A place as a plain pointer variable when it is more than a local's
+// address (macros evaluate it twice).
+fn (Gen g) mut placeVar(string ptrType, string p) string {
+    if (p.startsWith("(&l_") && isIdent(p.slice(2, p.len() - 1))) {
+        return p
+    }
+    if (isIdent(p)) {
+        return p
+    }
+    string n = g.newTmp()
+    g.emit(ptrType + " " + n + " = " + p + ";")
+    return n
+}
+
+// ---- package functions ----
+
+// A runtime call that returns its value through an out parameter and its
+// error as the result, packed into a (T, error) tuple.
+fn (Gen g) tupleOut(int tt, string valueType, string fnName, string arg) string {
+    return "({ " + valueType + " o_; sd_err e_ = " + fnName + "(" + arg + ", &o_); (" + g.ctype(tt) + "){o_, e_}; })"
+}
+
+fn (Gen g) mut pkgCall(int e, []string vals) string {
+    string a = vals[0]
+    int t = g.coreType(e)
+    switch (g.c.info[e].pkgFn) {
+    case PkgFn.Print:
+        return "sd_fmt_print(" + a + ")"
+    case PkgFn.Println:
+        return "sd_fmt_println(" + a + ")"
+    case PkgFn.Eprint:
+        return "sd_fmt_eprint(" + a + ")"
+    case PkgFn.Eprintln:
+        return "sd_fmt_eprintln(" + a + ")"
+    case PkgFn.Exit:
+        return "sd_os_exit(" + a + ")"
+    case PkgFn.Env:
+        return "sd_os_env(" + a + ")"
+    case PkgFn.Run:
+        return g.tupleOut(t, "sd_int", "sd_os_run", a)
+    case PkgFn.Read:
+        return g.tupleOut(t, "sd_str", "sd_fs_read", a)
+    case PkgFn.Write:
+        return "sd_fs_write(" + a + ", " + vals[1] + ")"
+    case PkgFn.Exists:
+        return "sd_fs_exists(" + a + ")"
+    case PkgFn.IsDir:
+        return "sd_fs_is_dir(" + a + ")"
+    case PkgFn.List:
+        return g.tupleOut(t, "sd_list *", "sd_fs_list", a)
+    case PkgFn.Mkdir:
+        return "sd_fs_mkdir(" + a + ")"
+    case PkgFn.Remove:
+        return "sd_fs_remove(" + a + ")"
+    case PkgFn.ErrNew:
+        return "sd_errors_new(" + a + ")"
+    case PkgFn.None:
+        return "/* internal error: unresolved package function */"
+    }
+}
+
+// ---- enum cases and conversions ----
+
+fn (Gen g) mut genumNew(int e) string {
+    ExprInfo i = g.c.info[e]
+    int d = i.ref
+    string n = g.c.ast.typeDecls[d].name
+    EnumCase ec = g.c.enumCase(d, i.sub)
+    []int args = g.argList(e)
+    []string vals = g.operands(args)
+    []string owned = []string{}
+    for (int k = 0; k < vals.len(); k++) {
+        owned.push(g.ownVal(vals[k], g.typeOf(args[k])))
+    }
+    string payload = "&(sd_E_" + n + "){.tag = " + i.sub.string() + ", .u.c_" + ec.name + " = {" + owned.join(", ") + "}}"
+    return g.temp(g.coreType(e), "sd_box_new(&sd_D_" + n + ", " + payload + ")")
+}
+
+fn (Gen g) mut gconv(int e) string {
+    int arg = g.arg(e, 0)
+    int from = g.typeOf(arg)
+    int to = g.coreType(e)
+    string v = g.gexpr(arg)
+    if (from == to) {
+        return v
+    }
+    if (to == tyInt) {
+        if (from == tyFloat) {
+            return g.temp(tyInt, "sd_float_to_int(" + v + ")")
+        }
+        return "sd_byte_to_int(" + v + ")"
+    }
+    if (to == tyFloat) {
+        return "sd_int_to_float(" + v + ")"
+    }
+    if (to == tyByte) {
+        return "sd_int_to_byte(" + v + ")"
+    }
+    if (to == tyString) {
+        return g.temp(tyString, "sd_str_from_bytes(" + v + ")")
+    }
+    return v
+}
+
+// ---- built-in methods ----
+
+fn (Gen g) mut gbuiltin(int e) string {
+    int r = g.recvOf(e)
+    int rt = g.typeOf(r)
+    []int args = g.argList(e)
+    int t = g.coreType(e)
+    Builtin b = g.c.info[e].builtin
+    if (isMutBuiltin(b)) {
+        return g.gmutBuiltin(e, b, r, rt, args)
+    }
+    []int ops = []int{r}
+    for (int i = 0; i < args.len(); i++) {
+        ops.push(args[i])
+    }
+    []string vals = g.operands(ops)
+    string v = vals[0]
+    switch (b) {
+    case Builtin.Len:
+        if (rt == tyString) {
+            return "sd_str_len(" + v + ")"
+        }
+        if (g.kindOf(rt) == Kind.Map) {
+            return "sd_map_len(" + v + ")"
+        }
+        return "sd_list_len(" + v + ")"
+    case Builtin.String:
+        Kind k = g.kindOf(rt)
+        if (k == Kind.Int) {
+            return g.temp(tyString, "sd_int_to_str(" + v + ")")
+        }
+        if (k == Kind.Float) {
+            return g.temp(tyString, "sd_float_to_str(" + v + ")")
+        }
+        if (k == Kind.Bool) {
+            return g.temp(tyString, "sd_bool_to_str(" + v + ")")
+        }
+        if (k == Kind.Byte) {
+            return g.temp(tyString, "sd_byte_to_str(" + v + ")")
+        }
+        return v
+    case Builtin.ToInt:
+        return g.temp(t, g.tupleOut(t, "sd_int", "sd_str_to_int", v))
+    case Builtin.ToFloat:
+        return g.temp(t, g.tupleOut(t, "double", "sd_str_to_float", v))
+    case Builtin.SContains:
+        return "sd_str_contains(" + v + ", " + vals[1] + ")"
+    case Builtin.SStarts:
+        return "sd_str_starts_with(" + v + ", " + vals[1] + ")"
+    case Builtin.SEnds:
+        return "sd_str_ends_with(" + v + ", " + vals[1] + ")"
+    case Builtin.SSlice, Builtin.SIndex, Builtin.Split, Builtin.Trim, Builtin.Replace, Builtin.Upper, Builtin.Lower:
+        return g.temp(t, builtinFn(b) + "(" + vals.join(", ") + ")")
+    case Builtin.Bytes, Builtin.Chars, Builtin.Join, Builtin.Message, Builtin.LSlice, Builtin.Keys:
+        return g.temp(t, builtinFn(b) + "(" + vals.join(", ") + ")")
+    case Builtin.LContains:
+        return "sd_list_contains(" + v + ", " + g.addr(g.typeOf(args[0]), vals[1]) + ")"
+    case Builtin.LIndex:
+        return g.temp(t, "sd_list_index(" + v + ", " + g.addr(g.typeOf(args[0]), vals[1]) + ")")
+    case Builtin.None, Builtin.Push, Builtin.Pop, Builtin.Insert, Builtin.Remove, Builtin.Reverse, Builtin.Sort:
+        return "/* internal error: builtin */"
+    case Builtin.SortBy, Builtin.Delete:
+        return "/* internal error: builtin */"
+    }
+}
+
+fn builtinFn(Builtin b) string {
+    switch (b) {
+    case Builtin.SSlice:
+        return "sd_str_slice"
+    case Builtin.SIndex:
+        return "sd_str_index"
+    case Builtin.Split:
+        return "sd_str_split"
+    case Builtin.Trim:
+        return "sd_str_trim"
+    case Builtin.Replace:
+        return "sd_str_replace"
+    case Builtin.Upper:
+        return "sd_str_to_upper"
+    case Builtin.Lower:
+        return "sd_str_to_lower"
+    case Builtin.Bytes:
+        return "sd_str_bytes"
+    case Builtin.Chars:
+        return "sd_str_chars"
+    case Builtin.Join:
+        return "sd_list_join"
+    case Builtin.Message:
+        return "sd_err_message"
+    case Builtin.LSlice:
+        return "sd_list_slice"
+    case Builtin.Keys:
+        return "sd_map_keys"
+    case Builtin.None, Builtin.Len, Builtin.String, Builtin.ToInt, Builtin.ToFloat, Builtin.SContains, Builtin.SStarts:
+        return ""
+    case Builtin.SEnds, Builtin.Push, Builtin.Pop, Builtin.Insert, Builtin.Remove, Builtin.LContains, Builtin.LIndex:
+        return ""
+    case Builtin.Reverse, Builtin.Sort, Builtin.SortBy, Builtin.Delete:
+        return ""
+    }
+}
+
+// push, pop, insert, remove, reverse, sort, sortBy and delete: the
+// arguments first (kept in temporaries), then the receiver's place.
+fn (Gen g) mut gmutBuiltin(int e, Builtin b, int r, int rt, []int args) string {
+    []string vals = []string{}
+    for (int i = 0; i < args.len(); i++) {
+        vals.push(g.ownedTemp(args[i]))
+    }
+    string ptype = "sd_list **"
+    if (g.kindOf(rt) == Kind.Map) {
+        ptype = "sd_map **"
+    }
+    string place = g.placeVar(ptype, g.gplace(r))
+    int el = g.elemOf(rt)
+    switch (b) {
+    case Builtin.Push:
+        g.consume(vals[0])
+        g.emit("SD_LIST_PUSH(" + place + ", " + g.ctype(el) + ", " + vals[0] + ");")
+        return ""
+    case Builtin.Pop:
+        int opt = g.coreType(e)
+        string o = g.newTmp()
+        string ok = g.newTmp()
+        g.emit(g.ctype(el) + " " + o + ";")
+        g.emit("bool " + ok + " = sd_list_pop(" + place + ", &" + o + ");")
+        if (g.isSmallOpt(opt)) {
+            return g.temp(opt, ok + " ? (" + g.ctype(opt) + "){true, " + o + "} : (" + g.ctype(opt) + "){false, 0}")
+        }
+        if (g.isBoxOpt(opt)) {
+            return g.temp(opt, ok + " ? sd_box_new(" + g.desc(el) + ", &" + o + ") : NULL")
+        }
+        return g.temp(opt, ok + " ? " + o + " : " + g.nullOf(opt))
+    case Builtin.Insert:
+        g.consume(vals[1])
+        g.emit("sd_list_insert(" + place + ", " + vals[0] + ", &" + vals[1] + ");")
+        return ""
+    case Builtin.Remove:
+        g.emit("sd_list_remove(" + place + ", " + vals[0] + ");")
+        return ""
+    case Builtin.Reverse:
+        g.emit("sd_list_reverse(" + place + ");")
+        return ""
+    case Builtin.Sort:
+        g.emit("sd_list_sort(" + place + ");")
+        return ""
+    case Builtin.SortBy:
+        g.emit("sd_list_sort_by(" + place + ", " + g.lessFn(g.typeOf(args[0])) + ", (void *)" + vals[0] + ");")
+        return ""
+    case Builtin.Delete:
+        g.emit("sd_map_delete(" + place + ", &" + vals[0] + ");")
+        return ""
+    case Builtin.None, Builtin.Len, Builtin.String, Builtin.SSlice, Builtin.SContains, Builtin.SIndex, Builtin.SStarts:
+        return ""
+    case Builtin.SEnds, Builtin.Split, Builtin.Trim, Builtin.Replace, Builtin.Upper, Builtin.Lower, Builtin.ToInt:
+        return ""
+    case Builtin.ToFloat, Builtin.Bytes, Builtin.LContains, Builtin.LIndex, Builtin.LSlice, Builtin.Join, Builtin.Keys:
+        return ""
+    case Builtin.Message, Builtin.Chars:
+        return ""
+    }
+}

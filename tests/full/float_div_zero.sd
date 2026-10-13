@@ -1,0 +1,21 @@
+// Float division by zero follows IEEE (inf, -inf, nan); only int division
+// by zero crashes.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    float zero = 0.0
+    float one = 1.0
+    fmt.println((one / zero).string())
+    fmt.println((-one / zero).string())
+    float n = zero / zero
+    fmt.println(n.string())
+    fmt.println((n == n).string() + " " + (n != n).string())
+    fmt.println((one / zero > 1.0e308).string())
+    int a = 7
+    int b = 0
+    fmt.println("before")
+    fmt.println((a / b).string())
+    return null
+}

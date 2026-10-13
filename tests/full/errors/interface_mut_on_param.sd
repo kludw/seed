@@ -1,0 +1,25 @@
+// expect-error: interface_mut_on_param.sd:19:
+// A mut method cannot be called through an interface parameter either.
+package main
+
+type Counter interface {
+    mut add(int n)
+}
+
+type Tally struct implements Counter {
+    int total
+}
+
+fn (Tally t) mut add(int n) {
+    t.total = t.total + n
+}
+
+fn bump(Counter c) {
+    // parameters are read-only
+    c.add(1)
+}
+
+fn main([]string args) error {
+    bump(Tally{total: 0})
+    return null
+}

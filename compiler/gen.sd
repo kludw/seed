@@ -1,65 +1,98 @@
-// The C generator: turns the checked program into one self-contained C file,
-// with the same representation and semantics as seed0 (see seed0/README.md):
+// The C generator: turns the checked program into one self-contained C file
+// that contains the runtime of runtime/ (see runtime/README.md for the
+// representation of every type and the ownership rules):
 //
-//   int int64_t, float double, bool bool, byte uint8_t, string sd_str,
-//   error sd_err*, []T sd_list*, map sd_map*, struct sd_S_Name (by value),
-//   enum sd_E_Name* (immutable heap object), int? sd_O_i (and f, b, y),
-//   Struct? sd_B_Name* (a counted box), other T? the same pointer or sd_str
-//   with NULL meaning null, several results sd_T_<mangle>.
+//   int sd_int (tagged, grows), float double, bool bool, byte uint8_t,
+//   string sd_str, []T sd_list*, map sd_map*, struct sd_S_Name (by value),
+//   enum sd_box* (a box holding sd_E_Name), interface sd_iface, error
+//   sd_err, fn(...) R a C function pointer sd_fn_<mangle>, int? sd_int
+//   (SD_INT_NULL), float?/bool?/byte? sd_opt_*, Struct? sd_box*, other T?
+//   the same C type with NULL (or a null vt) for null, several results
+//   sd_T_<mangle> with fields r0, r1, ...
 //
-// Values are copy-on-write: lists, maps and struct boxes carry a count that
-// is raised whenever a value is copied out of a place that still holds it
-// (gowned), and a container is copied before it is changed when its count is
-// above one (gplace and the sd_list_*/sd_map_* runtime functions).
+// Memory is managed by reference counting. Parameters are borrowed, results
+// owned, and stores consume. The generator keeps a stack of the counted
+// values the current function owns (Gen.slots): local variables and the
+// temporaries of the statement being generated. A temporary is released at
+// the end of its statement unless it was moved into a store; locals are
+// released at the end of their block; return, break, continue and try
+// release everything they leave. See compiler/README.md.
 //
-// Expressions become C expressions, using GNU statement expressions
-// `({ ... })` for temporaries. Per-type helpers (equality, retain, release)
-// are generated on demand through a queue.
-//
-// This file has the program layout, C types and helpers. Expressions are in
-// gen_expr.sd and statements in gen_stmt.sd.
+// This file has the program layout, C types, per-type helpers, type
+// definitions, vtables and the runtime. Expressions are in gen_expr.sd,
+// calls in gen_call.sd, statements in gen_stmt.sd.
 package main
 
 import "errors"
 import "fs"
 
 // Helper kinds, used as bits in Type.helpers.
-const int helperEq = 1
-const int helperEqPtr = 2
-const int helperRetain = 4
-const int helperRetainPtr = 8
-const int helperRelease = 16
+const int helperRetain = 1
+const int helperRelease = 2
+const int helperEq = 4
+const int helperLess = 8
 
 type HelperReq struct {
     int ty
     int kind
 }
 
+// A counted value owned by the function being generated: a local variable
+// or a temporary (temp). A slot that was moved out is not live.
+type Slot struct {
+    string name
+    int ty
+    bool live
+    bool temp
+}
+
+// The innermost loop: break and continue release the slots above mark.
+// label is the number of the continue label (_cN) when the loop has a post
+// statement, or -1 when C's continue does the job.
+type LoopCtx struct {
+    int mark
+    int label
+}
+
 type Gen struct {
     Checker c
     []string out
+    []string fnText
     []string typeDefs
     []string protos
     []string helpers
+    []string thunks
     []string consts
     []HelperReq queue
+    []Slot slots
+    []int scopes
+    []LoopCtx loops
     int indent
     int ntmp
+    int ndefer
     int curFn
+    bool defers
 }
 
 fn newGen(Checker c) Gen {
     return Gen{
         c: c,
         out: []string{},
+        fnText: []string{},
         typeDefs: []string{},
         protos: []string{},
         helpers: []string{},
+        thunks: []string{},
         consts: []string{},
         queue: []HelperReq{},
+        slots: []Slot{},
+        scopes: []int{},
+        loops: []LoopCtx{},
         indent: 0,
         ntmp: 0,
+        ndefer: 0,
         curFn: -1,
+        defers: false,
     }
 }
 
@@ -67,31 +100,22 @@ fn newGen(Checker c) Gen {
 fn (Gen g) mut genProgram() string {
     g.genTypes()
     g.genConsts()
-    g.consts = g.out
-    g.out = []string{}
     for (int f = 0; f < g.c.ast.fns.len(); f++) {
         g.genFn(f)
     }
     g.curFn = -1
-    g.emit("int main(int argc, char **argv) { return sd_finish(sd_f_main(sd_start(argc, argv))); }")
+    g.genVtables()
     for (int i = 0; i < g.queue.len(); i++) {
         g.genHelper(g.queue[i].ty, g.queue[i].kind)
     }
     []string parts = []string{"\n/* ---- program ---- */\n"}
     parts.push(g.typeDefs.join(""))
-    for (int t = 0; t < g.c.types.list.len(); t++) {
-        if (g.c.types.kind(t) == Kind.Tuple) {
-            []string fields = []string{}
-            for (int j = 0; j < g.c.types.count(t); j++) {
-                fields.push(" " + g.ctype(g.c.types.part(t, j)) + " r" + j.string() + ";")
-            }
-            parts.push("typedef struct {" + fields.join("") + " } " + g.ctype(t) + ";\n")
-        }
-    }
     parts.push(g.protos.join(""))
     parts.push(g.helpers.join(""))
+    parts.push(g.thunks.join(""))
     parts.push(g.consts.join(""))
-    parts.push(g.out.join(""))
+    parts.push(g.fnText.join(""))
+    parts.push("int main(int argc, char **argv) { return sd_main(argc, argv, sd_f_main); }\n")
     return parts.join("")
 }
 
@@ -105,7 +129,7 @@ fn (Gen g) mut emit(string line) {
     g.out.push(spaces(g.indent * 2) + line + "\n")
 }
 
-fn (Gen g) mut tmp() string {
+fn (Gen g) mut newTmp() string {
     g.ntmp++
     return "_t" + g.ntmp.string()
 }
@@ -129,7 +153,7 @@ fn (Gen g) ctype(int t) string {
     case Kind.Void:
         return "void"
     case Kind.Int:
-        return "int64_t"
+        return "sd_int"
     case Kind.Float:
         return "double"
     case Kind.Bool:
@@ -139,76 +163,98 @@ fn (Gen g) ctype(int t) string {
     case Kind.String:
         return "sd_str"
     case Kind.Error:
-        return "sd_err*"
-    case Kind.Null, Kind.Invalid, Kind.Interface, Kind.Func, Kind.Chan:
-        return "void*"
+        return "sd_err"
+    case Kind.Null, Kind.Invalid:
+        return "void *"
     case Kind.List:
-        return "sd_list*"
+        return "sd_list *"
     case Kind.Map:
-        return "sd_map*"
+        return "sd_map *"
+    case Kind.Chan:
+        return "sd_chan *"
     case Kind.Struct:
         return "sd_S_" + g.declName(t)
     case Kind.Enum:
-        return "sd_E_" + g.declName(t) + "*"
+        return "sd_box *"
+    case Kind.Interface:
+        return "sd_iface"
     case Kind.Tuple:
         return "sd_T_" + g.c.types.mangle(t)
+    case Kind.Func:
+        return "sd_fn_" + g.c.types.mangle(t)
     case Kind.Opt:
         int el = g.elemOf(t)
         Kind k = g.kindOf(el)
-        if (k == Kind.Int) {
-            return "sd_O_i"
-        }
         if (k == Kind.Float) {
-            return "sd_O_f"
+            return "sd_opt_float"
         }
         if (k == Kind.Bool) {
-            return "sd_O_b"
+            return "sd_opt_bool"
         }
         if (k == Kind.Byte) {
-            return "sd_O_y"
+            return "sd_opt_byte"
         }
         if (k == Kind.Struct) {
-            return "sd_B_" + g.declName(el) + "*"
+            return "sd_box *"
         }
         return g.ctype(el)
     }
 }
 
-// Whether a value of type t holds reference counts that must be raised when
-// it is copied. Cached in Type.rt.
-fn (Gen g) mut needsRt(int t) bool {
-    Kind k = g.kindOf(t)
-    if (k == Kind.List || k == Kind.Map) {
+// float?, bool? and byte?: a {has, v} struct.
+fn (Gen g) isSmallOpt(int t) bool {
+    if (!g.c.types.isOpt(t)) {
+        return false
+    }
+    Kind k = g.kindOf(g.elemOf(t))
+    return k == Kind.Float || k == Kind.Bool || k == Kind.Byte
+}
+
+// Struct?: a box holding the struct.
+fn (Gen g) isBoxOpt(int t) bool {
+    return g.c.types.isOpt(t) && g.kindOf(g.elemOf(t)) == Kind.Struct
+}
+
+// Whether values of type t hold reference counts (so copies are retained
+// and drops released). Cached in Type.rt for structs and tuples.
+fn (Gen g) mut counted(int t) bool {
+    switch (g.kindOf(t)) {
+    case Kind.Int, Kind.String, Kind.Error, Kind.List, Kind.Map, Kind.Chan, Kind.Enum, Kind.Interface:
         return true
-    }
-    if (k == Kind.Opt) {
-        Kind ek = g.kindOf(g.elemOf(t))
-        return ek == Kind.List || ek == Kind.Map || ek == Kind.Struct
-    }
-    if (k != Kind.Struct) {
+    case Kind.Void, Kind.Float, Kind.Bool, Kind.Byte, Kind.Null, Kind.Invalid, Kind.Func:
         return false
-    }
-    int cached = g.c.types.list[t].rt
-    if (cached == 0 || cached == 1) {
-        return cached == 1
-    }
-    if (cached == 2) {
-        return false
-    }
-    g.c.types.list[t].rt = 2
-    int d = g.c.types.decl(t)
-    bool r = false
-    for (int i = 0; i < g.c.ast.typeDecls[d].fieldCount; i++) {
-        if (g.needsRt(g.c.fieldType(d, i))) {
-            r = true
+    case Kind.Opt:
+        if (g.isBoxOpt(t)) {
+            return true
         }
+        return g.counted(g.elemOf(t))
+    case Kind.Struct, Kind.Tuple:
+        int cached = g.c.types.list[t].rt
+        if (cached == 0 || cached == 1) {
+            return cached == 1
+        }
+        bool r = false
+        if (g.kindOf(t) == Kind.Tuple) {
+            for (int i = 0; i < g.c.types.count(t); i++) {
+                if (g.counted(g.c.types.part(t, i))) {
+                    r = true
+                }
+            }
+        } else {
+            int d = g.c.types.decl(t)
+            for (int j = 0; j < g.c.ast.typeDecls[d].fieldCount; j++) {
+                if (g.counted(g.c.fieldType(d, j))) {
+                    r = true
+                }
+            }
+        }
+        if (r) {
+            g.c.types.list[t].rt = 1
+        } else {
+            g.c.types.list[t].rt = 0
+        }
+        return r
     }
-    if (r) {
-        g.c.types.list[t].rt = 1
-    } else {
-        g.c.types.list[t].rt = 0
-    }
-    return r
 }
 
 // Requests a helper for t and returns its name.
@@ -220,118 +266,235 @@ fn (Gen g) mut helper(int t, int kind, string prefix) string {
     return prefix + g.c.types.mangle(t)
 }
 
-fn (Gen g) baseOf(int t) int {
-    if (g.c.types.isOpt(t)) {
-        return g.elemOf(t)
+// An expression that retains v (of type t) and has its value.
+fn (Gen g) mut retainExpr(int t, string v) string {
+    if (!g.counted(t)) {
+        return v
     }
-    return t
+    switch (g.kindOf(t)) {
+    case Kind.Int:
+        return "sd_int_retain(" + v + ")"
+    case Kind.String:
+        return "sd_str_retain(" + v + ")"
+    case Kind.List:
+        return "sd_list_retain(" + v + ")"
+    case Kind.Map:
+        return "sd_map_retain(" + v + ")"
+    case Kind.Chan:
+        return "sd_chan_retain(" + v + ")"
+    case Kind.Enum:
+        return "sd_box_retain(" + v + ")"
+    case Kind.Interface, Kind.Error:
+        return "sd_iface_retain(" + v + ")"
+    case Kind.Struct, Kind.Tuple:
+        return g.helper(t, helperRetain, "sd_rt_") + "(" + v + ")"
+    case Kind.Opt:
+        if (g.isBoxOpt(t)) {
+            return "sd_box_retain(" + v + ")"
+        }
+        return g.retainExpr(g.elemOf(t), v)
+    case Kind.Void, Kind.Float, Kind.Bool, Kind.Byte, Kind.Null, Kind.Invalid, Kind.Func:
+        return v
+    }
 }
 
-fn (Gen g) mut rtFn(int t) string {
-    Kind k = g.kindOf(g.baseOf(t))
-    if (k == Kind.List) {
-        return "sd_rt_list"
+// A statement (without ;) that releases v, or "" when t is not counted.
+fn (Gen g) mut releaseCall(int t, string v) string {
+    if (!g.counted(t)) {
+        return ""
     }
-    if (k == Kind.Map) {
-        return "sd_rt_map"
+    switch (g.kindOf(t)) {
+    case Kind.Int:
+        return "sd_int_release(" + v + ")"
+    case Kind.String:
+        return "sd_str_release(" + v + ")"
+    case Kind.List:
+        return "sd_list_release(" + v + ")"
+    case Kind.Map:
+        return "sd_map_release(" + v + ")"
+    case Kind.Chan:
+        return "sd_chan_release(" + v + ")"
+    case Kind.Enum:
+        return "sd_box_release(" + v + ")"
+    case Kind.Interface, Kind.Error:
+        return "sd_iface_release(" + v + ")"
+    case Kind.Struct, Kind.Tuple:
+        return g.helper(t, helperRelease, "sd_rl_") + "(" + v + ")"
+    case Kind.Opt:
+        if (g.isBoxOpt(t)) {
+            return "sd_box_release(" + v + ")"
+        }
+        return g.releaseCall(g.elemOf(t), v)
+    case Kind.Void, Kind.Float, Kind.Bool, Kind.Byte, Kind.Null, Kind.Invalid, Kind.Func:
+        return ""
     }
-    return g.helper(t, helperRetain, "sd_rt_")
 }
 
-fn (Gen g) mut rlFn(int t) string {
-    Kind k = g.kindOf(g.baseOf(t))
-    if (k == Kind.List) {
-        return "sd_rl_list"
+// The runtime type descriptor of t (for list elements, map keys and values,
+// boxes and interface payloads).
+fn (Gen g) desc(int t) string {
+    switch (g.kindOf(t)) {
+    case Kind.Int:
+        return "&sd_type_int"
+    case Kind.Float:
+        return "&sd_type_float"
+    case Kind.Bool:
+        return "&sd_type_bool"
+    case Kind.Byte:
+        return "&sd_type_byte"
+    case Kind.String:
+        return "&sd_type_str"
+    case Kind.Error:
+        return "&sd_type_err"
+    case Kind.List:
+        return "&sd_type_list"
+    case Kind.Map:
+        return "&sd_type_map"
+    case Kind.Chan:
+        return "&sd_type_chan"
+    case Kind.Struct:
+        return "&sd_D_" + g.declName(t)
+    case Kind.Enum:
+        return "&sd_type_box"
+    case Kind.Interface:
+        return "&sd_type_iface"
+    case Kind.Func:
+        return "&sd_type_fn"
+    case Kind.Opt:
+        int el = g.elemOf(t)
+        Kind k = g.kindOf(el)
+        if (k == Kind.Float) {
+            return "&sd_type_opt_float"
+        }
+        if (k == Kind.Bool) {
+            return "&sd_type_opt_bool"
+        }
+        if (k == Kind.Byte) {
+            return "&sd_type_opt_byte"
+        }
+        if (k == Kind.Struct) {
+            return "&sd_type_box"
+        }
+        return g.desc(el)
+    case Kind.Void, Kind.Null, Kind.Invalid, Kind.Tuple:
+        return "NULL"
     }
-    if (k == Kind.Map) {
-        return "sd_rl_map"
-    }
-    return g.helper(t, helperRelease, "sd_rl_")
 }
 
-fn (Gen g) mut rtpFn(int t) string {
-    if (g.needsRt(t)) {
-        return g.helper(t, helperRetainPtr, "sd_rtp_")
-    }
-    return "NULL"
-}
-
-fn (Gen g) mut eqpFn(int t) string {
-    return g.helper(t, helperEqPtr, "sd_eqp_")
-}
-
-fn (Gen g) mut eqExpr(int t, string a, string b) string {
-    Kind k = g.kindOf(t)
-    if (k == Kind.Int || k == Kind.Float || k == Kind.Bool || k == Kind.Byte) {
-        return "((" + a + ") == (" + b + "))"
-    }
-    if (k == Kind.String) {
-        return "sd_str_eq(" + a + ", " + b + ")"
-    }
-    if (k == Kind.Error) {
-        return "sd_err_eq(" + a + ", " + b + ")"
-    }
-    return g.helper(t, helperEq, "sd_eq_") + "(" + a + ", " + b + ")"
-}
-
-fn (Gen g) isSmallOpt(int t) bool {
-    Kind k = g.kindOf(g.elemOf(t))
-    return k == Kind.Int || k == Kind.Float || k == Kind.Bool || k == Kind.Byte
-}
-
+// The null of a T? (or error).
 fn (Gen g) nullOf(int t) string {
+    if (g.isSmallOpt(t)) {
+        return "((" + g.ctype(t) + "){false, 0})"
+    }
+    Kind k = g.kindOf(t)
     if (g.c.types.isOpt(t)) {
-        if (g.isSmallOpt(t)) {
-            return "((" + g.ctype(t) + "){0})"
-        }
-        if (g.kindOf(g.elemOf(t)) == Kind.String) {
-            return "((sd_str){0})"
-        }
+        k = g.kindOf(g.elemOf(t))
+    }
+    if (k == Kind.Int) {
+        return "SD_INT_NULL"
+    }
+    if (k == Kind.Interface || k == Kind.Error) {
+        return "SD_IFACE_NULL"
     }
     return "NULL"
 }
 
+// A placeholder value of a plain type, for `return null, err` (never read).
 fn (Gen g) zeroOf(int t) string {
-    Kind k = g.kindOf(t)
-    if (k == Kind.Int || k == Kind.Byte) {
-        return "0"
-    }
-    if (k == Kind.Float) {
+    switch (g.kindOf(t)) {
+    case Kind.Int:
+        return "SD_INT(0)"
+    case Kind.Float:
         return "0.0"
+    case Kind.Bool:
+        return "false"
+    case Kind.Byte:
+        return "((uint8_t)0)"
+    case Kind.Struct, Kind.Tuple:
+        return "((" + g.ctype(t) + "){0})"
+    case Kind.Opt, Kind.Error, Kind.Interface:
+        return g.nullOf(t)
+    case Kind.Void, Kind.String, Kind.Null, Kind.Invalid, Kind.List, Kind.Map, Kind.Enum, Kind.Func, Kind.Chan:
+        return "NULL"
     }
-    if (k == Kind.Bool) {
+}
+
+fn (Gen g) isNull(int t, string v) string {
+    if (g.isSmallOpt(t)) {
+        return "(!(" + v + ").has)"
+    }
+    Kind k = g.kindOf(t)
+    if (g.c.types.isOpt(t)) {
+        k = g.kindOf(g.elemOf(t))
+    }
+    if (k == Kind.Int) {
+        return "sd_int_is_null(" + v + ")"
+    }
+    if (k == Kind.Interface || k == Kind.Error) {
+        return "sd_iface_is_null(" + v + ")"
+    }
+    return "((" + v + ") == NULL)"
+}
+
+// Seed == on two (borrowed, side-effect free) values of type t.
+fn (Gen g) mut eqExpr(int t, string a, string b) string {
+    switch (g.kindOf(t)) {
+    case Kind.Int:
+        return "sd_int_eq(" + a + ", " + b + ")"
+    case Kind.Float, Kind.Bool, Kind.Byte, Kind.Func, Kind.Chan:
+        return "((" + a + ") == (" + b + "))"
+    case Kind.String:
+        return "sd_str_eq(" + a + ", " + b + ")"
+    case Kind.Error:
+        return "sd_err_equal(" + a + ", " + b + ")"
+    case Kind.Interface:
+        return "sd_iface_equal(" + a + ", " + b + ")"
+    case Kind.List:
+        return "sd_list_equal(" + a + ", " + b + ")"
+    case Kind.Map:
+        return "sd_map_equal(" + a + ", " + b + ")"
+    case Kind.Enum:
+        return "sd_box_equal(" + a + ", " + b + ")"
+    case Kind.Struct:
+        return g.helper(t, helperEq, "sd_eq_") + "(" + a + ", " + b + ")"
+    case Kind.Opt:
+        if (g.isSmallOpt(t)) {
+            return "((" + a + ").has == (" + b + ").has && (!(" + a + ").has || (" + a + ").v == (" + b + ").v))"
+        }
+        if (g.isBoxOpt(t)) {
+            return "sd_box_equal(" + a + ", " + b + ")"
+        }
+        return g.eqExpr(g.elemOf(t), a, b)
+    case Kind.Void, Kind.Null, Kind.Invalid, Kind.Tuple:
         return "false"
     }
-    if (k == Kind.String) {
-        return "((sd_str){0})"
-    }
-    if (k == Kind.Struct || k == Kind.Tuple) {
-        return "((" + g.ctype(t) + "){0})"
-    }
-    if (k == Kind.Opt) {
-        return g.nullOf(t)
-    }
-    return "NULL"
 }
 
-// Converts a T into a T?.
-fn (Gen g) wrapVal(int opt, string v) string {
+// Converts a borrowed T into a T? (creating a box for a struct).
+fn (Gen g) mut wrapVal(int opt, string v) string {
+    int el = g.elemOf(opt)
     if (g.isSmallOpt(opt)) {
         return "((" + g.ctype(opt) + "){true, " + v + "})"
     }
-    if (g.kindOf(g.elemOf(opt)) == Kind.Struct) {
-        return "sd_bx_" + g.declName(g.elemOf(opt)) + "(" + v + ")"
+    if (g.isBoxOpt(opt)) {
+        string a = g.alias(el, g.ownVal(v, el))
+        return g.temp(opt, "sd_box_new(" + g.desc(el) + ", &" + a + ")")
     }
     return v
 }
 
-// Reads a T? that is known not to be null as a T.
+// Whether converting T to T? leaves the C value as it is.
+fn (Gen g) wrapIsIdentity(int opt) bool {
+    return !g.isSmallOpt(opt) && !g.isBoxOpt(opt)
+}
+
+// Reads a T? that is known not to be null as a T (borrowed).
 fn (Gen g) unwrapVal(int opt, string v) string {
     if (g.isSmallOpt(opt)) {
         return "(" + v + ").v"
     }
-    if (g.kindOf(g.elemOf(opt)) == Kind.Struct) {
-        return "(" + v + ")->v"
+    if (g.isBoxOpt(opt)) {
+        return "SD_BOX_GET(" + v + ", " + g.ctype(g.elemOf(opt)) + ")"
     }
     return v
 }
@@ -341,36 +504,10 @@ fn (Gen g) unwrapPlace(int opt, string p) string {
     if (g.isSmallOpt(opt)) {
         return "(&(" + p + ")->v)"
     }
-    if (g.kindOf(g.elemOf(opt)) == Kind.Struct) {
-        return "(&sd_bm_" + g.declName(g.elemOf(opt)) + "(" + p + ")->v)"
+    if (g.isBoxOpt(opt)) {
+        return "((" + g.ctype(g.elemOf(opt)) + " *)sd_box_mut(" + p + "))"
     }
     return p
-}
-
-fn (Gen g) isNull(int t, string v) string {
-    if (g.c.types.isOpt(t)) {
-        if (g.isSmallOpt(t)) {
-            return "(!(" + v + ").has)"
-        }
-        if (g.kindOf(g.elemOf(t)) == Kind.String) {
-            return "((" + v + ").p == NULL)"
-        }
-    }
-    return "((" + v + ") == NULL)"
-}
-
-fn (Gen g) keySuffix(int k) string {
-    if (k == tyString) {
-        return "s"
-    }
-    return "i"
-}
-
-fn (Gen g) keyArg(int k, string v) string {
-    if (k == tyString) {
-        return v
-    }
-    return "(int64_t)(" + v + ")"
 }
 
 const string octalDigits = "01234567"
@@ -405,20 +542,21 @@ fn cString(string s) string {
 fn (Gen g) mut genHelper(int t, int kind) {
     string ct = g.ctype(t)
     string m = g.c.types.mangle(t)
-    string attr = "static __attribute__((unused))"
+    string attr = "static inline __attribute__((unused))"
+    if (kind == helperLess) {
+        string et = g.ctype(g.c.types.part(t, 0))
+        g.protos.push(attr + " bool sd_less_" + m + "(void *ctx, const void *a, const void *b);\n")
+        g.helpers.push(attr + " bool sd_less_" + m + "(void *ctx, const void *a, const void *b) {\n  return ((" + ct + ")ctx)(*(" + et + " const *)a, *(" + et + " const *)b);\n}\n")
+        return
+    }
+    []string parts = g.partExprs(t, "v")
+    []int partTypes = g.partTypes(t)
     if (kind == helperRetain) {
         g.protos.push(attr + " " + ct + " sd_rt_" + m + "(" + ct + " v);\n")
         []string body = []string{attr + " " + ct + " sd_rt_" + m + "(" + ct + " v) {\n"}
-        if (g.c.types.isOpt(t)) {
-            body.push("  if (v) v->rc++;\n")
-        } else {
-            int d = g.c.types.decl(t)
-            for (int i = 0; i < g.c.ast.typeDecls[d].fieldCount; i++) {
-                int ft = g.c.fieldType(d, i)
-                string fname = g.c.fieldName(d, i)
-                if (g.needsRt(ft)) {
-                    body.push("  v.f_" + fname + " = " + g.rtFn(ft) + "(v.f_" + fname + ");\n")
-                }
+        for (int i = 0; i < parts.len(); i++) {
+            if (g.counted(partTypes[i])) {
+                body.push("  " + parts[i] + " = " + g.retainExpr(partTypes[i], parts[i]) + ";\n")
             }
         }
         body.push("  return v;\n}\n")
@@ -426,83 +564,62 @@ fn (Gen g) mut genHelper(int t, int kind) {
     } else if (kind == helperRelease) {
         g.protos.push(attr + " void sd_rl_" + m + "(" + ct + " v);\n")
         []string rbody = []string{attr + " void sd_rl_" + m + "(" + ct + " v) {\n"}
-        if (g.c.types.isOpt(t)) {
-            rbody.push("  if (v && v->rc > 0) v->rc--;\n")
-        } else {
-            int rd = g.c.types.decl(t)
-            for (int j = 0; j < g.c.ast.typeDecls[rd].fieldCount; j++) {
-                int rft = g.c.fieldType(rd, j)
-                if (g.needsRt(rft)) {
-                    rbody.push("  " + g.rlFn(rft) + "(v.f_" + g.c.fieldName(rd, j) + ");\n")
-                }
+        for (int j = 0; j < parts.len(); j++) {
+            string r = g.releaseCall(partTypes[j], parts[j])
+            if (r != "") {
+                rbody.push("  " + r + ";\n")
             }
         }
         rbody.push("}\n")
         g.helpers.push(rbody.join(""))
-    } else if (kind == helperRetainPtr) {
-        g.protos.push(attr + " void sd_rtp_" + m + "(void *p);\n")
-        g.helpers.push(attr + " void sd_rtp_" + m + "(void *p) { *(" + ct + "*)p = " + g.rtFn(t) + "(*(" + ct + "*)p); }\n")
-    } else if (kind == helperEqPtr) {
-        g.protos.push(attr + " bool sd_eqp_" + m + "(const void *a, const void *b);\n")
-        g.helpers.push(attr + " bool sd_eqp_" + m + "(const void *a, const void *b) { return " + g.eqExpr(t, "*(" + ct + "*)a", "*(" + ct + "*)b") + "; }\n")
     } else if (kind == helperEq) {
         g.protos.push(attr + " bool sd_eq_" + m + "(" + ct + " a, " + ct + " b);\n")
-        g.helpers.push(attr + " bool sd_eq_" + m + "(" + ct + " a, " + ct + " b) {\n" + g.eqBody(t) + "}\n")
+        []string a = g.partExprs(t, "a")
+        []string b = g.partExprs(t, "b")
+        []string conds = []string{"true"}
+        for (int k = 0; k < a.len(); k++) {
+            conds.push(g.eqExpr(partTypes[k], a[k], b[k]))
+        }
+        g.helpers.push(attr + " bool sd_eq_" + m + "(" + ct + " a, " + ct + " b) {\n  return " + conds.join(" && ") + ";\n}\n")
     }
 }
 
-fn (Gen g) mut eqBody(int t) string {
-    switch (g.kindOf(t)) {
-    case Kind.List:
-        int el = g.elemOf(t)
-        return "  return sd_list_eq(a, b, sizeof(" + g.ctype(el) + "), " + g.eqpFn(el) + ");\n"
-    case Kind.Map:
-        return "  return sd_map_eq(a, b, " + g.eqpFn(g.elemOf(t)) + ");\n"
-    case Kind.Struct:
-        int d = g.c.types.decl(t)
-        []string s = []string{"  return true"}
-        for (int i = 0; i < g.c.ast.typeDecls[d].fieldCount; i++) {
-            string f = g.c.fieldName(d, i)
-            s.push(" && " + g.eqExpr(g.c.fieldType(d, i), "a.f_" + f, "b.f_" + f))
+// The fields of a struct or the parts of a tuple, as C expressions on v.
+fn (Gen g) partExprs(int t, string v) []string {
+    []string xs = []string{}
+    if (g.kindOf(t) == Kind.Tuple) {
+        for (int i = 0; i < g.c.types.count(t); i++) {
+            xs.push(v + ".r" + i.string())
         }
-        s.push(";\n")
-        return s.join("")
-    case Kind.Enum:
-        int ed = g.c.types.decl(t)
-        []string es = []string{"  if (a == b) return true;\n  if (!a || !b || a->tag != b->tag) return false;\n  switch (a->tag) {\n"}
-        TypeDecl td = g.c.ast.typeDecls[ed]
-        for (int ci = 0; ci < td.caseCount; ci++) {
-            EnumCase ec = g.c.enumCase(ed, ci)
-            if (ec.paramCount == 0) {
-                continue
-            }
-            es.push("  case " + ci.string() + ": return true")
-            for (int k = 0; k < ec.paramCount; k++) {
-                string fld = "u.c_" + ec.name + ".f" + k.string()
-                es.push(" && " + g.eqExpr(g.c.caseParamType(ed, ci, k), "a->" + fld, "b->" + fld))
-            }
-            es.push(";\n")
-        }
-        es.push("  }\n  return true;\n")
-        return es.join("")
-    case Kind.Opt:
-        int oe = g.elemOf(t)
-        if (g.isSmallOpt(t)) {
-            return "  return a.has == b.has && (!a.has || " + g.eqExpr(oe, "a.v", "b.v") + ");\n"
-        }
-        Kind ok = g.kindOf(oe)
-        if (ok == Kind.String) {
-            return "  if (!a.p || !b.p) return a.p == b.p;\n  return sd_str_eq(a, b);\n"
-        }
-        if (ok == Kind.Struct) {
-            return "  if (!a || !b) return a == b;\n  return " + g.eqExpr(oe, "a->v", "b->v") + ";\n"
-        }
-        return "  if (!a || !b) return a == b;\n  return " + g.eqExpr(oe, "a", "b") + ";\n"
-    case Kind.Void, Kind.Int, Kind.Float, Kind.Bool, Kind.Byte, Kind.String, Kind.Error, Kind.Null:
-        return "  return false;\n"
-    case Kind.Invalid, Kind.Interface, Kind.Tuple, Kind.Func, Kind.Chan:
-        return "  return false;\n"
+        return xs
     }
+    int d = g.c.types.decl(t)
+    for (int j = 0; j < g.c.ast.typeDecls[d].fieldCount; j++) {
+        xs.push(v + ".f_" + g.c.fieldName(d, j))
+    }
+    return xs
+}
+
+fn (Gen g) partTypes(int t) []int {
+    []int xs = []int{}
+    if (g.kindOf(t) == Kind.Tuple) {
+        for (int i = 0; i < g.c.types.count(t); i++) {
+            xs.push(g.c.types.part(t, i))
+        }
+        return xs
+    }
+    int d = g.c.types.decl(t)
+    for (int j = 0; j < g.c.ast.typeDecls[d].fieldCount; j++) {
+        xs.push(g.c.fieldType(d, j))
+    }
+    return xs
+}
+
+// The comparison adapter for xs.sortBy(f), for the function type
+// fn(T, T) bool (helpers are keyed by type, so the request is made on the
+// function type).
+fn (Gen g) mut lessFn(int fnType) string {
+    return g.helper(fnType, helperLess, "sd_less_")
 }
 
 // ---- type definitions ----
@@ -514,7 +631,25 @@ fn (Gen g) mut genTypes() {
         if (td.kind == DeclKind.Enum) {
             g.typeDefs.push("typedef struct sd_E_" + td.name + " sd_E_" + td.name + ";\n")
         } else if (td.kind == DeclKind.Struct) {
-            g.typeDefs.push("typedef struct sd_S_" + td.name + " sd_S_" + td.name + ";\ntypedef struct sd_B_" + td.name + " sd_B_" + td.name + ";\n")
+            g.typeDefs.push("typedef struct sd_S_" + td.name + " sd_S_" + td.name + ";\n")
+        }
+    }
+    int nt = g.c.types.list.len()
+    for (int t = 0; t < nt; t++) {
+        if (g.kindOf(t) == Kind.Tuple) {
+            g.typeDefs.push("typedef struct " + g.ctype(t) + " " + g.ctype(t) + ";\n")
+        }
+    }
+    for (int f = 0; f < nt; f++) {
+        if (g.kindOf(f) == Kind.Func) {
+            []string ps = []string{}
+            for (int p = 0; p < g.c.types.count(f); p++) {
+                ps.push(g.ctype(g.c.types.part(f, p)))
+            }
+            if (ps.len() == 0) {
+                ps.push("void")
+            }
+            g.typeDefs.push("typedef " + g.ctype(g.elemOf(f)) + " (*" + g.ctype(f) + ")(" + ps.join(", ") + ");\n")
         }
     }
     []int state = []int{}
@@ -524,27 +659,32 @@ fn (Gen g) mut genTypes() {
     for (int k = 0; k < n; k++) {
         state = g.genStructDef(k, state)
     }
-    string attr = "static __attribute__((unused))"
-    for (int s = 0; s < n; s++) {
-        TypeDecl sd = g.c.ast.typeDecls[s]
-        if (sd.kind != DeclKind.Struct) {
-            continue
-        }
-        string nm = sd.name
-        g.typeDefs.push("struct sd_B_" + nm + " { int64_t rc; sd_S_" + nm + " v; };\n")
-        g.protos.push(attr + " sd_B_" + nm + " *sd_bx_" + nm + "(sd_S_" + nm + " v);\n" + attr + " sd_B_" + nm + " *sd_bm_" + nm + "(sd_B_" + nm + " **pb);\n")
-        g.helpers.push(attr + " sd_B_" + nm + " *sd_bx_" + nm + "(sd_S_" + nm + " v) { sd_B_" + nm + " *b = sd_alloc(sizeof *b); b->rc = 1; b->v = v; return b; }\n")
-        string copy = "b->v"
-        int st = g.c.declType[s]
-        if (g.needsRt(st)) {
-            copy = g.rtFn(st) + "(b->v)"
-        }
-        g.helpers.push(attr + " sd_B_" + nm + " *sd_bm_" + nm + "(sd_B_" + nm + " **pb) { sd_B_" + nm + " *b = *pb; if (b->rc > 1) { b->rc--; b = sd_bx_" + nm + "(" + copy + "); *pb = b; } return b; }\n")
-    }
     for (int e = 0; e < n; e++) {
-        TypeDecl ed = g.c.ast.typeDecls[e]
-        if (ed.kind == DeclKind.Enum) {
+        if (g.c.ast.typeDecls[e].kind == DeclKind.Enum) {
             g.genEnumDef(e)
+        }
+    }
+    for (int u = 0; u < nt; u++) {
+        if (g.kindOf(u) == Kind.Tuple) {
+            []string fields = []string{}
+            for (int q = 0; q < g.c.types.count(u); q++) {
+                fields.push(" " + g.ctype(g.c.types.part(u, q)) + " r" + q.string() + ";")
+            }
+            g.typeDefs.push("struct " + g.ctype(u) + " {" + fields.join("") + " };\n")
+        }
+    }
+    for (int d = 0; d < n; d++) {
+        TypeDecl dd = g.c.ast.typeDecls[d]
+        if (dd.kind != DeclKind.Interface) {
+            g.typeDefs.push("static const sd_type sd_D_" + dd.name + ";\n")
+        }
+    }
+    for (int s = 0; s < n; s++) {
+        g.genDescriptor(s)
+    }
+    for (int v = 0; v < n; v++) {
+        if (g.c.ast.typeDecls[v].kind == DeclKind.Interface) {
+            g.genVtableType(v)
         }
     }
 }
@@ -577,11 +717,11 @@ fn (Gen g) mut genStructDef(int d, []int state) []int {
     return st
 }
 
+// An enum value is a box holding sd_E_Name: a tag followed by a union of
+// the cases' fields.
 fn (Gen g) mut genEnumDef(int d) {
     TypeDecl td = g.c.ast.typeDecls[d]
-    string n = td.name
-    string attr = "static __attribute__((unused))"
-    []string s = []string{"struct sd_E_" + n + " { int tag;"}
+    []string s = []string{"struct sd_E_" + td.name + " { int32_t tag;"}
     bool any = false
     for (int i = 0; i < td.caseCount; i++) {
         if (g.c.enumCase(d, i).paramCount > 0) {
@@ -605,22 +745,147 @@ fn (Gen g) mut genEnumDef(int d) {
     }
     s.push(" };\n")
     g.typeDefs.push(s.join(""))
+}
+
+// The runtime descriptor of a struct or enum, and the immortal boxes of the
+// enum cases without data.
+fn (Gen g) mut genDescriptor(int d) {
+    TypeDecl td = g.c.ast.typeDecls[d]
+    string n = td.name
+    if (td.kind == DeclKind.Struct) {
+        []string fs = []string{}
+        for (int i = 0; i < td.fieldCount; i++) {
+            fs.push("SD_FIELD(sd_S_" + n + ", f_" + g.c.fieldName(d, i) + ", " + g.desc(g.c.fieldType(d, i)) + ")")
+        }
+        if (td.fieldCount == 0) {
+            fs.push("SD_FIELD(sd_S_" + n + ", unused_, &sd_type_byte)")
+        }
+        string kind = "SD_STRUCT_TYPE_TRIVIAL"
+        if (g.counted(g.c.declType[d])) {
+            kind = "SD_STRUCT_TYPE"
+        }
+        g.typeDefs.push("static const sd_field sd_F_" + n + "[] = {" + fs.join(", ") + "};\n")
+        g.typeDefs.push("static const sd_type sd_D_" + n + " = " + kind + "(\"" + n + "\", sd_S_" + n + ", sd_F_" + n + ");\n")
+        return
+    }
+    if (td.kind != DeclKind.Enum) {
+        return
+    }
+    []string vs = []string{}
+    for (int j = 0; j < td.caseCount; j++) {
+        EnumCase ec = g.c.enumCase(d, j)
+        if (ec.paramCount == 0) {
+            vs.push("{\"" + ec.name + "\", NULL, 0}")
+            continue
+        }
+        []string cf = []string{}
+        for (int k = 0; k < ec.paramCount; k++) {
+            cf.push("SD_FIELD(sd_E_" + n + ", u.c_" + ec.name + ".f" + k.string() + ", " + g.desc(g.c.caseParamType(d, j, k)) + ")")
+        }
+        g.typeDefs.push("static const sd_field sd_F_" + n + "__" + ec.name + "[] = {" + cf.join(", ") + "};\n")
+        vs.push("{\"" + ec.name + "\", sd_F_" + n + "__" + ec.name + ", " + ec.paramCount.string() + "}")
+    }
+    if (td.caseCount == 0) {
+        vs.push("{\"\", NULL, 0}")
+    }
+    g.typeDefs.push("static const sd_variant sd_V_" + n + "[] = {" + vs.join(", ") + "};\n")
+    g.typeDefs.push("static const sd_type sd_D_" + n + " = SD_ENUM_TYPE(\"" + n + "\", sd_E_" + n + ", sd_V_" + n + ");\n")
     for (int m = 0; m < td.caseCount; m++) {
         EnumCase c = g.c.enumCase(d, m)
         if (c.paramCount == 0) {
-            g.helpers.push("static sd_E_" + n + " sd_k_" + n + "__" + c.name + " = {" + m.string() + "};\n")
-            continue
+            g.typeDefs.push("SD_BOX_STATIC(sd_k_" + n + "__" + c.name + ", &sd_D_" + n + ", sd_E_" + n + ", {.tag = " + m.string() + "});\n")
         }
-        []string ps = []string{}
-        []string body = []string{}
-        for (int q = 0; q < c.paramCount; q++) {
-            ps.push(g.ctype(g.c.caseParamType(d, m, q)) + " a" + q.string())
-            body.push(" e->u.c_" + c.name + ".f" + q.string() + " = a" + q.string() + ";")
-        }
-        string params = ps.join(", ")
-        g.protos.push(attr + " sd_E_" + n + " *sd_mk_" + n + "__" + c.name + "(" + params + ");\n")
-        g.helpers.push(attr + " sd_E_" + n + " *sd_mk_" + n + "__" + c.name + "(" + params + ") { sd_E_" + n + " *e = sd_alloc(sizeof *e); e->tag = " + m.string() + ";" + body.join("") + " return e; }\n")
     }
+}
+
+// ---- interfaces ----
+
+// The C name of an interface type in vtable names.
+fn (Gen g) ifaceName(int iface) string {
+    if (iface == tyError) {
+        return "error"
+    }
+    return g.declName(iface)
+}
+
+// The parameter list of a vtable entry: self, then the method's parameters.
+fn (Gen g) vtParams(int sig, bool isMut, bool named) string {
+    string self = "const void *"
+    if (isMut) {
+        self = "void *"
+    }
+    if (named) {
+        self = self + "self"
+    }
+    []string ps = []string{self}
+    for (int i = 0; i < g.c.types.count(sig); i++) {
+        string p = g.ctype(g.c.types.part(sig, i))
+        if (named) {
+            p = p + " a" + i.string()
+        }
+        ps.push(p)
+    }
+    return ps.join(", ")
+}
+
+// struct sd_V_Name { sd_vtable hdr; R (*m_name)(const void *self, ...); }
+fn (Gen g) mut genVtableType(int d) {
+    TypeDecl td = g.c.ast.typeDecls[d]
+    []string s = []string{"typedef struct { sd_vtable hdr;"}
+    for (int i = 0; i < td.methodCount; i++) {
+        MethodSig ms = g.c.ifaceMethod(d, i)
+        int sig = g.c.ifaceMethodType(d, i)
+        s.push(" " + g.ctype(g.elemOf(sig)) + " (*m_" + ms.name + ")(" + g.vtParams(sig, ms.isMut, false) + ");")
+    }
+    s.push(" } sd_V_" + td.name + ";\n")
+    g.typeDefs.push(s.join(""))
+}
+
+// One vtable per (type, interface) pair, with a thunk per method that
+// calls the type's method on the payload of the interface's box.
+fn (Gen g) mut genVtables() {
+    for (int i = 0; i < g.c.impls.len(); i++) {
+        Impl im = g.c.impls[i]
+        int t = g.c.declType[im.decl]
+        string tname = g.c.ast.typeDecls[im.decl].name
+        string vt = "sd_vt_" + tname + "__" + g.ifaceName(im.iface)
+        []string entries = []string{"{\"" + tname + "\"}"}
+        for (int j = 0; j < g.c.ifaceMethodCount(im.iface); j++) {
+            string name = g.c.ifaceMethodName(im.iface, j)
+            int sig = g.c.ifaceMethodSig(im.iface, j)
+            bool isMut = g.c.ifaceMethodMut(im.iface, j)
+            int? m = g.c.methods[tname + "." + name]
+            if (m == null) {
+                continue
+            }
+            string thunk = vt + "__" + name
+            string self = "*(" + g.ctype(t) + " const *)self"
+            if (isMut) {
+                self = "(" + g.ctype(t) + " *)self"
+            }
+            []string args = []string{self}
+            for (int k = 0; k < g.c.types.count(sig); k++) {
+                args.push("a" + k.string())
+            }
+            string call = g.c.fnCName[m] + "(" + args.join(", ") + ")"
+            string ret = g.ctype(g.elemOf(sig))
+            if (g.elemOf(sig) != tyVoid) {
+                call = "return " + call
+            }
+            g.thunks.push("static " + ret + " " + thunk + "(" + g.vtParams(sig, isMut, true) + ") { " + call + "; }\n")
+            entries.push(thunk)
+        }
+        string vtype = "sd_error_vtable"
+        if (im.iface != tyError) {
+            vtype = "sd_V_" + g.declName(im.iface)
+        }
+        g.thunks.push("static const " + vtype + " " + vt + " = {" + entries.join(", ") + "};\n")
+    }
+}
+
+// The vtable that converts a value of type t to the interface iface.
+fn (Gen g) vtableOf(int t, int iface) string {
+    return "sd_vt_" + g.declName(t) + "__" + g.ifaceName(iface)
 }
 
 // ---- constants and functions ----
@@ -629,30 +894,39 @@ fn isLiteralKind(ExprKind k) bool {
     return k == ExprKind.IntLit || k == ExprKind.FloatLit || k == ExprKind.ByteLit || k == ExprKind.StringLit || k == ExprKind.BoolLit
 }
 
-// Constants are functions. A literal is returned directly; anything else is
-// computed on first use and cached.
+// Constants are functions that return a borrowed value. A literal is
+// returned directly; anything else is computed on first use (per thread)
+// and kept for the rest of the program.
 fn (Gen g) mut genConsts() {
     for (int i = 0; i < g.c.ast.consts.len(); i++) {
         ConstDecl cd = g.c.ast.consts[i]
-        string ct = g.ctype(g.c.constType[i])
+        int t = g.c.constType[i]
+        string ct = g.ctype(t)
         string head = "static " + ct + " sd_c_" + cd.name + "(void)"
         g.protos.push(head + ";\n")
+        g.out = []string{}
+        g.slots = []Slot{}
+        g.ntmp = 0
         if (isLiteralKind(g.c.ast.exprs[cd.expr].kind)) {
             g.emit(head + " { return " + g.gexpr(cd.expr) + "; }")
+            g.consts.push(g.out.join(""))
             continue
         }
         g.emit(head + " {")
         g.indent++
-        g.emit("static " + ct + " v;")
-        g.emit("static int st;")
+        g.emit("static _Thread_local " + ct + " v;")
+        g.emit("static _Thread_local int st;")
         g.emit("if (st == 2) return v;")
         g.emit("if (st == 1) sd_crash(\"constant " + cd.name + " depends on itself\");")
         g.emit("st = 1;")
-        g.emit("v = " + g.gowned(cd.expr) + ";")
+        string val = g.gexpr(cd.expr)
+        g.emit("v = " + g.ownVal(val, t) + ";")
+        g.releaseTo(0)
         g.emit("st = 2;")
         g.emit("return v;")
         g.indent--
         g.emit("}")
+        g.consts.push(g.out.join(""))
     }
 }
 
@@ -684,11 +958,23 @@ fn (Gen g) mut fnSig(int f) string {
 fn (Gen g) mut genFn(int f) {
     FnDecl fd = g.c.ast.fns[f]
     g.curFn = f
+    g.out = []string{}
+    g.slots = []Slot{}
+    g.scopes = []int{}
+    g.loops = []LoopCtx{}
+    g.ntmp = 0
+    g.defers = g.blockHasDefer(fd.body)
     string sig = g.fnSig(f)
     g.protos.push(sig + ";\n")
     g.emit(sig + " {")
     g.indent++
-    g.genBlock(fd.body)
+    if (g.defers) {
+        g.emit("size_t _dm = sd_defer_mark();")
+    }
+    g.genBody(fd.body)
+    if (fd.resultCount == 0 && g.defers && !g.c.blockExits(fd.body)) {
+        g.emit("sd_defer_run(_dm);")
+    }
     // The checker proved that every path returns (perhaps through an
     // exhaustive switch); tell the C compiler too.
     Block body = g.c.ast.blocks[fd.body]
@@ -699,13 +985,29 @@ fn (Gen g) mut genFn(int f) {
     g.indent--
     g.emit("}")
     g.emit("")
+    g.fnText.push(g.out.join(""))
 }
 
-// Reads the runtime that is pasted at the top of every generated program.
+// The runtime pasted at the top of every generated program: seed.h,
+// seed_internal.h and the implementation files, without their includes of
+// each other (runtime/README.md, section 1).
 fn readRuntime(string root) (string, error) {
-    string path = root + "/compiler/runtime0.c"
-    if (!fs.exists(path)) {
-        return null, errors.new("cannot find the runtime at " + path + "; set SEED_ROOT to the directory that contains compiler/runtime0.c")
+    []string files = []string{"seed.h", "seed_internal.h", "seed_core.c", "seed_int.c", "seed_str.c", "seed_list.c", "seed_task.c", "seed_pkg.c"}
+    []string parts = []string{}
+    for (int i = 0; i < files.len(); i++) {
+        string path = root + "/runtime/" + files[i]
+        if (!fs.exists(path)) {
+            return null, errors.new("cannot find the runtime at " + path + "; set SEED_ROOT to the directory that contains runtime/seed.h")
+        }
+        string text = try fs.read(path)
+        []string lines = text.split("\n")
+        []string kept = []string{"/* ---- runtime/" + files[i] + " ---- */"}
+        for (int j = 0; j < lines.len(); j++) {
+            if (!lines[j].startsWith("#include \"seed")) {
+                kept.push(lines[j])
+            }
+        }
+        parts.push(kept.join("\n"))
     }
-    return fs.read(path)
+    return parts.join("\n"), null
 }

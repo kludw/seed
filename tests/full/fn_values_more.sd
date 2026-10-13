@@ -1,0 +1,88 @@
+// Function values in struct fields, maps and nullable variables, functions
+// that return several results or take lists, and sortBy on structs with a
+// stable order and with a comparator chosen at run time.
+package main
+
+import "errors"
+import "fmt"
+
+type Op struct {
+    string name
+    fn(int, int) int apply
+}
+
+fn plus(int a, int b) int {
+    return a + b
+}
+
+fn minus(int a, int b) int {
+    return a - b
+}
+
+fn divide(int a, int b) (int, error) {
+    if (b == 0) {
+        return null, errors.new("divide by zero")
+    }
+    return a / b, null
+}
+
+fn longer(string a, string b) bool {
+    return a.len() > b.len()
+}
+
+fn alphabetical(string a, string b) bool {
+    return a < b
+}
+
+fn sorter(bool byLength) fn(string, string) bool {
+    if (byLength) {
+        return longer
+    }
+    return alphabetical
+}
+
+fn total([]int xs) int {
+    int sum = 0
+    for (int i = 0; i < xs.len(); i++) {
+        sum = sum + xs[i]
+    }
+    return sum
+}
+
+fn summarize([]int xs, fn([]int) int f) string {
+    return "summary " + f(xs).string()
+}
+
+fn main([]string args) error {
+    []Op ops = []Op{Op{name: "plus", apply: plus}, Op{name: "minus", apply: minus}}
+    for (int i = 0; i < ops.len(); i++) {
+        fmt.println(ops[i].name + " " + ops[i].apply(10, 3).string())
+    }
+    Op op = ops[1]
+    fmt.println(op.apply(1, 2).string())
+    map[string]fn(int, int) int table = map[string]fn(int, int) int{"+": plus}
+    table["-"] = minus
+    (fn(int, int) int)? chosen = table["-"]
+    if (chosen != null) {
+        fmt.println(chosen(100, 1).string())
+    }
+    (fn(int, int) int)? none = table["*"]
+    fmt.println((none == null).string())
+    fn(int, int) (int, error) d = divide
+    int q, error err = d(7, 2)
+    if (err == null) {
+        fmt.println(q.string())
+    }
+    int? r, _ = d(1, 0)
+    fmt.println((r == null).string())
+    fmt.println(summarize([]int{1, 2, 3}, total))
+    []string words = []string{"kiwi", "fig", "banana", "apple", "date"}
+    words.sortBy(sorter(true))
+    fmt.println(words.join(" "))
+    words.sortBy(sorter(false))
+    fmt.println(words.join(" "))
+    []string copy = words
+    copy.sortBy(longer)
+    fmt.println(words.join(" ") + " / " + copy.join(" "))
+    return null
+}

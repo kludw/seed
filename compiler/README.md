@@ -12,9 +12,17 @@ seed2 c --strict compiler/*.sd -> build/stage3.c      (identical to stage2.c)
 ```
 make verify     # builds all stages and checks stage2.c == stage3.c
 make test       # tests/lang and tests/seed0 with build/seed2
+make test-full  # tests/full with build/seed2 c --strict
+make test-leaks # every test program under macOS leaks --atExit
 make test-strict  # tests/lang with build/seed2 c --strict
-make test0      # the same suites with seed0
+make test0      # tests/lang, tests/seed0 and tests/seed0/only with seed0
 ```
+
+`tests/seed0/only` holds what only seed0 does (64-bit ints that crash on
+overflow, rejecting interfaces); the real compiler's ints grow
+(`tests/full/int_*`). In `make test-full` the concurrency tests (`chan_*`,
+`group_*`, `select_*`, `parallel_word_count`) fail until the next phase,
+and `errors/unformatted_code` needs `seed fmt`.
 
 Because stage 1 is built by seed0, the compiler source may only use the
 seed0 subset (docs/seed0.md) until a snapshot replaces seed0 (see "Adding a
@@ -32,12 +40,14 @@ seed ast <file.sd>...                print the syntax tree (debugging aid)
 All files given together form one package. Compile errors go to stderr and
 exit with code 1; usage errors exit with 2.
 
-The generated C contains the runtime `compiler/runtime0.c` (a copy of
-`seed0/runtime.c`). The compiler finds it through `$SEED_ROOT`, or else
-relative to its own path: the binary is `<root>/build/seedN`, so the root is
-the parent of the binary's directory. The C compiler and its flags for
-`build`/`run` are the constants `cCompiler`, `cFlags` and `cLibs` at the top
-of `main.sd` (the Makefile has the same flags in `SEED_CFLAGS`).
+The generated C is self-contained: it starts with the runtime of `runtime/`
+(`seed.h`, `seed_internal.h` and the six `seed_*.c` files pasted in that
+order, without their `#include "seed..."` lines; `readRuntime` in
+`gen.sd`). The compiler finds it through `$SEED_ROOT`, or else relative to
+its own path: the binary is `<root>/build/seedN`, so the root is the parent
+of the binary's directory. The C compiler and its flags for `build`/`run`
+are the constants `cCompiler`, `cFlags` and `cLibs` at the top of `main.sd`
+(the Makefile has the same flags in `SEED_CFLAGS` and `SEED_LIBS`).
 
 ## Files
 
@@ -53,13 +63,14 @@ of `main.sd` (the Makefile has the same flags in `SEED_CFLAGS`).
 | `types.sd` | check | `Kind`, `Type`, the interned `Types` arena |
 | `check.sd` | check | `Checker`, program passes, type resolution, scopes, narrowing |
 | `check_expr.sd` | check | expressions, places (lvalues), T/T? conversions |
-| `check_call.sd` | check | calls: functions, methods, built-ins, core packages, conversions |
-| `check_stmt.sd` | check | statements, switch, assignment, "always exits" analysis |
+| `check_call.sd` | check | calls: functions, methods, function values, interface methods, built-ins, core packages, conversions |
+| `check_iface.sd` | check | interfaces, `implements`, which types have `==` |
+| `check_stmt.sd` | check | statements, switch, assignment, defer, "always exits" analysis, error guards |
 | `check_style.sd` | check | `--strict` checks: unused names/results, unreachable code, naming |
-| `gen.sd` | gen | `Gen`, program layout, C types, per-type helpers, type definitions |
-| `gen_expr.sd` | gen | expressions, places, built-in calls |
-| `gen_stmt.sd` | gen | statements |
-| `runtime0.c` | — | runtime pasted into every generated program |
+| `gen.sd` | gen | `Gen`, program layout, C types, retain/release, descriptors, type definitions, vtables, constants, the runtime |
+| `gen_expr.sd` | gen | temporaries and slots, evaluation order, expressions, operators, `try` |
+| `gen_call.sd` | gen | calls, places, built-in methods, package functions, conversions |
+| `gen_stmt.sd` | gen | statements, scopes, return, `defer` |
 
 ## Data structures
 
@@ -156,15 +167,24 @@ analyses can add their own lists without touching the tree:
 | `stmtVar`, `stmtDiscard` | `stmts` | local const variable; `T? x, _ = f()` |
 | `labelCase` | `labels` | enum case index |
 | `paramVar` | `params` | variable of a parameter or pattern binding |
+| `methodSigType` | `methodSigs` | the `fn(...)` type of an interface method |
+
+`impls` lists the `(type declaration, interface)` pairs whose `implements`
+was checked; the generator emits one vtable per pair.
 
 `ExprInfo` holds:
 
 - `ty`: the type the parent sees.
 - `res` (an enum) plus `ref`/`sub`/`builtin`/`pkgFn`: what the expression
-  resolved to — a local (`ref` = variable), constant, function, method,
+  resolved to — a local (`ref` = variable), constant, function (a call, or
+  a function used as a value), method, call of a function value
+  (`ValueCall`), interface method (`ref` = interface decl, `sub` = method),
   built-in method (`builtin`), core package function (`pkgFn`), conversion,
   enum constructor or value (`ref` = decl, `sub` = case), struct field
   (`sub` = field), list/string/map index.
+- `ifaceFrom`: the expression produces a value of this struct or enum type,
+  which is converted to the interface (`ty`, or `inner` when `wrap` is set
+  too).
 - `wrap`/`inner`: the expression produces `inner` (a `T`) and is converted
   to `ty` (a `T?`). seed0 inserted a wrap node instead; with arenas a flag is
   simpler.
@@ -216,56 +236,135 @@ past the offending token. When a file has syntax errors, checking is skipped.
 1. Collect package-level names; check that all files share one package;
    check imports (per file: a package must be imported in the file that
    uses it).
-2. Create a type for every struct and enum, then resolve fields and enum
-   case fields, and report structs that contain themselves by value.
-3. Resolve every function signature and register methods.
-4. Check `main`'s signature, then constants (lazily, in dependency order),
+2. Create a type for every struct, enum and interface, then resolve fields,
+   enum case fields and interface method signatures (`methodSigType`), and
+   report structs that contain themselves by value.
+3. Resolve every function signature and register methods (not on
+   interfaces).
+4. Check every `implements` declaration (`checkImplements`): the named type
+   must be an interface (or `error`), and the type must have each of its
+   methods with the same parameter and result types and the same `mut`.
+   Each checked pair goes into `impls`.
+5. Check `main`'s signature, then constants (lazily, in dependency order),
    then every function body.
 
 Expression checking mirrors seed0: there are no implicit conversions except
-`T → T?` (`coerce` sets `wrap`), `null → T?/error`, and reading a narrowed
-`T?` as `T`. Narrowing keeps a stack of narrowed *paths* (`"v12.email"` =
-variable 12, field `email`), added by conditions (`!=`/`==` null through
-`&&`, `||`, `!`) and by an `if` whose branch always exits, killed by
-assignment to the path or a prefix, and by a mut method call on a prefix.
-Before a loop, every path the loop assigns or mutates is un-narrowed.
-Whether a statement always exits is a pure function over the checked tree
-(`stmtExits`), used for "missing return", unreachable code and narrowing
-after early exits.
+`T → T?` (`coerce` sets `wrap`), `null → T?/error`, reading a narrowed `T?`
+as `T`, and a struct or enum that declares `implements I` → `I` (and `I?`,
+and `error`; `coerce` sets `ifaceFrom`). Narrowing keeps a stack of
+narrowed *paths* (`"v12.email"` = variable 12, field `email`), added by
+conditions (`!=`/`==` null through `&&`, `||`, `!`) and by an `if` whose
+branch always exits, killed by assignment to the path or a prefix, and by a
+mut method call on a prefix. Before a loop, every path the loop assigns or
+mutates is un-narrowed. Whether a statement always exits is a pure function
+over the checked tree (`stmtExits`), used for "missing return", unreachable
+code and narrowing after early exits.
+
+The same conditions also record paths known to be *null* (keys starting
+with `!`). They drive the **error guards**: after `int n, error err = f()`
+(or `n, err = f()`), `n` carries a `Guard` until `err` is known to be null
+(`if (err != null) { return ... }`, inside `if (err == null)`, after
+`err == null &&`), `n` is assigned again, or the scope ends. Reading a
+guarded variable is an error in `--strict` mode.
+
+Function values: a function name used as a value has `Res.Func` and type
+`fn(params) result`; a call whose callee is not a function or method name
+(a variable, field, element or call result of function type) is a
+`ValueCall`. Function types and types that contain them have no `==`
+(`comparable`). `xs.sortBy(f)` takes `fn(T, T) bool`.
+
+`defer f(args)` must be a call of a function, method, function value,
+interface method or package function, not a mut method (the deferred call
+runs after the function's variables are released); an error result must be
+discarded with `defer _ = f(args)` (`Stmt.discard`).
 
 `--strict` adds the pedantic checks of the full language that seed0 lacks
 (check_style.sd): unused variables, imports and call results, unreachable
-code, locals that shadow package-level names, and the naming rules
-(camelCase/PascalCase, with a suggested spelling). They are off by default
-because some seed0-era test programs fail them; the compiler itself is always
-built with `--strict`.
+code, locals that shadow package-level names, the naming rules
+(camelCase/PascalCase, with a suggested spelling) and the error guards.
+They are off by default because some seed0-era test programs fail them; the
+compiler itself is always built with `--strict`.
 
-Features that parse but are not implemented are rejected in checking with
-"X is not supported by seed0, and this compiler does not implement it yet".
+Features that parse but are not implemented (`chan`, `select`, `group`,
+`spawn`, `test`, `assert`) are rejected in checking with "X is not
+implemented by this compiler yet"; imports of user packages say that only
+the core packages can be imported.
 
-**C generation** produces exactly the representation seed0 uses (see
-seed0/README.md), so generated programs behave identically:
+**C generation** targets the runtime in `runtime/` (runtime/README.md is
+the reference for every representation and ownership rule):
 
 | Seed | C |
 |---|---|
-| `int`, `float`, `bool`, `byte` | `int64_t` (checked `sd_add`/... crash on overflow), `double`, `bool`, `uint8_t` |
-| `string`, `error` | `sd_str` by value, `sd_err*` |
-| `[]T`, `map[K]V` | `sd_list*`, `sd_map*` (counted, copy-on-write) |
-| struct, enum | `sd_S_Name` by value, `sd_E_Name*` (immutable heap object) |
-| `int?` etc., `Struct?`, other `T?` | `sd_O_i`..., `sd_B_Name*` box, the same pointer/`sd_str` with NULL |
+| `int`, `int?` | `sd_int`, a tagged word that grows into a big integer (`sd_int_add`, ...); null is `SD_INT_NULL` |
+| `float`, `bool`, `byte` | `double`, `bool`, `uint8_t` |
+| `float?`, `bool?`, `byte?` | `sd_opt_float` ... (`{has, v}`) |
+| `string`, `[]T`, `map[K]V` (and `T?` of them) | `sd_str`, `sd_list *`, `sd_map *` (counted, copy-on-write); null is `NULL` |
+| struct `S` | `sd_S_S` by value, with a descriptor `sd_D_S` |
+| `S?` | `sd_box *` holding an `sd_S_S` (copy-on-write) |
+| enum `E`, `E?` | `sd_box *` holding `sd_E_E {int32_t tag; union {...} u}`; cases without data are static immortal boxes `sd_k_E__Case` |
+| interface `I`, `I?`, `error` | `sd_iface` / `sd_err` `{vt, obj}`: a vtable `sd_V_I` and a box with the value |
+| `fn(A) R` | a C function pointer `sd_fn_<mangle>` |
 | several results | `sd_T_<mangle>` with fields `r0, r1, ...` |
 | mut receiver | pointer to the caller's place |
 
 Names are prefixed (`l_x`, `f_x`, `sd_f_name`, `sd_m_Type__name`,
-`sd_c_name()`, `_tN`). Expressions become C expressions, with GNU statement
-expressions for temporaries; `genList` evaluates operands left to right
-through temporaries when more than one has side effects. `gowned` retains a
-value copied out of a place that still holds it; `gplace` builds a pointer to
-a place, making every container on the way unique; `gstore` releases the old
-value. Per-type helpers (`sd_eq_`, `sd_eqp_`, `sd_rt_`, `sd_rtp_`, `sd_rl_`)
-are requested on demand through a queue (`Gen.helper`) and generated at the
-end. The output is: runtime, type definitions, tuple typedefs, prototypes,
-helpers, constants (lazily initialised functions), functions, `main`.
+`sd_c_name()`, `_tN`, `sd_dN` for defer thunks, `sd_vt_Type__Iface` for
+vtables).
+
+*Memory management.* Ownership follows runtime/README.md section 3:
+parameters are borrowed, results are owned, stores consume. The generator
+tracks the counted values the current function owns in a stack of *slots*
+(`Gen.slots`): local variables and the temporaries of the statement being
+generated.
+
+- `gexpr(e)` returns a C expression for a *borrowed* value, valid until the
+  end of the statement. Every owned intermediate result (a call result, an
+  arithmetic result, a new list, a box) goes into a temporary `_tN` that is
+  registered as a slot. Calls are always evaluated into temporaries, so
+  side effects happen in source order.
+- `ownVal(v)` turns a value into an owned one for a store: a live
+  temporary is *moved* (its slot stops being live, nothing is released),
+  anything else is retained (`sd_str_retain`, `sd_rt_<struct>`, ...).
+  Literals are immortal and need neither.
+- Each statement takes a mark on the slot stack and releases the slots above
+  it at its end (`releaseTo`). A block's locals are released at its end
+  unless the block always exits. `return` computes its result, releases
+  every slot (except a returned local, which is moved), runs the defers and
+  returns; `break`/`continue` release the slots of the loop body; `try`
+  releases everything on its error path.
+- `operands` evaluates the operands of an operation left to right. A
+  borrowed operand is read when the operation runs, so when a later
+  operand has side effects (a call, a mut built-in, `try`), the earlier one
+  is first copied into a temporary.
+- `a && b`, `a || b`: `b`'s temporaries live in an `if` block of their own.
+- `gplace` builds a pointer to a place, making every container on the way
+  unique (`sd_list_at_mut`, `sd_box_mut`); `gstore` evaluates the value,
+  then the place, releases the old value and stores. A mut call evaluates
+  (and keeps) its arguments before the receiver's place (`bag.addAll(bag)`).
+- `x = x + a + b` on a local string appends in place (`sd_str_append`);
+  other string `+` chains are one `sd_str_concat_n`.
+- Constants are functions returning a borrowed value cached in a
+  `_Thread_local` static (literals are returned directly).
+- `defer f(args)` evaluates the callee, receiver and arguments into an
+  environment (owned), pushed with `sd_defer_push`; the thunk `sd_dN` calls
+  `f` and releases the environment and the result. A function with defers
+  takes `sd_defer_mark()` on entry and calls `sd_defer_run` before every
+  return; on a crash the runtime runs them.
+- `switch` becomes an `if`/`else` chain (so `break`/`continue` in a case
+  reach the loop); `for` becomes `for (;;) { if (!cond) break; { body }
+  _cN:; post }` so that the condition and post statement can have
+  temporaries and `continue` reaches the post statement.
+
+Per-type helpers (`sd_rt_`/`sd_rl_` retain and release for structs and
+tuples, `sd_eq_` for struct `==`, `sd_less_` sortBy adapters) are requested
+on demand through a queue (`Gen.helper`) and generated at the end. Each
+`(type, interface)` pair gets a vtable whose thunks call the type's
+methods on the payload of the interface's box.
+
+The output is: the runtime, type definitions (forward typedefs, function
+pointer typedefs, structs, enum payloads, tuples, descriptors, vtable
+types, static enum boxes), prototypes, helpers, vtables and defer thunks,
+constants, functions, `main` (which calls `sd_main`).
 
 ## Writing the compiler in Seed
 
@@ -277,9 +376,15 @@ Value semantics shape the code:
 - Never copy an arena list into a local (`[]Expr xs = c.ast.exprs`): it
   raises the list's count, and the next change to the arena copies all of it.
   Read elements through the owner (`c.ast.exprs[e]`).
-- Node structs contain no lists, so copying a node out of an arena is free.
-- Build long strings as `[]string` and `join("")`; repeated `+` on a growing
-  string is quadratic.
+- Node structs contain no lists, so copying a node out of an arena is cheap
+  (one retain per string or int field, which is a no-op for small ints and
+  enum cases without data).
+- Passing a struct (even `Checker`) to a function or a plain method costs a
+  memcpy and no counting: parameters are borrowed. Storing it in a local
+  retains every counted field.
+- Build long strings as `[]string` and `join("")`, or append to a local
+  (`s = s + x` appends in place when `s` is not shared); `+` on a growing
+  string stored elsewhere is quadratic.
 - Calling a mut method on a struct kills narrowing of everything under it, so
   copy a narrowed field into a local before calling mut methods.
 
@@ -302,17 +407,54 @@ teaching may need a `--strict`-style switch until all test programs pass it.
 
 ## Decisions
 
-- **Same runtime and representation as seed0.** The generator is a careful
-  port of seed0's, so semantics (copy-on-write, mut paths, narrowing, crash
-  messages and exit codes) match by construction. `runtime0.c` is a copy of
-  `seed0/runtime.c`; a later phase switches to `runtime/`.
-- **Arenas plus parallel result lists**, with `ExprInfo.wrap` and
-  `ExprInfo.narrowed` flags instead of rewriting the tree.
+- **The runtime of `runtime/`, pasted into the output.** Generated programs
+  stay one self-contained C file (so the bootstrap snapshot will be one
+  file). seed0 keeps its own runtime (`seed0/runtime.c`); `compiler/runtime0.c`
+  is gone. Crash messages and exit codes are the same as seed0's.
+- **Every call result goes into a temporary**, even when it is not counted:
+  side effects (printing, crashing) then happen in source order, and C's
+  unspecified argument order never matters. clang removes the copies.
+- **Borrowed reads plus the "later effects" rule** instead of retaining every
+  operand: an operand that only reads a place is passed as is, and is copied
+  into a temporary only when a later operand of the same operation has side
+  effects. Almost all reads in the compiler itself cost nothing.
+- **Enums are boxes** (the runtime's recommended layout). Cases without
+  data are static immortal boxes, so `Kind k = x.kind` never allocates.
+- **Interface values hold the value in a box**; an enum's value (itself a
+  box pointer) is boxed again. Vtable thunks take a pointer to the payload.
+- **Interface methods may be `mut`.** A call needs a mutable place (not a
+  parameter); it makes the interface's box unique (`sd_box_mut`) and passes
+  the payload to the mut method.
+- **`implements` requires the exact signature**, including `mut`. Methods
+  cannot be declared on interface types.
+- **A struct or enum converts to `I`, `I?` and (when it implements it)
+  `error` automatically**, wherever such a value is expected (arguments,
+  assignments, returns, list and map literals, struct fields).
+- **`defer` takes a call of a function, method, function value, interface
+  method or package function.** Not a mut method (its receiver would be
+  gone by the time the call runs), not a built-in method or conversion.
+  `defer _ = f()` is `Stmt.discard`.
+- **Nullable function types need parentheses**: `(fn(int) int)?`, because
+  `fn(int) int?` is a function returning `int?`. The type is printed that
+  way in messages.
+- **Error guards are `--strict` checks**, like the other pedantic checks, and
+  last until the end of the block that made them (a guard made inside an
+  `if` does not reach the code after it).
+- **A field of function type can be called directly** (`op.apply(1, 2)`),
+  when the struct has no method of that name.
+- **Integer literals may have any size** (decimal or hex); values outside
+  `SD_INT`'s 63-bit range become `SD_INT_BIGLIT` (parsed once, immortal).
+- **Constants are computed once per thread** (`_Thread_local` cache) and
+  never freed, as runtime/README.md section 12 asks.
+- **tests/seed0/only** holds the tests whose expectations only hold for
+  seed0 (64-bit overflow crashes, interfaces rejected); `make test0` runs
+  them.
+- **Arenas plus parallel result lists**, with `ExprInfo.wrap`,
+  `ExprInfo.narrowed` and `ExprInfo.ifaceFrom` instead of rewriting the tree.
 - **Diagnostics**: up to 20, sorted, deduplicated by position, one error per
   failing expression (`tyInvalid` suppresses cascades). "did you mean x?"
   hints are written without backticks because the seed0 tests look for that
-  exact text. Unsupported features say "not supported by seed0" for the same
-  reason.
+  exact text.
 - **"missing return"** is reported at the closing brace of the function.
 - **Imports are per file.** seed0 treats them as package-wide.
 - **`--strict` is opt-in** (see above); the bootstrap stages use it.
@@ -326,11 +468,14 @@ teaching may need a `--strict`-style switch until all test programs pass it.
 
 ## Known limitations
 
-- Everything outside the seed0 subset parses but is rejected by the checker:
-  interfaces and `implements`, function types and function values (and
-  `sortBy`), `chan`/`select`/`group`/`spawn`, `defer`, `test`/`assert`, user
-  packages and qualified names, `s.chars()`, integers wider than 64 bits.
-- `int` is 64-bit and memory is never freed (seed0's runtime).
+- Not implemented yet (rejected by the checker with a clear message):
+  `chan`/`select`/`group`/`spawn`, `test`/`assert`, user packages and
+  qualified names. The runtime already has everything the concurrency phase
+  needs (runtime/README.md sections 10 and 11).
+- A crash leaks the counted values held by the locals of the unwound C
+  frames (runtime/README.md section 15); normal execution leaks nothing.
+- A mut call evaluates its arguments before the receiver's place, so in
+  `xs[f()].push(g())` `g` runs before `f`.
 - Formatting is not checked yet (`seed fmt` is a later phase).
 - Two concurrent `seed run` of files with the same name share a temporary
   directory.

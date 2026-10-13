@@ -282,10 +282,40 @@ sd_box *sd_box_new(const sd_type *t, const void *val) {
   return b;
 }
 
-void sd_box_free_(sd_box *b) {
+/* Freeing a box, list or map releases what it holds, which can free more of
+ * them: dropping a long linked list (Node? next) or a deep tree would recurse
+ * once per node and overflow the stack. So an object whose count drops to
+ * zero while another one is being freed is queued, and the outermost call
+ * frees the queue iteratively. The queue is threaded through the dead
+ * objects' count fields (every counted object starts with int64_t rc), with
+ * the kind in the low bits of the (8-byte aligned) pointer. */
+static _Thread_local int64_t sd_dead_head;
+static _Thread_local bool sd_dead_busy;
+
+static void sd_box_destroy(sd_box *b) {
   sd_release(b->t, sd_box_data(b));
   sd_obj_free(b);
 }
+
+void sd_free_queued_(void *obj, int kind) {
+  *(int64_t *)obj = sd_dead_head;
+  sd_dead_head = (int64_t)((uintptr_t)obj | (uintptr_t)kind);
+  if (sd_dead_busy) return;
+  sd_dead_busy = true;
+  while (sd_dead_head) {
+    int64_t t = sd_dead_head;
+    void *o = (void *)(uintptr_t)(t & ~(int64_t)7);
+    sd_dead_head = *(int64_t *)o;
+    switch ((int)(t & 7)) {
+    case SD_DEAD_BOX: sd_box_destroy(o); break;
+    case SD_DEAD_LIST: sd_list_destroy_(o); break;
+    default: sd_map_destroy_(o); break;
+    }
+  }
+  sd_dead_busy = false;
+}
+
+void sd_box_free_(sd_box *b) { sd_free_queued_(b, SD_DEAD_BOX); }
 
 void *sd_box_mut(sd_box **pb) {
   sd_box *b = *pb;

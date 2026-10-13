@@ -1,0 +1,15 @@
+// expect-error: cannot be compared
+// Function values have no ==.
+package main
+
+import "fmt"
+
+fn one() int {
+    return 1
+}
+
+fn main([]string args) error {
+    fn() int f = one
+    fmt.println((f == one).string())
+    return null
+}

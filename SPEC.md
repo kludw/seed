@@ -206,6 +206,9 @@ people.sortBy(olderThan)
 
 - A named function can be passed as a value. Its type is written `fn(Person, Person) bool`.
 - There are no anonymous functions and no closures, so a function value never carries hidden state.
+- A nullable function type needs parentheses: `(fn(int) int)?`, because `fn(int) int?` is a function that returns `int?`.
+- A struct field of function type is called directly: `op.apply(1, 2)`.
+- Function values cannot be compared with `==`.
 
 ## Structs, enums, interfaces
 
@@ -230,8 +233,9 @@ pub type Named interface {
 - A struct literal must set every field: `User{name: "k", email: null, tags: []string{}}`.
 - An enum case is always written with its type, both when creating a value and in a `switch`: `Shape.Circle(2.0)`, `case Shape.Circle(float r):`. A case without data has no parentheses: `Token.Eof`.
 - A name from another package is always written with the package name: `users.User`, `users.Shape.Circle(2.0)`.
-- A type satisfies an interface only by declaring it with `implements`. The compiler then checks that every required method exists.
-- A value of such a type converts to the interface automatically wherever the interface is expected. There is no way to get the original type back out of an interface value (no type switches or assertions).
+- A type satisfies an interface only by declaring it with `implements`. The compiler then checks that every required method exists, with exactly the same signature (including `mut`). Methods cannot be declared on an interface type.
+- A value of such a type converts to the interface (or the nullable interface) automatically wherever the interface is expected. There is no way to get the original type back out of an interface value (no type switches or assertions).
+- An interface method can be `mut`. Like any `mut` method, it can only be called on a variable or a part of one, and it changes only that interface value.
 - An enum case can carry data, and a `switch` over an enum must cover every case.
 
 ## Control flow
@@ -276,7 +280,8 @@ defer f.close()
 - A `switch` over an `int`, `byte`, `string` or `bool` must end with `default`. One case can list several values.
 - Variables bound in a `case` also write their type, like every other declaration **(proposed)**.
 - `break` and `continue` work in loops. There are no labels and no `goto` **(proposed)**.
-- `defer` runs when the enclosing function returns. Several defers run in reverse order (last first).
+- `defer` runs when the enclosing function returns (or its goroutine crashes). Several defers run in reverse order (last first). The call's arguments are evaluated when the `defer` statement runs.
+- `defer` takes a call of a function, method, function value or interface method, but not of a `mut` method: the variable it would change is gone when the call runs.
 - A deferred call that returns an error must discard it explicitly: `defer _ = f.close()`.
 - `break` and `continue` inside a `switch` apply to the enclosing loop.
 
@@ -284,7 +289,7 @@ defer f.close()
 
 - `error` is an interface with a `message() string` method.
 - `error` is the one type that can be `null` without a `?`: a `null` error means "no error".
-- A function that can fail returns `(..., error)`. When the error is not null, the other return values are null, and the compiler stops you from reading them until the error has been checked.
+- A function that can fail returns `(..., error)`. When the error is not null, the other return values are null, and the compiler stops you from reading them until the error has been checked: inside `if (err == null)`, after `if (err != null) { return ... }`, or right of `err == null &&`.
 - Every error must be handled. Ignoring a returned error is a compile error.
 
 ```

@@ -12,6 +12,8 @@ exact stdout (and exit code, where it isn't 0) is checked.
 | `lang/errors/` | Programs that seed0 must reject: an ignored error, `_` with a plain `T`, a `mut` method on a parameter, a `T?` used as `T`, syntax errors, unknown names and type mismatches. | `seed0` and the full compiler |
 | `full/` | Programs for the features outside the subset: interfaces, function values and `sortBy`, `defer`, channels, `select`, `group`/`spawn` with Erlang-style failure, integers wider than 64 bits and `s.chars()`. | full compiler only |
 | `full/errors/` | The full compiler's pedantic checks: unused names and imports, shadowing, switch coverage, missing returns, unreachable code, naming rules, `implements`, unhandled errors, formatting and so on. | full compiler only |
+| `seed0/` | Extra programs for the bootstrap compiler's subset (also run with the full compiler). | `seed0` and the full compiler |
+| `seed0/only/` | What only seed0 does: 64-bit ints that crash on overflow, rejecting interfaces. | `seed0` only |
 
 The `lang/` programs are written to also pass the full compiler's checks: they
 are formatted (4-space indentation, gofmt-style layout), have no unused names
@@ -47,6 +49,10 @@ stdout. `run.sh` compiles that C with `$CC` (default `cc`), runs the program
 with stdin from `/dev/null`, compares the results and prints a pass/fail
 summary. It exits non-zero if anything failed.
 
+`tests/leaks.sh` takes the same arguments and runs every program under
+macOS `leaks --atExit` (`make test-leaks`); programs that crash are expected
+to leak the locals of the frames the crash unwinds.
+
 ## Notes
 
 - The `fs_*` tests work in `$TMPDIR/seed_lang_fs_basic` and
@@ -59,5 +65,8 @@ summary. It exits non-zero if anything failed.
 - Float output avoids values whose text depends on where a formatter switches
   to exponent notation. Only values between 0.001 and 100000 and values with
   three-digit exponents (`1e+300`) are printed.
-- seed0's 64-bit overflow crash is not tested, because the full compiler's
-  integers grow instead. `full/bigint_*` tests the growing integers.
+- seed0's 64-bit overflow crash is tested only in `seed0/only/`, because the
+  full compiler's integers grow instead. `full/bigint_*` and `full/int_*`
+  test the growing integers.
+- `full/` runs with `seed c --strict` (`make test-full`), because its error
+  tests are the pedantic checks.

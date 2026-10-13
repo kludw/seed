@@ -102,7 +102,7 @@ type StmtKind enum {
 //   Switch      expr, list/count (Case nodes)
 //   Select      list/count (Case nodes, each with a comm statement)
 //   Return      list/count (values)
-//   Defer       expr
+//   Defer       expr (a call), discard (`defer _ = f()`)
 //   Spawn       expr
 //   Assert      expr
 //   Const       typeExpr, name, namePos, expr
@@ -118,6 +118,7 @@ type Stmt struct {
     int init
     int post
     bool inc
+    bool discard
     int typeExpr
     string name
     Pos namePos
@@ -395,6 +396,7 @@ fn newStmt(StmtKind kind, Pos pos) Stmt {
         init: -1,
         post: -1,
         inc: false,
+        discard: false,
         typeExpr: -1,
         name: "",
         namePos: pos,

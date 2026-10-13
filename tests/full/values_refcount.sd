@@ -1,0 +1,147 @@
+// Value semantics under reference counting: mut methods whose argument is
+// the receiver itself, pushes of elements of the same list, copy-on-write
+// through nullable struct paths, recursive enums, a 100000-node linked list
+// (freed without recursion), try inside list literals and conditions, and
+// evaluation order of calls.
+package main
+
+import "errors"
+import "fmt"
+
+type Bag struct {
+    []string items
+    int big
+}
+
+fn (Bag b) mut addAll(Bag other) {
+    for (int i = 0; i < other.items.len(); i++) {
+        b.items.push(other.items[i])
+    }
+    b.big = b.big + other.big
+}
+
+type Node struct {
+    int value
+    Node? next
+}
+
+type Tree enum {
+    Leaf
+    Branch(Tree left, int value, Tree right)
+}
+
+fn insert(Tree t, int v) Tree {
+    switch (t) {
+    case Tree.Leaf:
+        return Tree.Branch(Tree.Leaf, v, Tree.Leaf)
+    case Tree.Branch(Tree l, int x, Tree r):
+        if (v < x) {
+            return Tree.Branch(insert(l, v), x, r)
+        }
+        return Tree.Branch(l, x, insert(r, v))
+    }
+}
+
+fn walk(Tree t, []int acc) []int {
+    []int out = acc
+    switch (t) {
+    case Tree.Leaf:
+        return out
+    case Tree.Branch(Tree l, int x, Tree r):
+        out = walk(l, out)
+        out.push(x)
+        return walk(r, out)
+    }
+}
+
+fn say(string s) string {
+    fmt.println("say " + s)
+    return s
+}
+
+fn check(int n) (int, error) {
+    if (n < 0) {
+        return null, errors.new("negative " + n.string())
+    }
+    return n * 2, null
+}
+
+fn pair(int n) (string, string) {
+    string s = n.string()
+    return s, s
+}
+
+fn useTry(int n) (string, error) {
+    []int xs = []int{try check(n), try check(n + 1)}
+    if (xs[0] > 0 && (try check(xs[1])) > 5) {
+        return "big " + xs[0].string(), null
+    }
+    return say("a") + say("b") + (try check(n)).string(), null
+}
+
+fn main([]string args) error {
+    Bag bag = Bag{items: []string{"x", "y"}, big: 1 << 70}
+    bag.addAll(bag)
+    fmt.println(bag.items.join(",") + " " + bag.big.string())
+    []string xs = []string{"a"}
+    xs.push(xs[0] + xs[0])
+    xs.push(xs[xs.len() - 1])
+    fmt.println(xs.join(","))
+    map[string]int m = map[string]int{"a": 1}
+    m["b"] = 1 << 80
+    int? mb = m["b"]
+    if (mb != null) {
+        m["a"] = mb + 1
+    }
+    fmt.println(m.keys().join(","))
+    Node? head = null
+    for (int i = 0; i < 5; i++) {
+        head = Node{value: i, next: head}
+    }
+    Node? copy = head
+    if (head != null) {
+        head.value = 100
+        if (head.next != null) {
+            head.next.value = 200
+        }
+    }
+    []string vals = []string{}
+    Node? cur = copy
+    for (; cur != null; ) {
+        vals.push(cur.value.string())
+        cur = cur.next
+    }
+    fmt.println(vals.join(" "))
+    Node? long = null
+    for (int j = 0; j < 100000; j++) {
+        long = Node{value: j, next: long}
+    }
+    Tree t = Tree.Leaf
+    []int order = []int{5, 2, 8, 1, 9, 3}
+    for (int k = 0; k < order.len(); k++) {
+        t = insert(t, order[k])
+    }
+    Tree t2 = t
+    t = insert(t, 4)
+    fmt.println(walk(t, []int{}).len().string() + " " + walk(t2, []int{}).len().string())
+    fmt.println(say("1") + say("2") + say("3"))
+    string a, string b = pair(42)
+    fmt.println(a + b)
+    string r1, error e1 = useTry(3)
+    if (e1 == null) {
+        fmt.println(r1)
+    }
+    string? r2, error e2 = useTry(-1)
+    if (e2 != null || r2 == null) {
+        fmt.println(e2.message())
+    }
+    string r3, error e3 = useTry(0)
+    if (e3 == null) {
+        fmt.println(r3)
+    }
+    []Bag bags = []Bag{bag}
+    bags[0].items[1] = "changed"
+    bags[0].addAll(bags[0])
+    fmt.println(bag.items.len().string() + " " + bags[0].items.len().string() + " " + bags[0].items[1])
+    return null
+}

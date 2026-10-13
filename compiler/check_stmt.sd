@@ -154,7 +154,7 @@ fn (Checker c) mut checkStmt(int s) {
     case StmtKind.Select:
         c.unsupported(st.pos, "select")
     case StmtKind.Defer:
-        c.unsupported(st.pos, "defer")
+        c.checkDefer(st)
     case StmtKind.Spawn:
         c.unsupported(st.pos, "spawn")
     case StmtKind.Assert:
@@ -408,6 +408,44 @@ fn (Checker c) mut checkAssign(int s) {
             c.killAssign(c.pathKey(tg3.expr))
         }
     }
+    c.addGuards(s, rt)
+}
+
+// int n, error err = f(): n may not be read until err is checked (see
+// Guard). The guards apply to local variables.
+fn (Checker c) mut addGuards(int s, int rt) {
+    Stmt st = c.ast.stmts[s]
+    int n = st.count
+    if (c.types.part(rt, n - 1) != tyError) {
+        return
+    }
+    int et = c.ast.at(st.list, n - 1)
+    Target last = c.ast.targets[et]
+    string errKey = ""
+    string errName = ""
+    if (last.kind == TargetKind.Decl && c.targetVar[et] >= 0) {
+        errKey = "v" + c.targetVar[et].string()
+        errName = last.name
+    } else if (last.kind == TargetKind.Place) {
+        errKey = c.pathKey(last.expr)
+        errName = c.describe(last.expr)
+    }
+    if (errKey == "") {
+        return
+    }
+    for (int i = 0; i < n - 1; i++) {
+        int ti = c.ast.at(st.list, i)
+        Target tg = c.ast.targets[ti]
+        int v = -1
+        if (tg.kind == TargetKind.Decl) {
+            v = c.targetVar[ti]
+        } else if (tg.kind == TargetKind.Place && c.ast.exprs[tg.expr].kind == ExprKind.Ident && c.info[tg.expr].res == Res.Local) {
+            v = c.info[tg.expr].ref
+        }
+        if (v >= 0) {
+            c.guards.push(Guard{key: "v" + v.string(), errKey: errKey, errName: errName, dead: false})
+        }
+    }
 }
 
 // After an error on the right side, still declare the typed targets so that
@@ -546,5 +584,51 @@ fn (Checker c) mut checkEnumSwitch(Stmt st, int t) {
         if (!seen[n]) {
             c.errorHint(st.pos, "switch over " + td.name + " does not handle case " + td.name + "." + c.enumCase(d, n).name, "add a case for it; a switch over an enum must list every case")
         }
+    }
+}
+
+// defer f(args): the arguments are evaluated now and the call runs when the
+// function returns (or crashes). An error result must be discarded
+// explicitly with  defer _ = f(args).
+fn (Checker c) mut checkDefer(Stmt st) {
+    int e = st.expr
+    c.checkExpr(e)
+    Expr x = c.ast.exprs[e]
+    if (x.kind != ExprKind.Call) {
+        if (x.kind != ExprKind.Bad) {
+            c.errorHint(x.pos, "defer needs a function call", "write  defer f(args)")
+        }
+        return
+    }
+    if (c.curFn < 0) {
+        return
+    }
+    ExprInfo i = c.info[e]
+    bool isMut = false
+    if (i.res == Res.Method) {
+        isMut = c.ast.fns[i.ref].recvMut
+    } else if (i.res == Res.IfaceMethod) {
+        isMut = c.ifaceMethod(i.ref, i.sub).isMut
+    } else if (i.res == Res.Builtin) {
+        isMut = isBuiltinMutName(c.ast.exprs[x.a].text)
+    }
+    if (isMut) {
+        c.errorHint(x.pos, "defer cannot call the mut method " + c.describe(e), "the deferred call runs after the function's variables are gone; call it before returning instead")
+        return
+    }
+    if (i.res != Res.Func && i.res != Res.Method && i.res != Res.ValueCall && i.res != Res.IfaceMethod && i.res != Res.Pkg) {
+        if (c.typeOf(e) != tyInvalid) {
+            c.errorHint(x.pos, "defer needs a call of a function or method, not " + c.describe(e), "write a function that does the work and defer a call of it")
+        }
+        return
+    }
+    int t = c.typeOf(e)
+    if (t == tyInvalid || st.discard) {
+        return
+    }
+    if (c.types.endsWithError(t)) {
+        c.errorHint(x.pos, "the error returned by " + c.describe(e) + " is not handled", "discard it explicitly:  defer _ = " + c.describe(e))
+    } else {
+        c.checkUnusedResult(e)
     }
 }

@@ -209,6 +209,9 @@ fn (Ast a) dumpStmt(int s, string indent) string {
     case StmtKind.Return:
         return "(return " + a.dumpExprs(st.list, st.count) + ")"
     case StmtKind.Defer:
+        if (st.discard) {
+            return "(defer _ " + a.dumpExpr(st.expr) + ")"
+        }
         return "(defer " + a.dumpExpr(st.expr) + ")"
     case StmtKind.Spawn:
         return "(spawn " + a.dumpExpr(st.expr) + ")"

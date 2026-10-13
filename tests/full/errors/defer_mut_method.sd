@@ -1,0 +1,10 @@
+// expect-error: defer_mut_method.sd:8:
+// A deferred call runs after the function's variables are gone, so it cannot
+// be a mut method.
+package main
+
+fn main([]string args) error {
+    []int xs = []int{}
+    defer xs.push(1)
+    return null
+}

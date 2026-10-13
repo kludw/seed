@@ -385,12 +385,50 @@ static void test_stress(long rounds) {
 #endif
 }
 
+/* Dropping long chains frees them without recursion (a recursive free of
+ * a million-node list overflows the stack): a linked list of boxes
+ * (type Node struct { int v; Node? next }), a list nested in lists, and a
+ * chain through maps. */
+typedef struct { sd_int v; sd_box *next; } S_Node;
+static const sd_field F_Node[] = {SD_FIELD(S_Node, v, &sd_type_int), SD_FIELD(S_Node, next, &sd_type_box)};
+static const sd_type T_Node = SD_STRUCT_TYPE("Node", S_Node, F_Node);
+
+static void test_long_chains(void) {
+  int64_t live0 = sd_live_objects();
+  enum { N = 1000000 };
+  sd_box *head = NULL;
+  for (int i = 0; i < N; i++) {
+    S_Node n = {SD_INT(i), head};
+    head = sd_box_new(&T_Node, &n);
+  }
+  sd_box_release(head);
+  CHECK(sd_live_objects() == live0);
+  sd_list *l = sd_list_new(&sd_type_list, 1);
+  for (int i = 0; i < N; i++) {
+    sd_list *outer = sd_list_new(&sd_type_list, 1);
+    SD_LIST_PUSH(&outer, sd_list *, l);
+    l = outer;
+  }
+  sd_list_release(l);
+  CHECK(sd_live_objects() == live0);
+  sd_map *m = sd_map_new(&sd_type_int, &sd_type_map);
+  for (int i = 0; i < N / 10; i++) {
+    sd_map *outer = sd_map_new(&sd_type_int, &sd_type_map);
+    sd_int k = SD_INT(i);
+    sd_map_set(&outer, &k, &m);
+    m = outer;
+  }
+  sd_map_release(m);
+  CHECK(sd_live_objects() == live0);
+}
+
 int main(int argc, char **argv) {
   int64_t live0 = sd_live_objects();
   test_lists();
   test_structs();
   test_maps();
   test_boxes_ifaces();
+  test_long_chains();
   CHECK(sd_live_objects() == live0);
   if (sd_live_objects() != live0) fprintf(stderr, "leaked %lld objects\n", (long long)(sd_live_objects() - live0));
   test_stress(argc > 1 ? atol(argv[1]) : 200000);

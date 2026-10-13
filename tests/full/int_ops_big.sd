@@ -1,0 +1,45 @@
+// Every int operator on values past 64 bits: bitwise operators use infinite
+// two's complement, >> floors, and comparisons, map keys, list search and
+// conversions work on big values.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    int a = 1 << 100
+    int b = (1 << 64) + 12345
+    fmt.println((a & b).string() + " " + (a | b).string() + " " + (a ^ b).string())
+    fmt.println(((-a) >> 3).string() + " " + (b >> 64).string() + " " + ((-b) & 0xffff).string())
+    fmt.println((a / b).string() + " " + (a % b).string() + " " + ((-a) / b).string() + " " + ((-a) % b).string())
+    fmt.println((a == 1 << 100).string() + " " + (a != b).string() + " " + (a <= b).string() + " " + (-a < b).string())
+    map[int]string names = map[int]string{a: "two to the 100", b: "two to the 64 and a bit"}
+    string? name = names[1 << 100]
+    if (name != null) {
+        fmt.println(name)
+    }
+    []int xs = []int{1, a, b, -a}
+    int? at = xs.index(-(1 << 100))
+    if (at != null) {
+        fmt.println("found at " + at.string())
+    }
+    fmt.println(xs.contains(b).string())
+    xs.sort()
+    []string parts = []string{}
+    for (int i = 0; i < xs.len(); i++) {
+        parts.push(xs[i].string())
+    }
+    fmt.println(parts.join(" "))
+    fmt.println(float(a).string())
+    fmt.println(int(1.0e30).string())
+    int s, error err = "-123456789012345678901234567890".toInt()
+    if (err == null) {
+        fmt.println((s * 10).string())
+    }
+    switch (a) {
+    case 1267650600228229401496703205376:
+        fmt.println("switch matched")
+    default:
+        fmt.println("switch missed")
+    }
+    return null
+}

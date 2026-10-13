@@ -40,9 +40,20 @@ type Var struct {
 }
 
 // A narrowed path (see pathKey). dead marks a path that was assigned after
-// it was narrowed.
+// it was narrowed. A key that starts with "!" is a path known to be null
+// (used for errors, see Guard).
 type Narrow struct {
     string key
+    bool dead
+}
+
+// After `int n, error err = f()`, n may not be read until err is checked:
+// the guard on n (key "v<n>") lasts until err (errKey) is known to be null
+// (the narrowing "!" + errKey), n is assigned again, or its scope ends.
+type Guard struct {
+    string key
+    string errKey
+    string errName
     bool dead
 }
 
@@ -56,6 +67,8 @@ type Narrow struct {
 //   EnumVal     ref = type decl, sub = case (Type.Case)
 //   Field       a struct field
 //   ListIndex, StringIndex, MapIndex
+//   ValueCall   a call of a function value (the callee is any expression)
+//   IfaceMethod ref = interface decl, sub = method index (in its methods)
 type Res enum {
     None
     Local
@@ -71,6 +84,8 @@ type Res enum {
     ListIndex
     StringIndex
     MapIndex
+    ValueCall
+    IfaceMethod
 }
 
 type Builtin enum {
@@ -103,6 +118,8 @@ type Builtin enum {
     Delete
     Keys
     Message
+    Chars
+    SortBy
 }
 
 type PkgFn enum {
@@ -129,9 +146,13 @@ type PkgFn enum {
 // type is the type the parent sees. When wrap is set, the expression itself
 // produces `inner` (a T) and is converted to type (a T?). When narrowed is
 // set, the expression is stored as `orig` (a T?) and read as type (a T).
+// When ifaceFrom is not -1, the expression produces a value of the struct or
+// enum type ifaceFrom, which is converted to the interface (type, or inner
+// when wrap is set too).
 type ExprInfo struct {
     int ty
     int inner
+    int ifaceFrom
     bool wrap
     bool narrowed
     int orig
@@ -146,6 +167,7 @@ fn newInfo() ExprInfo {
     return ExprInfo{
         ty: tyInvalid,
         inner: -1,
+        ifaceFrom: -1,
         wrap: false,
         narrowed: false,
         orig: -1,
@@ -155,6 +177,13 @@ fn newInfo() ExprInfo {
         builtin: Builtin.None,
         pkgFn: PkgFn.None,
     }
+}
+
+// A type that declares `implements iface` (iface is an interface type or
+// error) and has the methods for it.
+type Impl struct {
+    int decl
+    int iface
 }
 
 type Checker struct {
@@ -167,6 +196,8 @@ type Checker struct {
     map[string]bool usedImports
     map[string]int methods
     map[string]bool mutNames
+    []Impl impls
+    []int methodSigType
     []int declType
     []int teType
     []int fnRet
@@ -187,6 +218,8 @@ type Checker struct {
     []int scopeMarks
     []Narrow narrows
     []int narrowMarks
+    []Guard guards
+    []int guardMarks
     int curFn
     int loopDepth
     bool strict
@@ -207,6 +240,8 @@ fn newChecker(Ast ast, Diags diags, bool strict) Checker {
         usedImports: map[string]bool{},
         methods: map[string]int{},
         mutNames: map[string]bool{},
+        impls: []Impl{},
+        methodSigType: []int{},
         declType: []int{},
         teType: []int{},
         fnRet: []int{},
@@ -227,6 +262,8 @@ fn newChecker(Ast ast, Diags diags, bool strict) Checker {
         scopeMarks: []int{},
         narrows: []Narrow{},
         narrowMarks: []int{},
+        guards: []Guard{},
+        guardMarks: []int{},
         curFn: -1,
         loopDepth: 0,
         strict: strict,
@@ -251,6 +288,9 @@ fn newChecker(Ast ast, Diags diags, bool strict) Checker {
     for (int p = 0; p < ast.params.len(); p++) {
         c.paramVar.push(-1)
     }
+    for (int m = 0; m < ast.methodSigs.len(); m++) {
+        c.methodSigType.push(tyInvalid)
+    }
     return c
 }
 
@@ -265,9 +305,13 @@ fn (Checker c) mut errorHint(Pos pos, string message, string hint) {
 }
 
 // For the features that the parser accepts but this compiler cannot
-// translate yet.
+// translate yet: concurrency (chan, select, group, spawn) and tests.
 fn (Checker c) mut unsupported(Pos pos, string what) {
-    c.errorHint(pos, what + " is not supported by seed0, and this compiler does not implement it yet", "see docs/seed0.md for the supported subset")
+    string hint = "concurrency (chan, select, group, spawn) comes with the next version of the compiler"
+    if (what == "test" || what == "assert") {
+        hint = "tests and seed test come with a later version of the compiler"
+    }
+    c.errorHint(pos, what + " is not implemented by this compiler yet", hint)
 }
 
 // ---- small accessors ----
@@ -321,6 +365,7 @@ fn (Checker c) mut checkProgram() {
         c.resolveSignature(f)
         c.recvVar.push(-1)
     }
+    c.checkImplements()
     c.checkMain()
     for (int n = 0; n < c.ast.consts.len(); n++) {
         c.constType.push(tyInvalid)
@@ -407,11 +452,8 @@ fn (Checker c) isImported(int file, string pkg) bool {
 fn (Checker c) mut resolveTypeDecl(int d) {
     TypeDecl td = c.ast.typeDecls[d]
     if (td.kind == DeclKind.Interface) {
-        c.unsupported(td.pos, "interface")
+        c.resolveInterface(d)
         return
-    }
-    if (td.implCount > 0) {
-        c.unsupported(c.ast.typeExprs[c.ast.at(td.impls, 0)].pos, "implements")
     }
     for (int i = 0; i < td.fieldCount; i++) {
         Param f = c.ast.params[c.ast.at(td.fields, i)]
@@ -467,13 +509,7 @@ fn (Checker c) mut resolveSignature(int f) {
     for (int j = 0; j < fd.resultCount; j++) {
         rs.push(c.resolve(c.ast.at(fd.results, j)))
     }
-    if (rs.len() == 0) {
-        c.fnRet.push(tyVoid)
-    } else if (rs.len() == 1) {
-        c.fnRet.push(rs[0])
-    } else {
-        c.fnRet.push(c.types.tupleOf(rs))
-    }
+    c.fnRet.push(c.resultOf(rs))
     if (!fd.isMethod) {
         c.fnRecv.push(-1)
         c.fnCName.push("sd_f_" + fd.name)
@@ -494,6 +530,12 @@ fn (Checker c) mut resolveSignature(int f) {
     }
     int d = c.globalList[g].index
     TypeDecl td = c.ast.typeDecls[d]
+    if (td.kind == DeclKind.Interface) {
+        c.errorHint(rte.pos, "methods cannot be declared on the interface " + td.name, "declare them on the struct and enum types that implement it")
+        c.fnRecv.push(-1)
+        c.fnCName.push("sd_m_invalid__" + fd.name)
+        return
+    }
     c.teType[fd.recvType] = c.declType[d]
     c.fnRecv.push(d)
     c.fnCName.push("sd_m_" + td.name + "__" + fd.name)
@@ -576,6 +618,28 @@ fn (Checker c) paramType(int f, int i) int {
 
 fn (Checker c) resultType(int f, int i) int {
     return c.teType[c.ast.at(c.ast.fns[f].results, i)]
+}
+
+// The result type for a list of result types: void, the one type, or a
+// tuple.
+fn (Checker c) mut resultOf([]int rs) int {
+    if (rs.len() == 0) {
+        return tyVoid
+    }
+    if (rs.len() == 1) {
+        return rs[0]
+    }
+    return c.types.tupleOf(rs)
+}
+
+// The type of a function used as a value.
+fn (Checker c) mut fnType(int f) int {
+    FnDecl fd = c.ast.fns[f]
+    []int ps = []int{}
+    for (int i = 0; i < fd.paramCount; i++) {
+        ps.push(c.paramType(f, i))
+    }
+    return c.types.funcOf(ps, c.fnRet[f])
 }
 
 fn (Checker c) mut unknownCase(Pos pos, int d, string name) {
@@ -700,8 +764,19 @@ fn (Checker c) mut resolveUncached(int te) int {
         c.unsupported(x.pos, "chan")
         return tyInvalid
     case TypeExprKind.Func:
-        c.unsupported(x.pos, "a function type")
-        return tyInvalid
+        []int ps = []int{}
+        for (int j = 0; j < x.count; j++) {
+            ps.push(c.resolve(c.ast.at(x.list, j)))
+        }
+        []int rs = []int{}
+        for (int r = 0; r < x.resultCount; r++) {
+            rs.push(c.resolve(c.ast.at(x.results, r)))
+        }
+        int result = c.resultOf(rs)
+        if (result == tyInvalid) {
+            return tyInvalid
+        }
+        return c.types.funcOf(ps, result)
     }
 }
 
@@ -737,6 +812,8 @@ fn (Checker c) mut checkFnBody(int f) {
     c.scopeMarks = []int{}
     c.narrows = []Narrow{}
     c.narrowMarks = []int{}
+    c.guards = []Guard{}
+    c.guardMarks = []int{}
     c.loopDepth = 0
     int firstVar = c.vars.len()
     c.pushScope()
@@ -768,14 +845,19 @@ fn (Checker c) mut checkFnBody(int f) {
 fn (Checker c) mut pushScope() {
     c.scopeMarks.push(c.scope.len())
     c.narrowMarks.push(c.narrows.len())
+    c.guardMarks.push(c.guards.len())
 }
 
 fn (Checker c) mut popScope() {
     int? s = c.scopeMarks.pop()
     int? n = c.narrowMarks.pop()
+    int? g = c.guardMarks.pop()
     if (s != null && n != null) {
         c.truncateScope(s)
         c.truncateNarrows(n)
+    }
+    if (g != null && c.guards.len() > g) {
+        c.guards = c.guards.slice(0, g)
     }
 }
 
@@ -879,16 +961,45 @@ fn keyExtends(string key, string prefix, bool strict) bool {
     return key[prefix.len()] == '.'
 }
 
-// The path was assigned: it and everything under it may be null again.
+// The path was assigned: it and everything under it may be null again (or
+// no longer null), and a guard on it ends.
 fn (Checker c) mut killAssign(string key) {
     if (key == "") {
         return
     }
     for (int i = 0; i < c.narrows.len(); i++) {
-        if (keyExtends(c.narrows[i].key, key, false)) {
+        string k = c.narrows[i].key
+        if (k.startsWith("!")) {
+            k = k.slice(1, k.len())
+        }
+        if (keyExtends(k, key, false)) {
             c.narrows[i].dead = true
         }
     }
+    for (int j = 0; j < c.guards.len(); j++) {
+        if (c.guards[j].key == key) {
+            c.guards[j].dead = true
+        }
+    }
+}
+
+// The guard on the variable v, if v was returned beside an error that is
+// not known to be checked yet (or -1).
+fn (Checker c) guardOf(int v) int {
+    if (c.guards.len() == 0) {
+        return -1
+    }
+    string key = "v" + v.string()
+    for (int i = c.guards.len() - 1; i >= 0; i--) {
+        Guard g = c.guards[i]
+        if (g.key == key && !g.dead) {
+            if (c.isNarrowed("!" + g.errKey)) {
+                return -1
+            }
+            return i
+        }
+    }
+    return -1
 }
 
 // A mut method was called on the path: everything under it may change.
@@ -903,12 +1014,13 @@ fn (Checker c) mut killMut(string key) {
     }
 }
 
-// The paths that are known not to be null when cond is `when`.
+// The paths that are known not to be null when cond is `when`, and (with
+// a "!" in front) the paths known to be null.
 fn (Checker c) condKeys(int cond, bool when, []string out) []string {
     []string keys = out
     Expr x = c.ast.exprs[cond]
     if (x.kind == ExprKind.Binary) {
-        if ((x.op == Tok.Ne && when) || (x.op == Tok.Eq && !when)) {
+        if (x.op == Tok.Ne || x.op == Tok.Eq) {
             int other = -1
             if (c.ast.exprs[x.a].kind == ExprKind.NullLit) {
                 other = x.b
@@ -917,8 +1029,10 @@ fn (Checker c) condKeys(int cond, bool when, []string out) []string {
             }
             if (other >= 0) {
                 string k = c.pathKey(other)
-                if (k != "") {
+                if (k != "" && (x.op == Tok.Ne) == when) {
                     keys.push(k)
+                } else if (k != "") {
+                    keys.push("!" + k)
                 }
             }
         } else if ((x.op == Tok.AndAnd && when) || (x.op == Tok.OrOr && !when)) {
@@ -939,7 +1053,7 @@ fn (Checker c) mut narrowOn(int cond, bool when) {
 }
 
 fn isBuiltinMutName(string n) bool {
-    return n == "push" || n == "pop" || n == "insert" || n == "remove" || n == "reverse" || n == "sort" || n == "delete"
+    return n == "push" || n == "pop" || n == "insert" || n == "remove" || n == "reverse" || n == "sort" || n == "sortBy" || n == "delete"
 }
 
 // Before a loop: any path the loop assigns or mutates is not narrowed at its

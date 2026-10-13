@@ -1,0 +1,27 @@
+// expect-error: perimeter
+// Only the interface's methods can be called on an interface value.
+package main
+
+import "fmt"
+
+type Shape interface {
+    area() float
+}
+
+type Square struct implements Shape {
+    float side
+}
+
+fn (Square s) area() float {
+    return s.side * s.side
+}
+
+fn (Square s) perimeter() float {
+    return 4.0 * s.side
+}
+
+fn main([]string args) error {
+    Shape s = Square{side: 1.0}
+    fmt.println(s.perimeter().string())
+    return null
+}
