@@ -34,3 +34,17 @@ Details are in [compiler/README.md](compiler/README.md#decisions). The ones that
 17. **`fn(int) f` vs `fn(int) bool f`.** Where a type is followed by a name, an identifier right after a function type's `)` is its result type only if another name, `.` or `?` follows it. Elsewhere it is always the result type.
 18. **`select` with `default` is a syntax error**, with a hint to use a timeout channel.
 19. **The pedantic checks are opt-in for now** (`seed c --strict`): unused variables, imports and results, unreachable code, locals shadowing package-level names, and the naming rules. Some seed0-era test programs fail them; the compiler's own source is always built with `--strict`.
+
+## From the standard library design (docs/stdlib.md)
+
+20. **Struct fields are private unless marked `pub`.** Otherwise any program could forge a file or socket handle.
+21. **Standard-library functions can be declared without a body** and implemented in C. Only the standard library may do this.
+22. **`spawn` can appear anywhere inside a `group` block,** including loops. Worker pools and servers need it.
+23. **Blocking standard-library calls are cancellation points,** as well as channel operations. Otherwise a cancelled server goroutine would hang in `accept` forever.
+24. **Strings can hold any bytes.** Files, sockets and hashes use `string` for raw data.
+25. **Float division by zero gives `inf`/`nan`;** only integer division by zero crashes.
+26. **A deferred call that returns an error must discard it:** `defer _ = f.close()`.
+27. **No type switches on interfaces.** Errors are told apart by message or by returning richer results.
+28. **Channels are the one reference type.** Copying a channel gives another handle to the same channel (reply channels inside messages).
+29. **Defers run last-first,** like Go. **`break`/`continue` inside a `switch` apply to the loop.** **A struct converts to an interface it `implements` automatically.**
+30. **Map equality ignores insertion order;** errors are equal when their messages are.

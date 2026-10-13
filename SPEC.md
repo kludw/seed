@@ -41,7 +41,7 @@ Items marked **(proposed)** were filled in while writing this spec and have not 
 | `float`       | A 64-bit floating-point number.                                   |
 | `bool`        | `true` or `false`.                                                |
 | `byte`        | An 8-bit value, used for raw I/O.                                 |
-| `string`      | UTF-8 text. `s[i]` returns a `byte`, and `s.chars()` returns the characters. |
+| `string`      | Immutable bytes, normally UTF-8 text (any bytes are allowed). `s[i]` returns a `byte`, and `s.chars()` returns the characters. |
 | `[]T`         | A list that grows in place.                                       |
 | `map[K]V`     | A map.                                                            |
 | `chan T`      | A channel.                                                        |
@@ -134,6 +134,7 @@ string text, err = fs.read(other)     // text is new, err is reused
 | Ordering   | `< <= > >=`                   | `int`, `float`, `string`, `byte` |
 | Logic      | `&& \|\| !`                   | `bool`                           |
 
+- Integer division and `%` by zero crash. Float division by zero follows IEEE and gives `inf`, `-inf` or `nan`.
 - Both sides of an operator must have the same type, so mixing `int` and `float` is a compile error: `float(n) * 1.5`.
 - There is no compound assignment (`+=` and the like). Write `x = x + 1`.
 - There is no ternary `?:` operator.
@@ -225,10 +226,12 @@ pub type Named interface {
 }
 ```
 
+- Struct fields are private to their package unless marked `pub` (`pub string name`). A struct literal of another package's type is only allowed when every field is `pub`.
 - A struct literal must set every field: `User{name: "k", email: null, tags: []string{}}`.
 - An enum case is always written with its type, both when creating a value and in a `switch`: `Shape.Circle(2.0)`, `case Shape.Circle(float r):`. A case without data has no parentheses: `Token.Eof`.
 - A name from another package is always written with the package name: `users.User`, `users.Shape.Circle(2.0)`.
 - A type satisfies an interface only by declaring it with `implements`. The compiler then checks that every required method exists.
+- A value of such a type converts to the interface automatically wherever the interface is expected. There is no way to get the original type back out of an interface value (no type switches or assertions).
 - An enum case can carry data, and a `switch` over an enum must cover every case.
 
 ## Control flow
@@ -273,7 +276,9 @@ defer f.close()
 - A `switch` over an `int`, `byte`, `string` or `bool` must end with `default`. One case can list several values.
 - Variables bound in a `case` also write their type, like every other declaration **(proposed)**.
 - `break` and `continue` work in loops. There are no labels and no `goto` **(proposed)**.
-- `defer` runs when the enclosing function returns.
+- `defer` runs when the enclosing function returns. Several defers run in reverse order (last first).
+- A deferred call that returns an error must discard it explicitly: `defer _ = f.close()`.
+- `break` and `continue` inside a `switch` apply to the enclosing loop.
 
 ## Errors
 
@@ -318,6 +323,9 @@ if (err != null) {
   - A goroutine can only be stopped at a channel send or receive, and its `defer`s still run.
   - An error that nothing handles ends up in `main`, and the program exits with a clear message.
 - Goroutines share nothing. Sending a value on a channel copies it, so data races are impossible.
+- A `group` block is ordinary code: `spawn` may appear anywhere inside it, including in loops and `if`s.
+- Besides channel operations, blocking standard-library calls (`time.sleep`, I/O on files and sockets, `io.readLine`, `os.run`, `net.dial`) are also points where a cancelled goroutine stops.
+- Channels are the one reference type. Copying a channel value (into a struct, an enum, another channel) gives another handle to the same channel, which is how reply channels work.
 
 ### Channels
 
@@ -417,7 +425,9 @@ There is one binary, `seed`, with these commands **(proposed)**:
 
 ## Standard library (planned)
 
-`fmt`, `fs`, `io`, `strings`, `math`, `time`, `os`, `net`, `http`, `json`, `crypto`, `errors`
+`fmt`, `fs`, `io`, `strings`, `math`, `time`, `os`, `net`, `http`, `json`, `crypto`, `errors`, `path`, `rand`, `encoding`. The API is in [docs/stdlib.md](docs/stdlib.md).
+
+Standard-library functions that need the operating system are declared without a body and implemented in C in the runtime. Only the standard library may do this.
 
 ## Implementation plan
 
