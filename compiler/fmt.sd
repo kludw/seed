@@ -1,0 +1,218 @@
+// `seed fmt`: rewrites files in the canonical layout (docs/formatting.md),
+// or with --check reports the files that are not in it.
+//
+// The formatter works on the token stream rather than on the syntax tree. It
+// prints the tokens of the file in their original order and only decides
+// where lines break, how lines are indented and where single spaces go;
+// comments are put back by position. The tokens never change, apart from the
+// trailing comma of a list written one element per line, so formatting
+// cannot change what a program means. As a safety net, the result is parsed
+// again and its syntax tree compared with the original before anything is
+// written.
+//
+// fmt_layout.sd classifies brackets (blocks, lists, parameter lists) and
+// fmt_print.sd prints the tokens.
+package main
+
+import "fmt"
+import "fs"
+import "os"
+
+const string fmtUsage = "usage:\n  seed fmt <file.sd>...\n  seed fmt --check <file.sd>...\n  seed fmt --verify <file.sd>...\n"
+
+// `seed fmt [--check | --verify] <file.sd>...`. Returns the exit code: 1 if
+// a file has syntax errors, is not formatted (--check) or fails the
+// formatter's own test (--verify), otherwise 0.
+//
+// --verify is for testing the formatter (make test-fmt). It writes nothing
+// and checks, for every file, that formatting the formatted text changes
+// nothing, and that the tokens, comments and syntax tree are unchanged.
+// Files with syntax errors are skipped.
+fn fmtCommand([]string args) (int, error) {
+    string mode = ""
+    []string files = args
+    if (args.len() > 0 && (args[0] == "--check" || args[0] == "--verify")) {
+        mode = args[0]
+        files = args.slice(1, args.len())
+    }
+    if (files.len() == 0) {
+        fmt.eprint(fmtUsage)
+        os.exit(2)
+    }
+    int code = 0
+    int skipped = 0
+    for (int i = 0; i < files.len(); i++) {
+        string path = files[i]
+        string src = try fs.read(path)
+        if (mode == "--verify") {
+            if (fmtParse(path, src).diags.count() > 0) {
+                skipped++
+            } else if (!verifyFormat(path, src)) {
+                code = 1
+            }
+            continue
+        }
+        string? out = formatFile(path, src)
+        if (out == null) {
+            code = 1
+            continue
+        }
+        if (out == src) {
+            continue
+        }
+        if (mode == "--check") {
+            fmt.eprintln(path + ":" + firstDiffLine(src, out).string() + ": not formatted")
+            fmt.eprintln("    hint: run: seed fmt " + path)
+            code = 1
+        } else {
+            try fs.write(path, out)
+        }
+    }
+    if (mode == "--verify") {
+        int checked = files.len() - skipped
+        fmt.println("seed fmt --verify: " + checked.string() + " files checked, " + skipped.string() + " skipped (syntax errors)")
+    }
+    return code, null
+}
+
+// Parses one file on its own.
+fn fmtParse(string path, string src) Parser {
+    Parser p = newParser(newDiags())
+    int file = p.diags.addFile(path, src)
+    p.parseFile(file)
+    return p
+}
+
+// The formatted text of a file, or null (after printing the reason) when
+// the file has syntax errors.
+fn formatFile(string path, string src) string? {
+    Parser before = fmtParse(path, src)
+    if (before.diags.count() > 0) {
+        before.diags.print()
+        return null
+    }
+    string out = formatSource(src)
+    Parser after = fmtParse(path, out)
+    if (after.diags.count() > 0 || after.ast.dump() != before.ast.dump() || !sameComments(before.ast, after.ast)) {
+        fmt.eprintln(path + ": internal error: seed fmt would change the meaning of this file, so it was left unchanged")
+        return null
+    }
+    return out
+}
+
+// Formats source text that has no syntax errors.
+fn formatSource(string src) string {
+    Lexer lx = lex(0, src)
+    Formatter f = newFormatter(lx.tokens, lx.comments, src)
+    return f.format()
+}
+
+// Whether two trees have the same comments, ignoring trailing whitespace
+// (which the formatter removes).
+fn sameComments(Ast a, Ast b) bool {
+    if (a.comments.len() != b.comments.len()) {
+        return false
+    }
+    for (int i = 0; i < a.comments.len(); i++) {
+        if (trimRight(a.comments[i].text) != trimRight(b.comments[i].text)) {
+            return false
+        }
+    }
+    return true
+}
+
+// The first line (from 1) where two texts differ.
+fn firstDiffLine(string a, string b) int {
+    []string x = a.split("\n")
+    []string y = b.split("\n")
+    int n = x.len()
+    if (y.len() < n) {
+        n = y.len()
+    }
+    for (int i = 0; i < n; i++) {
+        if (x[i] != y[i]) {
+            return i + 1
+        }
+    }
+    if (n < 1) {
+        return 1
+    }
+    return n
+}
+
+// s without trailing spaces and tabs.
+fn trimRight(string s) string {
+    int end = s.len()
+    for (; end > 0 && (s[end - 1] == ' ' || s[end - 1] == '\t'); ) {
+        end--
+    }
+    return s.slice(0, end)
+}
+
+// The formatter's own test for one file without syntax errors (see
+// fmtCommand). Prints what is wrong and returns false on failure.
+fn verifyFormat(string path, string src) bool {
+    bool ok = true
+    string once = formatSource(src)
+    string twice = formatSource(once)
+    if (twice != once) {
+        fmt.eprintln(path + ":" + firstDiffLine(once, twice).string() + ": formatting the formatted text changes it")
+        ok = false
+    }
+    string tokens = tokenChange(src, once)
+    if (tokens != "") {
+        fmt.eprintln(path + ": formatting changes the tokens: " + tokens)
+        ok = false
+    }
+    Parser before = fmtParse(path, src)
+    Parser after = fmtParse(path, once)
+    if (after.diags.count() > 0) {
+        fmt.eprintln(path + ": the formatted text has syntax errors:")
+        after.diags.print()
+        ok = false
+    } else if (after.ast.dump() != before.ast.dump()) {
+        fmt.eprintln(path + ": formatting changes the syntax tree")
+        ok = false
+    }
+    if (!sameComments(before.ast, after.ast)) {
+        fmt.eprintln(path + ": formatting changes the comments")
+        ok = false
+    }
+    return ok
+}
+
+// The tokens that formatting must keep: all but newlines and a comma right
+// before a closing bracket (the formatter adds or removes those).
+fn keptTokens(string src) []Token {
+    Lexer lx = lex(0, src)
+    []Token all = []Token{}
+    for (int i = 0; i < lx.tokens.len(); i++) {
+        if (lx.tokens[i].kind != Tok.Newline) {
+            all.push(lx.tokens[i])
+        }
+    }
+    []Token kept = []Token{}
+    for (int j = 0; j < all.len(); j++) {
+        if (all[j].kind == Tok.Comma && j + 1 < all.len() && fmtCloser(all[j + 1].kind)) {
+            continue
+        }
+        kept.push(all[j])
+    }
+    return kept
+}
+
+// "" if two texts have the same kept tokens, otherwise the first
+// difference.
+fn tokenChange(string a, string b) string {
+    []Token x = keptTokens(a)
+    []Token y = keptTokens(b)
+    for (int i = 0; i < x.len() && i < y.len(); i++) {
+        if (x[i].kind != y[i].kind || x[i].raw != y[i].raw) {
+            return "line " + x[i].pos.line.string() + ": '" + x[i].raw + "' became '" + y[i].raw + "' (line " + y[i].pos.line.string() + ")"
+        }
+    }
+    if (x.len() != y.len()) {
+        return x.len().string() + " tokens became " + y.len().string()
+    }
+    return ""
+}

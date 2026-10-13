@@ -1,0 +1,30 @@
+package main
+
+fn endsStatement(Tok k) bool {
+    return k == Tok.Ident || k == Tok.Int ||
+    k == Tok.Float ||
+            k == Tok.String
+}
+
+fn main([]string args) error {
+    if (aVeryLongCondition &&
+        anotherCondition) {
+        run()
+    }
+    string s = "a" +
+        "b" +
+          "c"
+    int x =
+        5
+    return first,
+        second
+}
+
+fn cases(int x) int {
+    switch (x) {
+    case 1, 2,
+        3:
+        return 1
+    }
+    return 0
+}

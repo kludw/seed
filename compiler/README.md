@@ -13,6 +13,7 @@ seed2 c --strict compiler/*.sd -> build/stage3.c      (identical to stage2.c)
 make verify     # builds all stages and checks stage2.c == stage3.c
 make test       # tests/lang and tests/seed0 with build/seed2
 make test-strict  # tests/lang with build/seed2 c --strict
+make test-fmt   # seed fmt: self-checks on every .sd file, tests/fmt goldens
 make test0      # the same suites with seed0
 ```
 
@@ -27,6 +28,7 @@ seed c [--strict] <file.sd>...       C program on stdout (what tests/run.sh uses
 seed build -o <out> <file.sd>...     compile to an executable
 seed run <file.sd>... [-- args...]   compile into $TMPDIR and run; passes the exit code
 seed ast <file.sd>...                print the syntax tree (debugging aid)
+seed fmt [--check] <file.sd>...      format in place, or report unformatted files
 ```
 
 All files given together form one package. Compile errors go to stderr and
@@ -50,6 +52,9 @@ of `main.sd` (the Makefile has the same flags in `SEED_CFLAGS`).
 | `parser.sd` | parse | parser state, statements and expressions, error recovery |
 | `parse_decl.sd` | parse | files, top-level declarations, types |
 | `dump.sd` | debug | `seed ast` S-expression printer |
+| `fmt.sd` | fmt | `seed fmt` command, safety check, `--verify` |
+| `fmt_layout.sd` | fmt | `Formatter` state, bracket matching and roles |
+| `fmt_print.sd` | fmt | line breaks, indentation, spaces, comments |
 | `types.sd` | check | `Kind`, `Type`, the interned `Types` arena |
 | `check.sd` | check | `Checker`, program passes, type resolution, scopes, narrowing |
 | `check_expr.sd` | check | expressions, places (lvalues), T/T? conversions |
@@ -267,6 +272,68 @@ are requested on demand through a queue (`Gen.helper`) and generated at the
 end. The output is: runtime, type definitions, tuple typedefs, prototypes,
 helpers, constants (lazily initialised functions), functions, `main`.
 
+## The formatter (`seed fmt`)
+
+The rules are in docs/formatting.md. The formatter is a **token printer**,
+not a syntax-tree printer: it lexes the file again and prints the tokens in
+their original order, deciding only where lines break, how they are indented
+and where single spaces go. Comments (`Comment {pos, text, ownLine}` from
+the lexer) are merged back in by position. A tree printer would have to
+rebuild every construct and re-attach comments to nodes; printing the tokens
+keeps the program the same by construction, keeps redundant parentheses, and
+needs very little knowledge of the grammar.
+
+1. **Validate.** The file is parsed with the normal parser. A file with
+   syntax errors is reported and left alone.
+2. **Classify brackets** (`computeRoles`, fmt_layout.sd). Brackets are
+   matched, and every `{` gets a role from the keywords before it: a block
+   (`fn` declaration, `if`/`for` after their `(...)`, `else`, `group`,
+   `test`), a switch/select body, a type body (`struct`/`enum`/`interface`),
+   or otherwise a literal. Some `(` are marked too: parameter lists are
+   *lists* (they may be written one element per line); conditions, result
+   lists, receivers, `assert(...)` and `chan T(n)` are *plain*. Any other
+   `(` is a list (a call) when the token before it ends an operand, and
+   plain (grouping) otherwise. A `)` that closes a parameter list is marked
+   so that `fn f() (int, error)` gets its space.
+3. **Print** (fmt_print.sd). A stack of `FmtFrame`s mirrors the open
+   brackets. A frame knows its kind, the indentation of its items, of its
+   closing line and of the line where the current item started, and whether
+   the next token starts an item. For each token, `place` decides between
+   "new line with indentation N" and "same line"; `needSpace` decides the
+   space from the two tokens (and their roles). New lines come from:
+   statement ends (Newline tokens at statement level), block and case-label
+   openings, the elements of a broken list, closing brackets of blocks and
+   broken lists, and any other line break in the source, which is kept as a
+   continuation line (base indentation + 1). Whether a list is broken is
+   decided when it opens, by looking at the source line breaks at the list's
+   own level (`isBroken`); the closing bracket of a broken list gets a comma
+   before it if it has none, and a one-line list loses its trailing comma.
+4. **Blank lines** come from a prefix count of blank source lines, so
+   "was there a blank line between these two lines" is O(1). The top level
+   has its own state (`FmtTop`: after package / import / const /
+   declaration / comment).
+5. **Safety net.** The output is parsed again, and its `seed ast` dump and
+   comments must equal the original's; otherwise the file is left unchanged
+   with an internal error. Line breaks are only added after tokens that
+   never end a statement (`{`, `(`, `,`, `:`) or before a closing bracket,
+   and only removed before `,` or a closing bracket, where the parser skips
+   newlines, so the newline rule reads the output the same way.
+
+The formatter only uses the source and the tokens, so its result does not
+depend on the input's indentation or spacing at all; that, together with
+keeping the source's line structure, is what makes it idempotent.
+
+Testing (`make test-fmt`): `seed fmt --verify` runs on every `.sd` file in
+`compiler/` and `tests/` that parses, and checks that formatting the
+formatted text changes nothing, that the tokens are unchanged (ignoring
+newlines and commas before closing brackets), and that the comments and the
+syntax tree are unchanged. `tests/fmt/run.sh` runs the golden tests
+(`NAME.sd` must format to `NAME.expected`, which must be a fixed point;
+`--update` rewrites the expected files). Finally, `seed fmt --check` checks
+that the compiler and the test programs are formatted. The few test files
+with deliberate syntax errors, and `tests/full/errors/unformatted_code.sd`,
+are not formatted.
+
 ## Writing the compiler in Seed
 
 Value semantics shape the code:
@@ -323,6 +390,11 @@ teaching may need a `--strict`-style switch until all test programs pass it.
 - **`seed run`/`seed build`** put the C file and executable in
   `$TMPDIR/seed-run-<name>` / `$TMPDIR/seed-build-<name>`.
 - **`seed ast`** exists only for debugging the parser.
+- **`seed fmt` prints tokens, not the tree** (see "The formatter"). Style
+  decisions not fixed by the task are listed in docs/formatting.md: no line
+  length limit, `{}` for empty blocks, trailing comments not aligned,
+  one-line `const`s may stay grouped, comment indentation before `case`
+  follows the source column. `--check` reports to stderr.
 
 ## Known limitations
 
@@ -331,7 +403,8 @@ teaching may need a `--strict`-style switch until all test programs pass it.
   `sortBy`), `chan`/`select`/`group`/`spawn`, `defer`, `test`/`assert`, user
   packages and qualified names, `s.chars()`, integers wider than 64 bits.
 - `int` is 64-bit and memory is never freed (seed0's runtime).
-- Formatting is not checked yet (`seed fmt` is a later phase).
+- Formatting is not checked during compilation yet; `seed fmt --check` does
+  the check on its own.
 - Two concurrent `seed run` of files with the same name share a temporary
   directory.
 - The parser reports at most one syntax error per statement; an error in an

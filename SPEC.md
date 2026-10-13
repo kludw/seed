@@ -421,7 +421,7 @@ There is one binary, `seed`, with these commands **(proposed)**:
 - `seed run file.sd` compiles a file and runs it.
 - `seed build` compiles a package into a single static binary.
 - `seed test` runs the tests.
-- `seed fmt` formats the code.
+- `seed fmt` formats the code (the rules are in [docs/formatting.md](docs/formatting.md)).
 
 ## Standard library (planned)
 

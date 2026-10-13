@@ -12,6 +12,7 @@ exact stdout (and exit code, where it isn't 0) is checked.
 | `lang/errors/` | Programs that seed0 must reject: an ignored error, `_` with a plain `T`, a `mut` method on a parameter, a `T?` used as `T`, syntax errors, unknown names and type mismatches. | `seed0` and the full compiler |
 | `full/` | Programs for the features outside the subset: interfaces, function values and `sortBy`, `defer`, channels, `select`, `group`/`spawn` with Erlang-style failure, integers wider than 64 bits and `s.chars()`. | full compiler only |
 | `full/errors/` | The full compiler's pedantic checks: unused names and imports, shadowing, switch coverage, missing returns, unreachable code, naming rules, `implements`, unhandled errors, formatting and so on. | full compiler only |
+| `fmt/` | Golden tests for `seed fmt`: `NAME.sd` must format to `NAME.expected` (`tests/fmt/run.sh <seed>`, or `make test-fmt`). | full compiler |
 
 The `lang/` programs are written to also pass the full compiler's checks: they
 are formatted (4-space indentation, gofmt-style layout), have no unused names

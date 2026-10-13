@@ -1,0 +1,34 @@
+package main
+fn main([]string args) error {
+    int a, int b = pair()
+    x = (a +
+        b // inside parens
+    )
+    ys = []int{
+        1 // one
+        , 2}
+    call(
+        // nothing but a comment
+    )
+    call(
+    )
+    z = xs[
+        0]
+    switch (x) {
+    case -1:
+        switch (y) {
+        case 1:
+            return null
+        }
+    }
+    if (a) {
+        return
+    } else // why
+    {
+        b()
+    }
+    if (c) { d() } else if (e) { f() }
+    s = "tab\tin string"	// a tab before this comment
+	int tabbed = 1
+    return null
+}

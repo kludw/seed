@@ -1,0 +1,70 @@
+package main
+
+fn main([]string args) error {
+    []int a = []int{1, 2, 3}
+    []int b = []int{
+        1,
+        2,
+        3,
+    }
+    []int c = []int{
+        1,
+        2,
+    }
+    []int d = []int{}
+    Point p = Point{
+        x: 1,
+        y: 2,
+    }
+    call(
+        a,
+        b,
+        c,
+    )
+    call(
+        a,
+        b,
+        c,
+    )
+    call(a, Point{
+        x: 1,
+        y: 2,
+    })
+    call(Point{x: 1, y: 2}, []int{
+        1,
+    }, c)
+    nested([]int{
+        1,
+        2,
+    }, f(
+        x,
+        y,
+    ))
+    map[string]int m = map[string]int{
+        "a": 1,
+        "b": 2,
+    }
+    total = sum(first +
+        second, third)
+    return null
+}
+
+fn long(
+    int a,
+    int b,
+) {}
+
+fn longer(
+    int a,
+    int b,
+) int {
+    return 0
+}
+
+type Shape enum {
+    Circle(float r)
+    Rect(
+        float w,
+        float h,
+    )
+}

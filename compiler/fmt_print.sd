@@ -1,0 +1,387 @@
+// The formatter, part 2: printing. The tokens are printed in order; for each
+// one, place() decides whether it starts a new line and with which
+// indentation, and needSpace() whether a space separates it from the
+// previous token on the same line. Comments before a token are printed
+// first: a comment that followed code on its line stays at the end of the
+// output line, and a comment on its own line gets its own line, indented
+// like the code after it.
+//
+// Line breaks come from the structure (one item per line in blocks, in
+// type bodies and in lists written one element per line) and from the
+// source: any other line break in the source is kept as a continuation
+// line, indented one level more than the start of the item. The formatter
+// only adds line breaks after `{`, `(`, `,` and `:`, or before a closing
+// bracket, and only removes them before `,` or a closing bracket, so the
+// newline rule (docs/grammar.md) reads the result the same way.
+package main
+
+// The whole formatted file.
+fn (Formatter f) mut format() string {
+    f.computeRoles()
+    f.stack.push(FmtFrame{
+        kind: FmtFrameKind.Top,
+        open: -1,
+        indent: 0,
+        closeIndent: 0,
+        itemIndent: 0,
+        broken: false,
+        expectItem: true,
+        empty: true,
+        caseLabel: false,
+    })
+    int n = f.toks.len()
+    for (int i = 0; i < n - 1; i++) {
+        if (f.nlBefore[i] && f.statementFrame(f.stack.len() - 1)) {
+            f.stack[f.stack.len() - 1].expectItem = true
+        }
+        f.emitToken(i)
+    }
+    f.emitComments(n - 1, FmtPlace{newline: true, indent: 0, item: true, closer: false})
+    f.newline(0, false)
+    if (f.out.len() == 0) {
+        return ""
+    }
+    return f.out.join("\n") + "\n"
+}
+
+// Whether the frame at index s holds statements or declarations (as
+// opposed to expressions).
+fn (Formatter f) statementFrame(int s) bool {
+    FmtFrameKind k = f.stack[s].kind
+    return k == FmtFrameKind.Top || k == FmtFrameKind.Block || k == FmtFrameKind.Switch || k == FmtFrameKind.Decl
+}
+
+// Whether the frame at index s lays out its contents line by line.
+fn (Formatter f) structural(int s) bool {
+    return f.statementFrame(s) || (f.stack[s].kind == FmtFrameKind.List && f.stack[s].broken)
+}
+
+// The indentation of the line where the current item started.
+fn (Formatter f) baseIndent() int {
+    for (int s = f.stack.len() - 1; s > 0; s--) {
+        if (f.structural(s)) {
+            return f.stack[s].itemIndent
+        }
+    }
+    return f.stack[0].itemIndent
+}
+
+// The indentation of a continuation line.
+fn (Formatter f) contIndent() int {
+    return f.baseIndent() + 1
+}
+
+// Whether a comment comes before the token at i.
+fn (Formatter f) commentPending(int i) bool {
+    return f.nextComment < f.comments.len() && posBefore(f.comments[f.nextComment].pos, f.toks[i].pos)
+}
+
+// Decides where the token at i goes (see FmtPlace).
+fn (Formatter f) place(int i) FmtPlace {
+    int top = f.stack.len() - 1
+    FmtFrame fr = f.stack[top]
+    Tok k = f.toks[i].kind
+    if (fr.open >= 0 && f.match[fr.open] == i) {
+        if (f.statementFrame(top)) {
+            bool emptyBlock = fr.empty && !f.commentPending(i)
+            return FmtPlace{newline: !emptyBlock, indent: fr.closeIndent, item: false, closer: true}
+        }
+        return FmtPlace{newline: fr.kind == FmtFrameKind.List && fr.broken, indent: fr.closeIndent, item: false, closer: true}
+    }
+    if (f.statementFrame(top) && fr.expectItem) {
+        int ind = fr.indent
+        if (fr.kind == FmtFrameKind.Switch && (k == Tok.KwCase || k == Tok.KwDefault)) {
+            ind--
+        }
+        return FmtPlace{newline: true, indent: ind, item: true, closer: false}
+    }
+    int cont = f.contIndent()
+    if (fr.kind == FmtFrameKind.List && fr.broken) {
+        if (k == Tok.Comma) {
+            return FmtPlace{newline: false, indent: cont, item: false, closer: false}
+        }
+        if (fr.expectItem) {
+            return FmtPlace{newline: true, indent: fr.indent, item: true, closer: false}
+        }
+    }
+    if (k == Tok.LBrace && f.brace[i] != FmtBrace.Literal) {
+        // Only a comment can force a block's `{` onto a line of its own;
+        // it then lines up with the `}`.
+        return FmtPlace{newline: false, indent: cont - 1, item: false, closer: false}
+    }
+    bool joins = k == Tok.KwIf && f.kindAt(i - 1) == Tok.KwElse
+    bool srcBreak = i > 0 && f.lineOf(i) > f.lineOf(i - 1)
+    return FmtPlace{newline: srcBreak && !joins, indent: cont, item: false, closer: false}
+}
+
+fn (Formatter f) mut emitToken(int i) {
+    Tok k = f.toks[i].kind
+    int top = f.stack.len() - 1
+    FmtFrame fr = f.stack[top]
+    // A trailing comma in a list kept on one line is dropped.
+    if (k == Tok.Comma && fr.kind == FmtFrameKind.List && !fr.broken && f.match[fr.open] == i + 1) {
+        return
+    }
+    FmtPlace pl = f.place(i)
+    // A list written one element per line has a comma after every element.
+    if (pl.closer && fr.kind == FmtFrameKind.List && fr.broken && f.prev != fr.open && f.kindAt(f.prev) != Tok.Comma) {
+        f.cur.push(",")
+    }
+    f.emitComments(i, pl)
+    if (pl.newline || f.lineComment) {
+        bool blank = false
+        if (pl.item && !f.justOpened) {
+            if (fr.kind == FmtFrameKind.Top) {
+                blank = f.topBlank(i, f.lineOf(i))
+            } else {
+                blank = f.blankBetween(f.lastLine, f.lineOf(i))
+            }
+        }
+        f.newline(pl.indent, blank)
+    } else if (f.cur.len() > 0 && f.prev >= 0 && f.needSpace(f.prev, i)) {
+        f.cur.push(" ")
+    }
+    f.cur.push(f.toks[i].raw)
+    f.justOpened = false
+    f.lastLine = f.lineOf(i)
+    f.prev = i
+    if (pl.closer) {
+        f.stack.remove(top)
+        f.stack[top - 1].empty = false
+        return
+    }
+    f.stack[top].empty = false
+    if (pl.item) {
+        f.stack[top].expectItem = false
+        f.stack[top].itemIndent = pl.indent
+        if (fr.kind == FmtFrameKind.Switch && (k == Tok.KwCase || k == Tok.KwDefault)) {
+            f.stack[top].caseLabel = true
+        }
+        if (fr.kind == FmtFrameKind.Top) {
+            if (k == Tok.KwPackage) {
+                f.prevTop = FmtTop.Package
+            } else if (k == Tok.KwImport) {
+                f.prevTop = FmtTop.Import
+                f.seenImport = true
+            } else if (k == Tok.KwConst || (k == Tok.KwPub && f.kindAt(i + 1) == Tok.KwConst)) {
+                f.prevTop = FmtTop.Const
+            } else {
+                f.prevTop = FmtTop.Decl
+            }
+            f.topLine = f.lineOf(i)
+        }
+    }
+    if (k == Tok.Comma && fr.kind == FmtFrameKind.List && fr.broken) {
+        f.stack[top].expectItem = true
+    } else if (k == Tok.Colon && fr.kind == FmtFrameKind.Switch && f.stack[top].caseLabel) {
+        f.stack[top].caseLabel = false
+        f.stack[top].expectItem = true
+        f.justOpened = true
+    } else if (fmtOpener(k)) {
+        f.openFrame(i)
+    }
+}
+
+// Pushes the frame for the bracket at i, which was just printed.
+fn (Formatter f) mut openFrame(int i) {
+    Tok k = f.toks[i].kind
+    int base = f.baseIndent()
+    if (k == Tok.LBrace && f.brace[i] != FmtBrace.Literal) {
+        FmtFrameKind fk = FmtFrameKind.Block
+        if (f.brace[i] == FmtBrace.Switch) {
+            fk = FmtFrameKind.Switch
+        } else if (f.brace[i] == FmtBrace.Decl) {
+            fk = FmtFrameKind.Decl
+        }
+        f.stack.push(FmtFrame{
+            kind: fk,
+            open: i,
+            indent: base + 1,
+            closeIndent: base,
+            itemIndent: base + 1,
+            broken: false,
+            expectItem: true,
+            empty: true,
+            caseLabel: false,
+        })
+        f.justOpened = true
+        return
+    }
+    bool list = k == Tok.LBrace || (k == Tok.LParen && f.isListParen(i))
+    bool broken = list && f.isBroken(i)
+    FmtFrameKind lk = FmtFrameKind.Plain
+    if (list) {
+        lk = FmtFrameKind.List
+    }
+    int inner = f.curIndent
+    if (broken) {
+        inner = f.curIndent + 1
+        f.justOpened = true
+    }
+    f.stack.push(FmtFrame{
+        kind: lk,
+        open: i,
+        indent: inner,
+        closeIndent: f.curIndent,
+        itemIndent: inner,
+        broken: broken,
+        expectItem: broken,
+        empty: true,
+        caseLabel: false,
+    })
+}
+
+// Prints the comments that come before the token at i, which will be
+// placed at pl.
+fn (Formatter f) mut emitComments(int i, FmtPlace pl) {
+    int top = f.stack.len() - 1
+    FmtFrame fr = f.stack[top]
+    for (; f.commentPending(i); ) {
+        Comment c = f.comments[f.nextComment]
+        f.nextComment++
+        string text = trimRight(c.text)
+        if (!c.ownLine && f.cur.len() > 0) {
+            f.cur.push(" " + text)
+            f.lineComment = true
+            f.lastLine = c.pos.line
+            continue
+        }
+        // Own-line comments are items where the token after them is one,
+        // and before the `}` of a block or of a list written one element
+        // per line.
+        bool item = pl.item || (pl.closer && f.structural(top))
+        int indent = pl.indent
+        if (pl.closer && f.structural(top)) {
+            indent = fr.indent
+        } else if (pl.item && fr.kind == FmtFrameKind.Switch && (f.kindAt(i) == Tok.KwCase || f.kindAt(i) == Tok.KwDefault)) {
+            // Before a case label, the source column decides whether the
+            // comment belongs to the case or ends the previous case body.
+            if (c.pos.col > f.toks[i].pos.col) {
+                indent = fr.indent
+            }
+        } else if (!pl.newline) {
+            indent = f.contIndent()
+        }
+        bool blank = false
+        if (item && !f.justOpened) {
+            if (fr.kind == FmtFrameKind.Top) {
+                blank = f.topBlank(i, c.pos.line)
+            } else {
+                blank = f.blankBetween(f.lastLine, c.pos.line)
+            }
+        }
+        f.newline(indent, blank)
+        f.cur.push(text)
+        f.lineComment = true
+        f.justOpened = false
+        f.lastLine = c.pos.line
+        f.stack[top].empty = false
+        if (fr.kind == FmtFrameKind.Top && item) {
+            f.prevTop = FmtTop.Comment
+        }
+    }
+}
+
+// Whether a blank line goes before an item at the top level of the file
+// that starts at source line `line`; i is the token that starts it (or the
+// token after it, for a comment).
+fn (Formatter f) topBlank(int i, int line) bool {
+    FmtTop p = f.prevTop
+    if (p == FmtTop.Start) {
+        return false
+    }
+    if (p == FmtTop.Package || p == FmtTop.Decl) {
+        return true
+    }
+    Tok k = f.kindAt(i)
+    if (p == FmtTop.Const) {
+        // A const after a one-line const may stay in its group.
+        bool isConst = k == Tok.KwConst || (k == Tok.KwPub && f.kindAt(i + 1) == Tok.KwConst)
+        return !isConst || f.lastLine != f.topLine || f.blankBetween(f.lastLine, line)
+    }
+    if (p == FmtTop.Import) {
+        return k != Tok.KwImport
+    }
+    if (k == Tok.KwImport && f.seenImport) {
+        return false
+    }
+    return f.blankBetween(f.lastLine, line)
+}
+
+// Ends the current line and starts a new one.
+fn (Formatter f) mut newline(int indent, bool blank) {
+    if (f.cur.len() > 0) {
+        f.out.push(spaces(4 * f.curIndent) + f.cur.join(""))
+        f.cur = []string{}
+    }
+    if (blank && f.out.len() > 0) {
+        f.out.push("")
+    }
+    f.curIndent = indent
+    f.lineComment = false
+}
+
+fn isKeyword(Tok k) bool {
+    return k == Tok.KwPackage || k == Tok.KwImport || k == Tok.KwPub || k == Tok.KwFn || k == Tok.KwType ||
+        k == Tok.KwStruct || k == Tok.KwEnum || k == Tok.KwInterface || k == Tok.KwImplements ||
+        k == Tok.KwConst || k == Tok.KwIf || k == Tok.KwElse || k == Tok.KwFor || k == Tok.KwSwitch ||
+        k == Tok.KwCase || k == Tok.KwDefault || k == Tok.KwBreak || k == Tok.KwContinue ||
+        k == Tok.KwReturn || k == Tok.KwDefer || k == Tok.KwTry || k == Tok.KwNull || k == Tok.KwTrue ||
+        k == Tok.KwFalse || k == Tok.KwMut || k == Tok.KwTest || k == Tok.KwAssert || k == Tok.KwSelect ||
+        k == Tok.KwSpawn || k == Tok.KwGroup || k == Tok.KwChan || k == Tok.KwMap
+}
+
+// Whether a space separates the token at b from the token at a before it
+// on the same line.
+fn (Formatter f) needSpace(int a, int b) bool {
+    Tok ka = f.toks[a].kind
+    Tok kb = f.toks[b].kind
+    if (ka == Tok.Semi) {
+        // for (int i = 0; i < n; i++), for (; i < n; ), for (int i = 1; ; i++),
+        // and for (;;) with no spaces at all
+        bool first = kb == Tok.Semi && f.kindAt(a - 1) == Tok.LParen && f.kindAt(b + 1) == Tok.RParen
+        bool second = kb == Tok.RParen && f.kindAt(a - 1) == Tok.Semi && f.kindAt(a - 2) == Tok.LParen
+        return !first && !second
+    }
+    if (kb == Tok.RParen || kb == Tok.RBrack || kb == Tok.RBrace || kb == Tok.Comma || kb == Tok.Semi) {
+        return false
+    }
+    if (kb == Tok.Dot || kb == Tok.Colon || kb == Tok.Question || kb == Tok.Inc || kb == Tok.Dec) {
+        return false
+    }
+    if (ka == Tok.LParen || ka == Tok.LBrack || ka == Tok.LBrace || ka == Tok.Dot || f.isUnary(a)) {
+        return false
+    }
+    if (f.isBinary(b) || kb == Tok.Assign || f.isBinary(a) || ka == Tok.Assign) {
+        return true
+    }
+    if (ka == Tok.Comma || ka == Tok.Colon) {
+        return true
+    }
+    if (kb == Tok.LBrace) {
+        return f.brace[b] != FmtBrace.Literal
+    }
+    if (kb == Tok.LParen) {
+        if (f.recv[b] || f.sigClose[a]) {
+            return true
+        }
+        if (ka == Tok.KwFn || ka == Tok.KwAssert) {
+            return false
+        }
+        if (isKeyword(ka)) {
+            return !(ka == Tok.KwTrue || ka == Tok.KwFalse || ka == Tok.KwNull)
+        }
+        return !(f.operandEnd(a) || ka == Tok.RBrace || ka == Tok.Question)
+    }
+    if (kb == Tok.LBrack) {
+        if (f.sigClose[a]) {
+            return true
+        }
+        return !(f.operandEnd(a) || ka == Tok.KwMap)
+    }
+    if (ka == Tok.RBrack) {
+        // the rest of a type: []int, map[string]int, []fn(int) bool
+        return false
+    }
+    return true
+}
