@@ -1,0 +1,138 @@
+package rand
+
+import "fmt"
+
+fn testSplitMix64Vectors() TestLog {
+    TestLog t = newTestLog()
+    // The reference outputs of splitmix64.c for seeds 0 and 1234567.
+    Source s = seeded(0)
+    t.eqInt(s.next(), 0xe220a8397b1dcdaf)
+    t.eqInt(s.next(), 0x6e789e6aa1b965f4)
+    t.eqInt(s.next(), 0x06c45d188009454f)
+    t.eqInt(s.next(), 0xf88bb8a8724c81ec)
+    s = seeded(1234567)
+    t.eqInt(s.next(), 6457827717110365317)
+    t.eqInt(s.next(), 3203168211198807973)
+    t.eqInt(s.next(), 9817491932198370423)
+    return t
+}
+
+fn testSeedIsReducedModulo2To64() TestLog {
+    TestLog t = newTestLog()
+    Source a = seeded(-1)
+    Source b = seeded(0xffffffffffffffff)
+    Source c = seeded(0x1ffffffffffffffff)
+    int x = a.next()
+    t.eqInt(x, 16490336266968443936)
+    t.eqInt(b.next(), x)
+    t.eqInt(c.next(), x)
+    t.eqInt(a.next(), 16834447057089888969)
+    return t
+}
+
+fn testCopyReplays() TestLog {
+    TestLog t = newTestLog()
+    Source a = seeded(5)
+    int first = a.range(0, 1000)
+    Source b = a
+    int x = a.range(0, 1000000)
+    t.eqInt(b.range(0, 1000000), x)
+    t.ok(first >= 0 && first < 1000, "first in range")
+    return t
+}
+
+fn testRangeSequence() TestLog {
+    TestLog t = newTestLog()
+    Source s = seeded(42)
+    []int got = []int{}
+    for (int i = 0; i < 10; i++) {
+        got.push(s.range(1, 7))
+    }
+    t.ok(got == []int{2, 2, 1, 1, 5, 1, 2, 3, 2, 3}, "dice from seed 42")
+    s = seeded(7)
+    got = []int{}
+    for (int i = 0; i < 12; i++) {
+        got.push(s.range(0, 3))
+    }
+    t.ok(got == []int{0, 0, 0, 0, 1, 0, 1, 0, 2, 2, 1, 1}, "range(0, 3) from seed 7")
+    return t
+}
+
+fn testRangeLarge() TestLog {
+    TestLog t = newTestLog()
+    Source s = seeded(7)
+    t.eqInt(s.range(-1000000000000000000000000000000, 1000000000000000000000000000000), 478775793826387334282922976796)
+    t.eqInt(s.range(-1000000000000000000000000000000, 1000000000000000000000000000000), -573774229815964489348219524661)
+    t.eqInt(s.range(-1000000000000000000000000000000, 1000000000000000000000000000000), -71302795403188447530478294511)
+    s = seeded(99)
+    t.eqInt(s.range(0, 0x10000000000000000), 4824385676517010403)
+    t.eqInt(s.range(0, 0x10000000000000001), 14814616385017375063)
+    return t
+}
+
+fn testRangeBounds() TestLog {
+    TestLog t = newTestLog()
+    Source s = seeded(2026)
+    bool inside = true
+    []int counts = []int{0, 0, 0, 0, 0}
+    for (int i = 0; i < 5000; i++) {
+        int x = s.range(-2, 3)
+        if (x < -2 || x >= 3) {
+            inside = false
+        } else {
+            counts[x + 2] = counts[x + 2] + 1
+        }
+    }
+    t.ok(inside, "every value in [-2, 3)")
+    for (int i = 0; i < 5; i++) {
+        t.ok(counts[i] > 850 && counts[i] < 1150, "bucket " + i.string() + " roughly uniform: " + counts[i].string())
+    }
+    t.eqInt(s.range(5, 6), 5)
+    return t
+}
+
+fn testFraction() TestLog {
+    TestLog t = newTestLog()
+    Source s = seeded(42)
+    t.eqStr(s.fraction().string(), "0.7415648787718233")
+    t.eqStr(s.fraction().string(), "0.1599103928769201")
+    t.eqStr(s.fraction().string(), "0.27860113025513866")
+    bool inside = true
+    float sum = 0.0
+    for (int i = 0; i < 2000; i++) {
+        float f = s.fraction()
+        if (f < 0.0 || f >= 1.0) {
+            inside = false
+        }
+        sum = sum + f
+    }
+    t.ok(inside, "0 <= f < 1")
+    t.ok(sum > 950.0 && sum < 1050.0, "mean near 0.5")
+    return t
+}
+
+fn testPermutation() TestLog {
+    TestLog t = newTestLog()
+    Source s = seeded(42)
+    t.ok(s.permutation(10) == []int{0, 9, 5, 8, 6, 4, 7, 2, 1, 3}, "permutation from seed 42")
+    t.ok(s.permutation(0) == []int{}, "empty")
+    t.ok(s.permutation(1) == []int{0}, "one")
+    []int p = s.permutation(100)
+    p.sort()
+    []int want = []int{}
+    for (int i = 0; i < 100; i++) {
+        want.push(i)
+    }
+    t.ok(p == want, "a permutation of 0..99")
+    return t
+}
+
+fn crashRangeEmpty() {
+    Source s = seeded(1)
+    fmt.println(s.range(5, 5).string())
+}
+
+fn crashPermutationNegative() {
+    Source s = seeded(1)
+    fmt.println(s.permutation(-1).len().string())
+}

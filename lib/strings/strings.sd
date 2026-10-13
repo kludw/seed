@@ -1,0 +1,110 @@
+package strings
+
+// Text helpers that are not built-in methods (docs/stdlib.md, "strings").
+// Everything here is pure Seed.
+
+import "fmt"
+import "os"
+
+// `s` repeated `count` times. Crashes if `count` is negative.
+pub fn repeat(string s, int count) string {
+    if (count < 0) {
+        stringsCrash("strings.repeat: count (" + count.string() + ") must not be negative")
+    }
+    if (count == 0 || s.len() == 0) {
+        return ""
+    }
+    // Doubling: O(log count) joins, linear in the size of the result.
+    string out = ""
+    string piece = s
+    int n = count
+    for (; n > 0; ) {
+        if ((n & 1) == 1) {
+            out = out + piece
+        }
+        n = n >> 1
+        if (n > 0) {
+            piece = piece + piece
+        }
+    }
+    return out
+}
+
+// `s` with `fill` added in front until it is `width` characters long,
+// counted as UTF-8 characters (the way `s.chars()` counts them: an invalid
+// byte is one character). Each `fill` byte counts as one character.
+pub fn padLeft(string s, int width, byte fill) string {
+    int have = s.chars().len()
+    if (have >= width) {
+        return s
+    }
+    return repeat(string([]byte{fill}), width - have) + s
+}
+
+// The same as padLeft, adding at the end.
+pub fn padRight(string s, int width, byte fill) string {
+    int have = s.chars().len()
+    if (have >= width) {
+        return s
+    }
+    return s + repeat(string([]byte{fill}), width - have)
+}
+
+// The byte index of the last occurrence of `sub` in `s`, or null. An empty
+// `sub` gives `s.len()`.
+pub fn lastIndex(string s, string sub) int? {
+    int n = sub.len()
+    if (n == 0) {
+        return s.len()
+    }
+    for (int i = s.len() - n; i >= 0; i--) {
+        if (s[i] == sub[0] && s.slice(i, i + n) == sub) {
+            return i
+        }
+    }
+    return null
+}
+
+// `s` split around runs of spaces, tabs, \n, \r, \v and \f, with no empty
+// strings.
+pub fn fields(string s) []string {
+    []string out = []string{}
+    int start = -1
+    for (int i = 0; i < s.len(); i++) {
+        if (isSpace(s[i])) {
+            if (start >= 0) {
+                out.push(s.slice(start, i))
+                start = -1
+            }
+        } else if (start < 0) {
+            start = i
+        }
+    }
+    if (start >= 0) {
+        out.push(s.slice(start, s.len()))
+    }
+    return out
+}
+
+// '0' to '9'.
+pub fn isDigit(byte b) bool {
+    return b >= '0' && b <= '9'
+}
+
+// ASCII 'a' to 'z' and 'A' to 'Z'.
+pub fn isLetter(byte b) bool {
+    return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z')
+}
+
+// Space, \t, \n, \r, \v or \f.
+pub fn isSpace(byte b) bool {
+    return b == ' ' || b == '\t' || b == '\n' || b == '\r' || b == '\x0b' || b == '\x0c'
+}
+
+// Ends the program the way a crash does: "crash: <message>" on stderr and
+// exit code 2. Seed has no way yet for library code to crash with its own
+// message (see lib/README.md); this becomes a real crash when it does.
+fn stringsCrash(string message) {
+    fmt.eprintln("crash: " + message)
+    os.exit(2)
+}

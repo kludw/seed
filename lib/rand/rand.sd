@@ -1,0 +1,111 @@
+package rand
+
+// Pseudo-random numbers (docs/stdlib.md, "rand"): the seeded `Source`, in
+// pure Seed. The algorithm is fixed so that a seed gives the same sequence
+// on every platform and in every Seed version:
+//
+// - Raw output: SplitMix64 (Steele, Lea and Flood 2014; the reference
+//   `splitmix64.c` by Vigna). The state is a 64-bit integer; each step adds
+//   0x9e3779b97f4a7c15 to it and returns the mixed state.
+// - range(lo, hi): with n = hi - lo, take k, the smallest k >= 1 with
+//   2^(64k) >= n. Draw k outputs and join them into one 64k-bit number x,
+//   the first output being the most significant 64 bits. If x is below
+//   2^(64k) - (2^(64k) mod n), the largest multiple of n that fits, the
+//   result is lo + x mod n; otherwise draw k new outputs and try again.
+// - fraction(): the top 53 bits of one output, times 2^-53.
+// - permutation(n): Fisher-Yates on [0, 1, ..., n - 1]: for i from n - 1
+//   down to 1, swap element i with element range(0, i + 1).
+//
+// Seed's ints grow, so the 64-bit wrapping arithmetic is emulated by masking
+// with 2^64 - 1. The intermediate products are big integers (about 128
+// bits), so every step allocates; see lib/README.md for the measured cost.
+// If that is too slow, `next` can become a native method without changing
+// any result.
+//
+// The package functions range, fraction and permutation (the per-goroutine
+// generator seeded from the OS) need the native `nextOs`, and are added when
+// the compiler supports native functions (see lib/README.md).
+
+import "fmt"
+import "os"
+
+const int mask64 = 0xffffffffffffffff
+
+// A generator created from a seed. A plain value: copying it copies the
+// state, so the copy produces the same numbers from that point on.
+pub type Source struct {
+    int state
+}
+
+// A new generator. Any int is a valid seed; it is reduced modulo 2^64
+// (so -1 and 2^64 - 1 give the same generator).
+pub fn seeded(int seed) Source {
+    return Source{state: seed & mask64}
+}
+
+// The next 64-bit output, 0 <= x < 2^64 (SplitMix64).
+fn (Source s) mut next() int {
+    s.state = (s.state + 0x9e3779b97f4a7c15) & mask64
+    int z = s.state
+    z = ((z ^ (z >> 30)) * 0xbf58476d1ce4e5b9) & mask64
+    z = ((z ^ (z >> 27)) * 0x94d049bb133111eb) & mask64
+    return z ^ (z >> 31)
+}
+
+// A uniformly distributed int with lo <= n < hi. Works for any size of
+// range. Crashes if lo >= hi.
+pub fn (Source s) mut range(int lo, int hi) int {
+    if (lo >= hi) {
+        randCrash("rand.Source.range: lo (" + lo.string() + ") must be less than hi (" + hi.string() + ")")
+    }
+    int n = hi - lo
+    int words = 1
+    int span = mask64 + 1
+    for (; span < n; ) {
+        words++
+        span = span << 64
+    }
+    int limit = span - span % n
+    for (;;) {
+        int x = 0
+        for (int i = 0; i < words; i++) {
+            x = (x << 64) | s.next()
+        }
+        if (x < limit) {
+            return lo + x % n
+        }
+    }
+}
+
+// A uniformly distributed float with 0.0 <= f < 1.0, a multiple of 2^-53.
+pub fn (Source s) mut fraction() float {
+    int top = s.next() >> 11
+    return float(top) * (1.0 / 9007199254740992.0)
+}
+
+// The numbers 0 to n - 1 in a uniformly random order. Crashes if n is
+// negative.
+pub fn (Source s) mut permutation(int n) []int {
+    if (n < 0) {
+        randCrash("rand.Source.permutation: n (" + n.string() + ") must not be negative")
+    }
+    []int out = []int{}
+    for (int i = 0; i < n; i++) {
+        out.push(i)
+    }
+    for (int i = n - 1; i >= 1; i--) {
+        int j = s.range(0, i + 1)
+        int tmp = out[i]
+        out[i] = out[j]
+        out[j] = tmp
+    }
+    return out
+}
+
+// Ends the program the way a crash does: "crash: <message>" on stderr and
+// exit code 2. Seed has no way yet for library code to crash with its own
+// message (see lib/README.md); this becomes a real crash when it does.
+fn randCrash(string message) {
+    fmt.eprintln("crash: " + message)
+    os.exit(2)
+}

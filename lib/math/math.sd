@@ -1,0 +1,134 @@
+package math
+
+// Numeric functions and constants (docs/stdlib.md, "math"): the parts that
+// need no C library. The float functions listed under "Native" in
+// lib/README.md (powFloat, sqrt, floor, ceil, round, trunc, sin, cos, tan,
+// asin, acos, atan, atan2, exp, log, log2, log10) are bodiless natives,
+// added when the compiler supports native declarations.
+
+import "fmt"
+import "os"
+
+pub const float pi = 3.141592653589793
+pub const float e = 2.718281828459045
+
+// The absolute value.
+pub fn absInt(int x) int {
+    if (x < 0) {
+        return -x
+    }
+    return x
+}
+
+// The smaller of the two.
+pub fn minInt(int a, int b) int {
+    if (b < a) {
+        return b
+    }
+    return a
+}
+
+// The larger of the two.
+pub fn maxInt(int a, int b) int {
+    if (b > a) {
+        return b
+    }
+    return a
+}
+
+// `base` to the power `exp`, exactly (integers grow). powInt(0, 0) is 1.
+// Crashes if `exp` is negative.
+pub fn powInt(int base, int exp) int {
+    if (exp < 0) {
+        mathCrash("math.powInt: exp (" + exp.string() + ") must not be negative")
+    }
+    int result = 1
+    int b = base
+    int n = exp
+    for (; n > 0; ) {
+        if ((n & 1) == 1) {
+            result = result * b
+        }
+        n = n >> 1
+        if (n > 0) {
+            b = b * b
+        }
+    }
+    return result
+}
+
+// The absolute value. absFloat(-0.0) is 0.0 and absFloat of nan is nan.
+pub fn absFloat(float x) float {
+    if (x < 0.0 || isNegZero(x)) {
+        return -x
+    }
+    return x
+}
+
+// The smaller of the two; nan if either is nan. -0.0 is smaller than 0.0.
+pub fn minFloat(float a, float b) float {
+    if (isNan(a) || isNan(b)) {
+        return nanValue()
+    }
+    if (a == 0.0 && b == 0.0) {
+        if (isNegZero(a)) {
+            return a
+        }
+        return b
+    }
+    if (b < a) {
+        return b
+    }
+    return a
+}
+
+// The larger of the two; nan if either is nan. 0.0 is larger than -0.0.
+pub fn maxFloat(float a, float b) float {
+    if (isNan(a) || isNan(b)) {
+        return nanValue()
+    }
+    if (a == 0.0 && b == 0.0) {
+        if (isNegZero(a)) {
+            return b
+        }
+        return a
+    }
+    if (b > a) {
+        return b
+    }
+    return a
+}
+
+// Whether `x` is nan.
+pub fn isNan(float x) bool {
+    return x != x
+}
+
+// Whether `x` is inf or -inf.
+pub fn isInf(float x) bool {
+    return x == inf() || x == -inf()
+}
+
+// Positive infinity. (docs/stdlib.md lists this as native; IEEE division
+// gives it in pure Seed.)
+pub fn inf() float {
+    float zero = 0.0
+    return 1.0 / zero
+}
+
+fn isNegZero(float x) bool {
+    return x == 0.0 && 1.0 / x < 0.0
+}
+
+fn nanValue() float {
+    float zero = 0.0
+    return zero / zero
+}
+
+// Ends the program the way a crash does: "crash: <message>" on stderr and
+// exit code 2. Seed has no way yet for library code to crash with its own
+// message (see lib/README.md); this becomes a real crash when it does.
+fn mathCrash(string message) {
+    fmt.eprintln("crash: " + message)
+    os.exit(2)
+}

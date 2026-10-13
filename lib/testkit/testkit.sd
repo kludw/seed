@@ -1,0 +1,114 @@
+package main
+
+// A temporary test harness for lib/run_tests.sh, used until the compiler
+// supports packages, `test` blocks and `assert`. It is not a library package:
+// run_tests.sh compiles it together with a package (renamed to `main`), the
+// package's tests and a generated `main`.
+//
+// Every test is a function `fn testName() TestLog` that makes a TestLog,
+// records its checks and returns it. Each check maps to one `assert`:
+//
+//     t.ok(cond)           assert(cond)
+//     t.eqStr(got, want)   assert(got == want)      (also eqInt, eqFloat, eqBool)
+//     t.errIs(err, msg)    assert(err != null && err.message() == msg)
+//     t.noErr(err)         assert(err == null)
+//
+// A crash test is a function `fn crashName()` whose body must crash; the
+// script runs each one in its own process and records its exit code and
+// stderr.
+
+import "fmt"
+
+type TestLog struct {
+    []string fails
+    int checks
+}
+
+fn newTestLog() TestLog {
+    return TestLog{fails: []string{}, checks: 0}
+}
+
+fn (TestLog t) mut ok(bool cond, string what) {
+    t.checks++
+    if (!cond) {
+        t.fails.push("check " + t.checks.string() + " failed: " + what)
+    }
+}
+
+fn (TestLog t) mut eqStr(string got, string want) {
+    t.checks++
+    if (got != want) {
+        t.fails.push("check " + t.checks.string() + ": got " + testQuote(got) + ", want " + testQuote(want))
+    }
+}
+
+fn (TestLog t) mut eqInt(int got, int want) {
+    t.checks++
+    if (got != want) {
+        t.fails.push("check " + t.checks.string() + ": got " + got.string() + ", want " + want.string())
+    }
+}
+
+fn (TestLog t) mut eqFloat(float got, float want) {
+    t.checks++
+    if (got != want) {
+        t.fails.push("check " + t.checks.string() + ": got " + got.string() + ", want " + want.string())
+    }
+}
+
+fn (TestLog t) mut eqBool(bool got, bool want) {
+    t.checks++
+    if (got != want) {
+        t.fails.push("check " + t.checks.string() + ": got " + got.string() + ", want " + want.string())
+    }
+}
+
+fn (TestLog t) mut errIs(error err, string want) {
+    t.checks++
+    if (err == null) {
+        t.fails.push("check " + t.checks.string() + ": no error, want " + testQuote(want))
+        return
+    }
+    if (err.message() != want) {
+        t.fails.push("check " + t.checks.string() + ": error " + testQuote(err.message()) + ", want " + testQuote(want))
+    }
+}
+
+fn (TestLog t) mut noErr(error err) {
+    t.checks++
+    if (err != null) {
+        t.fails.push("check " + t.checks.string() + ": unexpected error " + testQuote(err.message()))
+    }
+}
+
+// Quotes a string for a failure message, escaping bytes that are not
+// printable ASCII.
+fn testQuote(string s) string {
+    []string out = []string{"\""}
+    string digits = "0123456789abcdef"
+    for (int i = 0; i < s.len(); i++) {
+        byte b = s[i]
+        if (b == '"' || b == '\\') {
+            out.push("\\" + string([]byte{b}))
+        } else if (b >= ' ' && b <= '~') {
+            out.push(string([]byte{b}))
+        } else {
+            out.push("\\x" + string([]byte{digits[int(b) >> 4], digits[int(b) & 15]}))
+        }
+    }
+    out.push("\"")
+    return out.join("")
+}
+
+// Prints the result of one test and returns 1 if it failed.
+fn testReport(string name, TestLog t) int {
+    if (t.fails.len() == 0) {
+        fmt.println("ok   " + name + " (" + t.checks.string() + " checks)")
+        return 0
+    }
+    fmt.println("FAIL " + name)
+    for (int i = 0; i < t.fails.len(); i++) {
+        fmt.println("     " + t.fails[i])
+    }
+    return 1
+}
