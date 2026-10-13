@@ -6,7 +6,6 @@ import "os"
 fn finish(int code) int {
     fmt.println("bye")
     os.exit(code)
-    return 0
 }
 
 fn main([]string args) error {

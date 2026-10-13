@@ -1,12 +1,7 @@
-// expect-error: assert
-// assert is only allowed inside a test block.
+// expect-error: assert can only be used in a test
 package main
 
-import "fmt"
-
 fn main([]string args) error {
-    int n = 3
-    assert(n == 3)
-    fmt.println("done")
+    assert(1 + 1 == 2)
     return null
 }

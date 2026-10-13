@@ -8,10 +8,6 @@ package http
 //
 // serve, get and send need the net package (native sockets) and are added
 // with it; see lib/README.md for how they use wire.sd.
-//
-// Until the compiler supports `pub` on struct fields, the fields of Request
-// and Response are written without it; every one of them is meant to be
-// `pub`.
 
 import "encoding"
 import "json"
@@ -21,17 +17,17 @@ import "json"
 // Header names are lowercase; a header received more than once is joined
 // into one value with ", ".
 pub type Request struct {
-    string method
-    string url
-    map[string]string headers
-    string body
+    pub string method
+    pub string url
+    pub map[string]string headers
+    pub string body
 }
 
 // A response. Header names are lowercase.
 pub type Response struct {
-    int status
-    map[string]string headers
-    string body
+    pub int status
+    pub map[string]string headers
+    pub string body
 }
 
 // Serves requests. A struct that implements Handler can hold configuration

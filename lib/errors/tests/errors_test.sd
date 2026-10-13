@@ -1,0 +1,29 @@
+package errors
+
+test "new keeps the message" {
+    error err = new("disk full")
+    assert(err.message() == "disk full")
+}
+
+test "errors with the same message are equal" {
+    assert(new("x") == new("x"))
+    assert(new("x") != new("y"))
+}
+
+test "wrap adds context" {
+    error err = wrap(new("fs.read: a.txt: no such file or directory"), "loading config")
+    assert(err.message() == "loading config: fs.read: a.txt: no such file or directory")
+}
+
+fn wrapNull() {
+    error none = null
+    _ = wrap(none, "context")
+}
+
+test "wrap crashes on null" {
+    error err = group {
+        spawn wrapNull()
+    }
+    assert(err != null)
+    assert(err.message() == "crash: errors.wrap: err is null")
+}

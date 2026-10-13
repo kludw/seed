@@ -376,7 +376,11 @@ fn (Parser p) mut parseStmt() int {
         p.pos++
         Stmt a = newStmt(StmtKind.Assert, t.pos)
         p.expect(Tok.LParen, " after assert (it is written assert(condition))")
+        int first = p.pos
         a.expr = p.parseExpr()
+        if (!p.failed) {
+            a.name = p.sourceText(first, p.pos - 1)
+        }
         p.expect(Tok.RParen, " to close the assert")
         return p.ast.addStmt(a)
     }
@@ -430,7 +434,7 @@ fn (Parser p) mut parseSimple() int {
     }
     Target first = p.ast.targets[targets[0]]
     if (targets.len() > 1 || first.kind == TargetKind.Decl) {
-        p.errorHint(p.here(), "expected '=' in the declaration or assignment, found " + tokenDesc(p.toks[p.pos]), "every declaration needs a value, for example  int count = 0")
+        p.errorHint(p.here(), "expected '=' in the declaration or assignment, found " + tokenDesc(p.toks[p.pos]), "every declaration needs a value, for example: int count = 0")
         return p.ast.addStmt(newStmt(StmtKind.Bad, start))
     }
     if (first.kind == TargetKind.Discard) {
@@ -546,6 +550,55 @@ fn (Parser p) mut parseCaseBody(Pos start) int {
     }
     p.ast.blocks.push(Block{pos: start, end: p.here(), list: p.ast.addList(stmts), count: stmts.len()})
     return p.ast.blocks.len() - 1
+}
+
+// The source text from the start of token `from` to the end of token `to`,
+// with each line break and the indentation after it turned into one space
+// (for the message of a failed assert).
+fn (Parser p) sourceText(int from, int to) string {
+    string src = p.diags.sources[p.file]
+    Token last = p.toks[to]
+    int start = posOffset(src, p.toks[from].pos)
+    int end = posOffset(src, last.pos) + last.raw.len()
+    if (start < 0 || end < start || end > src.len()) {
+        return ""
+    }
+    string text = src.slice(start, end)
+    if (!text.contains("\n")) {
+        return text
+    }
+    []byte out = []byte{}
+    bool skipping = false
+    for (int i = 0; i < text.len(); i++) {
+        byte b = text[i]
+        if (b == '\n') {
+            out.push(' ')
+            skipping = true
+        } else if (skipping && (b == ' ' || b == '\t' || b == '\r')) {
+            continue
+        } else {
+            skipping = false
+            out.push(b)
+        }
+    }
+    return string(out)
+}
+
+// The byte offset of a position in a source text, or -1.
+fn posOffset(string src, Pos pos) int {
+    int line = 1
+    for (int i = 0; i < src.len(); i++) {
+        if (line == pos.line) {
+            return i + pos.col - 1
+        }
+        if (src[i] == '\n') {
+            line++
+        }
+    }
+    if (line == pos.line) {
+        return src.len() + pos.col - 1
+    }
+    return -1
 }
 
 // A case label: an enum pattern (`Shape.Circle(float r)`, `Color.Red`,

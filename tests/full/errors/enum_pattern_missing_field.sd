@@ -1,0 +1,17 @@
+// expect-error: Shape.Rect carries 2 values but the pattern binds 1
+package main
+
+import "fmt"
+
+type Shape enum {
+    Rect(float w, float h)
+}
+
+fn main([]string args) error {
+    Shape s = Shape.Rect(1.0, 2.0)
+    switch (s) {
+    case Shape.Rect(float w):
+        fmt.println(w.string())
+    }
+    return null
+}

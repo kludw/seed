@@ -292,11 +292,11 @@ fn main([]string args) error {
     for (int i = 0; i < 4; i++) {
         fmt.println(i.string() + ": " + disasm(code[i]))
     }
-    []string? bad, error err = run("push 1\nadd\nhalt")
+    _, error err = run("push 1\nadd\nhalt")
     if (err != null) {
         fmt.println("error: " + err.message())
     }
-    bad, err = run("bogus")
+    _, err = run("bogus")
     if (err != null) {
         fmt.println("error: " + err.message())
     }

@@ -1,0 +1,18 @@
+// expect-error: a case with several labels cannot bind names
+package main
+
+import "fmt"
+
+type Shape enum {
+    Circle(float r)
+    Square(float r)
+}
+
+fn main([]string args) error {
+    Shape s = Shape.Square(2.0)
+    switch (s) {
+    case Shape.Circle(float r), Shape.Square(float _):
+        fmt.println(r.string())
+    }
+    return null
+}

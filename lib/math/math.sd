@@ -3,10 +3,9 @@ package math
 // Numeric functions and constants (docs/stdlib.md, "math"): the parts that
 // need no C library. The float functions listed under "Native" in
 // lib/README.md (powFloat, sqrt, floor, ceil, round, trunc, sin, cos, tan,
-// asin, acos, atan, atan2, exp, log, log2, log10) are bodiless natives,
-// added when the compiler supports native declarations.
+// asin, acos, atan, atan2, exp, log, log2, log10) are to be added as native
+// functions in math.c (runtime/README.md, "Native functions").
 
-import "fmt"
 import "os"
 
 pub const float pi = 3.141592653589793
@@ -40,7 +39,7 @@ pub fn maxInt(int a, int b) int {
 // Crashes if `exp` is negative.
 pub fn powInt(int base, int exp) int {
     if (exp < 0) {
-        mathCrash("math.powInt: exp (" + exp.string() + ") must not be negative")
+        os.crash("math.powInt: exp (" + exp.string() + ") must not be negative")
     }
     int result = 1
     int b = base
@@ -123,12 +122,4 @@ fn isNegZero(float x) bool {
 fn nanValue() float {
     float zero = 0.0
     return zero / zero
-}
-
-// Ends the program the way a crash does: "crash: <message>" on stderr and
-// exit code 2. Seed has no way yet for library code to crash with its own
-// message (see lib/README.md); this becomes a real crash when it does.
-fn mathCrash(string message) {
-    fmt.eprintln("crash: " + message)
-    os.exit(2)
 }

@@ -369,7 +369,7 @@ fn (Interp it) mut eval(Expr e) (Value, error) {
         }
         it.frames.push(frame)
         Value? result = try it.exec(f.body)
-        it.frames.pop()
+        _ = it.frames.pop()
         if (result == null) {
             return Value.Nothing, null
         }
@@ -434,7 +434,7 @@ fn binop(string op, Value a, Value b) (Value, error) {
             default:
                 return null, errors.new("unknown operator " + op)
             }
-        case Value.StrV(string y):
+        case Value.StrV(string _):
         case Value.Nothing:
         }
         return null, errors.new("bad operands for " + op)
@@ -511,7 +511,7 @@ fn run(string src) error {
         prog.push(s)
     }
     Interp it = Interp{frames: []map[string]Value{map[string]Value{}}, funcs: map[string]Func{}, output: []string{}, steps: 0}
-    Value? r, error err = it.exec(prog)
+    _, error err = it.exec(prog)
     fmt.println(it.output.join("\n"))
     if (err != null) {
         return err

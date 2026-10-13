@@ -166,6 +166,8 @@ The running process and its environment. A program's arguments are not here: `ma
 | `os.output([]string argv) (string, int, error)` | Like `os.run`, but captures the child's stdout and returns it with the exit code. |
 | `os.cwd() (string, error)` | The absolute path of the current directory. |
 | `os.hostname() (string, error)` | The machine's host name. |
+| `os.executable() string` | The absolute path of the running program, with symbolic links resolved, or `""` if it cannot be found. |
+| `os.crash(string message)` | Crashes the current goroutine exactly like a runtime fault, with `crash: <message>`. This is how library code reports a caller's mistake (see [Errors and crashes](#errors-and-crashes)). |
 
 `os.run` and `os.output`:
 
@@ -780,8 +782,8 @@ test "save then load keeps every todo" {
 
 ### Layout
 
-- Each package is a directory `lib/<pkg>/` of ordinary Seed files (`package <pkg>`), with its tests in `lib/<pkg>/tests/`. The compiler finds `lib/` next to its own binary, and `seed build` compiles the packages a program imports into the same static binary.
-- Code that needs the operating system is written in C in the runtime, in `runtime/lib/<pkg>.c`. Everything else is Seed. Packages may import each other, without cycles:
+- Each package is a directory `lib/<pkg>/` of ordinary Seed files (`package <pkg>`), with its tests in `lib/<pkg>/tests/` (`seed test lib` runs them). The compiler finds `lib/` next to its own binary, and `seed build` compiles the packages a program imports into the same static binary.
+- Code that needs the operating system is written in C, in `.c` files in the package's directory (`lib/<pkg>/<pkg>.c`), which may call the runtime. Everything else is Seed. Packages may import each other, without cycles:
 
 ```
 errors, strings, math, path, encoding    (no imports, apart from errors)
@@ -800,12 +802,13 @@ pub fn sqrt(float x) float
 pub fn (Conn c) read(int max) (string?, error)
 ```
 
-- Native declarations are only allowed in files under `lib/`. Anywhere else, a missing body is a compile error ("function `f` needs a body").
-- The compiler emits a call to a C function with a fixed name: `sd_lib_<pkg>_<name>` for functions and `sd_lib_<pkg>_<Type>_<method>` for methods (`sd_lib_math_sqrt`, `sd_lib_net_Conn_read`). Arguments and results use the runtime's normal C representation of each Seed type; several results are returned in the struct the compiler already uses for multiple returns. A `mut` native method receives a pointer to the receiver.
-- Errors are made with the runtime helper that `errors.new` uses, so their messages follow the format above. The native code builds the full message (`fs.read: notes.txt: no such file or directory`) from `strerror(errno)`.
+- Native declarations are only allowed in packages under `lib/`. Anywhere else, a missing body is a compile error ("fn f needs a body").
+- The compiler emits a call to a C function with a fixed name: `sd_lib_<pkg>_<name>` for functions and `sd_lib_<pkg>_<Type>_<method>` for methods (`sd_lib_math_sqrt`, `sd_lib_net_Conn_read`). Arguments and results use the runtime's normal C representation of each Seed type; with several results, the last one (normally the `error`) is returned and the others are written through out-pointers after the arguments. A `mut` native method receives a pointer to the receiver. The full contract is in [runtime/README.md](../runtime/README.md#13-native-functions).
+- Errors are made with the runtime helper that `errors.new` uses, so their messages follow the format above. The native code builds the full message (`fs.read: notes.txt: no such file or directory`) from `sd_strerror(errno)` (`strerror` with a lowercase first letter).
 - **Blocking.** A native call that can wait (reading, accepting, connecting, sleeping, waiting for a child process) must call the runtime's `sd_block_begin()` and `sd_block_end()` around the wait, so that other goroutines keep running and so that a group can stop the goroutine there. `sd_block_end()` reports whether the goroutine was asked to stop; the native then cleans up (kills a child, abandons a read) and returns to the runtime's stop path, which runs `defer`s. How this maps to the scheduler (OS threads, or an event loop with non-blocking descriptors) is the runtime's choice; the observable behaviour is the same.
-- **Handles.** `runtime/lib/handles.c` keeps one process-wide table. Each entry holds the kind (file, conn, listener), the descriptor, the read buffer used by `readLine` and `read`, the timeout, the closed flag, and a mutex that makes each operation atomic. The Seed struct holds only the entry's `int` id; ids count up and are never reused.
-- **The core packages in seed0.** `seed0` implements `errors.new`, `fmt`, `os.exit`, `os.env`, `os.run` and the `fs` functions in [builtins.md](builtins.md) directly in its runtime and does not read `lib/`. The real compiler uses `lib/`, and both must behave identically for that subset.
+- **Handles.** The runtime keeps one process-wide table (shared by `fs` and `net`, so it belongs in `runtime/`, not in one package's C file). Each entry holds the kind (file, conn, listener), the descriptor, the read buffer used by `readLine` and `read`, the timeout, the closed flag, and a mutex that makes each operation atomic. The Seed struct holds only the entry's `int` id; ids count up and are never reused.
+- **The core packages in seed0.** `seed0` implements `errors.new`, `fmt`, `os.exit`, `os.env`, `os.run`, `os.executable`, `os.cwd` and the `fs` functions in [builtins.md](builtins.md) directly in its runtime and does not read `lib/`. The real compiler uses `lib/`, and both must behave identically for that subset (including the error messages).
+- **Blocking natives are not stop points yet.** The runtime has no `sd_block_begin`/`sd_block_end` hooks so far; a native that blocks only blocks its own goroutine (each goroutine is a thread), but a failed group cannot stop it there.
 
 ### Native code per package
 

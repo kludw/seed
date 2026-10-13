@@ -1,0 +1,10 @@
+// expect-error: the method cheat of acct.Account is not pub
+package main
+
+import "acct"
+
+fn main([]string args) error {
+    acct.Account a = acct.open("eve")
+    a.cheat(100)
+    return null
+}

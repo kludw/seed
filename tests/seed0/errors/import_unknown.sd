@@ -1,7 +1,7 @@
-// expect-error: can only import the core packages
+// expect-error: "nosuchpkg"
 package main
 
-import "strings"
+import "nosuchpkg"
 
 fn main([]string args) error {
     return null

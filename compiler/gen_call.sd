@@ -1,13 +1,12 @@
 // The C generator, continued: calls of functions, methods, function values
-// and interface methods, built-in methods, core package functions,
-// conversions, enum constructors, and places (the targets of mut calls and
-// assignments).
+// and interface methods, built-in methods, conversions, enum constructors,
+// and places (the targets of mut calls and assignments).
 package main
 
 fn (Gen g) mut gcall(int e) string {
     ExprInfo i = g.c.info[e]
     switch (i.res) {
-    case Res.Func, Res.ValueCall, Res.Pkg:
+    case Res.Func, Res.ValueCall:
         return g.finishCall(e, g.callFrom(e, g.operands(g.callOperands(e))))
     case Res.Method:
         if (g.c.ast.fns[i.ref].recvMut) {
@@ -25,7 +24,7 @@ fn (Gen g) mut gcall(int e) string {
         return g.gconv(e)
     case Res.Builtin:
         return g.gbuiltin(e)
-    case Res.None, Res.Local, Res.Const, Res.EnumVal, Res.Field, Res.ListIndex, Res.StringIndex, Res.MapIndex, Res.PkgConst:
+    case Res.None, Res.Local, Res.Const, Res.EnumVal, Res.Field, Res.ListIndex, Res.StringIndex, Res.MapIndex:
         return "/* internal error: unresolved call */"
     }
 }
@@ -54,8 +53,8 @@ fn (Gen g) callOperands(int e) []int {
 }
 
 // The C call for a function, method (not mut), function value, interface
-// method (not mut), package function or ch.close(), given its evaluated
-// operands (callOperands).
+// method (not mut) or ch.close(), given its evaluated operands
+// (callOperands).
 fn (Gen g) mut callFrom(int e, []string vals) string {
     ExprInfo i = g.c.info[e]
     if (i.res == Res.Builtin) {
@@ -72,10 +71,10 @@ fn (Gen g) mut callFrom(int e, []string vals) string {
         for (int k = 1; k < vals.len(); k++) {
             args.push(vals[k])
         }
-        string vt = "((const sd_V_" + g.c.ast.typeDecls[i.ref].name + " *)(" + vals[0] + ").vt)"
+        string vt = "((const sd_V_" + g.c.declCName(i.ref) + " *)(" + vals[0] + ").vt)"
         return vt + "->m_" + g.c.ifaceMethod(i.ref, i.sub).name + "(" + args.join(", ") + ")"
     }
-    return g.pkgCall(e, vals)
+    return "/* internal error: call */"
 }
 
 // Emits a call whose result is not used as a value (void), or keeps its
@@ -113,7 +112,7 @@ fn (Gen g) mut gmutCall(int e) string {
     for (int m = 0; m < vals.len(); m++) {
         iargs.push(vals[m])
     }
-    string vt = "((const sd_V_" + g.c.ast.typeDecls[i.ref].name + " *)" + p + "->vt)"
+    string vt = "((const sd_V_" + g.c.declCName(i.ref) + " *)" + p + "->vt)"
     return g.finishCall(e, vt + "->m_" + g.c.ifaceMethod(i.ref, i.sub).name + "(" + iargs.join(", ") + ")")
 }
 
@@ -164,55 +163,10 @@ fn (Gen g) mut placeVar(string ptrType, string p) string {
     return n
 }
 
-// ---- package functions ----
-
 // A runtime call that returns its value through an out parameter and its
 // error as the result, packed into a (T, error) tuple.
 fn (Gen g) tupleOut(int tt, string valueType, string fnName, string arg) string {
     return "({ " + valueType + " o_; sd_err e_ = " + fnName + "(" + arg + ", &o_); (" + g.ctype(tt) + "){o_, e_}; })"
-}
-
-fn (Gen g) mut pkgCall(int e, []string vals) string {
-    string a = vals[0]
-    int t = g.coreType(e)
-    switch (g.c.info[e].pkgFn) {
-    case PkgFn.Print:
-        return "sd_fmt_print(" + a + ")"
-    case PkgFn.Println:
-        return "sd_fmt_println(" + a + ")"
-    case PkgFn.Eprint:
-        return "sd_fmt_eprint(" + a + ")"
-    case PkgFn.Eprintln:
-        return "sd_fmt_eprintln(" + a + ")"
-    case PkgFn.Exit:
-        return "sd_os_exit(" + a + ")"
-    case PkgFn.Env:
-        return "sd_os_env(" + a + ")"
-    case PkgFn.Run:
-        return g.tupleOut(t, "sd_int", "sd_os_run", a)
-    case PkgFn.Read:
-        return g.tupleOut(t, "sd_str", "sd_fs_read", a)
-    case PkgFn.Write:
-        return "sd_fs_write(" + a + ", " + vals[1] + ")"
-    case PkgFn.Exists:
-        return "sd_fs_exists(" + a + ")"
-    case PkgFn.IsDir:
-        return "sd_fs_is_dir(" + a + ")"
-    case PkgFn.List:
-        return g.tupleOut(t, "sd_list *", "sd_fs_list", a)
-    case PkgFn.Mkdir:
-        return "sd_fs_mkdir(" + a + ")"
-    case PkgFn.Remove:
-        return "sd_fs_remove(" + a + ")"
-    case PkgFn.ErrNew:
-        return "sd_errors_new(" + a + ")"
-    case PkgFn.After:
-        return "sd_time_after(" + a + ")"
-    case PkgFn.Sleep:
-        return "sd_time_sleep(" + a + ")"
-    case PkgFn.None:
-        return "/* internal error: unresolved package function */"
-    }
 }
 
 // ---- enum cases and conversions ----
@@ -220,7 +174,7 @@ fn (Gen g) mut pkgCall(int e, []string vals) string {
 fn (Gen g) mut genumNew(int e) string {
     ExprInfo i = g.c.info[e]
     int d = i.ref
-    string n = g.c.ast.typeDecls[d].name
+    string n = g.c.declCName(d)
     EnumCase ec = g.c.enumCase(d, i.sub)
     []int args = g.argList(e)
     []string vals = g.operands(args)

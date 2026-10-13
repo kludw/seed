@@ -8,7 +8,7 @@ fn (Checker c) mut notValue(int e) {
     if (t == tyVoid) {
         c.error(c.ast.exprs[e].pos, c.describe(e) + " does not return a value")
     } else if (c.types.isTuple(t)) {
-        c.errorHint(c.ast.exprs[e].pos, c.describe(e) + " returns " + c.types.count(t).string() + " values " + c.typeName(t), "assign them with a declaration like  T a, error err = ...")
+        c.errorHint(c.ast.exprs[e].pos, c.describe(e) + " returns " + c.types.count(t).string() + " values " + c.typeName(t), "assign them with a declaration such as T a, error err = ...")
     }
 }
 
@@ -73,7 +73,7 @@ fn (Checker c) mut coerce(int e, int want, string context) {
     } else if (c.types.isOpt(t) && c.types.elem(t) == want) {
         c.errorHint(pos, c.describe(e) + " is nullable (" + c.typeName(t) + ") and cannot be used as " + c.typeName(want) + " " + context, "check " + c.describe(e) + " != null first")
     } else if ((c.kindOf(want) == Kind.Interface || want == tyError) && (c.kindOf(t) == Kind.Struct || c.kindOf(t) == Kind.Enum)) {
-        c.errorHint(pos, "cannot use " + c.describe(e) + " (type " + c.typeName(t) + ") as " + c.typeName(want) + " " + context + ": " + c.typeName(t) + " does not declare that it implements " + c.typeName(want), "add  implements " + c.typeName(want) + "  to the declaration of " + c.typeName(t))
+        c.errorHint(pos, "cannot use " + c.describe(e) + " (type " + c.typeName(t) + ") as " + c.typeName(want) + " " + context + ": " + c.typeName(t) + " does not declare that it implements " + c.typeName(want), "add implements " + c.typeName(want) + " to the declaration of " + c.typeName(t))
     } else {
         c.error(pos, "cannot use " + c.describe(e) + " (type " + c.typeName(t) + ") as " + c.typeName(want) + " " + context + "; there are no implicit conversions")
     }
@@ -124,23 +124,33 @@ fn (Checker c) mut applyNarrowing(int e) {
 }
 
 // The type declaration named by e when it is a type name used as a value
-// (in Type.Case and Type{...}), or -1.
-fn (Checker c) typeNamed(int e) int {
+// (in Type.Case and Type{...}): Type, or pkg.Type for a pub type of an
+// imported package. -1 otherwise.
+fn (Checker c) mut typeNamed(int e) int {
     Expr x = c.ast.exprs[e]
+    if (x.kind == ExprKind.Field) {
+        int p = c.pkgNamed(x.a)
+        if (p < 0) {
+            return -1
+        }
+        int? pg = c.global(p, x.text)
+        if (pg == null || c.globalList[pg].kind != GlobalKind.Type) {
+            return -1
+        }
+        if (!c.globalPub(pg)) {
+            c.errorHint(x.pos, x.text + " is not pub in package " + c.ast.pkgs[p].name, "only names declared pub can be used outside their package")
+            return -1
+        }
+        return c.globalList[pg].index
+    }
     if (x.kind != ExprKind.Ident || c.lookupVar(x.text) >= 0) {
         return -1
     }
-    int? g = c.globals[x.text]
+    int? g = c.global(c.pkgOf(x.pos), x.text)
     if (g != null && c.globalList[g].kind == GlobalKind.Type) {
         return c.globalList[g].index
     }
     return -1
-}
-
-// Whether e names a core package (fmt, os, fs, errors).
-fn (Checker c) pkgNamed(int e) bool {
-    Expr x = c.ast.exprs[e]
-    return x.kind == ExprKind.Ident && c.lookupVar(x.text) < 0 && c.globals[x.text] == null && isCorePackage(x.text)
 }
 
 // Checks that e (already checked) is a place that may be modified: a local
@@ -192,7 +202,7 @@ fn (Checker c) mut checkLvalue(int e) {
     case ExprKind.Ident:
         int v = c.lookupVar(x.text)
         if (v < 0) {
-            int? g = c.globals[x.text]
+            int? g = c.global(c.pkgOf(pos), x.text)
             if (g != null && c.globalList[g].kind == GlobalKind.Const) {
                 c.error(pos, "cannot assign to the constant " + x.text)
             } else {
@@ -206,6 +216,10 @@ fn (Checker c) mut checkLvalue(int e) {
     case ExprKind.Field:
         if (c.typeNamed(x.a) >= 0) {
             c.error(pos, "cannot assign to an enum case")
+            return
+        }
+        if (c.pkgNamed(x.a) >= 0) {
+            c.error(pos, "cannot assign to " + c.ast.exprs[x.a].text + "." + x.text + ": another package's names cannot be assigned")
             return
         }
         c.checkExpr(x.a)
@@ -225,6 +239,10 @@ fn (Checker c) mut checkLvalue(int e) {
         int fi = c.findField(d, x.text)
         if (fi < 0) {
             c.unknownField(pos, d, x.text)
+            return
+        }
+        if (!c.fieldVisible(d, fi, pos)) {
+            c.privateField(pos, d, x.text)
             return
         }
         c.info[e].res = Res.Field
@@ -272,12 +290,19 @@ fn (Checker c) mut checkLvalue(int e) {
 
 fn (Checker c) mut undefinedName(int e) {
     Expr x = c.ast.exprs[e]
+    if (c.isPackageDir(x.text)) {
+        c.errorHint(x.pos, "package " + x.text + " is not imported", "add import \"" + x.text + "\" after the package line")
+        c.setType(e, tyInvalid)
+        return
+    }
     Suggest s = newSuggest(x.text)
     for (int i = c.scope.len() - 1; i >= 0; i--) {
         s.consider(c.vars[c.scope[i]].name)
     }
     for (int j = 0; j < c.ast.consts.len(); j++) {
-        s.consider(c.ast.consts[j].name)
+        if (c.ast.files[c.ast.consts[j].file].pkgIndex == c.pkgOf(x.pos)) {
+            s.consider(c.ast.consts[j].name)
+        }
     }
     c.errorHint(x.pos, "undefined: " + x.text, s.hint())
     c.setType(e, tyInvalid)
@@ -371,40 +396,48 @@ fn (Checker c) mut checkIdent(int e) {
         c.setType(e, c.vars[v].ty)
         c.applyNarrowing(e)
         int g = c.guardOf(v)
-        if (g >= 0 && c.strict) {
+        if (g >= 0) {
             string en = c.guards[g].errName
             c.errorHint(x.pos, n + " is read before " + en + " is checked; when " + en + " is not null, " + n + " is null", "check " + en + " != null first (and return or handle it), or use try")
             c.guards[g].dead = true
         }
         return
     }
-    int? g = c.globals[n]
+    int? g = c.global(c.pkgOf(x.pos), n)
     if (g != null) {
-        Global gl = c.globalList[g]
-        switch (gl.kind) {
-        case GlobalKind.Const:
-            c.checkConst(gl.index)
-            c.info[e].res = Res.Const
-            c.info[e].ref = gl.index
-            c.setType(e, c.constType[gl.index])
-            return
-        case GlobalKind.Fn:
-            c.info[e].res = Res.Func
-            c.info[e].ref = gl.index
-            c.setType(e, c.fnType(gl.index))
-            return
-        case GlobalKind.Type:
-            c.error(x.pos, n + " is a type, not a value")
-        }
-        c.setType(e, tyInvalid)
+        c.identGlobal(e, g)
         return
     }
-    if (isCorePackage(n)) {
-        c.error(x.pos, n + " is a package; use it as " + n + ".name(...)")
+    if (c.importedPkg(x.pos.file, n) >= 0) {
+        c.usedImports[x.pos.file.string() + ":" + n] = true
+        c.errorHint(x.pos, n + " is a package, not a value", "use one of its names, such as " + n + ".name")
         c.setType(e, tyInvalid)
         return
     }
     c.undefinedName(e)
+}
+
+// A package-level name used as a value: a constant, or a function (as a
+// function value).
+fn (Checker c) mut identGlobal(int e, int g) {
+    Expr x = c.ast.exprs[e]
+    Global gl = c.globalList[g]
+    switch (gl.kind) {
+    case GlobalKind.Const:
+        c.checkConst(gl.index)
+        c.info[e].res = Res.Const
+        c.info[e].ref = gl.index
+        c.setType(e, c.constType[gl.index])
+        return
+    case GlobalKind.Fn:
+        c.info[e].res = Res.Func
+        c.info[e].ref = gl.index
+        c.setType(e, c.fnType(gl.index))
+        return
+    case GlobalKind.Type:
+        c.error(x.pos, gl.name + " is a type, not a value")
+    }
+    c.setType(e, tyInvalid)
 }
 
 fn (Checker c) mut checkField(int e) {
@@ -413,7 +446,7 @@ fn (Checker c) mut checkField(int e) {
     if (d >= 0) {
         TypeDecl td = c.ast.typeDecls[d]
         if (td.kind != DeclKind.Enum) {
-            c.error(x.pos, td.name + " is a struct type; it has no case " + x.text)
+            c.error(x.pos, c.declDisplayName(d) + " is a struct type; it has no case " + x.text)
             c.setType(e, tyInvalid)
             return
         }
@@ -424,7 +457,7 @@ fn (Checker c) mut checkField(int e) {
             return
         }
         if (c.enumCase(d, ci).paramCount > 0) {
-            c.errorHint(x.pos, td.name + "." + x.text + " carries data", "create it with " + td.name + "." + x.text + "(...)")
+            c.errorHint(x.pos, c.declDisplayName(d) + "." + x.text + " carries data", "create it with " + c.declDisplayName(d) + "." + x.text + "(...)")
             c.setType(e, tyInvalid)
             return
         }
@@ -434,8 +467,14 @@ fn (Checker c) mut checkField(int e) {
         c.setType(e, c.declType[d])
         return
     }
-    if (c.pkgNamed(x.a)) {
-        c.checkPkgConst(e)
+    int p = c.pkgNamed(x.a)
+    if (p >= 0) {
+        int? g = c.pkgMember(p, x.text, x.pos)
+        if (g == null) {
+            c.setType(e, tyInvalid)
+            return
+        }
+        c.identGlobal(e, g)
         return
     }
     c.checkExpr(x.a)
@@ -456,8 +495,13 @@ fn (Checker c) mut checkField(int e) {
     }
     int sd = c.types.decl(bt)
     int fi = c.findField(sd, x.text)
+    if (fi >= 0 && !c.fieldVisible(sd, fi, x.pos)) {
+        c.privateField(x.pos, sd, x.text)
+        c.setType(e, tyInvalid)
+        return
+    }
     if (fi < 0) {
-        if (c.methods[c.ast.typeDecls[sd].name + "." + x.text] != null) {
+        if (c.methods[methodKey(sd, x.text)] != null) {
             c.errorHint(x.pos, x.text + " is a method, not a field", "call it with " + x.text + "()")
         } else {
             c.unknownField(x.pos, sd, x.text)
@@ -682,24 +726,51 @@ fn (Checker c) mut checkMapLit(int e) {
 fn (Checker c) mut checkStructLit(int e) {
     Expr x = c.ast.exprs[e]
     c.setType(e, tyInvalid)
+    int? g = null
     if (x.pkg != "") {
-        c.errorHint(x.pos, "unknown type " + x.pkg + "." + x.text, "types from other packages are not implemented yet")
-        return
+        int p = c.importedPkg(x.pos.file, x.pkg)
+        if (p < 0) {
+            c.errorHint(x.pos, "unknown package " + x.pkg + " in " + x.pkg + "." + x.text + "{...}", "import it: import \"" + x.pkg + "\"")
+            c.checkFieldValuesLoosely(e)
+            return
+        }
+        c.usedImports[x.pos.file.string() + ":" + x.pkg] = true
+        g = c.pkgMember(p, x.text, x.pos)
+        if (g == null) {
+            c.checkFieldValuesLoosely(e)
+            return
+        }
+    } else {
+        g = c.global(c.pkgOf(x.pos), x.text)
     }
-    int? g = c.globals[x.text]
     if (g == null || c.globalList[g].kind != GlobalKind.Type) {
         Suggest s = newSuggest(x.text)
         for (int i = 0; i < c.ast.typeDecls.len(); i++) {
-            s.consider(c.ast.typeDecls[i].name)
+            if (c.declPkg(i) == c.pkgOf(x.pos)) {
+                s.consider(c.ast.typeDecls[i].name)
+            }
         }
         c.errorHint(x.pos, "unknown struct type " + x.text, s.hint())
+        c.checkFieldValuesLoosely(e)
         return
     }
     int d = c.globalList[g].index
     TypeDecl td = c.ast.typeDecls[d]
+    string tname = c.declDisplayName(d)
     if (td.kind != DeclKind.Struct) {
-        c.errorHint(x.pos, td.name + " is not a struct", "create an enum value with " + td.name + ".Case")
+        c.errorHint(x.pos, tname + " is not a struct", "create an enum value with " + tname + ".Case")
+        c.checkFieldValuesLoosely(e)
         return
+    }
+    if (c.declPkg(d) != c.pkgOf(x.pos)) {
+        for (int pf = 0; pf < td.fieldCount; pf++) {
+            if (!c.fieldVisible(d, pf, x.pos)) {
+                string pkgName = c.ast.pkgs[c.declPkg(d)].name
+                c.errorHint(x.pos, "cannot write the literal " + tname + "{...} outside package " + pkgName + ": the field " + c.fieldName(d, pf) + " is not pub", "make the value with a function of package " + pkgName)
+                c.checkFieldValuesLoosely(e)
+                return
+            }
+        }
     }
     bool ok = true
     for (int j = 0; j < x.count; j++) {
@@ -730,7 +801,7 @@ fn (Checker c) mut checkStructLit(int e) {
             }
         }
         if (!found) {
-            c.errorHint(x.pos, "missing field " + name + " in " + td.name + " literal", "a struct literal must set every field")
+            c.errorHint(x.pos, "missing field " + name + " in " + tname + " literal", "a struct literal must set every field")
             ok = false
         }
     }
@@ -739,68 +810,11 @@ fn (Checker c) mut checkStructLit(int e) {
     }
 }
 
-// time.second and the other constants of the core packages.
-fn (Checker c) mut checkPkgConst(int e) {
+// Checks the field values of a struct literal whose type is unknown, so
+// that errors inside them are still reported.
+fn (Checker c) mut checkFieldValuesLoosely(int e) {
     Expr x = c.ast.exprs[e]
-    string pkg = c.ast.exprs[x.a].text
-    int v = pkgConstValue(pkg, x.text)
-    c.usedImports[x.pos.file.string() + ":" + pkg] = true
-    if (v < 0) {
-        []string known = pkgFunctionNames(pkg)
-        if (known.contains(x.text)) {
-            c.error(x.pos, pkg + "." + x.text + " is a function; call it")
-        } else {
-            Suggest s = newSuggest(x.text)
-            for (int i = 0; i < known.len(); i++) {
-                s.consider(known[i])
-            }
-            []string consts = pkgConstNames(pkg)
-            for (int j = 0; j < consts.len(); j++) {
-                s.consider(consts[j])
-            }
-            c.errorHint(x.pos, "package " + pkg + " has no " + x.text, s.hint())
-        }
-        c.setType(e, tyInvalid)
-        return
+    for (int i = 0; i < x.count; i++) {
+        c.checkExpr(c.ast.exprs[c.ast.at(x.list, i)].a)
     }
-    if (!c.isImported(x.pos.file, pkg)) {
-        c.errorHint(c.ast.exprs[x.a].pos, "package " + pkg + " is not imported", "add  import \"" + pkg + "\"  at the top of the file")
-    }
-    c.info[e].res = Res.PkgConst
-    c.info[e].sub = v
-    c.setType(e, tyInt)
-}
-
-fn pkgConstNames(string pkg) []string {
-    if (pkg == "time") {
-        return []string{"nanosecond", "microsecond", "millisecond", "second", "minute", "hour"}
-    }
-    return []string{}
-}
-
-// The value of a core package constant, or -1. The time constants are
-// durations in nanoseconds.
-fn pkgConstValue(string pkg, string name) int {
-    if (pkg != "time") {
-        return -1
-    }
-    if (name == "nanosecond") {
-        return 1
-    }
-    if (name == "microsecond") {
-        return 1000
-    }
-    if (name == "millisecond") {
-        return 1000000
-    }
-    if (name == "second") {
-        return 1000000000
-    }
-    if (name == "minute") {
-        return 60000000000
-    }
-    if (name == "hour") {
-        return 3600000000000
-    }
-    return -1
 }

@@ -111,8 +111,116 @@ fn (Gen g) mut genStmt(int s) {
         g.genSelect(st)
     case StmtKind.Spawn:
         g.genSpawn(st)
-    case StmtKind.Bad, StmtKind.Assert:
+    case StmtKind.Assert:
+        g.genAssert(st)
+        g.releaseTo(mark)
+    case StmtKind.Bad:
         g.emit("/* internal error: statement */")
+    }
+}
+
+// assert(cond) in a test: when cond is false, the test returns an assert
+// error (runtime/seed_test.c) whose message has the position, the source
+// of the condition and, for a comparison of printable values, both sides:
+// tests/x_test.sd:12: assert failed: xs.len() == 3 (2 == 3).
+fn (Gen g) mut genAssert(Stmt st) {
+    int e = st.expr
+    Expr x = g.c.ast.exprs[e]
+    string cond = ""
+    string lhs = ""
+    string rhs = ""
+    if (x.kind == ExprKind.Binary && isComparison(x.op) && !g.c.info[e].wrap) {
+        bool aNull = g.c.ast.exprs[x.a].kind == ExprKind.NullLit
+        bool bNull = g.c.ast.exprs[x.b].kind == ExprKind.NullLit
+        if (aNull || bNull) {
+            int other = x.a
+            if (aNull) {
+                other = x.b
+            }
+            int ot = g.typeOf(other)
+            string v = g.gexpr(other)
+            cond = g.isNull(ot, v)
+            if (x.op == Tok.Ne) {
+                cond = "(!" + cond + ")"
+            }
+            string shown = g.showVal(ot, v)
+            if (shown != "") {
+                lhs = shown
+                rhs = "SD_STR_LIT(\"null\")"
+                if (aNull) {
+                    lhs = rhs
+                    rhs = shown
+                }
+            }
+        } else {
+            int t = g.typeOf(x.a)
+            []string vals = g.operands([]int{x.a, x.b})
+            cond = g.binaryOp(x.op, t, vals[0], vals[1])
+            lhs = g.showVal(t, vals[0])
+            rhs = g.showVal(t, vals[1])
+            if (lhs == "" || rhs == "") {
+                lhs = ""
+                rhs = ""
+            }
+        }
+    } else {
+        cond = g.gexpr(e)
+    }
+    int failMark = g.slots.len()
+    g.emit("if (!(" + cond + ")) {")
+    g.indent++
+    string text = g.c.diags.paths[st.pos.file] + ":" + st.pos.line.string() + ": assert failed: " + st.name
+    []string parts = []string{}
+    if (lhs == "") {
+        parts.push("SD_STR_LIT(" + cString(text) + ")")
+    } else {
+        parts.push("SD_STR_LIT(" + cString(text + " (") + ")")
+        parts.push(g.temp(tyString, lhs))
+        parts.push("SD_STR_LIT(" + cString(" " + x.op.text() + " ") + ")")
+        parts.push(g.temp(tyString, rhs))
+        parts.push("SD_STR_LIT(\")\")")
+    }
+    string msg = g.concatVals(parts)
+    string err = g.temp(tyError, "sd_assert_error(" + msg + ")")
+    g.emitReturn(g.errReturn(err), []string{err})
+    g.indent--
+    g.emit("}")
+    if (g.slots.len() > failMark) {
+        g.slots = g.slots.slice(0, failMark)
+    }
+}
+
+// An owned string that shows the (borrowed) value v of type t in a failed
+// assert, or "" when t has no text form: numbers, bools and bytes as
+// .string() does, strings quoted, errors as their quoted message, and null.
+fn (Gen g) showVal(int t, string v) string {
+    switch (g.kindOf(t)) {
+    case Kind.Int:
+        return "sd_int_to_str(" + v + ")"
+    case Kind.Float:
+        return "sd_float_to_str(" + v + ")"
+    case Kind.Bool:
+        return "sd_bool_to_str(" + v + ")"
+    case Kind.Byte:
+        return "sd_byte_to_str(" + v + ")"
+    case Kind.String:
+        return "sd_str_quote(" + v + ")"
+    case Kind.Error:
+        return "sd_err_show(" + v + ")"
+    case Kind.Opt:
+        int el = g.elemOf(t)
+        if (g.kindOf(el) == Kind.Struct) {
+            return ""
+        }
+        string inner = g.showVal(el, g.unwrapVal(t, v))
+        if (inner == "") {
+            return ""
+        }
+        return "(" + g.isNull(t, v) + " ? SD_STR_LIT(\"null\") : " + inner + ")"
+    case Kind.Void, Kind.Null, Kind.Invalid, Kind.List, Kind.Map, Kind.Struct, Kind.Enum, Kind.Interface:
+        return ""
+    case Kind.Tuple, Kind.Func, Kind.Chan:
+        return ""
     }
 }
 

@@ -22,13 +22,11 @@ This guide is for programmers who already know Go or another C-like language. It
 
 ## The examples
 
-Every complete program in chapters 1 to 9 and 12 is in [examples/](examples/), with its exact output in a `.out` file next to it. The programs that the compiler must reject are in [examples/errors/](examples/errors/), each with the exact error message in a `.err` file, and the formatting example of chapter 12 is in [examples/fmt/](examples/fmt/). To check all of them against the current compiler:
+Every complete program is in [examples/](examples/), with its exact output in a `.out` file next to it; the project of chapter 11 is the directory [examples/11_shop/](examples/11_shop/), with the output of the program (`main.out`) and of its tests (`test.out`). The programs that the compiler must reject are in [examples/errors/](examples/errors/), each with the exact error message in a `.err` file, and the formatting example of chapter 12 is in [examples/fmt/](examples/fmt/). To check all of them against the current compiler:
 
 ```
 make
 docs/guide/check.sh
 ```
 
-The script compiles every example with the pedantic checks on (`seed c --strict`), runs it, compares its output and exit code, and checks that every example is formatted.
-
-Concurrency, user packages and tests are specified but not implemented yet. The examples for chapters 10 and 11 are in [examples/pending/](examples/pending/), with the output they should produce. They follow the spec, but no compiler has run them yet, and `check.sh` only checks their formatting.
+The script compiles every example (the pedantic checks are always on), runs it, compares its output and exit code, runs the tests of the chapter 11 project, and checks that every example is formatted.

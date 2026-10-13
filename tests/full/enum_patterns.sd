@@ -1,0 +1,44 @@
+// Enum case patterns: a case with data binds every field with its type, _
+// ignores a field, and a case with several labels binds only _.
+package main
+
+import "fmt"
+
+type Shape enum {
+    Circle(float r)
+    Rect(float w, float h)
+    Square(float side)
+    Point
+}
+
+fn kind(Shape s) string {
+    switch (s) {
+    case Shape.Circle(float _):
+        return "round"
+    case Shape.Rect(float _, float _), Shape.Square(float _):
+        return "cornered"
+    case Shape.Point:
+        return "point"
+    }
+}
+
+fn width(Shape s) float {
+    switch (s) {
+    case Shape.Circle(float r):
+        return 2.0 * r
+    case Shape.Rect(float w, float _):
+        return w
+    case Shape.Square(float side):
+        return side
+    case Shape.Point:
+        return 0.0
+    }
+}
+
+fn main([]string args) error {
+    []Shape all = []Shape{Shape.Circle(1.0), Shape.Rect(2.0, 5.0), Shape.Square(3.0), Shape.Point}
+    for (int i = 0; i < all.len(); i++) {
+        fmt.println(kind(all[i]) + " " + width(all[i]).string())
+    }
+    return null
+}

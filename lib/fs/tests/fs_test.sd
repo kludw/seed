@@ -1,0 +1,50 @@
+package fs
+
+import "os"
+
+fn tempRoot() string {
+    string? t = os.env("TMPDIR")
+    if (t == null || t == "") {
+        return "/tmp/seed-lib-fs-test"
+    }
+    return t + "/seed-lib-fs-test"
+}
+
+test "write, read, list and remove" {
+    string dir = tempRoot() + "/a/b"
+    try mkdir(dir)
+    assert(isDir(dir))
+    try mkdir(dir)
+    try write(dir + "/two.txt", "2")
+    try write(dir + "/one.txt", "one\n")
+    assert(exists(dir + "/one.txt"))
+    assert(!isDir(dir + "/one.txt"))
+    string text = try read(dir + "/one.txt")
+    assert(text == "one\n")
+    []string names = try list(dir)
+    assert(names == []string{"one.txt", "two.txt"})
+    try remove(dir + "/one.txt")
+    try remove(dir + "/two.txt")
+    try remove(dir)
+    try remove(tempRoot() + "/a")
+    try remove(tempRoot())
+    assert(!exists(dir))
+}
+
+test "errors name the function and the path" {
+    _, error err = read("/nonexistent-seed/notes.txt")
+    assert(err != null)
+    assert(err.message() == "fs.read: /nonexistent-seed/notes.txt: no such file or directory")
+    _, error err2 = list("/nonexistent-seed")
+    assert(err2 != null)
+    assert(err2.message() == "fs.list: /nonexistent-seed: no such file or directory")
+    error err3 = remove("/nonexistent-seed")
+    assert(err3 != null)
+    assert(err3.message() == "fs.remove: /nonexistent-seed: no such file or directory")
+}
+
+test "read of a directory fails" {
+    _, error err = read("/")
+    assert(err != null)
+    assert(err.message() == "fs.read: /: is a directory")
+}

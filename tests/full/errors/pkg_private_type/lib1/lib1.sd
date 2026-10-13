@@ -1,0 +1,11 @@
+package lib1
+
+type Hidden struct {
+    int x
+}
+
+pub fn make() Hidden {
+    return Hidden{x: 1}
+}
+
+pub fn use(Hidden h) {}

@@ -1,21 +1,31 @@
-# The Seed standard library: pure-Seed packages
+# The Seed standard library
 
-This directory holds the parts of the standard library ([docs/stdlib.md](../docs/stdlib.md))
-that need no operating system: `strings`, `path`, `math`, `encoding`, `rand`,
-`crypto`, `json` and `http`. The OS-facing parts (natives in
-`runtime/lib/<pkg>.c`) and the packages `errors`, `fmt`, `io`, `os`, `fs`,
-`time` and `net` are not here yet.
+This directory holds the standard library ([docs/stdlib.md](../docs/stdlib.md)):
+one directory per package, imported by its name (`import "json"`). The
+compiler finds it next to its own binary (`<root>/lib`, or
+`$SEED_ROOT/lib`) and looks there before the project's own packages.
+
+- The core packages `fmt`, `os`, `fs` and `time` declare their functions
+  without a body (native functions) and implement them in C, in
+  `<pkg>/<pkg>.c`, on top of the runtime (`runtime/seed_pkg.c`,
+  `seed_task.c`). `errors` is plain Seed. They provide what
+  [docs/builtins.md](../docs/builtins.md#core-packages) lists, plus
+  `errors.wrap`, `os.crash`, `os.executable` and `os.cwd`.
+- `strings`, `path`, `math`, `encoding`, `rand`, `crypto`, `json` and `http`
+  are written in Seed (no natives yet).
+- `io`, `net`, the rest of `os`, `fs`, `time`, `math`, `rand` and `crypto`
+  (the natives listed below and in docs/stdlib.md) are still to be written.
+  How to write a native function is in
+  [runtime/README.md](../runtime/README.md#13-native-functions).
 
 ## Layout
 
 ```
 lib/
   <pkg>/<pkg>.sd              the package (package <pkg>, pub API as in docs/stdlib.md)
-  <pkg>/tests/<pkg>_test.sd   its tests (package <pkg>)
-  <pkg>/tests/expected.out    the expected output of the test run
+  <pkg>/<pkg>.c               its native functions, if any (sd_lib_<pkg>_<name>)
+  <pkg>/tests/<pkg>_test.sd   its tests (package <pkg>: test blocks)
   http/wire.sd                http's second file: message reader and writer
-  testkit/testkit.sd          temporary test harness (TestLog), see below
-  run_tests.sh                builds and runs every package's tests
   COMPILER_BUGS.md            compiler issues found, with reproductions
 ```
 
@@ -23,76 +33,63 @@ lib/
 
 ```
 make build/seed2
-lib/run_tests.sh                 # all packages
-lib/run_tests.sh json http       # some packages
-lib/run_tests.sh --update json   # rewrite lib/json/tests/expected.out
-KEEP=1 lib/run_tests.sh          # keep the merged sources, C and binaries
+build/seed2 test lib          # every package (or: make test-lib)
+build/seed2 test lib/json     # one package
 ```
 
-The compiler cannot compile user packages, imports of them, natives or
-`test` blocks yet, so `run_tests.sh` tests each package **as part of a main
-program**. For each package it copies the package's files, the files of the
-lib packages it imports (http imports encoding and json), its test files and
-`testkit/testkit.sd` into a temporary directory, renames every
-`package <x>` to `package main`, deletes `import "<dep>"` lines and the
-`<dep>.` qualifiers of those lib packages (so `json.Value` becomes `Value`),
-generates a `main.sd` that calls every test, compiles with
-`seed c --strict` and the C compiler, runs it, runs each crash test in its
-own process, and compares the whole output with `tests/expected.out`. It
-also runs `seed fmt --check` on every file under `lib/`.
-
-All packages pass `--strict` and are formatted. Every test program was also
-checked with `leaks --atExit` (no leaks).
+Each package's tests are `test "description" { ... }` blocks in
+`<pkg>/tests/*.sd`, which belong to the package (they can use private
+names). `seed test` runs each test in a goroutine of its own and prints one
+line per failure and a summary. Every file must be formatted (the compiler
+checks it).
 
 ### Test conventions
 
-- A test is `fn testSomething() TestLog` in `tests/<pkg>_test.sd`: it makes a
-  `TestLog`, records checks and returns it. `run_tests.sh` finds tests by
-  that signature.
-- A crash test is `fn crashSomething()` whose body must crash. The script
-  runs it alone and records `exit <code>: <stderr>`, so the crash message is
-  part of `expected.out`.
-- Helpers in test files are prefixed with the package name
-  (`jsonTestError`, `httpTestParse`, `cryptoTestHex`) so they cannot clash
-  with the package or the harness when merged into one namespace.
+- A check is `assert(cond)`; a comparison shows both values when it fails
+  (`assert(got == want)`). An expected error is
+  `assert(err != null)` followed by `assert(err.message() == "...")`;
+  after `assert(err == null)` the values returned with `err` can be used.
+- A crash test runs the code in a group and checks the crash message:
 
-When the compiler gets `test` blocks, converting is mechanical:
+  ```
+  fn crashRepeatNegative() {
+      fmt.println(repeat("x", -1))
+  }
 
-| Now | Then |
-|---|---|
-| `fn testParseNumbers() TestLog {` ... `return t }` | `test "parse numbers" {` ... `}` |
-| `TestLog t = newTestLog()` | (remove) |
-| `t.ok(cond, "what")` | `assert(cond)` |
-| `t.eqStr(got, want)`, `eqInt`, `eqFloat`, `eqBool` | `assert(got == want)` |
-| `t.errIs(err, "msg")` | `assert(err != null && err.message() == "msg")` |
-| `t.noErr(err)` | `assert(err == null)` |
-| `fn crashX()` | a test that expects a crash, once the test runner can express it |
+  test "repeat negative crashes" {
+      error err = group {
+          spawn crashRepeatNegative()
+      }
+      assert(err != null)
+      assert(err.message() == "crash: strings.repeat: count (-1) must not be negative")
+  }
+  ```
 
-`lib/testkit/` and `run_tests.sh` are then deleted.
+- Tests that need files work in `$TMPDIR` and remove what they made.
+- Helpers in test files still carry the package's name as a prefix
+  (`jsonTestError`, `httpTestParse`), from the time when the tests were
+  merged into one namespace; that is no longer necessary.
 
-### Temporary conventions in the packages
+### Conventions in the packages
 
-- **Crashes.** Seed has no way for library code to crash with its own message
-  (docs/stdlib.md wants `crash: rand.range: lo (5) must be less than hi (5)`).
-  Each package that crashes has a private `<pkg>Crash(message)` that prints
-  `crash: <message>` to stderr and calls `os.exit(2)`, which gives the same
-  output and exit code as a crash outside a `group`. Inside a group it ends
-  the process instead of failing the group. Replace the body with the real
-  crash primitive when one exists (a native, or a built-in).
-- **Private names are prefixed** where they could clash once several
-  packages share one namespace in a test program (`jsonUtf8Len`,
-  `httpIsToken`, `stringsCrash`).
-- **Struct fields have no `pub`** because the parser does not accept it yet
-  (COMPILER_BUGS.md 2). Every field of `http.Request` and `http.Response` is
-  meant to be `pub`; `rand.Source.state` is meant to be private.
-- Imports between lib packages are written as they will be
-  (`import "encoding"`, `encoding.urlDecode(...)`); the test script removes
-  them.
+- **Crashes.** A caller's mistake is reported with
+  `os.crash("<pkg>.<fn>: <what is wrong>")` (docs/stdlib.md, "Errors and
+  crashes"), which crashes the goroutine like a runtime fault: inside a
+  group it fails the group.
+- **Private names** are still prefixed in places (`jsonUtf8Len`,
+  `httpIsToken`), from the same merged-namespace time.
+- **Struct fields** are `pub` where docs/stdlib.md makes them public
+  (`http.Request`, `http.Response`); `rand.Source.state` is private.
 
 ## What is implemented
 
-| Package | Implemented in Seed | Still native (or blocked) |
+| Package | Implemented | Still to do (natives, or blocked) |
 |---|---|---|
+| `errors` | everything: `new`, `wrap` | — |
+| `fmt` | `print`, `println`, `eprint`, `eprintln` (natives) | `fixed` |
+| `os` | `exit`, `crash`, `env`, `run`, `executable`, `cwd` (natives) | `output`, `hostname` |
+| `fs` | `read`, `write`, `exists`, `isDir`, `list`, `mkdir`, `remove` (natives) | `append`, `stat`, `rename`, `removeAll`, `makeTemp`, `open`, `create`, `File` |
+| `time` | the duration constants, `after`, `sleep` (natives) | `now`, `monotonic`, `date`, `fromDate`, `format`, `parse` |
 | `strings` | everything: `repeat`, `padLeft`, `padRight`, `lastIndex`, `fields`, `isDigit`, `isLetter`, `isSpace` | — |
 | `path` | everything: `join`, `clean`, `base`, `dir`, `ext` | — |
 | `math` | `pi`, `e`, `absInt`, `minInt`, `maxInt`, `powInt`, `absFloat`, `minFloat`, `maxFloat`, `isNan`, `isInf`, `inf` | `powFloat`, `sqrt`, `floor`, `ceil`, `round`, `trunc`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2`, `exp`, `log`, `log2`, `log10` |
@@ -193,8 +190,8 @@ that no optimiser can make it exit early) are left native, as the doc says.
   `\t`, `\r`, `\b`, `\f` or `\u00xx` (lowercase hex); each byte of invalid
   UTF-8 becomes one U+FFFD; DEL is written as it is. Printing `nan` or an
   infinity crashes: `json.Value.string: nan cannot be written in JSON`.
-- json uses only `errors` (plus `fmt` and `os` for the crash helper), not
-  `strings` and `math` as the dependency table in docs/stdlib.md allows.
+- json uses only `errors` (plus `os` for `os.crash`), not `strings` and
+  `math` as the dependency table in docs/stdlib.md allows.
 - Measured: parsing and printing a 3.8 MB document takes about 0.15 s
   (~25 MB/s for parse plus print).
 

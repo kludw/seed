@@ -1,0 +1,5 @@
+package util
+
+pub fn name() string {
+    return "util"
+}

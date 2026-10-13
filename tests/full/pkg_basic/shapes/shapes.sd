@@ -1,0 +1,28 @@
+// Package shapes is imported by the test program.
+package shapes
+
+import "geo/util"
+
+pub const int maxItems = 10
+
+pub type Item struct {
+    pub string name
+    pub int weight
+}
+
+pub type Shape enum {
+    Circle(float r)
+    Rect(float w, float h)
+    Empty
+}
+
+pub fn area(Shape s) float {
+    switch (s) {
+    case Shape.Circle(float r):
+        return util.pi * r * r
+    case Shape.Rect(float w, float h):
+        return w * h
+    case Shape.Empty:
+        return 0.0
+    }
+}

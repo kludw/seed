@@ -119,7 +119,7 @@ A switch over an enum must list every case, and it may not have `default`. This 
 
 A `default` would silently swallow the new case, which is exactly the bug the rule prevents.
 
-When you don't need a case's data, leave out the bindings, and several such cases can share one `case`: `case Shape.Dot, Shape.Circle:`. To skip just one field, bind it to `_`: `case Shape.Rect(float _, float h):`. A case that binds variables must be the only label in its `case`.
+A pattern always matches its case exactly: a case with data binds every field, with its type, and a case without data has no parentheses. When you don't need a field, bind it to `_`: `case Shape.Rect(float _, float h):`. Several cases can share one `case` when they bind only `_`: `case Shape.Dot, Shape.Circle(float _):`. Writing `case Shape.Circle:` for a case with data is an error, so the pattern always shows what the case carries.
 
 Because the switch is exhaustive, a function that returns from every case needs no `return` after the switch.
 

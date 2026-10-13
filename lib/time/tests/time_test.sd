@@ -1,0 +1,21 @@
+package time
+
+test "durations" {
+    assert(microsecond == 1000 * nanosecond)
+    assert(millisecond == 1000 * microsecond)
+    assert(second == 1000 * millisecond)
+    assert(minute == 60 * second)
+    assert(hour == 60 * minute)
+}
+
+test "after sends once and closes" {
+    chan int c = after(millisecond)
+    int? first = c.receive()
+    assert(first != null)
+    assert(first > 1600000000 * second)
+    assert(c.receive() == null)
+}
+
+test "sleep" {
+    sleep(millisecond)
+}

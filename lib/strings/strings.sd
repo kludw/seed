@@ -3,13 +3,12 @@ package strings
 // Text helpers that are not built-in methods (docs/stdlib.md, "strings").
 // Everything here is pure Seed.
 
-import "fmt"
 import "os"
 
 // `s` repeated `count` times. Crashes if `count` is negative.
 pub fn repeat(string s, int count) string {
     if (count < 0) {
-        stringsCrash("strings.repeat: count (" + count.string() + ") must not be negative")
+        os.crash("strings.repeat: count (" + count.string() + ") must not be negative")
     }
     if (count == 0 || s.len() == 0) {
         return ""
@@ -99,12 +98,4 @@ pub fn isLetter(byte b) bool {
 // Space, \t, \n, \r, \v or \f.
 pub fn isSpace(byte b) bool {
     return b == ' ' || b == '\t' || b == '\n' || b == '\r' || b == '\x0b' || b == '\x0c'
-}
-
-// Ends the program the way a crash does: "crash: <message>" on stderr and
-// exit code 2. Seed has no way yet for library code to crash with its own
-// message (see lib/README.md); this becomes a real crash when it does.
-fn stringsCrash(string message) {
-    fmt.eprintln("crash: " + message)
-    os.exit(2)
 }

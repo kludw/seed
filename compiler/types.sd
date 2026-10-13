@@ -172,15 +172,17 @@ fn (Types ts) mut chanOf(int e) int {
     return ts.compound(Kind.Chan, e, -1, "C" + ts.mangle(e), "chan " + ts.name(e))
 }
 
-// A struct, enum or interface type for a declaration.
-fn (Types ts) mut declared(Kind kind, int decl, string name) int {
+// A struct, enum or interface type for a declaration. name is the name in
+// messages (cart.Item for a type of another package), cname the name in C
+// (cart_Item).
+fn (Types ts) mut declared(Kind kind, int decl, string name, string cname) int {
     string prefix = "S"
     if (kind == Kind.Enum) {
         prefix = "E"
     } else if (kind == Kind.Interface) {
         prefix = "I"
     }
-    string mangle = prefix + name.len().string() + name
+    string mangle = prefix + cname.len().string() + cname
     return ts.intern(Type{kind: kind, elem: -1, key: -1, decl: decl, parts: 0, count: 0, name: name, mangle: mangle, rt: -1, helpers: 0})
 }
 

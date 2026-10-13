@@ -1,0 +1,284 @@
+// Loading a program: the root package and every package it imports,
+// parsed into one Ast (see Package in ast.sd).
+//
+// A package is a directory; all the .sd files directly in it belong to it.
+// `import "name"` is resolved, in order, to the standard library
+// ($SEED_ROOT/lib/name) and to a directory relative to the project root
+// (the directory of the root package): `import "shop/cart"` is
+// <root>/shop/cart, and its code calls it `cart`. Every file must be
+// formatted, and the imports must not form a cycle.
+package main
+
+import "fs"
+import "os"
+
+type Loader struct {
+    Parser p
+    string seedRoot
+    string projectRoot
+    string libDir
+    map[string]int byDir
+}
+
+fn newLoader(string seedRoot, string projectRoot) Loader {
+    string lib = absPath(seedRoot) + "/lib"
+    return Loader{p: newParser(newDiags()), seedRoot: seedRoot, projectRoot: projectRoot, libDir: lib, byDir: map[string]int{}}
+}
+
+// Adds a package and returns its index. Its files are parsed with
+// addFiles.
+fn (Loader l) mut addPackage(string path, string dir, bool isLib) int {
+    l.p.ast.pkgs.push(Package{path: path, name: "", dir: dir, cprefix: "", isLib: isLib})
+    int n = l.p.ast.pkgs.len() - 1
+    l.byDir[dir] = n
+    return n
+}
+
+// Parses source files into the package pkg (isTest for the files of its
+// tests/ directory) and checks that they are formatted.
+fn (Loader l) mut addFiles(int pkg, []string files, bool isTest) error {
+    for (int i = 0; i < files.len(); i++) {
+        string src = try fs.read(files[i])
+        int file = l.p.diags.addFile(files[i], src)
+        int before = l.p.diags.count()
+        l.p.parseFile(file)
+        l.p.ast.files[file].pkgIndex = pkg
+        l.p.ast.files[file].isTest = isTest
+        if (l.p.diags.count() == before) {
+            string formatted = formatSource(src)
+            if (formatted != src) {
+                Pos pos = Pos{file: file, line: firstDiffLine(src, formatted), col: 1}
+                l.p.diags.errorHint(pos, files[i] + " is not formatted", "run: seed fmt " + files[i])
+            }
+        }
+    }
+    return null
+}
+
+// The .sd files directly in dir, sorted.
+fn sourceFiles(string dir) ([]string, error) {
+    []string names = try fs.list(dir)
+    []string files = []string{}
+    for (int i = 0; i < names.len(); i++) {
+        string path = joinPath(dir, names[i])
+        if (names[i].endsWith(".sd") && !fs.isDir(path)) {
+            files.push(path)
+        }
+    }
+    return files, null
+}
+
+// Loads the imports of every file parsed so far (and of the packages they
+// bring in), then sets the package names and C prefixes and reports
+// import cycles. Errors are left in l.p.diags.
+fn (Loader l) mut loadImports() error {
+    for (int i = 0; i < l.p.ast.imports.len(); i++) {
+        Import im = l.p.ast.imports[i]
+        if (!validImportPath(im.path)) {
+            l.p.diags.errorHint(im.pos, "invalid import path \"" + im.path + "\"", "an import path is one or more lowercase names separated by /, such as \"fmt\" or \"shop/cart\"")
+            continue
+        }
+        string? dir = l.resolve(im.path)
+        if (dir == null) {
+            l.p.diags.errorHint(im.pos, "cannot find package \"" + im.path + "\"", "it is neither in the standard library (" + l.libDir + "/" + im.path + ") nor in the project (" + joinPath(l.projectRoot, im.path) + ")")
+            continue
+        }
+        int? known = l.byDir[dir]
+        if (known != null) {
+            l.p.ast.imports[i].target = known
+            continue
+        }
+        bool isLib = dir.startsWith(l.seedRoot + "/lib/")
+        int pkg = l.addPackage(im.path, dir, isLib)
+        l.p.ast.imports[i].target = pkg
+        []string files = try sourceFiles(dir)
+        if (files.len() == 0) {
+            l.p.diags.errorHint(im.pos, "package \"" + im.path + "\" has no .sd files in " + dir, "a package is a directory of .sd files")
+            continue
+        }
+        try l.addFiles(pkg, files, false)
+    }
+    l.setNames()
+    l.checkCycles()
+    return null
+}
+
+// The directory of an import path, or null.
+fn (Loader l) resolve(string path) string? {
+    string std = l.seedRoot + "/lib/" + path
+    if (fs.isDir(std)) {
+        return std
+    }
+    string local = joinPath(l.projectRoot, path)
+    if (fs.isDir(local)) {
+        return local
+    }
+    return null
+}
+
+fn validImportPath(string path) bool {
+    []string parts = path.split("/")
+    for (int i = 0; i < parts.len(); i++) {
+        string p = parts[i]
+        if (p.len() == 0 || !isLower(p[0])) {
+            return false
+        }
+        for (int j = 0; j < p.len(); j++) {
+            byte b = p[j]
+            if (!isLower(b) && !isUpper(b) && !(b >= '0' && b <= '9')) {
+                return false
+            }
+        }
+    }
+    return true
+}
+
+// Every file of a package must have the same package clause; an imported
+// package's name must be the last element of its path, and package main
+// cannot be imported.
+fn (Loader l) mut setNames() {
+    for (int f = 0; f < l.p.ast.files.len(); f++) {
+        SourceFile sf = l.p.ast.files[f]
+        if (sf.pkg == "") {
+            continue
+        }
+        Package pk = l.p.ast.pkgs[sf.pkgIndex]
+        if (pk.name == "") {
+            l.p.ast.pkgs[sf.pkgIndex].name = sf.pkg
+            // The package given on the command line may have any name (the
+            // checker requires package main for a program); an imported
+            // package, or one tested by seed test, has its directory's name.
+            string want = lastElement(pk.path)
+            if (pk.path == "") {
+                want = sf.pkg
+            }
+            if (sf.pkg == "main" && sf.pkgIndex > 0) {
+                l.p.diags.errorHint(sf.pkgPos, "package main cannot be imported", "move the code other packages need into a package of its own")
+            } else if (sf.pkg != "main" && sf.pkg != want) {
+                l.p.diags.errorHint(sf.pkgPos, "the package in directory " + pk.dir + " must be called " + want + ", not " + sf.pkg, "a package has the name of its directory (only package main may differ)")
+            }
+        } else if (sf.pkg != pk.name) {
+            l.p.diags.errorHint(sf.pkgPos, "all files in " + pk.dir + " must belong to one package: found " + sf.pkg + ", expected " + pk.name, "a package is a directory; move the file, or change its package line")
+        }
+    }
+    for (int i = 0; i < l.p.ast.pkgs.len(); i++) {
+        Package pkg = l.p.ast.pkgs[i]
+        if (pkg.name == "main") {
+            l.p.ast.pkgs[i].cprefix = ""
+        } else {
+            string path = pkg.path
+            if (path == "") {
+                path = pkg.name
+            }
+            l.p.ast.pkgs[i].cprefix = path.replace("/", "_") + "_"
+        }
+    }
+}
+
+// Reports each import that closes a cycle, with the whole cycle.
+fn (Loader l) mut checkCycles() {
+    []int state = []int{}
+    for (int i = 0; i < l.p.ast.pkgs.len(); i++) {
+        state.push(0)
+    }
+    for (int j = 0; j < l.p.ast.pkgs.len(); j++) {
+        state = l.visit(j, state, []int{})
+    }
+}
+
+// Depth-first search over the imports; state is 0 (not seen), 1 (on the
+// path) or 2 (done) per package.
+fn (Loader l) mut visit(int pkg, []int state, []int path) []int {
+    []int st = state
+    if (st[pkg] != 0) {
+        return st
+    }
+    st[pkg] = 1
+    []int next = path.slice(0, path.len())
+    next.push(pkg)
+    for (int i = 0; i < l.p.ast.imports.len(); i++) {
+        Import im = l.p.ast.imports[i]
+        if (im.target < 0 || l.p.ast.files[im.file].pkgIndex != pkg) {
+            continue
+        }
+        if (st[im.target] == 1) {
+            []string names = []string{}
+            int start = 0
+            int? at = next.index(im.target)
+            if (at != null) {
+                start = at
+            }
+            for (int j = start; j < next.len(); j++) {
+                names.push(l.pkgLabel(next[j]))
+            }
+            names.push(l.pkgLabel(im.target))
+            l.p.diags.errorHint(im.pos, "import cycle: " + names.join(" -> "), "packages cannot import each other in a circle; move the code they share into a package that both import")
+            continue
+        }
+        st = l.visit(im.target, st, next)
+    }
+    st[pkg] = 2
+    return st
+}
+
+fn (Loader l) pkgLabel(int pkg) string {
+    Package p = l.p.ast.pkgs[pkg]
+    if (p.path != "") {
+        return p.path
+    }
+    return p.name
+}
+
+// ---- paths ----
+
+fn joinPath(string dir, string name) string {
+    if (dir == "" || dir == ".") {
+        return name
+    }
+    if (dir.endsWith("/")) {
+        return dir + name
+    }
+    return dir + "/" + name
+}
+
+// The absolute, cleaned form of a path (relative paths are taken from the
+// current directory).
+fn absPath(string path) string {
+    if (path.startsWith("/")) {
+        return cleanPath(path)
+    }
+    string? cwd, _ = os.cwd()
+    if (cwd == null) {
+        return cleanPath(path)
+    }
+    return cleanPath(cwd + "/" + path)
+}
+
+// Removes empty and "." elements and resolves ".." lexically.
+fn cleanPath(string path) string {
+    bool abs = path.startsWith("/")
+    []string parts = path.split("/")
+    []string out = []string{}
+    for (int i = 0; i < parts.len(); i++) {
+        string p = parts[i]
+        if (p == "" || p == ".") {
+            continue
+        }
+        if (p == ".." && out.len() > 0 && out[out.len() - 1] != "..") {
+            out.remove(out.len() - 1)
+            continue
+        }
+        if (p == ".." && abs) {
+            continue
+        }
+        out.push(p)
+    }
+    string joined = out.join("/")
+    if (abs) {
+        return "/" + joined
+    }
+    if (joined == "") {
+        return "."
+    }
+    return joined
+}

@@ -23,10 +23,9 @@ package rand
 // any result.
 //
 // The package functions range, fraction and permutation (the per-goroutine
-// generator seeded from the OS) need the native `nextOs`, and are added when
-// the compiler supports native functions (see lib/README.md).
+// generator seeded from the OS) need the native `nextOs`, which is still to
+// be written (see lib/README.md).
 
-import "fmt"
 import "os"
 
 const int mask64 = 0xffffffffffffffff
@@ -56,7 +55,7 @@ fn (Source s) mut next() int {
 // range. Crashes if lo >= hi.
 pub fn (Source s) mut range(int lo, int hi) int {
     if (lo >= hi) {
-        randCrash("rand.Source.range: lo (" + lo.string() + ") must be less than hi (" + hi.string() + ")")
+        os.crash("rand.Source.range: lo (" + lo.string() + ") must be less than hi (" + hi.string() + ")")
     }
     int n = hi - lo
     int words = 1
@@ -87,7 +86,7 @@ pub fn (Source s) mut fraction() float {
 // negative.
 pub fn (Source s) mut permutation(int n) []int {
     if (n < 0) {
-        randCrash("rand.Source.permutation: n (" + n.string() + ") must not be negative")
+        os.crash("rand.Source.permutation: n (" + n.string() + ") must not be negative")
     }
     []int out = []int{}
     for (int i = 0; i < n; i++) {
@@ -100,12 +99,4 @@ pub fn (Source s) mut permutation(int n) []int {
         out[j] = tmp
     }
     return out
-}
-
-// Ends the program the way a crash does: "crash: <message>" on stderr and
-// exit code 2. Seed has no way yet for library code to crash with its own
-// message (see lib/README.md); this becomes a real crash when it does.
-fn randCrash(string message) {
-    fmt.eprintln("crash: " + message)
-    os.exit(2)
 }

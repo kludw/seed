@@ -1,0 +1,25 @@
+// expect-error: method Dog.name(bool) string does not match Named.name() string
+package main
+
+import "fmt"
+
+type Named interface {
+    name() string
+}
+
+type Dog struct implements Named {
+    string label
+}
+
+fn (Dog d) name(bool loud) string {
+    if (loud) {
+        return d.label.toUpper()
+    }
+    return d.label
+}
+
+fn main([]string args) error {
+    Named n = Dog{label: "rex"}
+    fmt.println(n.name())
+    return null
+}

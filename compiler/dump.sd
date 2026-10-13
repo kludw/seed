@@ -41,7 +41,11 @@ fn (Ast a) dumpParams(int start, int count) string {
     []string ps = []string{}
     for (int i = 0; i < count; i++) {
         Param p = a.params[a.at(start, i)]
-        ps.push("(" + a.dumpType(p.typeExpr) + " " + p.name + ")")
+        string mark = ""
+        if (p.isPub) {
+            mark = "pub "
+        }
+        ps.push("(" + mark + a.dumpType(p.typeExpr) + " " + p.name + ")")
     }
     return "(" + ps.join(" ") + ")"
 }

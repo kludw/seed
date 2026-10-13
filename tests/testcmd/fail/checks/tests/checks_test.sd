@@ -1,0 +1,51 @@
+package checks
+
+import "fmt"
+
+test "passes" {
+    int n = try parse("12")
+    assert(n == 12)
+}
+
+test "int comparison" {
+    int n = try parse("41")
+    assert(n == 42)
+}
+
+test "string comparison" {
+    string s = "a\tb\"c"
+    assert(s.len() > 0)
+    assert(s == "abc")
+}
+
+test "nullable" {
+    int? n = null
+    assert(n != null)
+}
+
+test "error from try" {
+    int n = try parse("")
+    fmt.println("not reached " + n.string())
+}
+
+test "crash" {
+    []int xs = []int{1, 2}
+    assert(xs[5] == 1)
+}
+
+test "defer runs when an assert fails" {
+    defer fmt.println("deferred")
+    assert(false)
+}
+
+test "error compared with null" {
+    _, error err = parse("x")
+    assert(err == null)
+}
+
+test "multi-line condition" {
+    bool a = true
+    string s = "1"
+    assert(a &&
+        s == "2")
+}

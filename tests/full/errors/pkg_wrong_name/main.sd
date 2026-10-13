@@ -1,0 +1,9 @@
+// expect-error: must be called util, not utils
+package main
+
+import "util"
+
+fn main([]string args) error {
+    util.run()
+    return null
+}

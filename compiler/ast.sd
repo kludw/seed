@@ -104,7 +104,7 @@ type StmtKind enum {
 //   Return      list/count (values)
 //   Defer       expr (a call), discard (`defer _ = f()`)
 //   Spawn       expr
-//   Assert      expr
+//   Assert      expr, name (the source text of the condition)
 //   Const       typeExpr, name, namePos, expr
 type Stmt struct {
     StmtKind kind
@@ -205,18 +205,24 @@ type TypeExpr struct {
 }
 
 // `Type name`: a function parameter, struct field, enum case field or a
-// binding in a case pattern.
+// binding in a case pattern. isPub is set for a struct field marked pub.
 type Param struct {
     Pos pos
     int typeExpr
     string name
+    bool isPub
 }
 
+// A function or method. body is -1 for a native function (declared
+// without a body). A test block is also recorded as a FnDecl with isTest
+// set (no parameters, result error, name = the description), so that the
+// checker and the generator treat its body like a function's.
 type FnDecl struct {
     Pos pos
     Pos start
     int file
     bool isPub
+    bool isTest
     string name
     bool isMethod
     int recvType
@@ -287,10 +293,32 @@ type TestDecl struct {
     int body
 }
 
+// An import. name is the last element of path (the name used in code);
+// target is the index of the package in Ast.pkgs (filled in by the driver).
 type Import struct {
     Pos pos
     int file
     string path
+    string name
+    int target
+}
+
+// A package of the program: the files of one directory.
+//
+//   path     the import path ("cart", "shop/cart"); for the root package
+//            given on the command line, "" unless it was found by seed test
+//   name     the name in the package clauses
+//   dir      the directory, as the driver found it
+//   cprefix  prefix of the C names of its declarations: "" for package
+//            main, otherwise the path with / replaced by _, then "_"
+//   isLib    the package is part of the standard library ($SEED_ROOT/lib),
+//            so it may declare native functions
+type Package struct {
+    string path
+    string name
+    string dir
+    string cprefix
+    bool isLib
 }
 
 type TopKind enum {
@@ -306,9 +334,13 @@ type TopDecl struct {
     int index
 }
 
+// One source file. pkgIndex is its package in Ast.pkgs; isTest is set for
+// the files of a package's tests/ directory.
 type SourceFile struct {
     string path
     string pkg
+    int pkgIndex
+    bool isTest
     Pos pkgPos
     int imports
     int importCount
@@ -333,6 +365,7 @@ type Ast struct {
     []ConstDecl consts
     []TestDecl tests
     []Import imports
+    []Package pkgs
     []TopDecl tops
     []Comment comments
     []int lists
@@ -356,6 +389,7 @@ fn newAst() Ast {
         consts: []ConstDecl{},
         tests: []TestDecl{},
         imports: []Import{},
+        pkgs: []Package{},
         tops: []TopDecl{},
         comments: []Comment{},
         lists: []int{},

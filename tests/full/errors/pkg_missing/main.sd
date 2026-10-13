@@ -1,0 +1,9 @@
+// expect-error: cannot find package "nowhere"
+package main
+
+import "nowhere"
+
+fn main([]string args) error {
+    nowhere.run()
+    return null
+}

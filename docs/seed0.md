@@ -26,12 +26,12 @@ seed0 supports everything in [SPEC.md](../SPEC.md), [grammar.md](grammar.md) and
 | `chan`, `select`, `group`, `spawn` | |
 | `defer` | |
 | `test`, `assert` | |
-| User packages | `import` may only name the core packages: `fmt`, `os`, `fs`, `errors`. |
+| User packages, native functions | `import` may only name the core packages: `fmt`, `os`, `fs`, `errors` (with `os.executable()` and `os.cwd()` besides builtins.md's functions; no `errors.wrap`, `os.crash` or `time`). |
 | `s.chars()` | |
 
 Everything else is in, including: structs, enums with data, methods and `mut` methods, multiple return values, `try`, `_`, nullable types with narrowing, `const`, lists, maps, `switch` (enum and value forms), `break`, `continue`, every operator, and every built-in method and core package function listed in [builtins.md](builtins.md) apart from the exceptions above.
 
-`pub` is accepted and ignored.
+`pub` is accepted and ignored (on top-level declarations; seed0 does not parse `pub` on struct fields).
 
 ## Semantics that must be right
 

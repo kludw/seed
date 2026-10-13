@@ -4,19 +4,21 @@
 #   docs/guide/check.sh            (from anywhere; uses build/seed2)
 #   SEED="build/seed2" docs/guide/check.sh
 #
-# For every examples/NAME.sd (compiled with `seed c --strict`):
+# For every examples/NAME.sd (compiled with `seed c`):
 #   NAME.out   expected stdout (required, may be empty)
 #   NAME.exit  expected exit code (optional, default 0)
 #   NAME.err   text that must appear in stderr (optional)
-# For every examples/errors/NAME.sd: compiling with --strict must fail, and
+# For every examples/NAME/ directory (a project: package main and the
+# packages it imports): `seed run NAME` must print NAME/main.out, and
+# `seed test NAME` must print NAME/test.out (both run in examples/).
+# For every examples/errors/NAME.sd: compiling must fail, and
 # stderr must be exactly NAME.err (the compiler runs inside examples/errors,
 # so the messages name the file without a directory, as the guide shows them).
 #
 # For examples/fmt/NAME.sd (deliberately unformatted): `seed fmt --check`
 # must print exactly NAME.check, and `seed fmt` must produce NAME.expected.
 # Every other example, pending ones included, must be formatted.
-# examples/pending/ holds programs for features the compiler does not
-# implement yet (concurrency, packages, tests); they are not run.
+# examples/pending/ (if it exists) holds programs that are not run.
 root=$(cd "$(dirname "$0")/../.." && pwd) || exit 1
 seed=${SEED:-$root/build/seed2}
 case $seed in /*) ;; *) seed=$root/$seed ;; esac
@@ -35,7 +37,7 @@ for src in "$dir"/*.sd; do
   [ -e "$src" ] || continue
   name=${src%.sd}
   short=${src#"$root"/}
-  if ! "$seed" c --strict "$src" > "$tmp/t.c" 2> "$tmp/cerr"; then
+  if ! "$seed" c "$src" > "$tmp/t.c" 2> "$tmp/cerr"; then
     failed "$short" "compile failed: $(head -c 600 "$tmp/cerr")"; continue
   fi
   if ! $CC -std=c11 -O1 -w -o "$tmp/t" "$tmp/t.c" -lm -lpthread 2> "$tmp/ccerr"; then
@@ -55,12 +57,31 @@ for src in "$dir"/*.sd; do
   pass=$((pass+1))
 done
 
+for proj in "$dir"/*/; do
+  name=$(basename "$proj")
+  case $name in errors|fmt|pending) continue ;; esac
+  short=${proj#"$root"/}
+  if ! (cd "$dir" && "$seed" run "$name" > "$tmp/out" 2> "$tmp/err" < /dev/null); then
+    failed "$short" "seed run failed: $(head -c 600 "$tmp/err")"; continue
+  fi
+  if ! cmp -s "$tmp/out" "$proj/main.out"; then
+    failed "$short" "stdout differs:"; diff "$proj/main.out" "$tmp/out" | head -20; continue
+  fi
+  if [ -f "$proj/test.out" ]; then
+    (cd "$dir" && "$seed" test "$name" > "$tmp/out" 2> "$tmp/err")
+    if ! cmp -s "$tmp/out" "$proj/test.out"; then
+      failed "$short" "seed test output differs:"; diff "$proj/test.out" "$tmp/out" | head -20; continue
+    fi
+  fi
+  pass=$((pass+1))
+done
+
 for src in "$dir"/errors/*.sd; do
   [ -e "$src" ] || continue
   name=${src%.sd}
   base=$(basename "$src")
   short=${src#"$root"/}
-  if (cd "$dir/errors" && "$seed" c --strict "$base" > /dev/null 2> "$tmp/cerr"); then
+  if (cd "$dir/errors" && "$seed" c "$base" > /dev/null 2> "$tmp/cerr"); then
     failed "$short" "compiled, but should fail"; continue
   fi
   if ! cmp -s "$tmp/cerr" "$name.err"; then
@@ -94,9 +115,8 @@ for src in "$dir"/fmt/*.sd; do
 done
 
 # Every other example must be formatted. Files named *syntax* hold deliberate
-# syntax errors and cannot be formatted. pending/11_shop/cart/cart.sd uses
-# `pub` struct fields, which the parser does not accept yet.
-find "$dir" -name '*.sd' ! -name '*syntax*' ! -path '*/examples/fmt/*' ! -path '*/11_shop/cart/cart.sd' | sort > "$tmp/files"
+# syntax errors and cannot be formatted.
+find "$dir" -name '*.sd' ! -name '*syntax*' ! -path '*/examples/fmt/*' | sort > "$tmp/files"
 if ! xargs "$seed" fmt --check < "$tmp/files" 2> "$tmp/fmterr"; then
   failed "seed fmt --check" "$(cat "$tmp/fmterr")"
 fi

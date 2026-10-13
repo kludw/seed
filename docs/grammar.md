@@ -46,7 +46,7 @@ TestDecl    = "test" String Block .
 ## Declarations
 
 ```
-FnDecl      = "fn" [ Receiver ] Ident "(" [ Params ] ")" [ Result ] Block .
+FnDecl      = "fn" [ Receiver ] Ident "(" [ Params ] ")" [ Result ] [ Block ] .   // no Block: native
 Receiver    = "(" Type Ident ")" [ "mut" ] .
 Params      = Param { "," Param } .
 Param       = Type Ident .
@@ -54,7 +54,8 @@ Result      = Type | "(" Type { "," Type } ")" .
 
 TypeDecl    = "type" Ident ( StructType | EnumType | InterfaceType ) .
 Implements  = "implements" TypeName { "," TypeName } .
-StructType  = "struct" [ Implements ] "{" NL { Type Ident NL } "}" .
+StructType  = "struct" [ Implements ] "{" NL { Field NL } "}" .
+Field       = [ "pub" ] Type Ident .
 EnumType    = "enum" [ Implements ] "{" NL { Ident [ "(" Params ")" ] NL } "}" .
 InterfaceType = "interface" "{" NL { MethodSig NL } "}" .
 MethodSig   = [ "mut" ] Ident "(" [ Params ] ")" [ Result ] .
@@ -63,6 +64,12 @@ ConstDecl   = "const" Type Ident "=" Expr .
 ```
 
 Example of a method declaration: `fn (User u) mut tag(string t) { ... }`.
+
+A function without a block is **native** (`pub fn read(string path) (string, error)`): its body is written in C. Only packages of the standard library may declare native functions; the compiler rejects a missing body anywhere else.
+
+`pub` before a top-level declaration or a struct field makes it usable from other packages. A `TestDecl` is only allowed in a package's `tests/` directory.
+
+The imported packages are written `import "path"`, and the code names a package by the last element of its path (`import "shop/money"` gives `money.Amount`). A `TypeName` with a dot (`money.Amount`) names a type of an imported package.
 
 ## Types
 
@@ -139,13 +146,13 @@ Primary     = Literal | Ident | "(" Expr ")"
 ListLit     = "[" "]" BaseType "{" [ Expr { "," Expr } [ "," ] ] "}" .
 MapLit      = "map" "[" Type "]" BaseType "{" [ Entry { "," Entry } [ "," ] ] "}" .
 Entry       = Expr ":" Expr .
-StructLit   = TypeName "{" [ Field { "," Field } [ "," ] ] "}" .
-Field       = Ident ":" Expr .
+StructLit   = TypeName "{" [ FieldInit { "," FieldInit } [ "," ] ] "}" .
+FieldInit   = Ident ":" Expr .
 ChanMake    = "chan" BaseType "(" Expr ")" .
 Group       = "group" Block .
 ```
 
 - A conversion looks like a call to a type name: `int(x)`, `float(n)`, `byte(i)`, `string(bytes)`.
-- An enum value is `Type.Case(args)`, or `Type.Case` for a case without data.
+- An enum value is `Type.Case(args)`, or `Type.Case` for a case without data. In an `EnumPattern`, a case with data has a `Param` for every field (`_` as the name ignores one), and a case without data has no parentheses.
 - Conditions in `if`, `for` and `switch` are always parenthesised, so `Name{` is always a struct literal.
 - A `Group` is only used whole: as the value of an assignment (`error err = group {...}`, `err = ...`, `_ = ...`), of `return`, or after `try`.

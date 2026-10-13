@@ -22,6 +22,11 @@ static sd_list *argv_of(const char *a, const char *b, const char *c) {
   return l;
 }
 
+static sd_err run_empty(void *argv) {
+  sd_int code;
+  return sd_os_run(argv, &code);
+}
+
 static void test_os(void) {
   sd_str path = SD_STR_LIT("PATH");
   sd_str v = sd_os_env(path);
@@ -53,8 +58,10 @@ static void test_os(void) {
   sd_err_release(e);
   sd_list_release(av);
   av = sd_list_new(&sd_type_str, 0);
-  e = sd_os_run(av, &code);
-  CHECK(!sd_err_is_null(e));
+  e = sd_catch(run_empty, av); /* an empty argv is the caller's mistake: a crash */
+  sd_str em = sd_err_message(e);
+  CHECK(strcmp(sd_str_cstr(em), "crash: os.run: argv is empty") == 0);
+  sd_str_release(em);
   sd_err_release(e);
   sd_list_release(av);
 }
@@ -86,7 +93,8 @@ static void test_fs(void) {
   sd_err e = sd_fs_read(missing, &back);
   CHECK(!sd_err_is_null(e) && back == NULL);
   sd_str m = sd_err_message(e);
-  CHECK(strstr(sd_str_cstr(m), "No such file") != NULL);
+  CHECK(strstr(sd_str_cstr(m), "fs.read: ") == sd_str_cstr(m));
+  CHECK(strstr(sd_str_cstr(m), "/missing: no such file or directory") != NULL);
   sd_str_release(m);
   sd_err_release(e);
   e = sd_fs_list(missing, &names);

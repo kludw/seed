@@ -67,100 +67,85 @@ fn httpTestResponse(string data, string method, bool eof) string {
     return httpTestResp(r.nextResponse(method, eof))
 }
 
-fn testParseSimpleGet() TestLog {
-    TestLog t = newTestLog()
-    t.eqStr(httpTestParse("GET /todos?done=1 HTTP/1.1\r\nHost: example.com\r\nUser-Agent: x\r\n\r\n"), "GET /todos?done=1 {host=example.com; user-agent=x} body=")
-    t.eqStr(httpTestParse("GET / HTTP/1.0\r\n\r\n"), "GET / {} body=")
-    t.eqStr(httpTestParse("GET / HTTP/1.1\nHost: a\n\n"), "GET / {host=a} body=")
-    t.eqStr(httpTestParse("\r\n\r\nGET / HTTP/1.1\r\nHost: a\r\n\r\n"), "GET / {host=a} body=")
-    t.eqStr(httpTestParse("OPTIONS * HTTP/1.1\r\nHost: a\r\n\r\n"), "OPTIONS * {host=a} body=")
-    return t
+test "parse simple get" {
+    assert(httpTestParse("GET /todos?done=1 HTTP/1.1\r\nHost: example.com\r\nUser-Agent: x\r\n\r\n") == "GET /todos?done=1 {host=example.com; user-agent=x} body=")
+    assert(httpTestParse("GET / HTTP/1.0\r\n\r\n") == "GET / {} body=")
+    assert(httpTestParse("GET / HTTP/1.1\nHost: a\n\n") == "GET / {host=a} body=")
+    assert(httpTestParse("\r\n\r\nGET / HTTP/1.1\r\nHost: a\r\n\r\n") == "GET / {host=a} body=")
+    assert(httpTestParse("OPTIONS * HTTP/1.1\r\nHost: a\r\n\r\n") == "OPTIONS * {host=a} body=")
 }
 
-fn testParseHeaders() TestLog {
-    TestLog t = newTestLog()
-    t.eqStr(httpTestParse("GET / HTTP/1.1\r\nHost: a\r\nX-Tag:  one \t\r\nx-tag: two\r\nEmpty:\r\n\r\n"), "GET / {host=a; x-tag=one, two; empty=} body=")
-    t.eqStr(httpTestParse("GET / HTTP/1.1\r\nHost: a\r\nX: a:b:c\r\n\r\n"), "GET / {host=a; x=a:b:c} body=")
-    return t
+test "parse headers" {
+    assert(httpTestParse("GET / HTTP/1.1\r\nHost: a\r\nX-Tag:  one \t\r\nx-tag: two\r\nEmpty:\r\n\r\n") == "GET / {host=a; x-tag=one, two; empty=} body=")
+    assert(httpTestParse("GET / HTTP/1.1\r\nHost: a\r\nX: a:b:c\r\n\r\n") == "GET / {host=a; x=a:b:c} body=")
 }
 
-fn testParseContentLengthBody() TestLog {
-    TestLog t = newTestLog()
-    t.eqStr(httpTestParse("POST /todos HTTP/1.1\r\nHost: a\r\nContent-Length: 11\r\n\r\nhello world"), "POST /todos {host=a; content-length=11} body=hello world")
-    t.eqStr(httpTestParse("POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 5\r\nContent-Length: 5\r\n\r\nhello"), "POST / {host=a; content-length=5, 5} body=hello")
-    t.eqStr(httpTestParse("POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 0\r\n\r\n"), "POST / {host=a; content-length=0} body=")
-    t.eqStr(httpTestParse("POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 5\r\n\r\nhel"), "need more")
-    t.eqStr(httpTestParseByteByByte("POST /x HTTP/1.1\r\nHost: a\r\nContent-Length: 3\r\n\r\nabc"), "POST /x {host=a; content-length=3} body=abc")
-    return t
+test "parse content length body" {
+    assert(httpTestParse("POST /todos HTTP/1.1\r\nHost: a\r\nContent-Length: 11\r\n\r\nhello world") == "POST /todos {host=a; content-length=11} body=hello world")
+    assert(httpTestParse("POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 5\r\nContent-Length: 5\r\n\r\nhello") == "POST / {host=a; content-length=5, 5} body=hello")
+    assert(httpTestParse("POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 0\r\n\r\n") == "POST / {host=a; content-length=0} body=")
+    assert(httpTestParse("POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 5\r\n\r\nhel") == "need more")
+    assert(httpTestParseByteByByte("POST /x HTTP/1.1\r\nHost: a\r\nContent-Length: 3\r\n\r\nabc") == "POST /x {host=a; content-length=3} body=abc")
 }
 
-fn testParseChunkedBody() TestLog {
-    TestLog t = newTestLog()
+test "parse chunked body" {
     string msg = "POST /up HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n6;ext=1\r\n world\r\n0\r\nX-Trailer: t\r\n\r\n"
-    t.eqStr(httpTestParse(msg), "POST /up {host=a; transfer-encoding=chunked} body=hello world")
-    t.eqStr(httpTestParseByteByByte(msg), "POST /up {host=a; transfer-encoding=chunked} body=hello world")
-    t.eqStr(httpTestParse("POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: chunked\r\n\r\nA\r\n0123456789\r\n0\r\n\r\n"), "POST / {host=a; transfer-encoding=chunked} body=0123456789")
-    t.eqStr(httpTestParse("POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n"), "POST / {host=a; transfer-encoding=chunked} body=")
-    t.eqStr(httpTestParse("POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n"), "need more")
-    t.eqStr(httpTestParse("POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: chunked\r\n\r\nzz\r\n"), "reject 400: invalid chunk size line")
-    t.eqStr(httpTestParse("POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nhello\r\n0\r\n\r\n"), "reject 400: chunk data is longer than its size")
-    return t
+    assert(httpTestParse(msg) == "POST /up {host=a; transfer-encoding=chunked} body=hello world")
+    assert(httpTestParseByteByByte(msg) == "POST /up {host=a; transfer-encoding=chunked} body=hello world")
+    assert(httpTestParse("POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: chunked\r\n\r\nA\r\n0123456789\r\n0\r\n\r\n") == "POST / {host=a; transfer-encoding=chunked} body=0123456789")
+    assert(httpTestParse("POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n") == "POST / {host=a; transfer-encoding=chunked} body=")
+    assert(httpTestParse("POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n") == "need more")
+    assert(httpTestParse("POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: chunked\r\n\r\nzz\r\n") == "reject 400: invalid chunk size line")
+    assert(httpTestParse("POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nhello\r\n0\r\n\r\n") == "reject 400: chunk data is longer than its size")
 }
 
-fn testPipelinedRequests() TestLog {
-    TestLog t = newTestLog()
+test "pipelined requests" {
     MessageReader r = newMessageReader(maxHeadBytes, maxRequestBody)
     r.feed("GET /a HTTP/1.1\r\nHost: h\r\n\r\nPOST /b HTTP/1.1\r\nHost: h\r\nContent-Length: 2\r\n\r\nhiGET /c HT")
-    t.eqStr(httpTestReq(r.nextRequest()), "GET /a {host=h} body=")
-    t.eqStr(httpTestReq(r.nextRequest()), "POST /b {host=h; content-length=2} body=hi")
-    t.eqStr(httpTestReq(r.nextRequest()), "need more")
+    assert(httpTestReq(r.nextRequest()) == "GET /a {host=h} body=")
+    assert(httpTestReq(r.nextRequest()) == "POST /b {host=h; content-length=2} body=hi")
+    assert(httpTestReq(r.nextRequest()) == "need more")
     r.feed("TP/1.1\r\nHost: h\r\n\r\n")
-    t.eqStr(httpTestReq(r.nextRequest()), "GET /c {host=h} body=")
-    t.eqStr(httpTestReq(r.nextRequest()), "need more")
-    t.eqInt(r.buffered(), 0)
-    return t
+    assert(httpTestReq(r.nextRequest()) == "GET /c {host=h} body=")
+    assert(httpTestReq(r.nextRequest()) == "need more")
+    assert(r.buffered() == 0)
 }
 
-fn testRejectMalformedRequests() TestLog {
-    TestLog t = newTestLog()
-    t.eqStr(httpTestParse("GET /\r\n\r\n"), "reject 400: malformed request line")
-    t.eqStr(httpTestParse("GET  / HTTP/1.1\r\nHost: a\r\n\r\n"), "reject 400: malformed request line")
-    t.eqStr(httpTestParse("G(T / HTTP/1.1\r\nHost: a\r\n\r\n"), "reject 400: malformed request line")
-    t.eqStr(httpTestParse("GET / FTP/1.1\r\n\r\n"), "reject 400: malformed request line")
-    t.eqStr(httpTestParse("GET / HTTP/2.0\r\n\r\n"), "reject 505: unsupported HTTP version")
-    t.eqStr(httpTestParse("GET /a\x01 HTTP/1.1\r\nHost: a\r\n\r\n"), "reject 400: malformed request target")
-    t.eqStr(httpTestParse("GET / HTTP/1.1\r\n\r\n"), "reject 400: missing host header")
-    t.eqStr(httpTestParse("GET / HTTP/1.1\r\nHost: a\r\nBad Name: x\r\n\r\n"), "reject 400: invalid header name")
-    t.eqStr(httpTestParse("GET / HTTP/1.1\r\nHost: a\r\nNoColon\r\n\r\n"), "reject 400: header line without ':'")
-    t.eqStr(httpTestParse("GET / HTTP/1.1\r\nHost: a\r\nX: a\r\n  folded\r\n\r\n"), "reject 400: obsolete line folding is not supported")
-    t.eqStr(httpTestParse("GET / HTTP/1.1\r\nHost: a\r\nX: a\x00b\r\n\r\n"), "reject 400: control character in header value")
-    t.eqStr(httpTestParse("GET / HTTP/1.1\r\nHost: a\r\n: x\r\n\r\n"), "reject 400: invalid header name")
-    return t
+test "reject malformed requests" {
+    assert(httpTestParse("GET /\r\n\r\n") == "reject 400: malformed request line")
+    assert(httpTestParse("GET  / HTTP/1.1\r\nHost: a\r\n\r\n") == "reject 400: malformed request line")
+    assert(httpTestParse("G(T / HTTP/1.1\r\nHost: a\r\n\r\n") == "reject 400: malformed request line")
+    assert(httpTestParse("GET / FTP/1.1\r\n\r\n") == "reject 400: malformed request line")
+    assert(httpTestParse("GET / HTTP/2.0\r\n\r\n") == "reject 505: unsupported HTTP version")
+    assert(httpTestParse("GET /a\x01 HTTP/1.1\r\nHost: a\r\n\r\n") == "reject 400: malformed request target")
+    assert(httpTestParse("GET / HTTP/1.1\r\n\r\n") == "reject 400: missing host header")
+    assert(httpTestParse("GET / HTTP/1.1\r\nHost: a\r\nBad Name: x\r\n\r\n") == "reject 400: invalid header name")
+    assert(httpTestParse("GET / HTTP/1.1\r\nHost: a\r\nNoColon\r\n\r\n") == "reject 400: header line without ':'")
+    assert(httpTestParse("GET / HTTP/1.1\r\nHost: a\r\nX: a\r\n  folded\r\n\r\n") == "reject 400: obsolete line folding is not supported")
+    assert(httpTestParse("GET / HTTP/1.1\r\nHost: a\r\nX: a\x00b\r\n\r\n") == "reject 400: control character in header value")
+    assert(httpTestParse("GET / HTTP/1.1\r\nHost: a\r\n: x\r\n\r\n") == "reject 400: invalid header name")
 }
 
-fn testRejectBadFraming() TestLog {
-    TestLog t = newTestLog()
-    t.eqStr(httpTestParse("POST / HTTP/1.1\r\nHost: a\r\nContent-Length: -1\r\n\r\n"), "reject 400: invalid content-length")
-    t.eqStr(httpTestParse("POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 1x\r\n\r\n"), "reject 400: invalid content-length")
-    t.eqStr(httpTestParse("POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 5\r\nContent-Length: 6\r\n\r\n"), "reject 400: invalid content-length")
-    t.eqStr(httpTestParse("POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 5\r\nTransfer-Encoding: chunked\r\n\r\n"), "reject 400: both transfer-encoding and content-length")
-    t.eqStr(httpTestParse("POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: gzip, chunked\r\n\r\n"), "reject 501: unsupported transfer-encoding")
-    return t
+test "reject bad framing" {
+    assert(httpTestParse("POST / HTTP/1.1\r\nHost: a\r\nContent-Length: -1\r\n\r\n") == "reject 400: invalid content-length")
+    assert(httpTestParse("POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 1x\r\n\r\n") == "reject 400: invalid content-length")
+    assert(httpTestParse("POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 5\r\nContent-Length: 6\r\n\r\n") == "reject 400: invalid content-length")
+    assert(httpTestParse("POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 5\r\nTransfer-Encoding: chunked\r\n\r\n") == "reject 400: both transfer-encoding and content-length")
+    assert(httpTestParse("POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: gzip, chunked\r\n\r\n") == "reject 501: unsupported transfer-encoding")
 }
 
-fn testLimits() TestLog {
-    TestLog t = newTestLog()
-    t.eqStr(httpTestParse("POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 8388609\r\n\r\n"), "reject 413: request body too large")
-    t.eqStr(httpTestParse("POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 99999999999999999999\r\n\r\n"), "reject 400: invalid content-length")
+test "limits" {
+    assert(httpTestParse("POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 8388609\r\n\r\n") == "reject 413: request body too large")
+    assert(httpTestParse("POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 99999999999999999999\r\n\r\n") == "reject 400: invalid content-length")
     MessageReader small = newMessageReader(100, 10)
     small.feed("POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: chunked\r\n\r\n6\r\nabcdef\r\n6\r\n")
-    t.eqStr(httpTestReq(small.nextRequest()), "reject 413: request body too large")
+    assert(httpTestReq(small.nextRequest()) == "reject 413: request body too large")
     MessageReader head = newMessageReader(100, 10)
     head.feed("GET / HTTP/1.1\r\nHost: a\r\nX: " + "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789")
-    t.eqStr(httpTestReq(head.nextRequest()), "reject 431: request header too large")
+    assert(httpTestReq(head.nextRequest()) == "reject 431: request header too large")
     MessageReader lines = newMessageReader(100, 10)
     lines.feed("GET / HTTP/1.1\r\nHost: a\r\nA: 0123456789\r\nB: 0123456789\r\nC: 0123456789\r\nD: 0123456789\r\nE: 0123456789\r\nF: 0123456789\r\n\r\n")
-    t.eqStr(httpTestReq(lines.nextRequest()), "reject 431: request header too large")
+    assert(httpTestReq(lines.nextRequest()) == "reject 431: request header too large")
     // A big header block within the limit, read in pieces.
     []string many = []string{"GET / HTTP/1.1\r\nHost: a\r\n"}
     for (int i = 0; i < 1000; i++) {
@@ -178,16 +163,14 @@ fn testLimits() TestLog {
         r.feed(big.slice(i, end))
         got = httpTestReq(r.nextRequest())
     }
-    t.ok(got.startsWith("GET / {host=a; x-0=value; x-1=value;"), "many headers: " + got.slice(0, 40))
-    return t
+    assert(got.startsWith("GET / {host=a; x-0=value; x-1=value;"))
 }
 
-fn testLargeBodyInPieces() TestLog {
-    TestLog t = newTestLog()
+test "large body in pieces" {
     int size = 1000000
     MessageReader r = newMessageReader(maxHeadBytes, maxRequestBody)
     r.feed("PUT /blob HTTP/1.1\r\nHost: a\r\nContent-Length: " + size.string() + "\r\n\r\n")
-    t.eqStr(httpTestReq(r.nextRequest()), "need more")
+    assert(httpTestReq(r.nextRequest()) == "need more")
     string piece = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
     []string pieces = []string{}
     for (int i = 0; i < 64; i++) {
@@ -207,239 +190,215 @@ fn testLargeBodyInPieces() TestLog {
     }
     switch (last) {
     case RequestParse.Done(Request req):
-        t.eqInt(req.body.len(), size)
-        t.eqStr(req.body.slice(4096, 4096 + 16), "0123456789abcdef")
+        assert(req.body.len() == size)
+        assert(req.body.slice(4096, 4096 + 16) == "0123456789abcdef")
     case RequestParse.NeedMore:
-        t.ok(false, "still needs more")
-    case RequestParse.Reject(int status, string reason):
-        t.ok(false, "rejected " + status.string() + " " + reason)
+        assert(false)
+    case RequestParse.Reject(int _, string _):
+        assert(false)
     }
-    return t
 }
 
-fn testParseResponses() TestLog {
-    TestLog t = newTestLog()
-    t.eqStr(httpTestResponse("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 5\r\n\r\nhello", "GET", false), "200 {content-type=text/plain; content-length=5} body=hello")
-    t.eqStr(httpTestResponse("HTTP/1.1 404 Not Found\r\nContent-Length: 3\r\n\r\nno", "GET", false), "need more")
-    t.eqStr(httpTestResponse("HTTP/1.1 404 Not Found\r\nContent-Length: 3\r\n\r\nno", "GET", true), "fail: connection closed in the middle of the response body")
-    t.eqStr(httpTestResponse("HTTP/1.0 200 OK\r\n\r\nall of it", "GET", false), "need more")
-    t.eqStr(httpTestResponse("HTTP/1.0 200 OK\r\n\r\nall of it", "GET", true), "200 {} body=all of it")
-    t.eqStr(httpTestResponse("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n4\r\nWiki\r\n5\r\npedia\r\nE\r\n in\r\n\r\nchunks.\r\n0\r\n\r\n", "GET", false), "200 {transfer-encoding=chunked} body=Wikipedia in\r\n\r\nchunks.")
-    t.eqStr(httpTestResponse("HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\n", "HEAD", false), "200 {content-length=10} body=")
-    t.eqStr(httpTestResponse("HTTP/1.1 204 No Content\r\n\r\n", "DELETE", false), "204 {} body=")
-    t.eqStr(httpTestResponse("HTTP/1.1 304 Not Modified\r\nETag: x\r\n\r\n", "GET", false), "304 {etag=x} body=")
-    t.eqStr(httpTestResponse("HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 201 Created\r\nContent-Length: 2\r\n\r\nok", "POST", false), "201 {content-length=2} body=ok")
-    t.eqStr(httpTestResponse("HTTP/1.1 599\r\nContent-Length: 0\r\n\r\n", "GET", false), "599 {content-length=0} body=")
-    t.eqStr(httpTestResponse("HTTP/1.1 302 Found\r\nLocation: /\r\nContent-Length: 0\r\n\r\n", "GET", false), "302 {location=/; content-length=0} body=")
-    return t
+test "parse responses" {
+    assert(httpTestResponse("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 5\r\n\r\nhello", "GET", false) == "200 {content-type=text/plain; content-length=5} body=hello")
+    assert(httpTestResponse("HTTP/1.1 404 Not Found\r\nContent-Length: 3\r\n\r\nno", "GET", false) == "need more")
+    assert(httpTestResponse("HTTP/1.1 404 Not Found\r\nContent-Length: 3\r\n\r\nno", "GET", true) == "fail: connection closed in the middle of the response body")
+    assert(httpTestResponse("HTTP/1.0 200 OK\r\n\r\nall of it", "GET", false) == "need more")
+    assert(httpTestResponse("HTTP/1.0 200 OK\r\n\r\nall of it", "GET", true) == "200 {} body=all of it")
+    assert(httpTestResponse("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n4\r\nWiki\r\n5\r\npedia\r\nE\r\n in\r\n\r\nchunks.\r\n0\r\n\r\n", "GET", false) == "200 {transfer-encoding=chunked} body=Wikipedia in\r\n\r\nchunks.")
+    assert(httpTestResponse("HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\n", "HEAD", false) == "200 {content-length=10} body=")
+    assert(httpTestResponse("HTTP/1.1 204 No Content\r\n\r\n", "DELETE", false) == "204 {} body=")
+    assert(httpTestResponse("HTTP/1.1 304 Not Modified\r\nETag: x\r\n\r\n", "GET", false) == "304 {etag=x} body=")
+    assert(httpTestResponse("HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 201 Created\r\nContent-Length: 2\r\n\r\nok", "POST", false) == "201 {content-length=2} body=ok")
+    assert(httpTestResponse("HTTP/1.1 599\r\nContent-Length: 0\r\n\r\n", "GET", false) == "599 {content-length=0} body=")
+    assert(httpTestResponse("HTTP/1.1 302 Found\r\nLocation: /\r\nContent-Length: 0\r\n\r\n", "GET", false) == "302 {location=/; content-length=0} body=")
 }
 
-fn testResponseErrors() TestLog {
-    TestLog t = newTestLog()
-    t.eqStr(httpTestResponse("", "GET", true), "fail: connection closed without a response")
-    t.eqStr(httpTestResponse("HTTP/1.1 200 OK\r\n", "GET", true), "fail: connection closed in the middle of the response header")
-    t.eqStr(httpTestResponse("HTTP/1.1 2x0 OK\r\n\r\n", "GET", false), "fail: malformed status line")
-    t.eqStr(httpTestResponse("HTTP/2 200 OK\r\n\r\n", "GET", false), "fail: malformed status line")
-    t.eqStr(httpTestResponse("HTTP/1.1 200OK\r\n\r\n", "GET", false), "fail: malformed status line")
-    t.eqStr(httpTestResponse("\r\nHTTP/1.1 200 OK\r\n\r\n", "GET", false), "fail: empty start line")
-    t.eqStr(httpTestResponse("HTTP/1.1 200 OK\r\nContent-Length: x\r\n\r\n", "GET", false), "fail: invalid content-length")
+test "response errors" {
+    assert(httpTestResponse("", "GET", true) == "fail: connection closed without a response")
+    assert(httpTestResponse("HTTP/1.1 200 OK\r\n", "GET", true) == "fail: connection closed in the middle of the response header")
+    assert(httpTestResponse("HTTP/1.1 2x0 OK\r\n\r\n", "GET", false) == "fail: malformed status line")
+    assert(httpTestResponse("HTTP/2 200 OK\r\n\r\n", "GET", false) == "fail: malformed status line")
+    assert(httpTestResponse("HTTP/1.1 200OK\r\n\r\n", "GET", false) == "fail: malformed status line")
+    assert(httpTestResponse("\r\nHTTP/1.1 200 OK\r\n\r\n", "GET", false) == "fail: empty start line")
+    assert(httpTestResponse("HTTP/1.1 200 OK\r\nContent-Length: x\r\n\r\n", "GET", false) == "fail: invalid content-length")
     MessageReader r = newMessageReader(maxHeadBytes, 4)
     r.feed("HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello")
-    t.eqStr(httpTestResp(r.nextResponse("GET", false)), "fail: response body too large")
+    assert(httpTestResp(r.nextResponse("GET", false)) == "fail: response body too large")
     MessageReader eofReader = newMessageReader(maxHeadBytes, 4)
     eofReader.feed("HTTP/1.1 200 OK\r\n\r\nhello")
-    t.eqStr(httpTestResp(eofReader.nextResponse("GET", false)), "fail: response body too large")
-    return t
+    assert(httpTestResp(eofReader.nextResponse("GET", false)) == "fail: response body too large")
 }
 
-fn testResponseUntilEofInPieces() TestLog {
-    TestLog t = newTestLog()
+test "response until eof in pieces" {
     MessageReader r = newMessageReader(maxHeadBytes, maxResponseBody)
     r.feed("HTTP/1.1 200 OK\r\n\r\nab")
-    t.eqStr(httpTestResp(r.nextResponse("GET", false)), "need more")
+    assert(httpTestResp(r.nextResponse("GET", false)) == "need more")
     r.feed("cd")
-    t.eqStr(httpTestResp(r.nextResponse("GET", false)), "need more")
+    assert(httpTestResp(r.nextResponse("GET", false)) == "need more")
     r.feed("ef")
-    t.eqStr(httpTestResp(r.nextResponse("GET", true)), "200 {} body=abcdef")
-    return t
+    assert(httpTestResp(r.nextResponse("GET", true)) == "200 {} body=abcdef")
 }
 
-fn testResponseBytes() TestLog {
-    TestLog t = newTestLog()
+test "response bytes" {
     Response resp = Response{status: 200, headers: map[string]string{"Content-Type": "text/plain", "content-length": "999"}, body: "hi"}
-    t.eqStr(responseBytes("GET", resp, false), "HTTP/1.1 200 OK\r\ncontent-type: text/plain\r\ncontent-length: 2\r\n\r\nhi")
-    t.eqStr(responseBytes("HEAD", resp, false), "HTTP/1.1 200 OK\r\ncontent-type: text/plain\r\ncontent-length: 2\r\n\r\n")
-    t.eqStr(responseBytes("GET", resp, true), "HTTP/1.1 200 OK\r\ncontent-type: text/plain\r\ncontent-length: 2\r\nconnection: close\r\n\r\nhi")
+    assert(responseBytes("GET", resp, false) == "HTTP/1.1 200 OK\r\ncontent-type: text/plain\r\ncontent-length: 2\r\n\r\nhi")
+    assert(responseBytes("HEAD", resp, false) == "HTTP/1.1 200 OK\r\ncontent-type: text/plain\r\ncontent-length: 2\r\n\r\n")
+    assert(responseBytes("GET", resp, true) == "HTTP/1.1 200 OK\r\ncontent-type: text/plain\r\ncontent-length: 2\r\nconnection: close\r\n\r\nhi")
     Response empty = Response{status: 204, headers: map[string]string{}, body: "ignored"}
-    t.eqStr(responseBytes("DELETE", empty, false), "HTTP/1.1 204 No Content\r\n\r\n")
+    assert(responseBytes("DELETE", empty, false) == "HTTP/1.1 204 No Content\r\n\r\n")
     Response odd = Response{status: 299, headers: map[string]string{"x-evil": "a\r\nset-cookie: b", "bad name": "x"}, body: ""}
-    t.eqStr(responseBytes("GET", odd, false), "HTTP/1.1 299 \r\nx-evil: a  set-cookie: b\r\ncontent-length: 0\r\n\r\n")
-    t.eqStr(errorResponseBytes(431), "HTTP/1.1 431 Request Header Fields Too Large\r\ncontent-type: text/plain; charset=utf-8\r\ncontent-length: 32\r\nconnection: close\r\n\r\nRequest Header Fields Too Large\n")
-    return t
+    assert(responseBytes("GET", odd, false) == "HTTP/1.1 299 \r\nx-evil: a  set-cookie: b\r\ncontent-length: 0\r\n\r\n")
+    assert(errorResponseBytes(431) == "HTTP/1.1 431 Request Header Fields Too Large\r\ncontent-type: text/plain; charset=utf-8\r\ncontent-length: 32\r\nconnection: close\r\n\r\nRequest Header Fields Too Large\n")
 }
 
-fn testResponseBytesParseBack() TestLog {
-    TestLog t = newTestLog()
+test "response bytes parse back" {
     Response resp = textResponse(statusCreated, "made it\n")
-    t.eqStr(httpTestResponse(responseBytes("POST", resp, false), "POST", false), "201 {content-type=text/plain; charset=utf-8; content-length=8} body=made it\n")
-    return t
+    assert(httpTestResponse(responseBytes("POST", resp, false), "POST", false) == "201 {content-type=text/plain; charset=utf-8; content-length=8} body=made it\n")
 }
 
-fn testParseUrl() TestLog {
-    TestLog t = newTestLog()
+test "parse url" {
     HttpTarget a, error err = parseUrl("http.get", "http://example.com/todos?done=1#frag")
-    t.noErr(err)
+    assert(err == null)
     if (err == null) {
-        t.eqStr(a.address, "example.com:80")
-        t.eqStr(a.host, "example.com")
-        t.eqStr(a.target, "/todos?done=1")
+        assert(a.address == "example.com:80")
+        assert(a.host == "example.com")
+        assert(a.target == "/todos?done=1")
     }
     a, err = parseUrl("http.get", "HTTP://localhost:8080")
-    t.noErr(err)
+    assert(err == null)
     if (err == null) {
-        t.eqStr(a.address, "localhost:8080")
-        t.eqStr(a.host, "localhost:8080")
-        t.eqStr(a.target, "/")
+        assert(a.address == "localhost:8080")
+        assert(a.host == "localhost:8080")
+        assert(a.target == "/")
     }
     a, err = parseUrl("http.get", "http://[::1]:9000?x=1")
-    t.noErr(err)
+    assert(err == null)
     if (err == null) {
-        t.eqStr(a.address, "[::1]:9000")
-        t.eqStr(a.host, "[::1]:9000")
-        t.eqStr(a.target, "/?x=1")
+        assert(a.address == "[::1]:9000")
+        assert(a.host == "[::1]:9000")
+        assert(a.target == "/?x=1")
     }
     a, err = parseUrl("http.get", "http://[::1]/")
-    t.noErr(err)
+    assert(err == null)
     if (err == null) {
-        t.eqStr(a.address, "[::1]:80")
-        t.eqStr(a.host, "[::1]")
+        assert(a.address == "[::1]:80")
+        assert(a.host == "[::1]")
     }
     a, err = parseUrl("http.get", "http://10.0.0.1:80/a/b")
-    t.noErr(err)
+    assert(err == null)
     if (err == null) {
-        t.eqStr(a.address, "10.0.0.1:80")
-        t.eqStr(a.host, "10.0.0.1")
-        t.eqStr(a.target, "/a/b")
+        assert(a.address == "10.0.0.1:80")
+        assert(a.host == "10.0.0.1")
+        assert(a.target == "/a/b")
     }
-    return t
 }
 
-fn testParseUrlErrors() TestLog {
-    TestLog t = newTestLog()
+test "parse url errors" {
     _, error err = parseUrl("http.get", "https://example.com/")
-    t.errIs(err, "http.get: https://example.com/: https is not supported")
+    assert(err != null)
+    assert(err.message() == "http.get: https://example.com/: https is not supported")
     _, err = parseUrl("http.send", "ftp://example.com/")
-    t.errIs(err, "http.send: ftp://example.com/: unsupported scheme ftp")
+    assert(err != null)
+    assert(err.message() == "http.send: ftp://example.com/: unsupported scheme ftp")
     _, err = parseUrl("http.get", "example.com/")
-    t.errIs(err, "http.get: example.com/: not an http:// URL")
+    assert(err != null)
+    assert(err.message() == "http.get: example.com/: not an http:// URL")
     _, err = parseUrl("http.get", "http:///path")
-    t.errIs(err, "http.get: http:///path: missing host")
+    assert(err != null)
+    assert(err.message() == "http.get: http:///path: missing host")
     _, err = parseUrl("http.get", "http://host:0/")
-    t.errIs(err, "http.get: http://host:0/: invalid port")
+    assert(err != null)
+    assert(err.message() == "http.get: http://host:0/: invalid port")
     _, err = parseUrl("http.get", "http://host:65536/")
-    t.errIs(err, "http.get: http://host:65536/: invalid port")
+    assert(err != null)
+    assert(err.message() == "http.get: http://host:65536/: invalid port")
     _, err = parseUrl("http.get", "http://host:/")
-    t.errIs(err, "http.get: http://host:/: invalid port")
+    assert(err != null)
+    assert(err.message() == "http.get: http://host:/: invalid port")
     _, err = parseUrl("http.get", "http://host:8o/")
-    t.errIs(err, "http.get: http://host:8o/: invalid port")
+    assert(err != null)
+    assert(err.message() == "http.get: http://host:8o/: invalid port")
     _, err = parseUrl("http.get", "http://user:pw@host/")
-    t.errIs(err, "http.get: http://user:pw@host/: user info in URLs is not supported")
+    assert(err != null)
+    assert(err.message() == "http.get: http://user:pw@host/: user info in URLs is not supported")
     _, err = parseUrl("http.get", "http://[::1/")
-    t.errIs(err, "http.get: http://[::1/: missing ']' in host")
+    assert(err != null)
+    assert(err.message() == "http.get: http://[::1/: missing ']' in host")
     _, err = parseUrl("http.get", "http://host/a b")
-    t.errIs(err, "http.get: http://host/a b: invalid character in URL")
-    return t
+    assert(err != null)
+    assert(err.message() == "http.get: http://host/a b: invalid character in URL")
 }
 
-fn testRequestBytes() TestLog {
-    TestLog t = newTestLog()
+test "request bytes" {
     Request get = Request{method: "GET", url: "http://example.com:8080/todos?x=1", headers: map[string]string{}, body: ""}
     HttpTarget target, error err = parseUrl("http.send", get.url)
-    t.noErr(err)
-    if (err != null) {
-        return t
-    }
+    assert(err == null)
     string bytes, error err2 = requestBytes("http.send", get, target)
-    t.ok(err2 == null && bytes == "GET /todos?x=1 HTTP/1.1\r\nhost: example.com:8080\r\nconnection: close\r\n\r\n", "GET bytes")
+    assert(err2 == null && bytes == "GET /todos?x=1 HTTP/1.1\r\nhost: example.com:8080\r\nconnection: close\r\n\r\n")
     Request post = Request{method: "POST", url: "http://example.com/todos", headers: map[string]string{"Content-Type": "application/json", "Connection": "keep-alive", "Host": "virtual.example"}, body: ""}
     HttpTarget t2, error err3 = parseUrl("http.send", post.url)
-    t.noErr(err3)
-    if (err3 != null) {
-        return t
-    }
+    assert(err3 == null)
     string bytes2, error err4 = requestBytes("http.send", post, t2)
-    t.ok(err4 == null && bytes2 == "POST /todos HTTP/1.1\r\ncontent-type: application/json\r\nhost: virtual.example\r\ncontent-length: 0\r\nconnection: close\r\n\r\n", "POST bytes")
+    assert(err4 == null && bytes2 == "POST /todos HTTP/1.1\r\ncontent-type: application/json\r\nhost: virtual.example\r\ncontent-length: 0\r\nconnection: close\r\n\r\n")
     Request bad = Request{method: "GE T", url: "http://a/", headers: map[string]string{}, body: "x"}
     _, error err5 = requestBytes("http.send", bad, t2)
-    t.errIs(err5, "http.send: http://a/: invalid method GE T")
-    return t
+    assert(err5 != null)
+    assert(err5.message() == "http.send: http://a/: invalid method GE T")
 }
 
-fn testRequestBytesParseBack() TestLog {
-    TestLog t = newTestLog()
+test "request bytes parse back" {
     Request req = Request{method: "PUT", url: "http://h/x", headers: map[string]string{"x-a": "1"}, body: "data"}
     HttpTarget target, error err = parseUrl("http.send", req.url)
-    t.noErr(err)
-    if (err != null) {
-        return t
-    }
+    assert(err == null)
     string bytes, error err2 = requestBytes("http.send", req, target)
-    t.noErr(err2)
+    assert(err2 == null)
     if (err2 == null) {
-        t.eqStr(httpTestParse(bytes), "PUT /x {host=h; x-a=1; content-length=4; connection=close} body=data")
+        assert(httpTestParse(bytes) == "PUT /x {host=h; x-a=1; content-length=4; connection=close} body=data")
     }
-    return t
 }
 
-fn testRequestPath() TestLog {
-    TestLog t = newTestLog()
-    t.eqStr(Request{method: "GET", url: "/todos?done=1", headers: map[string]string{}, body: ""}.path(), "/todos")
-    t.eqStr(Request{method: "GET", url: "/a%20b/c%2Fd+e", headers: map[string]string{}, body: ""}.path(), "/a b/c/d+e")
-    t.eqStr(Request{method: "GET", url: "/bad%zz?x", headers: map[string]string{}, body: ""}.path(), "/bad%zz")
-    t.eqStr(Request{method: "GET", url: "http://example.com/x/y?q#f", headers: map[string]string{}, body: ""}.path(), "/x/y")
-    t.eqStr(Request{method: "GET", url: "http://example.com", headers: map[string]string{}, body: ""}.path(), "/")
-    t.eqStr(Request{method: "GET", url: "http://example.com?q=1", headers: map[string]string{}, body: ""}.path(), "/")
-    t.eqStr(Request{method: "GET", url: "/", headers: map[string]string{}, body: ""}.path(), "/")
-    t.eqStr(Request{method: "GET", url: "/redirect?to=http://x/y", headers: map[string]string{}, body: ""}.path(), "/redirect")
-    return t
+test "request path" {
+    assert(Request{method: "GET", url: "/todos?done=1", headers: map[string]string{}, body: ""}.path() == "/todos")
+    assert(Request{method: "GET", url: "/a%20b/c%2Fd+e", headers: map[string]string{}, body: ""}.path() == "/a b/c/d+e")
+    assert(Request{method: "GET", url: "/bad%zz?x", headers: map[string]string{}, body: ""}.path() == "/bad%zz")
+    assert(Request{method: "GET", url: "http://example.com/x/y?q#f", headers: map[string]string{}, body: ""}.path() == "/x/y")
+    assert(Request{method: "GET", url: "http://example.com", headers: map[string]string{}, body: ""}.path() == "/")
+    assert(Request{method: "GET", url: "http://example.com?q=1", headers: map[string]string{}, body: ""}.path() == "/")
+    assert(Request{method: "GET", url: "/", headers: map[string]string{}, body: ""}.path() == "/")
+    assert(Request{method: "GET", url: "/redirect?to=http://x/y", headers: map[string]string{}, body: ""}.path() == "/redirect")
 }
 
-fn testRequestQuery() TestLog {
-    TestLog t = newTestLog()
+test "request query" {
     Request r = Request{method: "GET", url: "/s?q=a+b%21&lang=en&q=last&flag&&empty=&bad=%zz&%41=x#frag", headers: map[string]string{}, body: ""}
-    t.eqStr(httpTestHeaders(r.query()), "{q=last; lang=en; flag=; empty=; A=x}")
-    t.eqInt(Request{method: "GET", url: "/s", headers: map[string]string{}, body: ""}.query().len(), 0)
-    t.eqInt(Request{method: "GET", url: "/s?", headers: map[string]string{}, body: ""}.query().len(), 0)
-    t.eqStr(httpTestHeaders(Request{method: "GET", url: "http://h/p?a=1=2", headers: map[string]string{}, body: ""}.query()), "{a=1=2}")
-    return t
+    assert(httpTestHeaders(r.query()) == "{q=last; lang=en; flag=; empty=; A=x}")
+    assert(Request{method: "GET", url: "/s", headers: map[string]string{}, body: ""}.query().len() == 0)
+    assert(Request{method: "GET", url: "/s?", headers: map[string]string{}, body: ""}.query().len() == 0)
+    assert(httpTestHeaders(Request{method: "GET", url: "http://h/p?a=1=2", headers: map[string]string{}, body: ""}.query()) == "{a=1=2}")
 }
 
-fn testStatusText() TestLog {
-    TestLog t = newTestLog()
-    t.eqStr(statusText(200), "OK")
-    t.eqStr(statusText(404), "Not Found")
-    t.eqStr(statusText(statusInternalServerError), "Internal Server Error")
-    t.eqStr(statusText(418), "I'm a teapot")
-    t.eqStr(statusText(299), "")
-    t.eqStr(statusText(-1), "")
+test "status text" {
+    assert(statusText(200) == "OK")
+    assert(statusText(404) == "Not Found")
+    assert(statusText(statusInternalServerError) == "Internal Server Error")
+    assert(statusText(418) == "I'm a teapot")
+    assert(statusText(299) == "")
+    assert(statusText(-1) == "")
     []int codes = []int{statusOk, statusCreated, statusNoContent, statusMovedPermanently, statusFound, statusNotModified, statusBadRequest, statusUnauthorized, statusForbidden, statusNotFound, statusMethodNotAllowed, statusConflict, statusInternalServerError, statusServiceUnavailable}
-    t.ok(codes == []int{200, 201, 204, 301, 302, 304, 400, 401, 403, 404, 405, 409, 500, 503}, "constants")
+    assert(codes == []int{200, 201, 204, 301, 302, 304, 400, 401, 403, 404, 405, 409, 500, 503})
     for (int i = 0; i < codes.len(); i++) {
-        t.ok(statusText(codes[i]) != "", "text for " + codes[i].string())
+        assert(statusText(codes[i]) != "")
     }
-    return t
 }
 
-fn testBuildingResponses() TestLog {
-    TestLog t = newTestLog()
+test "building responses" {
     Response text = textResponse(statusNotFound, "not found\n")
-    t.eqInt(text.status, 404)
-    t.eqStr(httpTestHeaders(text.headers), "{content-type=text/plain; charset=utf-8}")
-    t.eqStr(text.body, "not found\n")
+    assert(text.status == 404)
+    assert(httpTestHeaders(text.headers) == "{content-type=text/plain; charset=utf-8}")
+    assert(text.body == "not found\n")
     json.Value doc = json.Value.Object(map[string]json.Value{"ok": json.Value.Bool(true), "n": json.Value.Number(2.0)})
     Response js = jsonResponse(statusOk, doc)
-    t.eqInt(js.status, 200)
-    t.eqStr(httpTestHeaders(js.headers), "{content-type=application/json}")
-    t.eqStr(js.body, "{\"ok\":true,\"n\":2}")
-    return t
+    assert(js.status == 200)
+    assert(httpTestHeaders(js.headers) == "{content-type=application/json}")
+    assert(js.body == "{\"ok\":true,\"n\":2}")
 }

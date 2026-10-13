@@ -18,6 +18,8 @@ fn (Parser p) mut parseFile(int file) {
     SourceFile sf = SourceFile{
         path: p.diags.paths[file],
         pkg: "",
+        pkgIndex: 0,
+        isTest: false,
         pkgPos: p.here(),
         imports: p.ast.imports.len(),
         importCount: 0,
@@ -25,7 +27,7 @@ fn (Parser p) mut parseFile(int file) {
         topCount: 0,
     }
     p.skipNewlines()
-    p.expect(Tok.KwPackage, " at the start of the file (every file starts with  package name)")
+    p.expect(Tok.KwPackage, " at the start of the file (every file starts with package <name>)")
     sf.pkgPos = p.here()
     sf.pkg = p.expectIdent("for the package")
     p.expect(Tok.Newline, " after the package name")
@@ -37,8 +39,8 @@ fn (Parser p) mut parseFile(int file) {
     for (; p.kind() == Tok.KwImport; ) {
         Pos ipos = p.next().pos
         Token path = p.toks[p.pos]
-        if (p.expectTok(Tok.String, " after import (imports look like  import \"fmt\")")) {
-            p.ast.imports.push(Import{pos: ipos, file: file, path: path.text})
+        if (p.expectTok(Tok.String, " after import (an import looks like import \"fmt\")")) {
+            p.ast.imports.push(Import{pos: ipos, file: file, path: path.text, name: lastElement(path.text), target: -1})
             sf.importCount++
         }
         p.expect(Tok.Newline, " after the import")
@@ -114,6 +116,7 @@ fn (Parser p) mut parseFn(bool isPub, Pos start) {
         start: start,
         file: p.file,
         isPub: isPub,
+        isTest: false,
         name: "",
         isMethod: false,
         recvType: -1,
@@ -137,13 +140,19 @@ fn (Parser p) mut parseFn(bool isPub, Pos start) {
     f.pos = p.here()
     f.name = p.expectIdent("for the function")
     p.expect(Tok.LParen, " after the function name")
-    []int params = p.parseParams("for the parameter (parameters are written  Type name)")
+    []int params = p.parseParams("for the parameter (parameters are written as Type name)")
     f.params = p.ast.addList(params)
     f.paramCount = params.len()
     []int results = p.parseResult()
     f.results = p.ast.addList(results)
     f.resultCount = results.len()
-    f.body = p.parseBlock(" to open the function body (braces go on the same line)")
+    if (!p.failed && (p.kind() == Tok.Newline || p.kind() == Tok.Eof)) {
+        // No body: a native function, implemented in C (only allowed in the
+        // standard library; the checker enforces that).
+        f.body = -1
+    } else {
+        f.body = p.parseBlock(" to open the function body (braces go on the same line)")
+    }
     p.ast.fns.push(f)
     p.addTop(TopKind.Fn, p.ast.fns.len() - 1)
 }
@@ -156,7 +165,7 @@ fn (Parser p) mut parseParams(string context) []int {
         int te = p.parseType(true)
         Pos npos = p.here()
         string name = p.expectIdent(context)
-        p.ast.params.push(Param{pos: npos, typeExpr: te, name: name})
+        p.ast.params.push(Param{pos: npos, typeExpr: te, name: name, isPub: false})
         ps.push(p.ast.params.len() - 1)
         p.skipNewlines()
         if (!p.accept(Tok.Comma)) {
@@ -242,10 +251,11 @@ fn (Parser p) mut parseTypeDecl(bool isPub) {
     []int members = []int{}
     for (; !p.failed && p.kind() != Tok.RBrace && p.kind() != Tok.Eof; ) {
         if (td.kind == DeclKind.Struct) {
+            bool fieldPub = p.accept(Tok.KwPub)
             int te = p.parseType(true)
             Pos npos = p.here()
-            string name = p.expectIdent("for the field (fields are written  Type name)")
-            p.ast.params.push(Param{pos: npos, typeExpr: te, name: name})
+            string name = p.expectIdent("for the field (fields are written as Type name)")
+            p.ast.params.push(Param{pos: npos, typeExpr: te, name: name, isPub: fieldPub})
             members.push(p.ast.params.len() - 1)
         } else if (td.kind == DeclKind.Enum) {
             EnumCase c = EnumCase{pos: p.here(), name: "", parens: false, params: 0, paramCount: 0}
@@ -289,7 +299,7 @@ fn (Parser p) mut parseMethodSig() int {
     m.pos = p.here()
     m.name = p.expectIdent("for the method")
     p.expect(Tok.LParen, " after the method name")
-    []int ps = p.parseParams("for the parameter (parameters are written  Type name)")
+    []int ps = p.parseParams("for the parameter (parameters are written as Type name)")
     m.params = p.ast.addList(ps)
     m.paramCount = ps.len()
     []int rs = p.parseResult()
@@ -317,10 +327,44 @@ fn (Parser p) mut parseConstDecl(bool isPub) {
 fn (Parser p) mut parseTest() {
     Pos pos = p.next().pos
     Token name = p.toks[p.pos]
-    p.expect(Tok.String, " after test (a test looks like  test \"what it checks\" { ... })")
+    p.expect(Tok.String, " after test (a test looks like test \"what it checks\" { ... })")
     int body = p.parseBlock(" to open the test body")
     p.ast.tests.push(TestDecl{pos: pos, file: p.file, name: name.text, body: body})
     p.addTop(TopKind.Test, p.ast.tests.len() - 1)
+    // The test's body is checked and generated as the body of a function
+    // without parameters that returns error (see FnDecl).
+    TypeExpr errType = newTypeExpr(TypeExprKind.Name, pos)
+    errType.name = "error"
+    int result = p.ast.addTypeExpr(errType)
+    p.ast.fns.push(FnDecl{
+        pos: pos,
+        start: pos,
+        file: p.file,
+        isPub: false,
+        isTest: true,
+        name: name.text,
+        isMethod: false,
+        recvType: -1,
+        recvName: "",
+        recvPos: pos,
+        recvMut: false,
+        params: 0,
+        paramCount: 0,
+        results: p.ast.addList([]int{result}),
+        resultCount: 1,
+        body: body,
+    })
+}
+
+// The last element of an import path: "cart" for "shop/cart".
+fn lastElement(string path) string {
+    int slash = -1
+    for (int i = 0; i < path.len(); i++) {
+        if (path[i] == '/') {
+            slash = i
+        }
+    }
+    return path.slice(slash + 1, path.len())
 }
 
 // ---- types ----

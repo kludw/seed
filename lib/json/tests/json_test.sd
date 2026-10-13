@@ -21,184 +21,162 @@ fn jsonTestError(string text) string {
     return err.message()
 }
 
-fn testParseLiterals() TestLog {
-    TestLog t = newTestLog()
+test "parse literals" {
     Value v, error err = parse("true")
-    t.ok(err == null && v == Value.Bool(true), "true")
+    assert(err == null && v == Value.Bool(true))
     v, err = parse(" false ")
-    t.ok(err == null && v == Value.Bool(false), "false")
+    assert(err == null && v == Value.Bool(false))
     v, err = parse("\t\r\n null \n")
-    t.ok(err == null && v == Value.Null, "null")
-    return t
+    assert(err == null && v == Value.Null)
 }
 
-fn testParseNumbers() TestLog {
-    TestLog t = newTestLog()
+test "parse numbers" {
     Value v, error err = parse("0")
-    t.ok(err == null && v == Value.Number(0.0), "0")
+    assert(err == null && v == Value.Number(0.0))
     v, err = parse("-12")
-    t.ok(err == null && v == Value.Number(-12.0), "-12")
+    assert(err == null && v == Value.Number(-12.0))
     v, err = parse("2.5")
-    t.ok(err == null && v == Value.Number(2.5), "2.5")
+    assert(err == null && v == Value.Number(2.5))
     v, err = parse("1e3")
-    t.ok(err == null && v == Value.Number(1000.0), "1e3")
+    assert(err == null && v == Value.Number(1000.0))
     v, err = parse("1E+3")
-    t.ok(err == null && v == Value.Number(1000.0), "1E+3")
+    assert(err == null && v == Value.Number(1000.0))
     v, err = parse("-1.5e-3")
-    t.ok(err == null && v == Value.Number(-0.0015), "-1.5e-3")
+    assert(err == null && v == Value.Number(-0.0015))
     v, err = parse("0.1")
-    t.ok(err == null && v == Value.Number(0.1), "0.1")
+    assert(err == null && v == Value.Number(0.1))
     v, err = parse("1e-400")
-    t.ok(err == null && v == Value.Number(0.0), "underflow is 0")
-    t.eqStr(jsonTestRoundTrip("-0"), "-0")
-    t.eqStr(jsonTestRoundTrip("-0.0"), "-0")
-    t.eqStr(jsonTestRoundTrip("9007199254740993"), "9007199254740992")
-    t.eqStr(jsonTestRoundTrip("123456789012345678901234567890"), "1.2345678901234568e+29")
-    t.eqStr(jsonTestRoundTrip("1.7976931348623157e308"), "1.7976931348623157e+308")
-    return t
+    assert(err == null && v == Value.Number(0.0))
+    assert(jsonTestRoundTrip("-0") == "-0")
+    assert(jsonTestRoundTrip("-0.0") == "-0")
+    assert(jsonTestRoundTrip("9007199254740993") == "9007199254740992")
+    assert(jsonTestRoundTrip("123456789012345678901234567890") == "1.2345678901234568e+29")
+    assert(jsonTestRoundTrip("1.7976931348623157e308") == "1.7976931348623157e+308")
 }
 
-fn testParseNumberErrors() TestLog {
-    TestLog t = newTestLog()
-    t.eqStr(jsonTestError("01"), "json.parse: line 1, column 1: leading zeros are not allowed")
-    t.eqStr(jsonTestError("-01"), "json.parse: line 1, column 2: leading zeros are not allowed")
-    t.eqStr(jsonTestError("1."), "json.parse: line 1, column 3: unexpected end of input")
-    t.eqStr(jsonTestError("1.e5"), "json.parse: line 1, column 3: expected a digit after '.'")
-    t.eqStr(jsonTestError(".5"), "json.parse: line 1, column 1: unexpected character '.'")
-    t.eqStr(jsonTestError("+1"), "json.parse: line 1, column 1: unexpected character '+'")
-    t.eqStr(jsonTestError("-"), "json.parse: line 1, column 2: unexpected end of input")
-    t.eqStr(jsonTestError("-a"), "json.parse: line 1, column 2: expected a digit")
-    t.eqStr(jsonTestError("1e"), "json.parse: line 1, column 3: unexpected end of input")
-    t.eqStr(jsonTestError("1e+x"), "json.parse: line 1, column 4: expected a digit in the exponent")
-    t.eqStr(jsonTestError("1e400"), "json.parse: line 1, column 1: number out of range")
-    t.eqStr(jsonTestError("[-1e999]"), "json.parse: line 1, column 2: number out of range")
-    t.eqStr(jsonTestError("NaN"), "json.parse: line 1, column 1: unexpected character 'N'")
-    t.eqStr(jsonTestError("Infinity"), "json.parse: line 1, column 1: unexpected character 'I'")
-    t.eqStr(jsonTestError("0x10"), "json.parse: line 1, column 2: unexpected character 'x' after the value")
-    return t
+test "parse number errors" {
+    assert(jsonTestError("01") == "json.parse: line 1, column 1: leading zeros are not allowed")
+    assert(jsonTestError("-01") == "json.parse: line 1, column 2: leading zeros are not allowed")
+    assert(jsonTestError("1.") == "json.parse: line 1, column 3: unexpected end of input")
+    assert(jsonTestError("1.e5") == "json.parse: line 1, column 3: expected a digit after '.'")
+    assert(jsonTestError(".5") == "json.parse: line 1, column 1: unexpected character '.'")
+    assert(jsonTestError("+1") == "json.parse: line 1, column 1: unexpected character '+'")
+    assert(jsonTestError("-") == "json.parse: line 1, column 2: unexpected end of input")
+    assert(jsonTestError("-a") == "json.parse: line 1, column 2: expected a digit")
+    assert(jsonTestError("1e") == "json.parse: line 1, column 3: unexpected end of input")
+    assert(jsonTestError("1e+x") == "json.parse: line 1, column 4: expected a digit in the exponent")
+    assert(jsonTestError("1e400") == "json.parse: line 1, column 1: number out of range")
+    assert(jsonTestError("[-1e999]") == "json.parse: line 1, column 2: number out of range")
+    assert(jsonTestError("NaN") == "json.parse: line 1, column 1: unexpected character 'N'")
+    assert(jsonTestError("Infinity") == "json.parse: line 1, column 1: unexpected character 'I'")
+    assert(jsonTestError("0x10") == "json.parse: line 1, column 2: unexpected character 'x' after the value")
 }
 
-fn testParseStrings() TestLog {
-    TestLog t = newTestLog()
+test "parse strings" {
     Value v, error err = parse("\"hello\"")
-    t.ok(err == null && v == Value.String("hello"), "plain")
+    assert(err == null && v == Value.String("hello"))
     v, err = parse("\"\"")
-    t.ok(err == null && v == Value.String(""), "empty")
+    assert(err == null && v == Value.String(""))
     v, err = parse("\"a\\\"b\\\\c\\/d\\be\\ff\\ng\\rh\\ti\"")
-    t.ok(err == null && v == Value.String("a\"b\\c/d\x08e\x0cf\ng\rh\ti"), "short escapes")
+    assert(err == null && v == Value.String("a\"b\\c/d\x08e\x0cf\ng\rh\ti"))
     v, err = parse("\"\\u0041\\u00e9\\u20AC\\u0000\"")
-    t.ok(err == null && v == Value.String("A\xc3\xa9\xe2\x82\xac\x00"), "u escapes")
+    assert(err == null && v == Value.String("A\xc3\xa9\xe2\x82\xac\x00"))
     v, err = parse("\"caf\xc3\xa9 \xe2\x82\xac \xf0\x9f\x98\x80\"")
-    t.ok(err == null && v == Value.String("caf\xc3\xa9 \xe2\x82\xac \xf0\x9f\x98\x80"), "raw UTF-8")
+    assert(err == null && v == Value.String("caf\xc3\xa9 \xe2\x82\xac \xf0\x9f\x98\x80"))
     v, err = parse("\"x\\ny\xc3\xa9z\"")
-    t.ok(err == null && v == Value.String("x\ny\xc3\xa9z"), "escape then UTF-8")
-    return t
+    assert(err == null && v == Value.String("x\ny\xc3\xa9z"))
 }
 
-fn testParseSurrogates() TestLog {
-    TestLog t = newTestLog()
+test "parse surrogates" {
     Value v, error err = parse("\"\\ud83d\\ude00\"")
-    t.ok(err == null && v == Value.String("\xf0\x9f\x98\x80"), "pair U+1F600")
+    assert(err == null && v == Value.String("\xf0\x9f\x98\x80"))
     v, err = parse("\"\\uD834\\uDD1E\"")
-    t.ok(err == null && v == Value.String("\xf0\x9d\x84\x9e"), "pair U+1D11E")
+    assert(err == null && v == Value.String("\xf0\x9d\x84\x9e"))
     v, err = parse("\"\\udbff\\udfff\"")
-    t.ok(err == null && v == Value.String("\xf4\x8f\xbf\xbf"), "pair U+10FFFF")
+    assert(err == null && v == Value.String("\xf4\x8f\xbf\xbf"))
     v, err = parse("\"\\ud83d\"")
-    t.ok(err == null && v == Value.String("\xef\xbf\xbd"), "lone high")
+    assert(err == null && v == Value.String("\xef\xbf\xbd"))
     v, err = parse("\"\\ude00x\"")
-    t.ok(err == null && v == Value.String("\xef\xbf\xbdx"), "lone low")
+    assert(err == null && v == Value.String("\xef\xbf\xbdx"))
     v, err = parse("\"\\ud83d\\u0041\"")
-    t.ok(err == null && v == Value.String("\xef\xbf\xbdA"), "high then non-surrogate")
+    assert(err == null && v == Value.String("\xef\xbf\xbdA"))
     v, err = parse("\"\\ud83d\\ud83d\\ude00\"")
-    t.ok(err == null && v == Value.String("\xef\xbf\xbd\xf0\x9f\x98\x80"), "high, then a pair")
-    t.eqStr(jsonTestError("\"\\ud83d\\u12\""), "json.parse: line 1, column 8: invalid \\u escape (expected 4 hex digits)")
-    return t
+    assert(err == null && v == Value.String("\xef\xbf\xbd\xf0\x9f\x98\x80"))
+    assert(jsonTestError("\"\\ud83d\\u12\"") == "json.parse: line 1, column 8: invalid \\u escape (expected 4 hex digits)")
 }
 
-fn testParseStringErrors() TestLog {
-    TestLog t = newTestLog()
-    t.eqStr(jsonTestError("\"abc"), "json.parse: line 1, column 1: unterminated string")
-    t.eqStr(jsonTestError("\"ab\\"), "json.parse: line 1, column 1: unterminated string")
-    t.eqStr(jsonTestError("\"a\nb\""), "json.parse: line 1, column 3: unescaped control character byte 0x0a in string")
-    t.eqStr(jsonTestError("\"a\tb\""), "json.parse: line 1, column 3: unescaped control character byte 0x09 in string")
-    t.eqStr(jsonTestError("\"\\x41\""), "json.parse: line 1, column 2: invalid escape '\\x'")
-    t.eqStr(jsonTestError("\"\\'\""), "json.parse: line 1, column 2: invalid escape '\\''")
-    t.eqStr(jsonTestError("\"\\u00g0\""), "json.parse: line 1, column 2: invalid \\u escape (expected 4 hex digits)")
-    t.eqStr(jsonTestError("\"\\u12\""), "json.parse: line 1, column 2: invalid \\u escape (expected 4 hex digits)")
-    t.eqStr(jsonTestError("'a'"), "json.parse: line 1, column 1: unexpected character ''' (strings use double quotes)")
-    return t
+test "parse string errors" {
+    assert(jsonTestError("\"abc") == "json.parse: line 1, column 1: unterminated string")
+    assert(jsonTestError("\"ab\\") == "json.parse: line 1, column 1: unterminated string")
+    assert(jsonTestError("\"a\nb\"") == "json.parse: line 1, column 3: unescaped control character byte 0x0a in string")
+    assert(jsonTestError("\"a\tb\"") == "json.parse: line 1, column 3: unescaped control character byte 0x09 in string")
+    assert(jsonTestError("\"\\x41\"") == "json.parse: line 1, column 2: invalid escape '\\x'")
+    assert(jsonTestError("\"\\'\"") == "json.parse: line 1, column 2: invalid escape '\\''")
+    assert(jsonTestError("\"\\u00g0\"") == "json.parse: line 1, column 2: invalid \\u escape (expected 4 hex digits)")
+    assert(jsonTestError("\"\\u12\"") == "json.parse: line 1, column 2: invalid \\u escape (expected 4 hex digits)")
+    assert(jsonTestError("'a'") == "json.parse: line 1, column 1: unexpected character ''' (strings use double quotes)")
 }
 
-fn testParseInvalidUtf8() TestLog {
-    TestLog t = newTestLog()
-    t.eqStr(jsonTestError("\"a\xff\""), "json.parse: line 1, column 3: invalid UTF-8 in string")
-    t.eqStr(jsonTestError("\"\xc0\x80\""), "json.parse: line 1, column 2: invalid UTF-8 in string")
-    t.eqStr(jsonTestError("\"\xc3\""), "json.parse: line 1, column 2: invalid UTF-8 in string")
-    t.eqStr(jsonTestError("\"\xe0\x80\xaf\""), "json.parse: line 1, column 2: invalid UTF-8 in string")
-    t.eqStr(jsonTestError("\"\xed\xa0\x80\""), "json.parse: line 1, column 2: invalid UTF-8 in string")
-    t.eqStr(jsonTestError("\"\xf4\x90\x80\x80\""), "json.parse: line 1, column 2: invalid UTF-8 in string")
-    t.eqStr(jsonTestError("\"\xf5\x80\x80\x80\""), "json.parse: line 1, column 2: invalid UTF-8 in string")
-    t.eqStr(jsonTestError("\"\xe2\x82\""), "json.parse: line 1, column 2: invalid UTF-8 in string")
-    t.eqStr(jsonTestError("\"\xe2\x82"), "json.parse: line 1, column 2: invalid UTF-8 in string")
-    t.eqStr(jsonTestError("\"\x80\""), "json.parse: line 1, column 2: invalid UTF-8 in string")
-    t.eqStr(jsonTestRoundTrip("\"\xef\xbf\xbf\xf0\x90\x80\x80\xdf\xbf\""), "\"\xef\xbf\xbf\xf0\x90\x80\x80\xdf\xbf\"")
-    return t
+test "parse invalid utf-8" {
+    assert(jsonTestError("\"a\xff\"") == "json.parse: line 1, column 3: invalid UTF-8 in string")
+    assert(jsonTestError("\"\xc0\x80\"") == "json.parse: line 1, column 2: invalid UTF-8 in string")
+    assert(jsonTestError("\"\xc3\"") == "json.parse: line 1, column 2: invalid UTF-8 in string")
+    assert(jsonTestError("\"\xe0\x80\xaf\"") == "json.parse: line 1, column 2: invalid UTF-8 in string")
+    assert(jsonTestError("\"\xed\xa0\x80\"") == "json.parse: line 1, column 2: invalid UTF-8 in string")
+    assert(jsonTestError("\"\xf4\x90\x80\x80\"") == "json.parse: line 1, column 2: invalid UTF-8 in string")
+    assert(jsonTestError("\"\xf5\x80\x80\x80\"") == "json.parse: line 1, column 2: invalid UTF-8 in string")
+    assert(jsonTestError("\"\xe2\x82\"") == "json.parse: line 1, column 2: invalid UTF-8 in string")
+    assert(jsonTestError("\"\xe2\x82") == "json.parse: line 1, column 2: invalid UTF-8 in string")
+    assert(jsonTestError("\"\x80\"") == "json.parse: line 1, column 2: invalid UTF-8 in string")
+    assert(jsonTestRoundTrip("\"\xef\xbf\xbf\xf0\x90\x80\x80\xdf\xbf\"") == "\"\xef\xbf\xbf\xf0\x90\x80\x80\xdf\xbf\"")
 }
 
-fn testParseArraysAndObjects() TestLog {
-    TestLog t = newTestLog()
-    t.eqStr(jsonTestRoundTrip("[]"), "[]")
-    t.eqStr(jsonTestRoundTrip("{}"), "{}")
-    t.eqStr(jsonTestRoundTrip(" [ ] "), "[]")
-    t.eqStr(jsonTestRoundTrip("{ }"), "{}")
-    t.eqStr(jsonTestRoundTrip("[1, 2.5, \"x\", true, false, null, [], {}]"), "[1,2.5,\"x\",true,false,null,[],{}]")
-    t.eqStr(jsonTestRoundTrip("{\"a\" : [1, {\"b\": null}], \"c\": \"d\"}"), "{\"a\":[1,{\"b\":null}],\"c\":\"d\"}")
-    t.eqStr(jsonTestRoundTrip("{\"z\": 1, \"a\": 2, \"m\": 3}"), "{\"z\":1,\"a\":2,\"m\":3}")
-    t.eqStr(jsonTestRoundTrip("[[[[[[1]]]]]]"), "[[[[[[1]]]]]]")
-    t.eqStr(jsonTestRoundTrip("{\"\": \"\"}"), "{\"\":\"\"}")
-    return t
+test "parse arrays and objects" {
+    assert(jsonTestRoundTrip("[]") == "[]")
+    assert(jsonTestRoundTrip("{}") == "{}")
+    assert(jsonTestRoundTrip(" [ ] ") == "[]")
+    assert(jsonTestRoundTrip("{ }") == "{}")
+    assert(jsonTestRoundTrip("[1, 2.5, \"x\", true, false, null, [], {}]") == "[1,2.5,\"x\",true,false,null,[],{}]")
+    assert(jsonTestRoundTrip("{\"a\" : [1, {\"b\": null}], \"c\": \"d\"}") == "{\"a\":[1,{\"b\":null}],\"c\":\"d\"}")
+    assert(jsonTestRoundTrip("{\"z\": 1, \"a\": 2, \"m\": 3}") == "{\"z\":1,\"a\":2,\"m\":3}")
+    assert(jsonTestRoundTrip("[[[[[[1]]]]]]") == "[[[[[[1]]]]]]")
+    assert(jsonTestRoundTrip("{\"\": \"\"}") == "{\"\":\"\"}")
 }
 
-fn testRepeatedKeyKeepsFirstPositionLastValue() TestLog {
-    TestLog t = newTestLog()
-    t.eqStr(jsonTestRoundTrip("{\"a\": 1, \"b\": 2, \"a\": 3}"), "{\"a\":3,\"b\":2}")
-    return t
+test "repeated key keeps first position last value" {
+    assert(jsonTestRoundTrip("{\"a\": 1, \"b\": 2, \"a\": 3}") == "{\"a\":3,\"b\":2}")
 }
 
-fn testParseStructureErrors() TestLog {
-    TestLog t = newTestLog()
-    t.eqStr(jsonTestError(""), "json.parse: line 1, column 1: unexpected end of input")
-    t.eqStr(jsonTestError("   "), "json.parse: line 1, column 4: unexpected end of input")
-    t.eqStr(jsonTestError("[1, 2"), "json.parse: line 1, column 6: unexpected end of input")
-    t.eqStr(jsonTestError("[1 2]"), "json.parse: line 1, column 4: expected ',' or ']'")
-    t.eqStr(jsonTestError("[1,]"), "json.parse: line 1, column 4: trailing comma")
-    t.eqStr(jsonTestError("{\"a\":1,}"), "json.parse: line 1, column 8: trailing comma")
-    t.eqStr(jsonTestError("{\"a\" 1}"), "json.parse: line 1, column 6: expected ':'")
-    t.eqStr(jsonTestError("{\"a\":1 \"b\":2}"), "json.parse: line 1, column 8: expected ',' or '}'")
-    t.eqStr(jsonTestError("{a:1}"), "json.parse: line 1, column 2: expected a string key")
-    t.eqStr(jsonTestError("{1:1}"), "json.parse: line 1, column 2: expected a string key")
-    t.eqStr(jsonTestError("{\"a\":}"), "json.parse: line 1, column 6: unexpected character '}'")
-    t.eqStr(jsonTestError("[,1]"), "json.parse: line 1, column 2: unexpected character ','")
-    t.eqStr(jsonTestError("]"), "json.parse: line 1, column 1: unexpected character ']'")
-    t.eqStr(jsonTestError("1 2"), "json.parse: line 1, column 3: unexpected character '2' after the value")
-    t.eqStr(jsonTestError("{} x"), "json.parse: line 1, column 4: unexpected character 'x' after the value")
-    t.eqStr(jsonTestError("tru"), "json.parse: line 1, column 1: invalid literal (expected true)")
-    t.eqStr(jsonTestError("nul"), "json.parse: line 1, column 1: invalid literal (expected null)")
-    t.eqStr(jsonTestError("True"), "json.parse: line 1, column 1: unexpected character 'T'")
-    t.eqStr(jsonTestError("[1] // c"), "json.parse: line 1, column 5: unexpected character '/' after the value")
-    t.eqStr(jsonTestError("/* c */ 1"), "json.parse: line 1, column 1: unexpected character '/' (comments are not allowed)")
-    t.eqStr(jsonTestError("\xef\xbb\xbf{}"), "json.parse: line 1, column 1: byte-order mark is not allowed")
-    t.eqStr(jsonTestError("\x00"), "json.parse: line 1, column 1: unexpected byte 0x00")
-    t.eqStr(jsonTestError("[1]\x0c"), "json.parse: line 1, column 4: unexpected byte 0x0c after the value")
-    return t
+test "parse structure errors" {
+    assert(jsonTestError("") == "json.parse: line 1, column 1: unexpected end of input")
+    assert(jsonTestError("   ") == "json.parse: line 1, column 4: unexpected end of input")
+    assert(jsonTestError("[1, 2") == "json.parse: line 1, column 6: unexpected end of input")
+    assert(jsonTestError("[1 2]") == "json.parse: line 1, column 4: expected ',' or ']'")
+    assert(jsonTestError("[1,]") == "json.parse: line 1, column 4: trailing comma")
+    assert(jsonTestError("{\"a\":1,}") == "json.parse: line 1, column 8: trailing comma")
+    assert(jsonTestError("{\"a\" 1}") == "json.parse: line 1, column 6: expected ':'")
+    assert(jsonTestError("{\"a\":1 \"b\":2}") == "json.parse: line 1, column 8: expected ',' or '}'")
+    assert(jsonTestError("{a:1}") == "json.parse: line 1, column 2: expected a string key")
+    assert(jsonTestError("{1:1}") == "json.parse: line 1, column 2: expected a string key")
+    assert(jsonTestError("{\"a\":}") == "json.parse: line 1, column 6: unexpected character '}'")
+    assert(jsonTestError("[,1]") == "json.parse: line 1, column 2: unexpected character ','")
+    assert(jsonTestError("]") == "json.parse: line 1, column 1: unexpected character ']'")
+    assert(jsonTestError("1 2") == "json.parse: line 1, column 3: unexpected character '2' after the value")
+    assert(jsonTestError("{} x") == "json.parse: line 1, column 4: unexpected character 'x' after the value")
+    assert(jsonTestError("tru") == "json.parse: line 1, column 1: invalid literal (expected true)")
+    assert(jsonTestError("nul") == "json.parse: line 1, column 1: invalid literal (expected null)")
+    assert(jsonTestError("True") == "json.parse: line 1, column 1: unexpected character 'T'")
+    assert(jsonTestError("[1] // c") == "json.parse: line 1, column 5: unexpected character '/' after the value")
+    assert(jsonTestError("/* c */ 1") == "json.parse: line 1, column 1: unexpected character '/' (comments are not allowed)")
+    assert(jsonTestError("\xef\xbb\xbf{}") == "json.parse: line 1, column 1: byte-order mark is not allowed")
+    assert(jsonTestError("\x00") == "json.parse: line 1, column 1: unexpected byte 0x00")
+    assert(jsonTestError("[1]\x0c") == "json.parse: line 1, column 4: unexpected byte 0x0c after the value")
 }
 
-fn testErrorLineAndColumn() TestLog {
-    TestLog t = newTestLog()
-    t.eqStr(jsonTestError("{\n  \"a\" 1\n}"), "json.parse: line 2, column 7: expected ':'")
-    t.eqStr(jsonTestError("[\n1,\n2,\n\n   x]"), "json.parse: line 5, column 4: unexpected character 'x'")
-    t.eqStr(jsonTestError("{\"name\": \"caf\xc3\xa9\" \"x\"}"), "json.parse: line 1, column 18: expected ',' or '}'")
-    return t
+test "error line and column" {
+    assert(jsonTestError("{\n  \"a\" 1\n}") == "json.parse: line 2, column 7: expected ':'")
+    assert(jsonTestError("[\n1,\n2,\n\n   x]") == "json.parse: line 5, column 4: unexpected character 'x'")
+    assert(jsonTestError("{\"name\": \"caf\xc3\xa9\" \"x\"}") == "json.parse: line 1, column 18: expected ',' or '}'")
 }
 
 fn jsonTestNested(int depth) string {
@@ -212,207 +190,177 @@ fn jsonTestNested(int depth) string {
     return out.join("")
 }
 
-fn testNestingLimit() TestLog {
-    TestLog t = newTestLog()
+test "nesting limit" {
     _, error err = parse(jsonTestNested(512))
-    t.noErr(err)
-    t.eqStr(jsonTestError(jsonTestNested(513)), "json.parse: line 1, column 513: nesting deeper than 512 levels")
-    t.eqStr(jsonTestError(jsonTestNested(100000)), "json.parse: line 1, column 513: nesting deeper than 512 levels")
+    assert(err == null)
+    assert(jsonTestError(jsonTestNested(513)) == "json.parse: line 1, column 513: nesting deeper than 512 levels")
+    assert(jsonTestError(jsonTestNested(100000)) == "json.parse: line 1, column 513: nesting deeper than 512 levels")
     []string objs = []string{}
     for (int i = 0; i < 513; i++) {
         objs.push("{\"a\":")
     }
-    t.eqStr(jsonTestError(objs.join("")), "json.parse: line 1, column 2561: nesting deeper than 512 levels")
+    assert(jsonTestError(objs.join("")) == "json.parse: line 1, column 2561: nesting deeper than 512 levels")
     // Depth counts open containers, not the total: many siblings are fine.
     []string wide = []string{}
     for (int i = 0; i < 2000; i++) {
         wide.push("[[]]")
     }
     _, err = parse("[" + wide.join(",") + "]")
-    t.noErr(err)
-    return t
+    assert(err == null)
 }
 
-fn testStringCompact() TestLog {
-    TestLog t = newTestLog()
+test "string compact" {
     map[string]Value fields = map[string]Value{}
     fields["a"] = Value.Array([]Value{Value.Number(1.0), Value.Number(2.5), Value.String("x")})
-    t.eqStr(Value.Object(fields).string(), "{\"a\":[1,2.5,\"x\"]}")
-    t.eqStr(Value.Null.string(), "null")
-    t.eqStr(Value.Bool(true).string(), "true")
-    t.eqStr(Value.Array([]Value{}).string(), "[]")
-    t.eqStr(Value.Object(map[string]Value{}).string(), "{}")
-    return t
+    assert(Value.Object(fields).string() == "{\"a\":[1,2.5,\"x\"]}")
+    assert(Value.Null.string() == "null")
+    assert(Value.Bool(true).string() == "true")
+    assert(Value.Array([]Value{}).string() == "[]")
+    assert(Value.Object(map[string]Value{}).string() == "{}")
 }
 
-fn testNumberPrinting() TestLog {
-    TestLog t = newTestLog()
-    t.eqStr(Value.Number(3.0).string(), "3")
-    t.eqStr(Value.Number(-12.0).string(), "-12")
-    t.eqStr(Value.Number(0.0).string(), "0")
-    t.eqStr(Value.Number(-0.0).string(), "-0")
-    t.eqStr(Value.Number(0.1).string(), "0.1")
-    t.eqStr(Value.Number(2.5).string(), "2.5")
-    t.eqStr(Value.Number(-2.5e-7).string(), "-2.5e-07")
-    t.eqStr(Value.Number(1.0e300).string(), "1e+300")
-    t.eqStr(Value.Number(1.0e20).string(), "100000000000000000000")
-    t.eqStr(Value.Number(-1.0e20).string(), "-100000000000000000000")
-    t.eqStr(Value.Number(999999999999999900000.0).string(), "999999999999999868928")
-    t.eqStr(Value.Number(1.0e21).string(), "1e+21")
-    t.eqStr(Value.Number(9007199254740993.0).string(), "9007199254740992")
-    t.eqStr(Value.Number(123456.789).string(), "123456.789")
-    return t
+test "number printing" {
+    assert(Value.Number(3.0).string() == "3")
+    assert(Value.Number(-12.0).string() == "-12")
+    assert(Value.Number(0.0).string() == "0")
+    assert(Value.Number(-0.0).string() == "-0")
+    assert(Value.Number(0.1).string() == "0.1")
+    assert(Value.Number(2.5).string() == "2.5")
+    assert(Value.Number(-2.5e-7).string() == "-2.5e-07")
+    assert(Value.Number(1.0e300).string() == "1e+300")
+    assert(Value.Number(1.0e20).string() == "100000000000000000000")
+    assert(Value.Number(-1.0e20).string() == "-100000000000000000000")
+    assert(Value.Number(999999999999999900000.0).string() == "999999999999999868928")
+    assert(Value.Number(1.0e21).string() == "1e+21")
+    assert(Value.Number(9007199254740993.0).string() == "9007199254740992")
+    assert(Value.Number(123456.789).string() == "123456.789")
 }
 
-fn testStringEscaping() TestLog {
-    TestLog t = newTestLog()
-    t.eqStr(Value.String("a\"b\\c/d").string(), "\"a\\\"b\\\\c/d\"")
-    t.eqStr(Value.String("\n\t\r\x08\x0c").string(), "\"\\n\\t\\r\\b\\f\"")
-    t.eqStr(Value.String("\x00\x01\x1f\x7f").string(), "\"\\u0000\\u0001\\u001f\x7f\"")
-    t.eqStr(Value.String("caf\xc3\xa9 \xf0\x9f\x98\x80").string(), "\"caf\xc3\xa9 \xf0\x9f\x98\x80\"")
-    t.eqStr(Value.String("a\xffb").string(), "\"a\xef\xbf\xbdb\"")
-    t.eqStr(Value.String("\xc3").string(), "\"\xef\xbf\xbd\"")
-    t.eqStr(Value.String("\xed\xa0\x80").string(), "\"\xef\xbf\xbd\xef\xbf\xbd\xef\xbf\xbd\"")
+test "string escaping" {
+    assert(Value.String("a\"b\\c/d").string() == "\"a\\\"b\\\\c/d\"")
+    assert(Value.String("\n\t\r\x08\x0c").string() == "\"\\n\\t\\r\\b\\f\"")
+    assert(Value.String("\x00\x01\x1f\x7f").string() == "\"\\u0000\\u0001\\u001f\x7f\"")
+    assert(Value.String("caf\xc3\xa9 \xf0\x9f\x98\x80").string() == "\"caf\xc3\xa9 \xf0\x9f\x98\x80\"")
+    assert(Value.String("a\xffb").string() == "\"a\xef\xbf\xbdb\"")
+    assert(Value.String("\xc3").string() == "\"\xef\xbf\xbd\"")
+    assert(Value.String("\xed\xa0\x80").string() == "\"\xef\xbf\xbd\xef\xbf\xbd\xef\xbf\xbd\"")
     map[string]Value fields = map[string]Value{}
     fields["k\"ey\n"] = Value.Null
-    t.eqStr(Value.Object(fields).string(), "{\"k\\\"ey\\n\":null}")
-    return t
+    assert(Value.Object(fields).string() == "{\"k\\\"ey\\n\":null}")
 }
 
-fn testPretty() TestLog {
-    TestLog t = newTestLog()
+test "pretty" {
     Value v, error err = parse("{\"a\":[1,2.5,\"x\"],\"b\":{},\"c\":[],\"d\":{\"e\":null,\"f\":[true]}}")
-    t.noErr(err)
+    assert(err == null)
     if (err == null) {
-        t.eqStr(v.pretty(), "{\n  \"a\": [\n    1,\n    2.5,\n    \"x\"\n  ],\n  \"b\": {},\n  \"c\": [],\n  \"d\": {\n    \"e\": null,\n    \"f\": [\n      true\n    ]\n  }\n}")
+        assert(v.pretty() == "{\n  \"a\": [\n    1,\n    2.5,\n    \"x\"\n  ],\n  \"b\": {},\n  \"c\": [],\n  \"d\": {\n    \"e\": null,\n    \"f\": [\n      true\n    ]\n  }\n}")
     }
-    t.eqStr(Value.Number(1.0).pretty(), "1")
-    t.eqStr(Value.Array([]Value{}).pretty(), "[]")
-    t.eqStr(Value.Object(map[string]Value{}).pretty(), "{}")
-    t.eqStr(Value.Array([]Value{Value.Null}).pretty(), "[\n  null\n]")
-    return t
+    assert(Value.Number(1.0).pretty() == "1")
+    assert(Value.Array([]Value{}).pretty() == "[]")
+    assert(Value.Object(map[string]Value{}).pretty() == "{}")
+    assert(Value.Array([]Value{Value.Null}).pretty() == "[\n  null\n]")
 }
 
-fn testRoundTripKeepsValue() TestLog {
-    TestLog t = newTestLog()
+test "round trip keeps value" {
     string text = "{\"name\":\"Seed\",\"tags\":[\"a\",\"b\"],\"n\":3,\"pi\":3.14159,\"neg\":-0.5,\"ok\":true,\"none\":null,\"nested\":{\"x\":[[],{}]},\"s\":\"\\u0001\\n\\\"\"}"
     Value v, error err = parse(text)
-    t.noErr(err)
+    assert(err == null)
     if (err == null) {
-        t.eqStr(v.string(), text)
+        assert(v.string() == text)
         Value back, error err2 = parse(v.pretty())
-        t.ok(err2 == null && back == v, "pretty parses back to the same value")
+        assert(err2 == null && back == v)
         Value again, error err3 = parse(v.string())
-        t.ok(err3 == null && again == v, "string parses back to the same value")
+        assert(err3 == null && again == v)
     }
-    return t
 }
 
-fn testEquality() TestLog {
-    TestLog t = newTestLog()
+test "equality" {
     Value a, error err = parse("{\"a\":1,\"b\":[true]}")
     Value b, error err2 = parse("{ \"a\" : 1.0 , \"b\" : [ true ] }")
-    t.ok(err == null && err2 == null && a == b, "same document")
+    assert(err == null && err2 == null && a == b)
     Value c, error err3 = parse("{\"b\":[true],\"a\":1}")
     // docs/stdlib.md says key order counts in ==, "as it does for maps",
     // but map == ignores order (DECISIONS.md 30), and Value's == is the
     // built-in enum ==. See lib/README.md.
-    t.ok(err == null && err3 == null && a == c, "key order is ignored by ==")
-    return t
+    assert(err == null && err3 == null && a == c)
 }
 
-fn testAccessors() TestLog {
-    TestLog t = newTestLog()
+test "accessors" {
     Value doc, error err = parse("{\"name\":\"Seed\",\"user\":{\"address\":{\"city\":\"Oslo\"}},\"n\":42,\"f\":2.5,\"ok\":true,\"list\":[10,\"x\"],\"nil\":null}")
-    t.noErr(err)
-    if (err != null) {
-        return t
-    }
+    assert(err == null)
     string? name = doc.get("name").asString()
-    t.ok(name != null && name == "Seed", "asString")
+    assert(name != null && name == "Seed")
     string? city = doc.get("user").get("address").get("city").asString()
-    t.ok(city != null && city == "Oslo", "chained get")
-    t.ok(doc.get("user").get("nope").get("city").asString() == null, "missing step")
-    t.ok(doc.get("name").get("x").isNull(), "get on a string")
+    assert(city != null && city == "Oslo")
+    assert(doc.get("user").get("nope").get("city").asString() == null)
+    assert(doc.get("name").get("x").isNull())
     int? n = doc.get("n").asInt()
-    t.ok(n != null && n == 42, "asInt")
+    assert(n != null && n == 42)
     float? f = doc.get("f").asFloat()
-    t.ok(f != null && f == 2.5, "asFloat")
-    t.ok(doc.get("f").asInt() == null, "asInt of a fraction")
-    t.ok(doc.get("name").asInt() == null && doc.get("name").asFloat() == null, "number of a string")
+    assert(f != null && f == 2.5)
+    assert(doc.get("f").asInt() == null)
+    assert(doc.get("name").asInt() == null && doc.get("name").asFloat() == null)
     bool? ok = doc.get("ok").asBool()
-    t.ok(ok != null && ok, "asBool")
-    t.ok(doc.get("n").asBool() == null, "asBool of a number")
+    assert(ok != null && ok)
+    assert(doc.get("n").asBool() == null)
     []Value? list = doc.get("list").asArray()
-    t.ok(list != null && list.len() == 2, "asArray")
-    t.ok(doc.asArray() == null, "asArray of an object")
+    assert(list != null && list.len() == 2)
+    assert(doc.asArray() == null)
     map[string]Value? fields = doc.asObject()
-    t.ok(fields != null && fields.len() == 7, "asObject")
-    t.ok(doc.get("list").asObject() == null, "asObject of an array")
+    assert(fields != null && fields.len() == 7)
+    assert(doc.get("list").asObject() == null)
     int? first = doc.get("list").at(0).asInt()
-    t.ok(first != null && first == 10, "at")
-    t.ok(doc.get("list").at(2).isNull() && doc.get("list").at(-1).isNull(), "at out of range")
-    t.ok(doc.at(0).isNull(), "at on an object")
-    t.ok(doc.get("nil").isNull() && doc.get("missing").isNull(), "isNull")
-    t.ok(!doc.get("n").isNull(), "not null")
-    return t
+    assert(first != null && first == 10)
+    assert(doc.get("list").at(2).isNull() && doc.get("list").at(-1).isNull())
+    assert(doc.at(0).isNull())
+    assert(doc.get("nil").isNull() && doc.get("missing").isNull())
+    assert(!doc.get("n").isNull())
 }
 
-fn testMissingKeyVersusNull() TestLog {
-    TestLog t = newTestLog()
+test "missing key versus null" {
     Value doc, error err = parse("{\"a\":null}")
-    t.noErr(err)
-    if (err != null) {
-        return t
-    }
+    assert(err == null)
     map[string]Value? fields = doc.asObject()
     if (fields != null) {
-        t.ok(fields["a"] != null, "present null")
-        t.ok(fields["b"] == null, "missing")
+        assert(fields["a"] != null)
+        assert(fields["b"] == null)
     }
-    return t
 }
 
-fn testAsIntLimits() TestLog {
-    TestLog t = newTestLog()
+test "as int limits" {
     int? a = Value.Number(9007199254740992.0).asInt()
-    t.ok(a != null && a == 9007199254740992, "2^53")
+    assert(a != null && a == 9007199254740992)
     int? b = Value.Number(-9007199254740992.0).asInt()
-    t.ok(b != null && b == -9007199254740992, "-2^53")
-    t.ok(Value.Number(18014398509481984.0).asInt() == null, "2^54")
-    t.ok(Value.Number(1.0e300).asInt() == null, "1e300")
+    assert(b != null && b == -9007199254740992)
+    assert(Value.Number(18014398509481984.0).asInt() == null)
+    assert(Value.Number(1.0e300).asInt() == null)
     int? z = Value.Number(-0.0).asInt()
-    t.ok(z != null && z == 0, "-0")
-    return t
+    assert(z != null && z == 0)
 }
 
-fn testDocExample() TestLog {
-    TestLog t = newTestLog()
+test "doc example" {
     Value out = Value.Object(map[string]Value{
         "name": Value.String("demo"),
         "tags": Value.Array([]Value{Value.String("a"), Value.String("b")}),
         "count": Value.Number(3.0),
     })
-    t.eqStr(out.pretty(), "{\n  \"name\": \"demo\",\n  \"tags\": [\n    \"a\",\n    \"b\"\n  ],\n  \"count\": 3\n}")
-    return t
+    assert(out.pretty() == "{\n  \"name\": \"demo\",\n  \"tags\": [\n    \"a\",\n    \"b\"\n  ],\n  \"count\": 3\n}")
 }
 
-fn testLargeDocument() TestLog {
-    TestLog t = newTestLog()
+test "large document" {
     []string items = []string{}
     for (int i = 0; i < 20000; i++) {
         items.push("{\"id\":" + i.string() + ",\"name\":\"item " + i.string() + "\",\"tags\":[\"x\",\"y\"],\"score\":" + i.string() + ".5}")
     }
     string text = "[" + items.join(",") + "]"
     Value v, error err = parse(text)
-    t.noErr(err)
+    assert(err == null)
     if (err == null) {
-        t.eqInt(text.len(), v.string().len())
-        t.ok(v.string() == text, "large round trip")
+        assert(text.len() == v.string().len())
+        assert(v.string() == text)
         int? id = v.at(19999).get("id").asInt()
-        t.ok(id != null && id == 19999, "last id")
+        assert(id != null && id == 19999)
     }
-    return t
 }
 
 fn crashStringNan() {
@@ -423,4 +371,20 @@ fn crashStringNan() {
 fn crashPrettyInf() {
     float zero = 0.0
     fmt.println(Value.Number(-1.0 / zero).pretty())
+}
+
+test "string nan crashes" {
+    error err = group {
+        spawn crashStringNan()
+    }
+    assert(err != null)
+    assert(err.message() == "crash: json.Value.string: nan cannot be written in JSON")
+}
+
+test "pretty inf crashes" {
+    error err = group {
+        spawn crashPrettyInf()
+    }
+    assert(err != null)
+    assert(err.message() == "crash: json.Value.pretty: -inf cannot be written in JSON")
 }

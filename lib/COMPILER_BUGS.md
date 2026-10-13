@@ -1,7 +1,15 @@
 # Compiler issues found while writing lib/
 
 Found with `build/seed2` at `seed-v2` (7a63a1d). None of them blocked the
-library; the workaround is given for each. The compiler was not changed.
+library; the workaround is given for each.
+
+**Status:** both are fixed (with packages, natives and tests): a `T?` next
+to an error is not guarded any more (tests/full/error_guard_nullable.sd),
+and `pub` struct fields parse and are enforced across packages
+(tests/full/pkg_basic, tests/full/errors/pkg_private_field). Of the limits
+at the end, `os.crash` now reports a caller's mistake, a `case` with
+several labels may have patterns whose bindings are all `_`, and packages,
+natives and `test` blocks exist (lib/run_tests.sh is gone).
 
 ## 1. Error guard on a variable that is already nullable (`--strict`)
 

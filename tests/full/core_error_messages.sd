@@ -1,0 +1,38 @@
+// The errors of the core packages and of toInt/toFloat follow
+// docs/stdlib.md: "<package>.<function>: <subject>: <reason>".
+package main
+
+import "errors"
+import "fmt"
+import "fs"
+import "os"
+
+fn show(error err) {
+    if (err == null) {
+        fmt.println("no error")
+        return
+    }
+    fmt.println(err.message())
+}
+
+fn main([]string args) error {
+    string dir = "/nonexistent-seed-dir"
+    _, error e1 = fs.read(dir + "/notes.txt")
+    show(e1)
+    _, error e2 = fs.list(dir)
+    show(e2)
+    show(fs.write(dir + "/x", "data"))
+    show(fs.remove(dir + "/x"))
+    _, error e3 = os.run([]string{"seed-no-such-program"})
+    show(e3)
+    _, error e4 = "12x".toInt()
+    show(e4)
+    _, error e5 = "1.5.2".toFloat()
+    show(e5)
+    show(errors.wrap(e1, "loading config"))
+    string? cwd, error e6 = os.cwd()
+    show(e6)
+    fmt.println((cwd != null && cwd.startsWith("/")).string())
+    fmt.println((os.executable() != "").string())
+    return null
+}

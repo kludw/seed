@@ -1,0 +1,40 @@
+package os
+
+test "env" {
+    string? path = env("PATH")
+    assert(path != null)
+    assert(env("SEED_SURELY_NOT_SET_42") == null)
+}
+
+test "cwd is absolute" {
+    string dir = try cwd()
+    assert(dir.startsWith("/"))
+}
+
+test "executable is the test program" {
+    string exe = executable()
+    assert(exe.startsWith("/"))
+    assert(exe.endsWith("/test"))
+}
+
+test "run returns the exit code" {
+    int ok = try run([]string{"true"})
+    assert(ok == 0)
+    int bad = try run([]string{"sh", "-c", "exit 3"})
+    assert(bad == 3)
+    _, error err = run([]string{"seed-no-such-program"})
+    assert(err != null)
+    assert(err.message() == "os.run: seed-no-such-program: no such file or directory")
+}
+
+fn crashing() {
+    crash("os test: deliberate")
+}
+
+test "crash fails the goroutine" {
+    error err = group {
+        spawn crashing()
+    }
+    assert(err != null)
+    assert(err.message() == "crash: os test: deliberate")
+}

@@ -1,7 +1,5 @@
 # 10. Concurrency
 
-> **Not implemented yet.** This chapter describes concurrency as the spec defines it. The compiler doesn't support `chan`, `select`, `group` or `spawn` yet, so the programs here are in [examples/pending/](examples/pending/) with the output they should produce, and have not been run.
-
 Seed's concurrency looks like Go's, with goroutines and channels, but three rules make it much harder to get wrong:
 
 1. **Goroutines share nothing.** Every value a goroutine gets is its own copy, so data races are impossible.

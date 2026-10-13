@@ -13,6 +13,11 @@
 #   NAME.in    stdin for the program (optional)
 # For every <dir>/errors/NAME.sd: compiling must fail, and stderr must contain
 # the text after "// expect-error: " on the file's first line.
+# A program made of packages is a directory <dir>/NAME/ (with NAME.out next
+# to it): the compile command gets the directory, which holds package main
+# and the packages it imports (NAME/cart/, ...). <dir>/errors/NAME/ is a
+# directory that must fail to compile; the expected text is on the first
+# line of its main.sd.
 CC=${CC:-cc}
 compile=$1; shift
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/seedtest.XXXXXX")
@@ -20,9 +25,12 @@ trap 'rm -rf "$tmp"' EXIT
 pass=0; fail=0
 failed() { fail=$((fail+1)); echo "FAIL $1: $2"; }
 for dir in "$@"; do
-  for src in "$dir"/*.sd; do
+  for src in "$dir"/*.sd "$dir"/*/; do
     [ -e "$src" ] || continue
-    name=${src%.sd}
+    case $src in
+      */) src=${src%/}; [ -f "$src.out" ] || continue; name=$src ;;
+      *) name=${src%.sd} ;;
+    esac
     if ! $compile "$src" > "$tmp/t.c" 2> "$tmp/cerr"; then
       failed "$src" "compile failed: $(head -c 300 "$tmp/cerr")"; continue
     fi
@@ -43,9 +51,11 @@ for dir in "$@"; do
     fi
     pass=$((pass+1))
   done
-  for src in "$dir"/errors/*.sd; do
+  for src in "$dir"/errors/*.sd "$dir"/errors/*/; do
     [ -e "$src" ] || continue
-    want=$(head -1 "$src" | sed -n 's|^// expect-error: ||p')
+    first=$src
+    case $src in */) src=${src%/}; first=$src/main.sd ;; esac
+    want=$(head -1 "$first" | sed -n 's|^// expect-error: ||p')
     if $compile "$src" > /dev/null 2> "$tmp/cerr"; then
       failed "$src" "compiled, but should fail with '$want'"; continue
     fi

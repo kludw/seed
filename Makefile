@@ -11,7 +11,7 @@ SEED_SRC = $(sort $(wildcard compiler/*.sd))
 # The runtime that the compiler pastes into every generated program.
 RUNTIME_SRC = $(wildcard runtime/*.h runtime/seed_*.c)
 
-.PHONY: all test0 test test-full test-leaks test-strict test-fmt verify clean
+.PHONY: all test0 test test-full test-leaks test-fmt test-lib verify clean
 
 all: build/seed2
 
@@ -32,8 +32,8 @@ test0: build/seed0
 
 # Bootstrap: seed0 compiles the compiler (stage1), which compiles itself
 # (stage2), which compiles itself again (stage3). stage2.c and stage3.c must
-# be identical. The later stages run with --strict, so the compiler's own
-# source must pass the pedantic checks (unused names, shadowing).
+# be identical. The real compiler always applies the pedantic checks (unused
+# names, shadowing, formatting), so the compiler's own source must pass them.
 build/stage1.c: build/seed0 $(SEED_SRC)
 	build/seed0 $(SEED_SRC) > $@
 
@@ -41,13 +41,13 @@ build/seed1: build/stage1.c
 	$(CC) $(SEED_CFLAGS) -o $@ build/stage1.c $(SEED_LIBS)
 
 build/stage2.c: build/seed1 $(SEED_SRC) $(RUNTIME_SRC)
-	build/seed1 c --strict $(SEED_SRC) > $@
+	build/seed1 c $(SEED_SRC) > $@
 
 build/seed2: build/stage2.c
 	$(CC) $(SEED_CFLAGS) -o $@ build/stage2.c $(SEED_LIBS)
 
 build/stage3.c: build/seed2 $(SEED_SRC) $(RUNTIME_SRC)
-	build/seed2 c --strict $(SEED_SRC) > $@
+	build/seed2 c $(SEED_SRC) > $@
 
 verify: build/stage2.c build/stage3.c
 	cmp build/stage2.c build/stage3.c
@@ -56,29 +56,34 @@ verify: build/stage2.c build/stage3.c
 test: build/seed2
 	tests/run.sh "build/seed2 c" tests/lang tests/seed0
 
-# The features outside the seed0 subset. errors/unformatted_code is expected
-# to fail until compiling checks formatting (seed fmt --check does today).
+# The features outside the seed0 subset, packages (tests/full/NAME/
+# directories) and seed test (tests/test_cmd.sh).
 test-full: build/seed2
-	tests/run.sh "build/seed2 c --strict" tests/full
+	tests/run.sh "build/seed2 c" tests/full
+	tests/test_cmd.sh build/seed2
 
 # Every test program under macOS `leaks --atExit` (slow: about 3 minutes).
 test-leaks: build/seed2
 	tests/leaks.sh "build/seed2 c" tests/lang tests/seed0 tests/full
 
-# tests/lang is written to pass the full compiler's pedantic checks too.
-test-strict: build/seed2
-	tests/run.sh "build/seed2 c --strict" tests/lang
+# The tests of the standard library packages (lib/<pkg>/tests).
+test-lib: build/seed2
+	build/seed2 test lib
 
 # seed fmt. --verify runs the formatter's own checks on every .sd file under
-# compiler/ and tests/ (files with syntax errors are skipped): formatting the
+# compiler/, tests/ and lib/ (files with syntax errors are skipped): formatting the
 # formatted text changes nothing, and the tokens (ignoring newlines and
 # trailing commas), comments and syntax tree are unchanged. Then the golden
 # tests in tests/fmt, and a check that the compiler and the test programs
 # are formatted.
 FMT_CHECKED = $(SEED_SRC) $(wildcard tests/lang/*.sd tests/seed0/*.sd tests/full/*.sd)
 
+# Package directories (tests/full/NAME/, tests/testcmd/) and the standard
+# library are verified too.
+FMT_VERIFIED = $(SEED_SRC) $(wildcard tests/*/*.sd tests/*/errors/*.sd) $(shell find tests/full tests/testcmd lib -mindepth 2 -name '*.sd')
+
 test-fmt: build/seed2
-	@build/seed2 fmt --verify $(SEED_SRC) $(wildcard tests/*/*.sd tests/*/errors/*.sd)
+	@build/seed2 fmt --verify $(FMT_VERIFIED)
 	tests/fmt/run.sh build/seed2
 	@build/seed2 fmt --check $(FMT_CHECKED) && echo "seed fmt --check: the compiler and the test programs are formatted"
 

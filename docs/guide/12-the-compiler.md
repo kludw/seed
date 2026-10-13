@@ -2,8 +2,6 @@
 
 The Seed compiler is strict on purpose. It reports **errors only, never warnings**: anything worth mentioning is worth fixing, and a warning that everyone learns to ignore helps nobody. Every error shows the code it is about, explains what is wrong, and suggests a fix. Seed accepts slower compiles as the price for this.
 
-> In the current compiler, the checks in [The pedantic checks](#the-pedantic-checks) below run only with `seed c --strict file.sd`; `seed run` and `seed build` skip them. All the examples in this guide pass them.
-
 ## Reading an error
 
 ```seed
@@ -249,13 +247,9 @@ fn main([]string args) error {
    13 | fn (Dog d) name(bool loud) string {
       |            ^
     hint: Dog declares implements Named, so the signatures must be the same
-12_implements.sd:21:15: error: cannot use the value (type Dog) as Named to initialize n: Dog does not declare that it implements Named
-   21 |     Named n = Dog{label: "rex"}
-      |               ^
-    hint: add  implements Named  to the declaration of Dog
 ```
 
-The first error is the real one. (The second is a knock-on error: the compiler treats a declaration that fails its check as missing.)
+Only the mismatch is reported: `Dog` still counts as a `Named` everywhere else, so `Named n = Dog{...}` is not a second error.
 
 ### Syntax that doesn't exist
 
@@ -292,6 +286,7 @@ The compiler rejects:
 | Shadowing | [2](02-basics.md) |
 | A name that breaks the naming rules | [2](02-basics.md) |
 | A switch over an enum that misses a case or has `default` | [3](03-control-flow.md), [8](08-enums.md) |
+| A case pattern that doesn't bind every field of its case | [8](08-enums.md) |
 | A switch over a value without `default` | [3](03-control-flow.md) |
 | An unhandled error | [4](04-functions-and-errors.md) |
 | A value read before the error returned with it is checked | [4](04-functions-and-errors.md) |
@@ -302,6 +297,9 @@ The compiler rejects:
 | A `mut` method called on a parameter | [7](07-structs-and-methods.md) |
 | A struct literal that misses a field | [7](07-structs-and-methods.md) |
 | A type whose methods don't match its `implements` | [9](09-interfaces-and-functions.md) |
+| A name, field or method of another package that isn't `pub` | [11](11-packages.md) |
+| An import cycle | [11](11-packages.md) |
+| `assert` outside a test | [11](11-packages.md) |
 | An unused variable, import or result | this chapter |
 | Unreachable code | this chapter |
 | Unformatted code | below |
@@ -322,7 +320,17 @@ fn main([]string args) error {
   return null }
 ```
 
-`seed fmt --check` reports it, and the hint says how to fix it:
+Compiling it fails at the first line that differs from the formatted text, and the hint says how to fix it:
+
+```
+$ seed run messy.sd
+messy.sd:2:1: error: messy.sd is not formatted
+    2 | import "fmt"
+      | ^
+    hint: run: seed fmt messy.sd
+```
+
+`seed fmt --check` reports the same without compiling (useful in a build script):
 
 ```
 $ seed fmt --check messy.sd
@@ -359,6 +367,6 @@ The formatter only changes spaces, line breaks and the trailing comma of lists; 
 - **Where long lines break.** There is no line-length limit. A statement continues on the next line after an operator or a comma, and the formatter keeps your line breaks and indents the continuation.
 - **Whether a list is on one line or one element per line.** If you break a list (arguments, a literal, parameters) anywhere, the formatter puts each element on its own line with a trailing comma, like `xs` above. Otherwise it stays on one line.
 
-The complete rules are in [formatting.md](../formatting.md). In the finished language, compiling unformatted code is an error that names the `seed fmt` command to run; the current compiler doesn't enforce this yet, so run `seed fmt --check` in your build.
+The complete rules are in [formatting.md](../formatting.md).
 
 Next: [Seed for Go programmers](13-for-go-programmers.md).

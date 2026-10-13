@@ -1,0 +1,14 @@
+// A project whose tests all pass: seed test runs the tests of calc and
+// calc/inner; the program itself is run by tests/test_cmd.sh too.
+package main
+
+import "calc"
+import "fmt"
+
+fn main([]string args) error {
+    fmt.println("sum " + calc.sum([]int{1, 2, 3}).string())
+    for (int i = 1; i < args.len(); i++) {
+        fmt.println("arg " + args[i])
+    }
+    return null
+}

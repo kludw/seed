@@ -1,0 +1,20 @@
+// Package fmt writes text to stdout and stderr. There is no format-string
+// language: values become text through .string() and are joined with +.
+//
+// Each call is a single write, so output from two goroutines can interleave
+// between calls but never inside one. Stdout is buffered and flushed when
+// the program exits (for any reason) and before anything is written to
+// stderr. Stderr is not buffered.
+package fmt
+
+// Writes s to stdout.
+pub fn print(string s)
+
+// Writes s and a newline to stdout.
+pub fn println(string s)
+
+// Writes s to stderr.
+pub fn eprint(string s)
+
+// Writes s and a newline to stderr.
+pub fn eprintln(string s)

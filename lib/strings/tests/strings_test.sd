@@ -2,82 +2,76 @@ package strings
 
 import "fmt"
 
-fn testRepeat() TestLog {
-    TestLog t = newTestLog()
-    t.eqStr(repeat("ab", 3), "ababab")
-    t.eqStr(repeat("ab", 0), "")
-    t.eqStr(repeat("", 5), "")
-    t.eqStr(repeat("x", 1), "x")
-    t.eqInt(repeat("abc", 1000).len(), 3000)
-    t.eqStr(repeat("xy", 7), "xyxyxyxyxyxyxy")
-    return t
+test "repeat" {
+    assert(repeat("ab", 3) == "ababab")
+    assert(repeat("ab", 0) == "")
+    assert(repeat("", 5) == "")
+    assert(repeat("x", 1) == "x")
+    assert(repeat("abc", 1000).len() == 3000)
+    assert(repeat("xy", 7) == "xyxyxyxyxyxyxy")
 }
 
-fn testPadLeft() TestLog {
-    TestLog t = newTestLog()
-    t.eqStr(padLeft("7", 3, '0'), "007")
-    t.eqStr(padLeft("1234", 3, '0'), "1234")
-    t.eqStr(padLeft("abc", 3, ' '), "abc")
-    t.eqStr(padLeft("", 2, '-'), "--")
-    t.eqStr(padLeft("x", -1, '-'), "x")
-    return t
+test "pad left" {
+    assert(padLeft("7", 3, '0') == "007")
+    assert(padLeft("1234", 3, '0') == "1234")
+    assert(padLeft("abc", 3, ' ') == "abc")
+    assert(padLeft("", 2, '-') == "--")
+    assert(padLeft("x", -1, '-') == "x")
 }
 
-fn testPadCountsUtf8Characters() TestLog {
-    TestLog t = newTestLog()
+test "pad counts utf-8 characters" {
     // "é" is two bytes but one character.
-    t.eqStr(padLeft("\xc3\xa9", 3, '.'), "..\xc3\xa9")
-    t.eqStr(padRight("\xc3\xa9t\xc3\xa9", 5, '.'), "\xc3\xa9t\xc3\xa9..")
-    return t
+    assert(padLeft("\xc3\xa9", 3, '.') == "..\xc3\xa9")
+    assert(padRight("\xc3\xa9t\xc3\xa9", 5, '.') == "\xc3\xa9t\xc3\xa9..")
 }
 
-fn testPadRight() TestLog {
-    TestLog t = newTestLog()
-    t.eqStr(padRight("ab", 5, ' '), "ab   ")
-    t.eqStr(padRight("abcdef", 5, ' '), "abcdef")
-    t.eqStr(padRight("", 0, ' '), "")
-    return t
+test "pad right" {
+    assert(padRight("ab", 5, ' ') == "ab   ")
+    assert(padRight("abcdef", 5, ' ') == "abcdef")
+    assert(padRight("", 0, ' ') == "")
 }
 
-fn testLastIndex() TestLog {
-    TestLog t = newTestLog()
+test "last index" {
     int? i = lastIndex("go gopher", "go")
-    t.ok(i != null && i == 3, "lastIndex go gopher")
+    assert(i != null && i == 3)
     i = lastIndex("abc", "")
-    t.ok(i != null && i == 3, "empty sub gives len")
-    t.ok(lastIndex("abc", "d") == null, "missing")
-    t.ok(lastIndex("ab", "abc") == null, "longer sub")
+    assert(i != null && i == 3)
+    assert(lastIndex("abc", "d") == null)
+    assert(lastIndex("ab", "abc") == null)
     i = lastIndex("aaaa", "aa")
-    t.ok(i != null && i == 2, "overlapping")
+    assert(i != null && i == 2)
     i = lastIndex("abc", "abc")
-    t.ok(i != null && i == 0, "whole")
-    t.ok(lastIndex("", "a") == null, "empty s")
+    assert(i != null && i == 0)
+    assert(lastIndex("", "a") == null)
     i = lastIndex("", "")
-    t.ok(i != null && i == 0, "both empty")
-    return t
+    assert(i != null && i == 0)
 }
 
-fn testFields() TestLog {
-    TestLog t = newTestLog()
-    t.ok(fields("  a b\n") == []string{"a", "b"}, "doc example")
-    t.ok(fields("") == []string{}, "empty")
-    t.ok(fields(" \t\n\r\x0b\x0c") == []string{}, "only space")
-    t.ok(fields("one") == []string{"one"}, "one")
-    t.ok(fields("a\x0bb\x0cc\rd") == []string{"a", "b", "c", "d"}, "all separators")
-    t.ok(fields("x  y   z") == []string{"x", "y", "z"}, "runs")
-    return t
+test "fields" {
+    assert(fields("  a b\n") == []string{"a", "b"})
+    assert(fields("") == []string{})
+    assert(fields(" \t\n\r\x0b\x0c") == []string{})
+    assert(fields("one") == []string{"one"})
+    assert(fields("a\x0bb\x0cc\rd") == []string{"a", "b", "c", "d"})
+    assert(fields("x  y   z") == []string{"x", "y", "z"})
 }
 
-fn testByteClasses() TestLog {
-    TestLog t = newTestLog()
-    t.ok(isDigit('0') && isDigit('9') && !isDigit('a') && !isDigit('/') && !isDigit(':'), "isDigit")
-    t.ok(isLetter('a') && isLetter('z') && isLetter('A') && isLetter('Z'), "isLetter yes")
-    t.ok(!isLetter('@') && !isLetter('[') && !isLetter('`') && !isLetter('{') && !isLetter('\xc3'), "isLetter no")
-    t.ok(isSpace(' ') && isSpace('\t') && isSpace('\n') && isSpace('\r') && isSpace('\x0b') && isSpace('\x0c'), "isSpace yes")
-    t.ok(!isSpace('a') && !isSpace('\x00') && !isSpace('\xa0'), "isSpace no")
-    return t
+test "byte classes" {
+    assert(isDigit('0') && isDigit('9') && !isDigit('a') && !isDigit('/') && !isDigit(':'))
+    assert(isLetter('a') && isLetter('z') && isLetter('A') && isLetter('Z'))
+    assert(!isLetter('@') && !isLetter('[') && !isLetter('`') && !isLetter('{') && !isLetter('\xc3'))
+    assert(isSpace(' ') && isSpace('\t') && isSpace('\n') && isSpace('\r') && isSpace('\x0b') && isSpace('\x0c'))
+    assert(!isSpace('a') && !isSpace('\x00') && !isSpace('\xa0'))
 }
 
 fn crashRepeatNegative() {
     fmt.println(repeat("x", -1))
+}
+
+test "repeat negative crashes" {
+    error err = group {
+        spawn crashRepeatNegative()
+    }
+    assert(err != null)
+    assert(err.message() == "crash: strings.repeat: count (-1) must not be negative")
 }

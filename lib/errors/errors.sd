@@ -1,0 +1,29 @@
+// Package errors makes errors. error itself is a built-in interface with
+// one method, message() string; two errors are equal when their messages
+// are.
+package errors
+
+import "os"
+
+// The error that new and wrap make.
+type TextError struct implements error {
+    string text
+}
+
+fn (TextError e) message() string {
+    return e.text
+}
+
+// An error whose message() is message.
+pub fn new(string message) error {
+    return TextError{text: message}
+}
+
+// An error whose message() is context + ": " + err.message(). Crashes if
+// err is null.
+pub fn wrap(error err, string context) error {
+    if (err == null) {
+        os.crash("errors.wrap: err is null")
+    }
+    return TextError{text: context + ": " + err.message()}
+}

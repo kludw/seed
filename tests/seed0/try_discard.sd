@@ -70,9 +70,10 @@ fn main([]string args) error {
     _ = check(1)
 
     int total, error e2 = sum([]string{"1", "2", "3"})
-    fmt.println(total.string() + " " + (e2 == null).string())
-    int t2 = 0
-    t2, e2 = sum([]string{"1", "bad"})
+    if (e2 == null) {
+        fmt.println(total.string() + " true")
+    }
+    _, e2 = sum([]string{"1", "bad"})
     if (e2 != null) {
         fmt.println(e2.message())
     }

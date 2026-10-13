@@ -1,12 +1,12 @@
 ok:3 10
 true
-error: invalid integer: "x"
+error: string.toInt: "x": invalid integer
 error: negative: -6
 error: empty
 false true
 12
 6 true
-invalid integer: "bad"
+string.toInt: "bad": invalid integer
 10 ok:5
 true true
 true

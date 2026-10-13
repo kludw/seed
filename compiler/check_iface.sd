@@ -108,31 +108,31 @@ fn (Checker c) mut checkImplements() {
                 }
             }
             if (twice) {
-                c.error(pos, td.name + " declares implements " + c.typeName(it) + " twice")
+                c.error(pos, c.declDisplayName(d) + " declares implements " + c.typeName(it) + " twice")
                 continue
             }
-            if (c.checkImplementsOne(d, it, pos)) {
-                c.impls.push(Impl{decl: d, iface: it})
-            }
+            // The pair is recorded even when the methods do not match, so
+            // that the type still converts to the interface and the mismatch
+            // is the only error reported.
+            c.checkImplementsOne(d, it, pos)
+            c.impls.push(Impl{decl: d, iface: it})
         }
     }
 }
 
-// Whether the type declaration d has every method of iface, with the same
-// signature and mut-ness. Reports the first mismatch.
-fn (Checker c) mut checkImplementsOne(int d, int iface, Pos pos) bool {
-    string tname = c.ast.typeDecls[d].name
+// Checks that the type declaration d has every method of iface, with the
+// same signature and mut-ness, and reports each mismatch.
+fn (Checker c) mut checkImplementsOne(int d, int iface, Pos pos) {
+    string tname = c.declDisplayName(d)
     string iname = c.typeName(iface)
-    bool ok = true
     for (int i = 0; i < c.ifaceMethodCount(iface); i++) {
         string name = c.ifaceMethodName(iface, i)
         int want = c.ifaceMethodSig(iface, i)
         bool wantMut = c.ifaceMethodMut(iface, i)
         string sig = methodSigText(name, c.typeName(want), wantMut)
-        int? m = c.methods[tname + "." + name]
+        int? m = c.methods[methodKey(d, name)]
         if (m == null) {
-            c.errorHint(pos, tname + " does not implement " + iname + ": it has no method " + sig, "add  fn (" + tname + " v) " + sig + " { ... }")
-            ok = false
+            c.errorHint(pos, tname + " does not implement " + iname + ": it has no method " + sig, "add the method: fn (" + c.ast.typeDecls[d].name + " v) " + sig + " { ... }")
             continue
         }
         if (want == tyInvalid) {
@@ -142,10 +142,8 @@ fn (Checker c) mut checkImplementsOne(int d, int iface, Pos pos) bool {
         bool haveMut = c.ast.fns[m].recvMut
         if (have != want || haveMut != wantMut) {
             c.errorHint(c.ast.fns[m].pos, "method " + tname + "." + methodSigText(name, c.typeName(have), haveMut) + " does not match " + iname + "." + sig, tname + " declares implements " + iname + ", so the signatures must be the same")
-            ok = false
         }
     }
-    return ok
 }
 
 // A method signature for messages: "mut add(int) string" for the method

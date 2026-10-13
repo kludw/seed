@@ -1,0 +1,10 @@
+FAIL "int comparison": testcmd/fail/checks/tests/checks_test.sd:12: assert failed: n == 42 (41 == 42)
+FAIL "string comparison": testcmd/fail/checks/tests/checks_test.sd:18: assert failed: s == "abc" ("a\tb\"c" == "abc")
+FAIL "nullable": testcmd/fail/checks/tests/checks_test.sd:23: assert failed: n != null (null != null)
+FAIL "error from try": testcmd/fail/checks/tests/checks_test.sd:26: error: checks.parse: empty input
+FAIL "crash": testcmd/fail/checks/tests/checks_test.sd:31: crash: index out of range: 5 with length 2
+deferred
+FAIL "defer runs when an assert fails": testcmd/fail/checks/tests/checks_test.sd:38: assert failed: false
+FAIL "error compared with null": testcmd/fail/checks/tests/checks_test.sd:43: assert failed: err == null ("string.toInt: \"x\": invalid integer" == null)
+FAIL "multi-line condition": testcmd/fail/checks/tests/checks_test.sd:49: assert failed: a && s == "2"
+1 passed, 8 failed

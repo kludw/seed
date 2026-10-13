@@ -1,0 +1,20 @@
+// Package calc adds numbers.
+package calc
+
+import "calc/inner"
+
+pub fn sum([]int xs) int {
+    int total = 0
+    for (int i = 0; i < xs.len(); i++) {
+        total = inner.add(total, xs[i])
+    }
+    return total
+}
+
+// Private: only tests of package calc can call it.
+fn half(int x) (int, error) {
+    if (x % 2 != 0) {
+        return null, inner.oddError(x)
+    }
+    return x / 2, null
+}

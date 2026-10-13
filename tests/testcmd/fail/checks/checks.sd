@@ -1,0 +1,10 @@
+package checks
+
+import "errors"
+
+pub fn parse(string s) (int, error) {
+    if (s == "") {
+        return null, errors.new("checks.parse: empty input")
+    }
+    return s.toInt()
+}

@@ -1,0 +1,11 @@
+// expect-error: cannot write the literal acct.Account{...} outside package acct: the field balance is not pub
+package main
+
+import "acct"
+import "fmt"
+
+fn main([]string args) error {
+    acct.Account a = acct.Account{owner: "eve", balance: 1000000}
+    fmt.println(a.owner)
+    return null
+}

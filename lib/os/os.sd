@@ -1,0 +1,32 @@
+// Package os is the running process and its environment. A program's
+// arguments are not here: main receives them as []string args.
+package os
+
+// Exits immediately with code (only its low 8 bits are used), after
+// flushing stdout. Deferred calls do not run.
+pub fn exit(int code)
+
+// Crashes the current goroutine with message, exactly like a runtime fault
+// (an index out of range): its deferred calls run, and inside a group the
+// group fails with the error "crash: <message>"; elsewhere the program
+// prints "crash: <message>" and exits with code 2. Library code uses it to
+// report a caller's mistake: os.crash("rand.range: lo (5) must be less than
+// hi (5)").
+pub fn crash(string message)
+
+// The environment variable name, or null if it is not set.
+pub fn env(string name) string?
+
+// Runs a program (argv[0] is looked up on PATH unless it contains a /) with
+// the same stdin, stdout and stderr, waits for it and returns its exit code
+// (128 + the signal for a child killed by a signal). The error is set only
+// when the program could not be started: "os.run: frobnicate: no such file
+// or directory". Crashes if argv is empty.
+pub fn run([]string argv) (int, error)
+
+// The absolute path of the running program, with symbolic links resolved,
+// or "" if it cannot be found.
+pub fn executable() string
+
+// The absolute path of the current directory.
+pub fn cwd() (string, error)

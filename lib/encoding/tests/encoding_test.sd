@@ -8,185 +8,184 @@ fn allBytes() string {
     return string(b)
 }
 
-fn testHexEncode() TestLog {
-    TestLog t = newTestLog()
-    t.eqStr(hexEncode(""), "")
-    t.eqStr(hexEncode("foobar"), "666f6f626172")
-    t.eqStr(hexEncode("\x00\x01\x7f\x80\xfe\xff"), "00017f80feff")
-    t.eqInt(hexEncode(allBytes()).len(), 512)
-    return t
+test "hex encode" {
+    assert(hexEncode("") == "")
+    assert(hexEncode("foobar") == "666f6f626172")
+    assert(hexEncode("\x00\x01\x7f\x80\xfe\xff") == "00017f80feff")
+    assert(hexEncode(allBytes()).len() == 512)
 }
 
-fn testHexDecode() TestLog {
-    TestLog t = newTestLog()
+test "hex decode" {
     string s, error err = hexDecode("666f6f626172")
-    t.noErr(err)
+    assert(err == null)
     if (err == null) {
-        t.eqStr(s, "foobar")
+        assert(s == "foobar")
     }
     s, err = hexDecode("DEADbeef")
-    t.noErr(err)
+    assert(err == null)
     if (err == null) {
-        t.eqStr(s, "\xde\xad\xbe\xef")
+        assert(s == "\xde\xad\xbe\xef")
     }
     s, err = hexDecode("")
-    t.noErr(err)
+    assert(err == null)
     if (err == null) {
-        t.eqStr(s, "")
+        assert(s == "")
     }
     s, err = hexDecode(hexEncode(allBytes()))
-    t.noErr(err)
+    assert(err == null)
     if (err == null) {
-        t.eqStr(s, allBytes())
+        assert(s == allBytes())
     }
-    return t
 }
 
-fn testHexDecodeErrors() TestLog {
-    TestLog t = newTestLog()
+test "hex decode errors" {
     _, error err = hexDecode("abcg")
-    t.errIs(err, "encoding.hexDecode: offset 3: invalid hex digit 'g'")
+    assert(err != null)
+    assert(err.message() == "encoding.hexDecode: offset 3: invalid hex digit 'g'")
     _, err = hexDecode("abc")
-    t.errIs(err, "encoding.hexDecode: offset 2: odd number of hex digits")
+    assert(err != null)
+    assert(err.message() == "encoding.hexDecode: offset 2: odd number of hex digits")
     _, err = hexDecode("a b")
-    t.errIs(err, "encoding.hexDecode: offset 1: invalid hex digit ' '")
+    assert(err != null)
+    assert(err.message() == "encoding.hexDecode: offset 1: invalid hex digit ' '")
     _, err = hexDecode("0\xff")
-    t.errIs(err, "encoding.hexDecode: offset 1: invalid hex digit byte 0xff")
+    assert(err != null)
+    assert(err.message() == "encoding.hexDecode: offset 1: invalid hex digit byte 0xff")
     _, err = hexDecode("0x00")
-    t.errIs(err, "encoding.hexDecode: offset 1: invalid hex digit 'x'")
-    return t
+    assert(err != null)
+    assert(err.message() == "encoding.hexDecode: offset 1: invalid hex digit 'x'")
 }
 
-fn testBase64Rfc4648Vectors() TestLog {
-    TestLog t = newTestLog()
+test "base64 rfc 4648 vectors" {
     []string plain = []string{"", "f", "fo", "foo", "foob", "fooba", "foobar"}
     []string std = []string{"", "Zg==", "Zm8=", "Zm9v", "Zm9vYg==", "Zm9vYmE=", "Zm9vYmFy"}
     []string url = []string{"", "Zg", "Zm8", "Zm9v", "Zm9vYg", "Zm9vYmE", "Zm9vYmFy"}
     for (int i = 0; i < plain.len(); i++) {
-        t.eqStr(base64Encode(plain[i]), std[i])
-        t.eqStr(base64UrlEncode(plain[i]), url[i])
+        assert(base64Encode(plain[i]) == std[i])
+        assert(base64UrlEncode(plain[i]) == url[i])
         string s, error err = base64Decode(std[i])
-        t.noErr(err)
+        assert(err == null)
         if (err == null) {
-            t.eqStr(s, plain[i])
+            assert(s == plain[i])
         }
         s, err = base64Decode(url[i])
-        t.noErr(err)
+        assert(err == null)
         if (err == null) {
-            t.eqStr(s, plain[i])
+            assert(s == plain[i])
         }
         s, err = base64UrlDecode(url[i])
-        t.noErr(err)
+        assert(err == null)
         if (err == null) {
-            t.eqStr(s, plain[i])
+            assert(s == plain[i])
         }
         s, err = base64UrlDecode(std[i])
-        t.noErr(err)
+        assert(err == null)
         if (err == null) {
-            t.eqStr(s, plain[i])
+            assert(s == plain[i])
         }
     }
-    return t
 }
 
-fn testBase64Alphabets() TestLog {
-    TestLog t = newTestLog()
-    t.eqStr(base64Encode("\xfb\xff"), "+/8=")
-    t.eqStr(base64UrlEncode("\xfb\xff"), "-_8")
-    t.eqStr(base64Encode("\xfb\xef\xbe"), "++++")
-    t.eqStr(base64UrlEncode("\xff\xff\xff"), "____")
+test "base64 alphabets" {
+    assert(base64Encode("\xfb\xff") == "+/8=")
+    assert(base64UrlEncode("\xfb\xff") == "-_8")
+    assert(base64Encode("\xfb\xef\xbe") == "++++")
+    assert(base64UrlEncode("\xff\xff\xff") == "____")
     _, error err = base64Decode("-_8")
-    t.errIs(err, "encoding.base64Decode: offset 0: invalid base64 character '-'")
+    assert(err != null)
+    assert(err.message() == "encoding.base64Decode: offset 0: invalid base64 character '-'")
     _, err = base64UrlDecode("+/8=")
-    t.errIs(err, "encoding.base64UrlDecode: offset 0: invalid base64 character '+'")
+    assert(err != null)
+    assert(err.message() == "encoding.base64UrlDecode: offset 0: invalid base64 character '+'")
     string s2, error err2 = base64Decode("+/8=")
-    t.ok(err2 == null && s2 == "\xfb\xff", "std decode")
-    return t
+    assert(err2 == null && s2 == "\xfb\xff")
 }
 
-fn testBase64RoundTrip() TestLog {
-    TestLog t = newTestLog()
+test "base64 round trip" {
     string data = allBytes()
     for (int n = 0; n < 8; n++) {
         string part = data.slice(250 - n * 30, 256)
         string s, error err = base64Decode(base64Encode(part))
-        t.ok(err == null && s == part, "std round trip " + n.string())
+        assert(err == null && s == part)
         s, err = base64UrlDecode(base64UrlEncode(part))
-        t.ok(err == null && s == part, "url round trip " + n.string())
+        assert(err == null && s == part)
     }
-    return t
 }
 
-fn testBase64IgnoresUnusedBits() TestLog {
-    TestLog t = newTestLog()
+test "base64 ignores unused bits" {
     string s, error err = base64Decode("Zh==")
-    t.ok(err == null && s == "f", "Zh== is f")
+    assert(err == null && s == "f")
     s, err = base64UrlDecode("Zm9")
-    t.ok(err == null && s == "fo", "Zm9 is fo")
-    return t
+    assert(err == null && s == "fo")
 }
 
-fn testBase64DecodeErrors() TestLog {
-    TestLog t = newTestLog()
+test "base64 decode errors" {
     _, error err = base64Decode("Zm9v YmFy")
-    t.errIs(err, "encoding.base64Decode: offset 4: invalid base64 character ' '")
+    assert(err != null)
+    assert(err.message() == "encoding.base64Decode: offset 4: invalid base64 character ' '")
     _, err = base64Decode("Zm9v\n")
-    t.errIs(err, "encoding.base64Decode: offset 4: invalid base64 character byte 0x0a")
+    assert(err != null)
+    assert(err.message() == "encoding.base64Decode: offset 4: invalid base64 character byte 0x0a")
     _, err = base64Decode("Z")
-    t.errIs(err, "encoding.base64Decode: offset 1: input ends in the middle of a byte")
+    assert(err != null)
+    assert(err.message() == "encoding.base64Decode: offset 1: input ends in the middle of a byte")
     _, err = base64Decode("Zm9vY")
-    t.errIs(err, "encoding.base64Decode: offset 5: input ends in the middle of a byte")
+    assert(err != null)
+    assert(err.message() == "encoding.base64Decode: offset 5: input ends in the middle of a byte")
     _, err = base64Decode("Zg=")
-    t.errIs(err, "encoding.base64Decode: offset 2: incorrect padding")
+    assert(err != null)
+    assert(err.message() == "encoding.base64Decode: offset 2: incorrect padding")
     _, err = base64Decode("Zg===")
-    t.errIs(err, "encoding.base64Decode: offset 2: incorrect padding")
+    assert(err != null)
+    assert(err.message() == "encoding.base64Decode: offset 2: incorrect padding")
     _, err = base64Decode("Zm9v=")
-    t.errIs(err, "encoding.base64Decode: offset 4: incorrect padding")
+    assert(err != null)
+    assert(err.message() == "encoding.base64Decode: offset 4: incorrect padding")
     _, err = base64Decode("Zm8==")
-    t.errIs(err, "encoding.base64Decode: offset 3: incorrect padding")
+    assert(err != null)
+    assert(err.message() == "encoding.base64Decode: offset 3: incorrect padding")
     _, err = base64Decode("Zg==Zg==")
-    t.errIs(err, "encoding.base64Decode: offset 2: invalid base64 character '='")
+    assert(err != null)
+    assert(err.message() == "encoding.base64Decode: offset 2: invalid base64 character '='")
     _, err = base64Decode("====")
-    t.errIs(err, "encoding.base64Decode: offset 0: incorrect padding")
-    return t
+    assert(err != null)
+    assert(err.message() == "encoding.base64Decode: offset 0: incorrect padding")
 }
 
-fn testUrlEncode() TestLog {
-    TestLog t = newTestLog()
-    t.eqStr(urlEncode(""), "")
-    t.eqStr(urlEncode("AZaz09-_.~"), "AZaz09-_.~")
-    t.eqStr(urlEncode("a b"), "a%20b")
-    t.eqStr(urlEncode("a+b&c=d/e?f#g%"), "a%2Bb%26c%3Dd%2Fe%3Ff%23g%25")
-    t.eqStr(urlEncode("\xc3\xa9\x00\xff"), "%C3%A9%00%FF")
-    return t
+test "url encode" {
+    assert(urlEncode("") == "")
+    assert(urlEncode("AZaz09-_.~") == "AZaz09-_.~")
+    assert(urlEncode("a b") == "a%20b")
+    assert(urlEncode("a+b&c=d/e?f#g%") == "a%2Bb%26c%3Dd%2Fe%3Ff%23g%25")
+    assert(urlEncode("\xc3\xa9\x00\xff") == "%C3%A9%00%FF")
 }
 
-fn testUrlDecode() TestLog {
-    TestLog t = newTestLog()
+test "url decode" {
     string s, error err = urlDecode("a%20b+c")
-    t.ok(err == null && s == "a b c", "space forms")
+    assert(err == null && s == "a b c")
     s, err = urlDecode("%c3%A9")
-    t.ok(err == null && s == "\xc3\xa9", "either case")
+    assert(err == null && s == "\xc3\xa9")
     s, err = urlDecode("plain")
-    t.ok(err == null && s == "plain", "plain")
+    assert(err == null && s == "plain")
     s, err = urlDecode("")
-    t.ok(err == null && s == "", "empty")
+    assert(err == null && s == "")
     s, err = urlDecode(urlEncode(allBytes()))
-    t.ok(err == null && s == allBytes(), "round trip")
+    assert(err == null && s == allBytes())
     s, err = urlDecode("100%25")
-    t.ok(err == null && s == "100%", "percent")
-    return t
+    assert(err == null && s == "100%")
 }
 
-fn testUrlDecodeErrors() TestLog {
-    TestLog t = newTestLog()
+test "url decode errors" {
     _, error err = urlDecode("100%")
-    t.errIs(err, "encoding.urlDecode: offset 3: '%' must be followed by two hex digits")
+    assert(err != null)
+    assert(err.message() == "encoding.urlDecode: offset 3: '%' must be followed by two hex digits")
     _, err = urlDecode("a%2")
-    t.errIs(err, "encoding.urlDecode: offset 1: '%' must be followed by two hex digits")
+    assert(err != null)
+    assert(err.message() == "encoding.urlDecode: offset 1: '%' must be followed by two hex digits")
     _, err = urlDecode("a%zz")
-    t.errIs(err, "encoding.urlDecode: offset 1: '%' must be followed by two hex digits")
+    assert(err != null)
+    assert(err.message() == "encoding.urlDecode: offset 1: '%' must be followed by two hex digits")
     _, err = urlDecode("%%41")
-    t.errIs(err, "encoding.urlDecode: offset 0: '%' must be followed by two hex digits")
-    return t
+    assert(err != null)
+    assert(err.message() == "encoding.urlDecode: offset 0: '%' must be followed by two hex digits")
 }

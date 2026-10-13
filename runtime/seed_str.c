@@ -228,7 +228,7 @@ sd_str sd_str_to_lower(sd_str s) { return sd_str_map_ascii(s, 'A', 'Z', 'a' - 'A
 sd_err sd_str_to_int(sd_str s, sd_int *out) {
   if (sd_int_parse_dec_(s->data, s->len, out)) return SD_ERR_NULL;
   *out = SD_INT_NULL;
-  return sd_errorf("invalid integer: \"%s\"", s->data);
+  return sd_errorf("string.toInt: \"%s\": invalid integer", s->data);
 }
 
 sd_err sd_str_to_float(sd_str s, double *out) {
@@ -240,7 +240,7 @@ sd_err sd_str_to_float(sd_str s, double *out) {
   *out = d;
   return SD_ERR_NULL;
 bad:
-  return sd_errorf("invalid float: \"%s\"", s->data);
+  return sd_errorf("string.toFloat: \"%s\": invalid float", s->data);
 }
 
 sd_list *sd_str_bytes(sd_str s) {

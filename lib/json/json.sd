@@ -21,7 +21,6 @@ package json
 //   lowercase hex. DEL (0x7f) is written as it is.
 
 import "errors"
-import "fmt"
 import "os"
 
 // A JSON document. Object keys keep their order (maps keep insertion
@@ -547,10 +546,10 @@ fn (JsonWriter w) mut write(Value v, int indent) {
 // (-0 for negative zero); other numbers print as f.string() does.
 fn jsonNumber(float n, string method) string {
     if (n != n) {
-        jsonCrash(method + ": nan cannot be written in JSON")
+        os.crash(method + ": nan cannot be written in JSON")
     }
     if (n - n != 0.0) {
-        jsonCrash(method + ": " + n.string() + " cannot be written in JSON")
+        os.crash(method + ": " + n.string() + " cannot be written in JSON")
     }
     if (n > -1.0e21 && n < 1.0e21) {
         int i = int(n)
@@ -629,14 +628,6 @@ fn jsonQuote(string s) string {
     }
     out.push('"')
     return string(out)
-}
-
-// Ends the program the way a crash does: "crash: <message>" on stderr and
-// exit code 2. Seed has no way yet for library code to crash with its own
-// message (see lib/README.md); this becomes a real crash when it does.
-fn jsonCrash(string message) {
-    fmt.eprintln("crash: " + message)
-    os.exit(2)
 }
 
 // --------------------------------------------------------------- accessors

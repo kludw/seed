@@ -1,0 +1,28 @@
+// Package fs reads and writes files and directories. Paths are passed to
+// the OS unchanged; relative paths are relative to the current directory.
+// Errors look like "fs.read: notes.txt: no such file or directory".
+package fs
+
+// The whole file.
+pub fn read(string path) (string, error)
+
+// Creates the file or replaces its contents.
+pub fn write(string path, string data) error
+
+// Whether anything exists at path (following symbolic links).
+pub fn exists(string path) bool
+
+// Whether path is a directory (following symbolic links); false if nothing
+// is there.
+pub fn isDir(string path) bool
+
+// The names (not paths) of the entries of a directory, sorted by bytes,
+// without . and ..
+pub fn list(string dir) ([]string, error)
+
+// Creates the directory and any missing parents. Succeeds if it already
+// exists as a directory.
+pub fn mkdir(string path) error
+
+// Removes a file or an empty directory.
+pub fn remove(string path) error

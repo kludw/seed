@@ -1,0 +1,5 @@
+package bad
+
+test "uses an unknown name" {
+    assert(one() == two())
+}

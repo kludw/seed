@@ -1,0 +1,18 @@
+// Package time: durations, sleeping and timeouts. Durations are int
+// nanoseconds: write 5 * time.second.
+package time
+
+pub const int nanosecond = 1
+pub const int microsecond = 1000
+pub const int millisecond = 1000000
+pub const int second = 1000000000
+pub const int minute = 60000000000
+pub const int hour = 3600000000000
+
+// A channel that receives the current time (Unix nanoseconds) once, d
+// nanoseconds from now, and is then closed. Meant for timeouts in select.
+pub fn after(int d) chan int
+
+// Pauses the goroutine for at least d nanoseconds. Like a channel receive,
+// it is a point where a goroutine whose group failed stops.
+pub fn sleep(int d)

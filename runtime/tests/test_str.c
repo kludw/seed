@@ -169,7 +169,7 @@ static void test_methods(void) {
   e = sd_str_to_float(SD_STR_LIT("2.5x"), &d);
   CHECK(!sd_err_is_null(e));
   sd_str m = sd_err_message(e);
-  CHECK_STREQ(sd_str_cstr(m), "invalid float: \"2.5x\"");
+  CHECK_STREQ(sd_str_cstr(m), "string.toFloat: \"2.5x\": invalid float");
   sd_str_release(m);
   sd_err_release(e);
   e = sd_str_to_float(SD_STR_LIT(" 1"), &d);

@@ -1,0 +1,11 @@
+fs.read: /nonexistent-seed-dir/notes.txt: no such file or directory
+fs.list: /nonexistent-seed-dir: no such file or directory
+fs.write: /nonexistent-seed-dir/x: no such file or directory
+fs.remove: /nonexistent-seed-dir/x: no such file or directory
+os.run: seed-no-such-program: no such file or directory
+string.toInt: "12x": invalid integer
+string.toFloat: "1.5.2": invalid float
+loading config: fs.read: /nonexistent-seed-dir/notes.txt: no such file or directory
+no error
+true
+true

@@ -1,0 +1,9 @@
+// expect-error: package util is not imported
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    fmt.println(util.name())
+    return null
+}

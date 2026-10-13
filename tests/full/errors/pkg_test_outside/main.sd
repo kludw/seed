@@ -1,0 +1,9 @@
+// expect-error: tests belong in the tests/ directory of their package
+package main
+
+import "util"
+
+fn main([]string args) error {
+    util.run()
+    return null
+}

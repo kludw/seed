@@ -1,4 +1,4 @@
 ok: 2 ports
 error: port out of range: 99999
-error: invalid integer: "http"
+error: string.toInt: "http": invalid integer
 8080

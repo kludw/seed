@@ -1,0 +1,10 @@
+// expect-error: "util" is imported but not used
+package main
+
+import "fmt"
+import "util"
+
+fn main([]string args) error {
+    fmt.println("hi")
+    return null
+}

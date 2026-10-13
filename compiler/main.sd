@@ -1,12 +1,14 @@
 // The `seed` command line.
 //
-//   seed c [--strict] <file.sd>...       write the C program to stdout
-//   seed build -o <out> <file.sd>...     compile to an executable
-//   seed run <file.sd>... [-- args...]   compile and run, passing the exit code
-//   seed ast <file.sd>...                print the syntax tree (for debugging)
-//   seed fmt [--check] <file.sd>...      format the files in place (see fmt.sd)
+//   seed build [-o out] <dir | file.sd>   compile a program to an executable
+//   seed run <dir | file.sd> [args...]    compile and run, passing the exit code
+//   seed test [dir...]                    run the tests of the packages under the dirs
+//   seed fmt [--check] <file.sd>...       format the files in place (see fmt.sd)
+//   seed c <dir | file.sd...>             write the C program to stdout (for tests)
+//   seed ast <file.sd>...                 print the syntax tree (for debugging)
 //
-// All files given together form one package.
+// A program is the package main in a directory (all its .sd files), or a
+// single .sd file. The packages it imports are loaded by load.sd.
 package main
 
 import "errors"
@@ -14,12 +16,12 @@ import "fmt"
 import "fs"
 import "os"
 
-// The C compiler and its flags, used by build and run.
+// The C compiler and its flags, used by build, run and test.
 const string cCompiler = "cc"
 const []string cFlags = []string{"-std=c11", "-O2", "-w"}
 const []string cLibs = []string{"-lm", "-lpthread"}
 
-const string usage = "usage:\n  seed c [--strict] <file.sd>...\n  seed build -o <out> <file.sd>...\n  seed run <file.sd>... [-- args...]\n  seed ast <file.sd>...\n  seed fmt [--check] <file.sd>...\n"
+const string usage = "usage:\n  seed build [-o out] <dir | file.sd>\n  seed run <dir | file.sd> [args...]\n  seed test [dir...]\n  seed fmt [--check] <file.sd>...\n  seed c <dir | file.sd...>\n  seed ast <file.sd>...\n"
 
 fn main([]string args) error {
     if (args.len() < 2) {
@@ -27,71 +29,94 @@ fn main([]string args) error {
         os.exit(2)
     }
     string cmd = args[1]
+    []string rest = args.slice(2, args.len())
     string root = rootDir(args[0])
     if (cmd == "c") {
-        []string files = args.slice(2, args.len())
-        bool strict = files.len() > 0 && files[0] == "--strict"
-        if (strict) {
-            files.remove(0)
-        }
-        if (files.len() == 0) {
+        if (rest.len() == 0) {
             fmt.eprint(usage)
             os.exit(2)
         }
-        string program = try compileFiles(files, root, strict)
+        Build t = try targetOf(rest)
+        string? program = try compileProgram(root, t, false)
+        if (program == null) {
+            os.exit(1)
+        }
         fmt.print(program)
         return null
     }
     if (cmd == "ast") {
-        Parser p = try parseFiles(args.slice(2, args.len()))
+        Parser p = try parseFiles(rest)
         fmt.print(p.ast.dump())
         return null
     }
     if (cmd == "fmt") {
-        int code = try fmtCommand(args.slice(2, args.len()))
+        int code = try fmtCommand(rest)
         os.exit(code)
     }
     if (cmd == "build") {
-        if (args.len() < 5 || args[2] != "-o") {
+        string out = ""
+        int o = -1
+        int? found = rest.index("-o")
+        if (found != null) {
+            o = found
+        }
+        if (o >= 0 && o + 1 < rest.len()) {
+            out = rest[o + 1]
+            rest.remove(o + 1)
+            rest.remove(o)
+        }
+        if (rest.len() != 1 || rest[0] == "-o") {
             fmt.eprint(usage)
             os.exit(2)
         }
-        string out = args[3]
-        try build(args.slice(4, args.len()), root, out)
+        Build bt = try targetOf(rest)
+        if (out == "") {
+            out = bt.name
+        }
+        bool ok = try build(root, bt, out)
+        if (!ok) {
+            os.exit(1)
+        }
         return null
     }
     if (cmd == "run") {
-        []string files = []string{}
-        []string progArgs = []string{}
-        bool rest = false
-        for (int i = 2; i < args.len(); i++) {
-            if (rest) {
-                progArgs.push(args[i])
-            } else if (args[i] == "--") {
-                rest = true
-            } else {
-                files.push(args[i])
-            }
-        }
-        if (files.len() == 0) {
+        if (rest.len() == 0) {
             fmt.eprint(usage)
             os.exit(2)
         }
-        int code = try run(files, root, progArgs)
+        []string progArgs = rest.slice(1, rest.len())
+        if (progArgs.len() > 0 && progArgs[0] == "--") {
+            progArgs.remove(0)
+        }
+        Build rt = try targetOf(rest.slice(0, 1))
+        int code = try run(root, rt, progArgs)
+        os.exit(code)
+    }
+    if (cmd == "test") {
+        int code = try testCommand(root, rest)
         os.exit(code)
     }
     fmt.eprint("seed: unknown command " + cmd + "\n" + usage)
     os.exit(2)
 }
 
-// The directory that contains runtime/: $SEED_ROOT, or the parent of the
-// directory of the binary (which is <root>/build/seedN).
+// The directory that contains runtime/ and lib/: $SEED_ROOT, or the parent
+// of the directory of the binary (which is <root>/build/seedN). The binary
+// is found through os.executable(), which resolves symbolic links, so seed
+// works when it is called through $PATH or a link.
 fn rootDir(string argv0) string {
     string? env = os.env("SEED_ROOT")
     if (env != null && env != "") {
+        if (env.endsWith("/") && env.len() > 1) {
+            return env.slice(0, env.len() - 1)
+        }
         return env
     }
-    return dirName(dirName(argv0))
+    string exe = os.executable()
+    if (exe == "") {
+        exe = argv0
+    }
+    return dirName(dirName(exe))
 }
 
 fn dirName(string path) string {
@@ -111,37 +136,103 @@ fn dirName(string path) string {
 }
 
 fn baseName(string path) string {
+    string p = path
+    if (p.endsWith("/") && p.len() > 1) {
+        p = p.slice(0, p.len() - 1)
+    }
     int slash = -1
-    for (int i = 0; i < path.len(); i++) {
-        if (path[i] == '/') {
+    for (int i = 0; i < p.len(); i++) {
+        if (p[i] == '/') {
             slash = i
         }
     }
-    string base = path.slice(slash + 1, path.len())
+    string base = p.slice(slash + 1, p.len())
     if (base.endsWith(".sd")) {
         return base.slice(0, base.len() - 3)
+    }
+    if (base == "." || base == ".." || base == "") {
+        return lastElement(absPath(p))
     }
     return base
 }
 
-// Compiles the files to C. Compile errors are printed to stderr and end the
-// process with exit code 1.
-fn compileFiles([]string files, string root, bool strict) (string, error) {
-    Parser p = try parseFiles(files)
-    Checker c = newChecker(p.ast, p.diags, strict)
+// What to compile: the files of the root package and its directory, the
+// project root (which imports are relative to: the root package's
+// directory, or the directory given to seed test) and a name for the
+// program (for seed test, the package's import path).
+type Build struct {
+    []string files
+    string dir
+    string projectRoot
+    string name
+}
+
+// A directory, or one or more .sd files (which must be in one directory).
+fn targetOf([]string args) (Build, error) {
+    if (args.len() == 1 && !args[0].endsWith(".sd")) {
+        string dir = args[0]
+        if (dir.endsWith("/") && dir.len() > 1) {
+            dir = dir.slice(0, dir.len() - 1)
+        }
+        if (!fs.isDir(dir)) {
+            return null, errors.new(dir + " is neither a directory nor a .sd file")
+        }
+        []string files = try sourceFiles(dir)
+        if (files.len() == 0) {
+            return null, errors.new(dir + " has no .sd files")
+        }
+        return Build{files: files, dir: dir, projectRoot: dir, name: baseName(dir)}, null
+    }
+    for (int i = 0; i < args.len(); i++) {
+        if (!args[i].endsWith(".sd")) {
+            return null, errors.new(args[i] + ": expected a .sd file")
+        }
+        if (dirName(args[i]) != dirName(args[0])) {
+            return null, errors.new(args[i] + " and " + args[0] + " are in different directories; a package is one directory")
+        }
+    }
+    string fdir = dirName(args[0])
+    return Build{files: args, dir: fdir, projectRoot: fdir, name: baseName(args[0])}, null
+}
+
+// Loads, checks and translates a program to C. Compile errors are printed
+// to stderr, and the result is then null. In test mode, the root package's
+// tests/ files are compiled too, and the program runs the tests instead of
+// main.
+fn compileProgram(string root, Build t, bool testMode) (string?, error) {
+    Loader l = newLoader(root, t.projectRoot)
+    string path = ""
+    if (testMode) {
+        path = t.name
+    }
+    int pkg = l.addPackage(path, t.dir, absPath(t.dir).startsWith(l.libDir + "/"))
+    try l.addFiles(pkg, t.files, false)
+    if (testMode) {
+        []string testFiles = try sourceFiles(joinPath(t.dir, "tests"))
+        try l.addFiles(pkg, testFiles, true)
+    }
+    try l.loadImports()
+    if (l.p.diags.count() > 0) {
+        l.p.diags.print()
+        return null, null
+    }
+    Checker c = newChecker(l.p.ast, l.p.diags, testMode)
+    c.libDir = l.libDir
+    c.projectRoot = t.projectRoot
     c.checkProgram()
     if (c.diags.count() > 0) {
         c.diags.print()
-        os.exit(1)
+        return null, null
     }
     string runtime = try readRuntime(root)
+    string natives = try readNatives(c.ast)
     Gen g = newGen(c)
-    string program = g.genProgram()
+    string program = g.genProgram(natives)
     return runtime + program, null
 }
 
-// Parses the files into one tree. Syntax errors are printed to stderr and
-// end the process with exit code 1.
+// Parses the files into one tree (for seed ast). Syntax errors are printed
+// to stderr and end the process with exit code 1.
 fn parseFiles([]string files) (Parser, error) {
     Parser p = newParser(newDiags())
     for (int i = 0; i < files.len(); i++) {
@@ -167,14 +258,8 @@ fn tempDir() string {
     return "/tmp"
 }
 
-// Compiles the files into the executable out, through a C file in the
-// temporary directory.
-fn build([]string files, string root, string out) error {
-    string program = try compileFiles(files, root, false)
-    string dir = tempDir() + "/seed-build-" + baseName(out)
-    try fs.mkdir(dir)
-    string cfile = dir + "/" + baseName(out) + ".c"
-    try fs.write(cfile, program)
+// Runs the C compiler on a C file.
+fn compileC(string cfile, string out) error {
     []string argv = []string{cCompiler}
     for (int i = 0; i < cFlags.len(); i++) {
         argv.push(cFlags[i])
@@ -192,16 +277,144 @@ fn build([]string files, string root, string out) error {
     return null
 }
 
-// Builds the files into a temporary executable, runs it with args and
-// returns its exit code.
-fn run([]string files, string root, []string args) (int, error) {
-    string dir = tempDir() + "/seed-run-" + baseName(files[0])
+// Compiles a program into the executable out, through a C file in the
+// temporary directory. Returns false when there were compile errors.
+fn build(string root, Build t, string out) (bool, error) {
+    string? program = try compileProgram(root, t, false)
+    if (program == null) {
+        return false, null
+    }
+    string dir = tempDir() + "/seed-build-" + baseName(out)
     try fs.mkdir(dir)
-    string exe = dir + "/" + baseName(files[0])
-    try build(files, root, exe)
+    string cfile = dir + "/" + baseName(out) + ".c"
+    try fs.write(cfile, program)
+    try compileC(cfile, out)
+    return true, null
+}
+
+// Builds a program into a temporary executable, runs it with args and
+// returns its exit code.
+fn run(string root, Build t, []string args) (int, error) {
+    string dir = tempDir() + "/seed-run-" + t.name
+    try fs.mkdir(dir)
+    string exe = dir + "/" + t.name
+    bool ok = try build(root, t, exe)
+    if (!ok) {
+        return 1, null
+    }
     []string argv = []string{exe}
     for (int i = 0; i < args.len(); i++) {
         argv.push(args[i])
     }
     return os.run(argv)
+}
+
+// ---- seed test ----
+
+// `seed test [dir...]`: finds every package under the directories (default:
+// the current one) that has a tests/ directory, builds a test program for
+// it and runs it. Each test program prints one line per failed test and
+// writes its counts to a file; the summary adds them up. Returns the exit
+// code: 1 if a test failed or a package did not compile.
+fn testCommand(string root, []string args) (int, error) {
+    []string dirs = args
+    if (dirs.len() == 0) {
+        dirs = []string{"."}
+    }
+    int passed = 0
+    int failed = 0
+    for (int i = 0; i < dirs.len(); i++) {
+        string base = dirs[i]
+        if (base.endsWith("/...")) {
+            base = base.slice(0, base.len() - 4)
+        }
+        if (base.endsWith("/") && base.len() > 1) {
+            base = base.slice(0, base.len() - 1)
+        }
+        if (!fs.isDir(base)) {
+            return 2, errors.new("seed test: " + base + " is not a directory")
+        }
+        []string pkgs = try testPackages(base, []string{})
+        for (int j = 0; j < pkgs.len(); j++) {
+            []int counts = try testPackage(root, base, pkgs[j])
+            passed = passed + counts[0]
+            failed = failed + counts[1]
+        }
+    }
+    fmt.println(passed.string() + " passed, " + failed.string() + " failed")
+    if (failed > 0) {
+        return 1, null
+    }
+    return 0, null
+}
+
+// The package directories under dir (dir included) that have tests.
+fn testPackages(string dir, []string found) ([]string, error) {
+    []string out = found
+    []string names = try fs.list(dir)
+    bool hasSource = false
+    for (int i = 0; i < names.len(); i++) {
+        string path = joinPath(dir, names[i])
+        if (fs.isDir(path)) {
+            continue
+        }
+        if (names[i].endsWith(".sd")) {
+            hasSource = true
+        }
+    }
+    string tests = joinPath(dir, "tests")
+    if (hasSource && fs.isDir(tests)) {
+        []string testFiles = try sourceFiles(tests)
+        if (testFiles.len() > 0) {
+            out.push(dir)
+        }
+    }
+    for (int j = 0; j < names.len(); j++) {
+        string sub = joinPath(dir, names[j])
+        if (names[j] != "tests" && !names[j].startsWith(".") && fs.isDir(sub)) {
+            out = try testPackages(sub, out)
+        }
+    }
+    return out, null
+}
+
+// Builds and runs the tests of the package in dir (base is the project
+// root). Returns the numbers of passed and failed tests.
+fn testPackage(string root, string base, string dir) ([]int, error) {
+    []string files = try sourceFiles(dir)
+    string name = baseName(dir)
+    if (dir != base && base == ".") {
+        name = dir
+    } else if (dir != base) {
+        name = dir.slice(base.len() + 1, dir.len())
+    }
+    Build t = Build{files: files, dir: dir, projectRoot: base, name: name}
+    string? program = try compileProgram(root, t, true)
+    if (program == null) {
+        fmt.println("FAIL " + dir + ": the package or its tests do not compile")
+        return []int{0, 1}, null
+    }
+    string tmp = tempDir() + "/seed-test-" + name.replace("/", "-")
+    try fs.mkdir(tmp)
+    string cfile = tmp + "/test.c"
+    string exe = tmp + "/test"
+    string results = tmp + "/results"
+    try fs.write(cfile, program)
+    try compileC(cfile, exe)
+    if (fs.exists(results)) {
+        try fs.remove(results)
+    }
+    int code = try os.run([]string{exe, results})
+    string? text, _ = fs.read(results)
+    if (text == null) {
+        fmt.println("FAIL " + dir + ": the test program ended with exit code " + code.string())
+        return []int{0, 1}, null
+    }
+    []string parts = text.trim().split(" ")
+    if (parts.len() != 2) {
+        return null, errors.new("seed test: unexpected results file " + results)
+    }
+    int p = try parts[0].toInt()
+    int f = try parts[1].toInt()
+    return []int{p, f}, null
 }

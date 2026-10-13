@@ -1,0 +1,61 @@
+// A program made of packages: qualified names of functions, types, enum
+// cases, constants and function values, pub fields, an interface
+// implemented in another package, a nested import path, and a type name
+// (Item) used by two packages.
+package main
+
+import "fmt"
+import "geo/util"
+import "shapes"
+
+type Item struct {
+    string label
+}
+
+// A type of this package that implements an interface of another one.
+type Robot struct implements shapes.Named {
+    string id
+}
+
+fn (Robot r) name() string {
+    return "robot " + r.id
+}
+
+fn twice(int x) int {
+    return x * 2
+}
+
+fn describe(shapes.Shape s) string {
+    switch (s) {
+    case shapes.Shape.Circle(float r):
+        return "circle " + r.string()
+    case shapes.Shape.Rect(float w, float _):
+        return "rect of width " + w.string()
+    case shapes.Shape.Empty:
+        return "empty"
+    }
+}
+
+fn main([]string args) error {
+    shapes.Item it = shapes.Item{name: "box", weight: 3}
+    it.weight = it.weight + 1
+    Item mine = Item{label: it.name}
+    fmt.println(mine.label + " " + it.weight.string())
+    []shapes.Shape all = []shapes.Shape{shapes.Shape.Circle(1.5), shapes.Shape.Rect(2.0, 3.0), shapes.Shape.Empty}
+    for (int i = 0; i < all.len(); i++) {
+        fmt.println(describe(all[i]) + ", area " + shapes.area(all[i]).string())
+    }
+    shapes.Counter c = shapes.newCounter("clicks")
+    c.add(2)
+    c.add(3)
+    fmt.println(c.name + " " + c.total().string())
+    shapes.Named n = c
+    fmt.println("named: " + n.name())
+    n = Robot{id: "r2"}
+    fmt.println("named: " + n.name())
+    fmt.println("max " + shapes.maxItems.string() + ", unit " + util.unit)
+    fn(int) int f = util.apply
+    fmt.println(f(5).string() + " " + util.twiceThen(twice, 4).string())
+    fmt.println(util.clamp(150).string())
+    return null
+}

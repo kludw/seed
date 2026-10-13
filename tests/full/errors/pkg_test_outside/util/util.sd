@@ -1,0 +1,7 @@
+package util
+
+pub fn run() {}
+
+test "run does nothing" {
+    run()
+}

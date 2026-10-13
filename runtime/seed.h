@@ -540,6 +540,9 @@ bool sd_iface_equal(sd_iface a, sd_iface b);
 
 sd_err sd_errors_new(sd_str msg);                 /* errors.new: msg borrowed */
 sd_err sd_errorf(const char *fmt, ...) SD_PRINTF(1, 2);
+/* strerror(e) with a lowercase first letter, for the <reason> part of
+ * docs/stdlib.md's error messages (borrowed, per thread). */
+const char *sd_strerror(int e);
 sd_str sd_err_message(sd_err e);                  /* e.message(); crashes on null */
 bool sd_err_equal(sd_err a, sd_err b);            /* both null, or same message */
 extern const sd_error_vtable sd_errors_vtable;   /* the vtable of errors.new values */
@@ -612,6 +615,24 @@ int sd_main(int argc, char **argv, sd_err (*main_fn)(sd_list *args));
 sd_err sd_catch(sd_err (*fn)(void *arg), void *arg);
 SD_NORETURN void sd_exit_process(int code); /* flush stdout/stderr and _exit */
 
+/* ---- seed test (seed_test.c) ----
+ *   static const sd_test sd_tests[] = {{"name", "pkg/tests/x_test.sd", 12, sd_test_3}, ...};
+ *   int main(int argc, char **argv) { return sd_test_main(argc, argv, sd_tests, n); }
+ * Runs each test in a goroutine of its own group and prints a line for each
+ * one that fails (an assert, an error it returned, a crash); writes
+ * "<passed> <failed>" to the file named by argv[1]; exits 1 if a test failed. */
+typedef struct {
+  const char *name;
+  const char *file;
+  int line;
+  sd_err (*fn)(void);
+} sd_test;
+int sd_test_main(int argc, char **argv, const sd_test *tests, int n);
+sd_err sd_assert_error(sd_str msg); /* the error of a failed assert (msg borrowed) */
+bool sd_err_is_assert(sd_err e);
+sd_str sd_str_quote(sd_str s);      /* "text" with \n, \t, \", \\ and \xHH escapes */
+sd_str sd_err_show(sd_err e);       /* null, or the quoted message */
+
 /* ======================================================================
  * Core packages
  * ====================================================================== */
@@ -623,6 +644,9 @@ void sd_fmt_eprint(sd_str s);
 void sd_fmt_eprintln(sd_str s);
 /* os */
 SD_NORETURN void sd_os_exit(sd_int code);
+SD_NORETURN void sd_os_crash(sd_str message);       /* os.crash: like a runtime fault */
+sd_str sd_os_executable(void);                      /* the program's real path ("" if unknown) */
+sd_err sd_os_cwd(sd_str *out);                      /* os.cwd */
 sd_str sd_os_env(sd_str name);                      /* string?: NULL when unset */
 sd_err sd_os_run(const sd_list *argv, sd_int *code); /* on error *code = SD_INT_NULL */
 /* fs (on error the out value is NULL) */

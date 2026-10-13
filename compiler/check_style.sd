@@ -1,8 +1,6 @@
-// The pedantic checks of --strict mode (see newChecker): unused variables,
-// imports and results, unreachable code, shadowing of package-level names
-// and the naming rules. seed0 has none of them, and some programs in the
-// seed0-era test suites fail them, so they are opt-in for now. The compiler
-// itself is always built with --strict.
+// The pedantic checks: unused variables, imports and results, unreachable
+// code and the naming rules (shadowing is checked in declare). seed0 has
+// none of them; the real compiler always applies them.
 package main
 
 // Every local variable must be read somewhere (assigning to it is not
@@ -20,7 +18,7 @@ fn (Checker c) mut checkUnusedVars(int first) {
 fn (Checker c) mut checkUnusedImports() {
     for (int i = 0; i < c.ast.imports.len(); i++) {
         Import im = c.ast.imports[i]
-        if (isCorePackage(im.path) && c.usedImports[im.file.string() + ":" + im.path] == null) {
+        if (im.target >= 0 && c.usedImports[im.file.string() + ":" + im.name] == null) {
             c.errorHint(im.pos, "\"" + im.path + "\" is imported but not used", "remove the import")
         }
     }
@@ -88,14 +86,14 @@ fn convertCase(string name, bool pascal) string {
 }
 
 fn (Checker c) mut checkCamel(string name, Pos pos, string what) {
-    if (!c.strict || name == "_" || name == "" || isCamelCase(name)) {
+    if (name == "_" || name == "" || isCamelCase(name)) {
         return
     }
     c.errorHint(pos, what + " " + name + " must be written in camelCase", "rename it to " + convertCase(name, false))
 }
 
 fn (Checker c) mut checkPascal(string name, Pos pos, string what) {
-    if (!c.strict || name == "" || isPascalCase(name)) {
+    if (name == "" || isPascalCase(name)) {
         return
     }
     c.errorHint(pos, what + " " + name + " must be written in PascalCase", "rename it to " + convertCase(name, true))
@@ -126,6 +124,9 @@ fn (Checker c) mut checkDeclNames() {
     }
     for (int f = 0; f < c.ast.fns.len(); f++) {
         FnDecl fd = c.ast.fns[f]
+        if (fd.isTest) {
+            continue
+        }
         string what = "the function"
         if (fd.isMethod) {
             what = "the method"
@@ -143,14 +144,12 @@ fn (Checker c) mut checkDeclNames() {
 // A call used as a statement must not return a value that is dropped.
 fn (Checker c) mut checkUnusedResult(int e) {
     int t = c.typeOf(e)
-    if (!c.strict || t == tyVoid || t == tyInvalid || c.types.endsWithError(t)) {
+    if (t == tyVoid || t == tyInvalid || c.types.endsWithError(t)) {
         return
     }
-    c.errorHint(c.ast.exprs[e].pos, "the result of " + c.describe(e) + " is not used", "assign it to a variable, or change the function to return nothing")
+    c.errorHint(c.ast.exprs[e].pos, "the result of " + c.describe(e) + " is not used", "assign it to a variable, or discard it explicitly by writing _ = in front of the call")
 }
 
 fn (Checker c) mut reportUnreachable(int s) {
-    if (c.strict) {
-        c.errorHint(c.ast.stmts[s].pos, "unreachable code", "the statement before it always returns, breaks, continues or exits")
-    }
+    c.errorHint(c.ast.stmts[s].pos, "unreachable code", "the statement before it always returns, breaks, continues or exits")
 }

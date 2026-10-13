@@ -1,0 +1,20 @@
+// expect-error: Shape.Point carries no data, so its pattern has no parentheses
+package main
+
+import "fmt"
+
+type Shape enum {
+    Circle(float r)
+    Point
+}
+
+fn main([]string args) error {
+    Shape s = Shape.Point
+    switch (s) {
+    case Shape.Circle(float _):
+        fmt.println("circle")
+    case Shape.Point():
+        fmt.println("point")
+    }
+    return null
+}

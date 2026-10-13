@@ -101,11 +101,18 @@ fn newGen(Checker c) Gen {
 }
 
 // Generates the program and returns the C text (without the runtime).
-fn (Gen g) mut genProgram() string {
+// natives is the C code of the native functions of the standard library
+// packages in the program; it goes after the type definitions and
+// prototypes, so that it can use them.
+fn (Gen g) mut genProgram(string natives) string {
     g.genTypes()
     g.genConsts()
     for (int f = 0; f < g.c.ast.fns.len(); f++) {
-        g.genFn(f)
+        if (g.c.ast.fns[f].body < 0) {
+            g.genNative(f)
+        } else if (!g.c.ast.fns[f].isTest || g.c.testMode) {
+            g.genFn(f)
+        }
     }
     g.curFn = -1
     g.genVtables()
@@ -115,12 +122,37 @@ fn (Gen g) mut genProgram() string {
     []string parts = []string{"\n/* ---- program ---- */\n"}
     parts.push(g.typeDefs.join(""))
     parts.push(g.protos.join(""))
+    parts.push(natives)
     parts.push(g.helpers.join(""))
     parts.push(g.thunks.join(""))
     parts.push(g.consts.join(""))
     parts.push(g.fnText.join(""))
-    parts.push("int main(int argc, char **argv) { return sd_main(argc, argv, sd_f_main); }\n")
+    if (g.c.testMode) {
+        parts.push(g.testMain())
+    } else {
+        parts.push("int main(int argc, char **argv) { return sd_main(argc, argv, sd_f_main); }\n")
+    }
     return parts.join("")
+}
+
+// The table of tests and a main that runs them (runtime/seed_test.c): each
+// test runs in a goroutine of its own group.
+fn (Gen g) testMain() string {
+    []string rows = []string{}
+    for (int f = 0; f < g.c.ast.fns.len(); f++) {
+        FnDecl fd = g.c.ast.fns[f]
+        if (fd.isTest && g.c.ast.files[fd.file].isTest) {
+            rows.push("  {" + cString(fd.name) + ", " + cString(g.c.diags.paths[fd.file]) + ", " + fd.pos.line.string() + ", " + g.c.fnCName[f] + "},\n")
+        }
+    }
+    if (rows.len() == 0) {
+        rows.push("  {NULL, NULL, 0, NULL},\n")
+    }
+    string n = rows.len().string()
+    if (rows[0].startsWith("  {NULL")) {
+        n = "0"
+    }
+    return "static const sd_test sd_tests[] = {\n" + rows.join("") + "};\nint main(int argc, char **argv) { return sd_test_main(argc, argv, sd_tests, " + n + "); }\n"
 }
 
 // ---- output ----
@@ -148,8 +180,16 @@ fn (Gen g) elemOf(int t) int {
     return g.c.types.elem(t)
 }
 
+// The C name of a struct, enum or interface type (with its package's
+// prefix).
 fn (Gen g) declName(int t) string {
-    return g.c.ast.typeDecls[g.c.types.decl(t)].name
+    return g.c.declCName(g.c.types.decl(t))
+}
+
+// The C function that returns the value of a constant.
+fn (Gen g) constCName(int i) string {
+    ConstDecl cd = g.c.ast.consts[i]
+    return "sd_c_" + g.c.ast.pkgs[g.c.ast.files[cd.file].pkgIndex].cprefix + cd.name
 }
 
 fn (Gen g) ctype(int t) string {
@@ -633,9 +673,11 @@ fn (Gen g) mut genTypes() {
     for (int i = 0; i < n; i++) {
         TypeDecl td = g.c.ast.typeDecls[i]
         if (td.kind == DeclKind.Enum) {
-            g.typeDefs.push("typedef struct sd_E_" + td.name + " sd_E_" + td.name + ";\n")
+            string en = g.c.declCName(i)
+            g.typeDefs.push("typedef struct sd_E_" + en + " sd_E_" + en + ";\n")
         } else if (td.kind == DeclKind.Struct) {
-            g.typeDefs.push("typedef struct sd_S_" + td.name + " sd_S_" + td.name + ";\n")
+            string sn = g.c.declCName(i)
+            g.typeDefs.push("typedef struct sd_S_" + sn + " sd_S_" + sn + ";\n")
         }
     }
     int nt = g.c.types.list.len()
@@ -680,7 +722,7 @@ fn (Gen g) mut genTypes() {
     for (int d = 0; d < n; d++) {
         TypeDecl dd = g.c.ast.typeDecls[d]
         if (dd.kind != DeclKind.Interface) {
-            g.typeDefs.push("static const sd_type sd_D_" + dd.name + ";\n")
+            g.typeDefs.push("static const sd_type sd_D_" + g.c.declCName(d) + ";\n")
         }
     }
     for (int s = 0; s < n; s++) {
@@ -709,7 +751,7 @@ fn (Gen g) mut genStructDef(int d, []int state) []int {
         }
     }
     st[d] = 2
-    []string s = []string{"struct sd_S_" + td.name + " {"}
+    []string s = []string{"struct sd_S_" + g.c.declCName(d) + " {"}
     for (int j = 0; j < td.fieldCount; j++) {
         s.push(" " + g.ctype(g.c.fieldType(d, j)) + " f_" + g.c.fieldName(d, j) + ";")
     }
@@ -725,7 +767,7 @@ fn (Gen g) mut genStructDef(int d, []int state) []int {
 // the cases' fields.
 fn (Gen g) mut genEnumDef(int d) {
     TypeDecl td = g.c.ast.typeDecls[d]
-    []string s = []string{"struct sd_E_" + td.name + " { int32_t tag;"}
+    []string s = []string{"struct sd_E_" + g.c.declCName(d) + " { int32_t tag;"}
     bool any = false
     for (int i = 0; i < td.caseCount; i++) {
         if (g.c.enumCase(d, i).paramCount > 0) {
@@ -755,20 +797,20 @@ fn (Gen g) mut genEnumDef(int d) {
 // enum cases without data.
 fn (Gen g) mut genDescriptor(int d) {
     TypeDecl td = g.c.ast.typeDecls[d]
-    string n = td.name
+    string n = g.c.declCName(d)
     if (td.kind == DeclKind.Struct) {
-        []string fs = []string{}
+        []string fields = []string{}
         for (int i = 0; i < td.fieldCount; i++) {
-            fs.push("SD_FIELD(sd_S_" + n + ", f_" + g.c.fieldName(d, i) + ", " + g.desc(g.c.fieldType(d, i)) + ")")
+            fields.push("SD_FIELD(sd_S_" + n + ", f_" + g.c.fieldName(d, i) + ", " + g.desc(g.c.fieldType(d, i)) + ")")
         }
         if (td.fieldCount == 0) {
-            fs.push("SD_FIELD(sd_S_" + n + ", unused_, &sd_type_byte)")
+            fields.push("SD_FIELD(sd_S_" + n + ", unused_, &sd_type_byte)")
         }
         string kind = "SD_STRUCT_TYPE_TRIVIAL"
         if (g.counted(g.c.declType[d])) {
             kind = "SD_STRUCT_TYPE"
         }
-        g.typeDefs.push("static const sd_field sd_F_" + n + "[] = {" + fs.join(", ") + "};\n")
+        g.typeDefs.push("static const sd_field sd_F_" + n + "[] = {" + fields.join(", ") + "};\n")
         g.typeDefs.push("static const sd_type sd_D_" + n + " = " + kind + "(\"" + n + "\", sd_S_" + n + ", sd_F_" + n + ");\n")
         return
     }
@@ -841,7 +883,7 @@ fn (Gen g) mut genVtableType(int d) {
         int sig = g.c.ifaceMethodType(d, i)
         s.push(" " + g.ctype(g.elemOf(sig)) + " (*m_" + ms.name + ")(" + g.vtParams(sig, ms.isMut, false) + ");")
     }
-    s.push(" } sd_V_" + td.name + ";\n")
+    s.push(" } sd_V_" + g.c.declCName(d) + ";\n")
     g.typeDefs.push(s.join(""))
 }
 
@@ -851,14 +893,14 @@ fn (Gen g) mut genVtables() {
     for (int i = 0; i < g.c.impls.len(); i++) {
         Impl im = g.c.impls[i]
         int t = g.c.declType[im.decl]
-        string tname = g.c.ast.typeDecls[im.decl].name
+        string tname = g.c.declCName(im.decl)
         string vt = "sd_vt_" + tname + "__" + g.ifaceName(im.iface)
         []string entries = []string{"{\"" + tname + "\"}"}
         for (int j = 0; j < g.c.ifaceMethodCount(im.iface); j++) {
             string name = g.c.ifaceMethodName(im.iface, j)
             int sig = g.c.ifaceMethodSig(im.iface, j)
             bool isMut = g.c.ifaceMethodMut(im.iface, j)
-            int? m = g.c.methods[tname + "." + name]
+            int? m = g.c.methods[methodKey(im.decl, name)]
             if (m == null) {
                 continue
             }
@@ -906,7 +948,8 @@ fn (Gen g) mut genConsts() {
         ConstDecl cd = g.c.ast.consts[i]
         int t = g.c.constType[i]
         string ct = g.ctype(t)
-        string head = "static " + ct + " sd_c_" + cd.name + "(void)"
+        string cn = g.constCName(i)
+        string head = "static " + ct + " " + cn + "(void)"
         g.protos.push(head + ";\n")
         g.out = []string{}
         g.slots = []Slot{}
@@ -918,13 +961,14 @@ fn (Gen g) mut genConsts() {
         }
         // A counted value is released when a goroutine that computed it
         // ends (the main goroutine keeps its values until the program exits).
-        string v = "sd_cv_" + cd.name
-        string st = "sd_cs_" + cd.name
+        string base = cn.slice(5, cn.len())
+        string v = "sd_cv_" + base
+        string st = "sd_cs_" + base
         g.emit("static _Thread_local " + ct + " " + v + ";")
         g.emit("static _Thread_local int " + st + ";")
         string rel = g.releaseCall(t, v)
         if (rel != "") {
-            g.emit("static void sd_cf_" + cd.name + "(void) { " + rel + "; " + st + " = 0; }")
+            g.emit("static void sd_cf_" + base + "(void) { " + rel + "; " + st + " = 0; }")
         }
         g.emit(head + " {")
         g.indent++
@@ -936,7 +980,7 @@ fn (Gen g) mut genConsts() {
         g.releaseTo(0)
         g.emit(st + " = 2;")
         if (rel != "") {
-            g.emit("sd_goroutine_atexit(sd_cf_" + cd.name + ");")
+            g.emit("sd_goroutine_atexit(sd_cf_" + base + ");")
         }
         g.emit("return " + v + ";")
         g.indent--
@@ -970,6 +1014,71 @@ fn (Gen g) mut fnSig(int f) string {
     return "static " + g.ctype(g.c.fnRet[f]) + " " + g.c.fnCName[f] + "(" + ps.join(", ") + ")"
 }
 
+// The C symbol of a native function: sd_lib_<package>_<name>, or
+// sd_lib_<package>_<Type>_<name> for a method (runtime/README.md, "Native
+// functions").
+fn (Gen g) nativeName(int f) string {
+    FnDecl fd = g.c.ast.fns[f]
+    string prefix = "sd_lib_" + g.c.ast.pkgs[g.c.fnPkg(f)].cprefix
+    if (fd.isMethod && g.c.fnRecv[f] >= 0) {
+        return prefix + g.c.ast.typeDecls[g.c.fnRecv[f]].name + "_" + fd.name
+    }
+    return prefix + fd.name
+}
+
+// A native function: a prototype of its C implementation, and a function
+// with the usual calling convention that calls it. Several results come
+// back as the last result (returned) and out-pointers for the others.
+fn (Gen g) mut genNative(int f) {
+    FnDecl fd = g.c.ast.fns[f]
+    int r = g.c.fnRet[f]
+    string native = g.nativeName(f)
+    []string ps = []string{}
+    []string args = []string{}
+    if (fd.isMethod) {
+        string star = ""
+        if (fd.recvMut) {
+            star = " *"
+        }
+        ps.push(g.ctype(g.c.declType[g.c.fnRecv[f]]) + star)
+        args.push("l_" + fd.recvName)
+    }
+    for (int i = 0; i < fd.paramCount; i++) {
+        Param p = g.c.ast.params[g.c.ast.at(fd.params, i)]
+        ps.push(g.ctype(g.c.teType[p.typeExpr]))
+        if (p.name == "_") {
+            args.push("_p" + i.string())
+        } else {
+            args.push("l_" + p.name)
+        }
+    }
+    string sig = g.fnSig(f)
+    g.protos.push(sig + ";\n")
+    if (!g.c.types.isTuple(r)) {
+        if (ps.len() == 0) {
+            ps.push("void")
+        }
+        g.protos.push(g.ctype(r) + " " + native + "(" + ps.join(", ") + ");\n")
+        string call = native + "(" + args.join(", ") + ")"
+        if (r != tyVoid) {
+            call = "return " + call
+        }
+        g.fnText.push(sig + " { " + call + "; }\n\n")
+        return
+    }
+    int n = g.c.types.count(r)
+    []string body = []string{sig + " {\n  " + g.ctype(r) + " r_;\n"}
+    for (int k = 0; k < n - 1; k++) {
+        int pt = g.c.types.part(r, k)
+        ps.push(g.ctype(pt) + " *")
+        args.push("&r_.r" + k.string())
+        body.push("  r_.r" + k.string() + " = " + g.zeroOf(pt) + ";\n")
+    }
+    g.protos.push(g.ctype(g.c.types.part(r, n - 1)) + " " + native + "(" + ps.join(", ") + ");\n")
+    body.push("  r_.r" + (n - 1).string() + " = " + native + "(" + args.join(", ") + ");\n  return r_;\n}\n\n")
+    g.fnText.push(body.join(""))
+}
+
 fn (Gen g) mut genFn(int f) {
     FnDecl fd = g.c.ast.fns[f]
     g.curFn = f
@@ -995,7 +1104,12 @@ fn (Gen g) mut genFn(int f) {
     // exhaustive switch); tell the C compiler too.
     Block body = g.c.ast.blocks[fd.body]
     bool endsInReturn = body.count > 0 && g.c.ast.stmts[g.c.ast.at(body.list, body.count - 1)].kind == StmtKind.Return
-    if (fd.resultCount > 0 && !endsInReturn) {
+    if (fd.isTest) {
+        // A test that reaches its end passed.
+        if (!g.c.blockExits(fd.body)) {
+            g.emitReturn("SD_ERR_NULL", []string{})
+        }
+    } else if (fd.resultCount > 0 && !endsInReturn) {
         g.emit("sd_crash(\"internal error: " + fd.name + " reached its end without returning\");")
     }
     g.indent--
@@ -1004,11 +1118,47 @@ fn (Gen g) mut genFn(int f) {
     g.fnText.push(g.out.join(""))
 }
 
+// The C files of the standard library packages in the program
+// (lib/<pkg>/*.c: their native functions), without their includes of the
+// runtime's headers.
+fn readNatives(Ast ast) (string, error) {
+    []string parts = []string{}
+    for (int p = 0; p < ast.pkgs.len(); p++) {
+        Package pk = ast.pkgs[p]
+        if (!pk.isLib) {
+            continue
+        }
+        []string names = try fs.list(pk.dir)
+        for (int i = 0; i < names.len(); i++) {
+            if (!names[i].endsWith(".c")) {
+                continue
+            }
+            string path = pk.dir + "/" + names[i]
+            string text = try fs.read(path)
+            parts.push(stripRuntimeIncludes(text, "lib/" + pk.path + "/" + names[i]))
+        }
+    }
+    return parts.join("\n"), null
+}
+
+// A C file without its #include "seed..." lines (the runtime is pasted
+// above it), headed by a comment with its name.
+fn stripRuntimeIncludes(string text, string name) string {
+    []string lines = text.split("\n")
+    []string kept = []string{"/* ---- " + name + " ---- */"}
+    for (int j = 0; j < lines.len(); j++) {
+        if (!lines[j].startsWith("#include \"seed")) {
+            kept.push(lines[j])
+        }
+    }
+    return kept.join("\n")
+}
+
 // The runtime pasted at the top of every generated program: seed.h,
 // seed_internal.h and the implementation files, without their includes of
 // each other (runtime/README.md, section 1).
 fn readRuntime(string root) (string, error) {
-    []string files = []string{"seed.h", "seed_internal.h", "seed_core.c", "seed_int.c", "seed_str.c", "seed_list.c", "seed_task.c", "seed_pkg.c"}
+    []string files = []string{"seed.h", "seed_internal.h", "seed_core.c", "seed_int.c", "seed_str.c", "seed_list.c", "seed_task.c", "seed_pkg.c", "seed_test.c"}
     []string parts = []string{}
     for (int i = 0; i < files.len(); i++) {
         string path = root + "/runtime/" + files[i]

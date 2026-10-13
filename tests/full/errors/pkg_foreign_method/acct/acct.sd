@@ -1,0 +1,10 @@
+package acct
+
+pub type Account struct {
+    pub string owner
+    int balance
+}
+
+pub fn open(string owner) Account {
+    return Account{owner: owner, balance: 0}
+}

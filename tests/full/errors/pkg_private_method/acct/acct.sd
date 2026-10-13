@@ -1,0 +1,14 @@
+package acct
+
+pub type Account struct {
+    pub string owner
+    int balance
+}
+
+pub fn open(string owner) Account {
+    return Account{owner: owner, balance: 0}
+}
+
+fn (Account a) mut cheat(int n) {
+    a.balance = a.balance + n
+}

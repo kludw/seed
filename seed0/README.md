@@ -113,9 +113,18 @@ quadratic implementation would take minutes.
 - **Equality.** Maps compare equal when they have the same keys and values,
   in any order. Two errors are equal when both are null, or both have the
   same message.
-- **Runtime error texts.** `toInt` gives `invalid integer: "x"` and `toFloat`
-  gives `invalid float: "x"`. fs errors are `path: strerror`. `os.run`
-  returns `128 + signal` for a child killed by a signal. Crashes are
+- **Runtime error texts** follow docs/stdlib.md, as the real compiler's do:
+  `toInt` gives `string.toInt: "x": invalid integer` and `toFloat`
+  `string.toFloat: "x": invalid float`; fs errors are
+  `fs.read: <path>: <reason>` (`fs.write`, `fs.list`, `fs.mkdir`,
+  `fs.remove`), with `strerror`'s text starting in lowercase. `os.run`
+  returns `128 + signal` for a child killed by a signal, gives
+  `os.run: <program>: <reason>` when it cannot start it, and crashes on an
+  empty argv.
+- **os.executable() and os.cwd()** (added for the real compiler, which uses
+  them to find its root through symbolic links): the program's real path
+  (`_NSGetExecutablePath` or `/proc/self/exe`, then `realpath`), and
+  `getcwd`. Crashes are
   `crash: index out of range: 5 with length 3`, `crash: integer overflow`,
   `crash: division by zero`, and so on. A stack overflow (or any other memory
   fault) is reported as `crash: stack overflow or invalid memory access` with

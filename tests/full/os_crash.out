@@ -1,0 +1,5 @@
+deferred in check
+group: crash: check: n (-1) must not be negative
+checked 1
+deferred in check
+deferred in check

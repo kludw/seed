@@ -69,28 +69,9 @@ fn (Checker c) mut checkNamedCall(int e, string n) {
         c.checkArgsLoosely(e)
         return
     }
-    int? g = c.globals[n]
+    int? g = c.global(c.pkgOf(cpos), n)
     if (g != null) {
-        Global gl = c.globalList[g]
-        switch (gl.kind) {
-        case GlobalKind.Fn:
-            int f = gl.index
-            FnDecl fd = c.ast.fns[f]
-            []int ps = []int{}
-            for (int i = 0; i < fd.paramCount; i++) {
-                ps.push(c.paramType(f, i))
-            }
-            c.info[e].res = Res.Func
-            c.info[e].ref = f
-            c.setType(e, c.fnRet[f])
-            c.checkArgs(e, ps, n + "()")
-            return
-        case GlobalKind.Type:
-            c.errorHint(cpos, n + " is a type", "a struct value is written " + n + "{field: value, ...}")
-        case GlobalKind.Const:
-            c.error(cpos, n + " is a constant, not a function")
-        }
-        c.setType(e, tyInvalid)
+        c.checkGlobalCall(e, g, n)
         return
     }
     if (n == "int" || n == "float" || n == "byte" || n == "string" || n == "bool") {
@@ -99,8 +80,9 @@ fn (Checker c) mut checkNamedCall(int e, string n) {
     }
     Suggest s = newSuggest(n)
     for (int j = 0; j < c.ast.fns.len(); j++) {
-        if (!c.ast.fns[j].isMethod) {
-            s.consider(c.ast.fns[j].name)
+        FnDecl cand = c.ast.fns[j]
+        if (!cand.isMethod && !cand.isTest && c.fnPkg(j) == c.pkgOf(cpos)) {
+            s.consider(cand.name)
         }
     }
     for (int k = c.scope.len() - 1; k >= 0; k--) {
@@ -111,6 +93,31 @@ fn (Checker c) mut checkNamedCall(int e, string n) {
         c.checkExpr(c.ast.at(x.list, m))
     }
     c.setType(e, tyInvalid)
+}
+
+// A call of a package-level name (what is "f" or "pkg.f" for messages).
+fn (Checker c) mut checkGlobalCall(int e, int g, string what) {
+    Pos cpos = c.ast.exprs[c.ast.exprs[e].a].pos
+    Global gl = c.globalList[g]
+    switch (gl.kind) {
+    case GlobalKind.Fn:
+        int f = gl.index
+        FnDecl fd = c.ast.fns[f]
+        []int ps = []int{}
+        for (int i = 0; i < fd.paramCount; i++) {
+            ps.push(c.paramType(f, i))
+        }
+        c.info[e].res = Res.Func
+        c.info[e].ref = f
+        c.setType(e, c.fnRet[f])
+        c.checkArgs(e, ps, what + "()")
+        return
+    case GlobalKind.Type:
+        c.errorHint(cpos, what + " is a type", "a struct value is written " + what + "{field: value, ...}")
+    case GlobalKind.Const:
+        c.error(cpos, what + " is a constant, not a function")
+    }
+    c.checkArgsLoosely(e)
 }
 
 fn (Checker c) mut checkConversion(int e, string n) {
@@ -161,8 +168,14 @@ fn (Checker c) mut checkSelectorCall(int e) {
     Expr callee = c.ast.exprs[fe]
     int base = callee.a
     string name = callee.text
-    if (c.pkgNamed(base)) {
-        c.checkPkgCall(e, c.ast.exprs[base].text, name)
+    int pkg = c.pkgNamed(base)
+    if (pkg >= 0) {
+        int? g = c.pkgMember(pkg, name, callee.pos)
+        if (g == null) {
+            c.checkArgsLoosely(e)
+            return
+        }
+        c.checkGlobalCall(e, g, c.ast.exprs[base].text + "." + name)
         return
     }
     int d = c.typeNamed(base)
@@ -179,14 +192,19 @@ fn (Checker c) mut checkSelectorCall(int e) {
     Kind k = c.kindOf(bt)
     if (k == Kind.Struct || k == Kind.Enum) {
         int rd = c.types.decl(bt)
-        TypeDecl td = c.ast.typeDecls[rd]
-        int? m = c.methods[td.name + "." + name]
+        string tname = c.declDisplayName(rd)
+        int? m = c.methods[methodKey(rd, name)]
         int fi = -1
         if (k == Kind.Struct) {
             fi = c.findField(rd, name)
         }
         if (m == null && fi >= 0 && c.isFuncType(c.fieldType(rd, fi))) {
             // s.f(args) calls the function value in the field f.
+            if (!c.fieldVisible(rd, fi, callee.pos)) {
+                c.privateField(callee.pos, rd, name)
+                c.checkArgsLoosely(e)
+                return
+            }
             c.info[fe].res = Res.Field
             c.info[fe].sub = fi
             c.setType(fe, c.fieldType(rd, fi))
@@ -196,7 +214,7 @@ fn (Checker c) mut checkSelectorCall(int e) {
         }
         if (m == null) {
             if (fi >= 0) {
-                c.error(callee.pos, name + " is a field of " + td.name + ", not a method")
+                c.error(callee.pos, name + " is a field of " + tname + ", not a method")
             } else {
                 Suggest s = newSuggest(name)
                 for (int i = 0; i < c.ast.fns.len(); i++) {
@@ -204,12 +222,17 @@ fn (Checker c) mut checkSelectorCall(int e) {
                         s.consider(c.ast.fns[i].name)
                     }
                 }
-                c.errorHint(callee.pos, td.name + " has no method " + name, s.hint())
+                c.errorHint(callee.pos, tname + " has no method " + name, s.hint())
             }
             c.checkArgsLoosely(e)
             return
         }
         FnDecl md = c.ast.fns[m]
+        if (!md.isPub && c.fnPkg(m) != c.pkgOf(callee.pos)) {
+            c.errorHint(callee.pos, "the method " + name + " of " + tname + " is not pub", "only pub methods can be called outside package " + c.ast.pkgs[c.fnPkg(m)].name)
+            c.checkArgsLoosely(e)
+            return
+        }
         if (md.recvMut) {
             c.requireMutable(base, "call the mut method " + name + "() on")
             c.killMut(c.pathKey(base))
@@ -221,7 +244,7 @@ fn (Checker c) mut checkSelectorCall(int e) {
         c.info[e].res = Res.Method
         c.info[e].ref = m
         c.setType(e, c.fnRet[m])
-        c.checkArgs(e, ps, td.name + "." + name + "()")
+        c.checkArgs(e, ps, tname + "." + name + "()")
         return
     }
     if (k == Kind.Interface) {
@@ -243,7 +266,7 @@ fn (Checker c) mut checkIfaceCall(int e, int base, int it, string name) {
         for (int i = 0; i < td.methodCount; i++) {
             s.consider(c.ifaceMethod(d, i).name)
         }
-        c.errorHint(cpos, "interface " + td.name + " has no method " + name, s.hint())
+        c.errorHint(cpos, "interface " + c.declDisplayName(d) + " has no method " + name, s.hint())
         c.checkArgsLoosely(e)
         return
     }
@@ -280,9 +303,10 @@ fn (Checker c) mut checkArgsLoosely(int e) {
 fn (Checker c) mut checkEnumNew(int e, int d, string name) {
     Expr x = c.ast.exprs[e]
     TypeDecl td = c.ast.typeDecls[d]
+    string tname = c.declDisplayName(d)
     Pos cpos = c.ast.exprs[x.a].pos
     if (td.kind != DeclKind.Enum) {
-        c.error(cpos, td.name + " is a struct type; it has no case " + name)
+        c.error(cpos, tname + " is a struct type; it has no case " + name)
         c.checkArgsLoosely(e)
         return
     }
@@ -294,7 +318,7 @@ fn (Checker c) mut checkEnumNew(int e, int d, string name) {
     }
     EnumCase ec = c.enumCase(d, ci)
     if (ec.paramCount == 0) {
-        c.errorHint(x.pos, td.name + "." + name + " carries no data", "write it without parentheses: " + td.name + "." + name)
+        c.errorHint(x.pos, tname + "." + name + " carries no data", "write it without parentheses: " + tname + "." + name)
         c.checkArgsLoosely(e)
         return
     }
@@ -306,7 +330,7 @@ fn (Checker c) mut checkEnumNew(int e, int d, string name) {
     c.info[e].ref = d
     c.info[e].sub = ci
     c.setType(e, c.declType[d])
-    c.checkArgs(e, ps, td.name + "." + name)
+    c.checkArgs(e, ps, tname + "." + name)
 }
 
 // A built-in method such as xs.push(x) or s.split(sep).
@@ -493,99 +517,4 @@ fn (Checker c) mut checkBuiltin(int e, int recv, string name) {
     c.info[e].builtin = b
     c.setType(e, res)
     c.checkArgs(e, ps, name + "()")
-}
-
-// fmt.println(s), os.exit(n), fs.read(path), errors.new(msg), ...
-fn (Checker c) mut checkPkgCall(int e, string pkg, string name) {
-    Expr x = c.ast.exprs[e]
-    Pos cpos = c.ast.exprs[x.a].pos
-    PkgFn f = PkgFn.None
-    []int ps = []int{tyString}
-    int res = tyVoid
-    string key = pkg + "." + name
-    if (key == "fmt.print") {
-        f = PkgFn.Print
-    } else if (key == "fmt.println") {
-        f = PkgFn.Println
-    } else if (key == "fmt.eprint") {
-        f = PkgFn.Eprint
-    } else if (key == "fmt.eprintln") {
-        f = PkgFn.Eprintln
-    } else if (key == "os.exit") {
-        f = PkgFn.Exit
-        ps = []int{tyInt}
-    } else if (key == "os.env") {
-        f = PkgFn.Env
-        res = c.types.optOf(tyString)
-    } else if (key == "os.run") {
-        f = PkgFn.Run
-        ps = []int{c.types.listOf(tyString)}
-        res = c.types.tuple2(tyInt, tyError)
-    } else if (key == "fs.read") {
-        f = PkgFn.Read
-        res = c.types.tuple2(tyString, tyError)
-    } else if (key == "fs.write") {
-        f = PkgFn.Write
-        ps = []int{tyString, tyString}
-        res = tyError
-    } else if (key == "fs.exists") {
-        f = PkgFn.Exists
-        res = tyBool
-    } else if (key == "fs.isDir") {
-        f = PkgFn.IsDir
-        res = tyBool
-    } else if (key == "fs.list") {
-        f = PkgFn.List
-        res = c.types.tuple2(c.types.listOf(tyString), tyError)
-    } else if (key == "fs.mkdir") {
-        f = PkgFn.Mkdir
-        res = tyError
-    } else if (key == "fs.remove") {
-        f = PkgFn.Remove
-        res = tyError
-    } else if (key == "errors.new") {
-        f = PkgFn.ErrNew
-        res = tyError
-    } else if (key == "time.after") {
-        f = PkgFn.After
-        ps = []int{tyInt}
-        res = c.types.chanOf(tyInt)
-    } else if (key == "time.sleep") {
-        f = PkgFn.Sleep
-        ps = []int{tyInt}
-    }
-    if (f == PkgFn.None) {
-        Suggest s = newSuggest(name)
-        []string known = pkgFunctionNames(pkg)
-        for (int i = 0; i < known.len(); i++) {
-            s.consider(known[i])
-        }
-        c.errorHint(cpos, "package " + pkg + " has no function " + name, s.hint())
-        c.checkArgsLoosely(e)
-        return
-    }
-    c.usedImports[x.pos.file.string() + ":" + pkg] = true
-    if (!c.isImported(x.pos.file, pkg)) {
-        c.errorHint(cpos, "package " + pkg + " is not imported", "add  import \"" + pkg + "\"  at the top of the file")
-    }
-    c.info[e].res = Res.Pkg
-    c.info[e].pkgFn = f
-    c.setType(e, res)
-    c.checkArgs(e, ps, key)
-}
-
-fn pkgFunctionNames(string pkg) []string {
-    if (pkg == "fmt") {
-        return []string{"print", "println", "eprint", "eprintln"}
-    }
-    if (pkg == "os") {
-        return []string{"exit", "env", "run"}
-    }
-    if (pkg == "fs") {
-        return []string{"read", "write", "exists", "isDir", "list", "mkdir", "remove"}
-    }
-    if (pkg == "time") {
-        return []string{"after", "sleep"}
-    }
-    return []string{"new"}
 }

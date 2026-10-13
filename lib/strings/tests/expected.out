@@ -1,9 +1,0 @@
-ok   testRepeat (6 checks)
-ok   testPadLeft (5 checks)
-ok   testPadCountsUtf8Characters (2 checks)
-ok   testPadRight (3 checks)
-ok   testLastIndex (8 checks)
-ok   testFields (6 checks)
-ok   testByteClasses (5 checks)
-7 tests, 0 failed
-crash crashRepeatNegative: exit 2: crash: strings.repeat: count (-1) must not be negative

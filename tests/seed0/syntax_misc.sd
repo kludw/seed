@@ -136,7 +136,9 @@ fn main([]string args) error {
     fmt.println(f.string())
 
     int q, error err = halves(8, 6)
-    fmt.println(q.string() + " " + (err == null).string())
+    if (err == null) {
+        fmt.println(q.string() + " true")
+    }
     q, err = halves(8, 5)
     if (err != null) {
         fmt.println(err.message())

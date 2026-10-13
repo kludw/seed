@@ -1,0 +1,8 @@
+// expect-error: package main cannot be imported
+package main
+
+import "other"
+
+fn main([]string args) error {
+    return other.main([]string{})
+}

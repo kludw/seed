@@ -1,0 +1,10 @@
+// expect-error: Hidden is not pub in package lib1
+package main
+
+import "lib1"
+
+fn main([]string args) error {
+    lib1.Hidden h = lib1.make()
+    lib1.use(h)
+    return null
+}

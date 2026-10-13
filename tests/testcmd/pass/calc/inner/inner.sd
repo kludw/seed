@@ -1,0 +1,11 @@
+package inner
+
+import "errors"
+
+pub fn add(int a, int b) int {
+    return a + b
+}
+
+pub fn oddError(int x) error {
+    return errors.new("calc.half: " + x.string() + " is odd")
+}

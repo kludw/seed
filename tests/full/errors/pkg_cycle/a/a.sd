@@ -1,0 +1,7 @@
+package a
+
+import "b"
+
+pub fn hello() {
+    b.world()
+}

@@ -1,0 +1,28 @@
+// os.crash crashes the goroutine like a runtime fault: inside a group the
+// group fails with "crash: <message>" and the deferred calls run; in main
+// the program prints "crash: <message>" and exits with code 2.
+package main
+
+import "fmt"
+import "os"
+
+fn check(int n) {
+    defer fmt.println("deferred in check")
+    if (n < 0) {
+        os.crash("check: n (" + n.string() + ") must not be negative")
+    }
+    fmt.println("checked " + n.string())
+}
+
+fn main([]string args) error {
+    error err = group {
+        spawn check(-1)
+    }
+    if (err != null) {
+        fmt.println("group: " + err.message())
+    }
+    check(1)
+    check(-2)
+    fmt.println("not reached")
+    return null
+}

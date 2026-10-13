@@ -15,9 +15,12 @@ tmp=$(mktemp -d "${TMPDIR:-/tmp}/seedleaks.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 clean=0; leaky=0; crashed=0
 for dir in "$@"; do
-  for src in "$dir"/*.sd; do
+  for src in "$dir"/*.sd "$dir"/*/; do
     [ -e "$src" ] || continue
-    name=${src%.sd}
+    case $src in
+      */) src=${src%/}; [ -f "$src.out" ] || continue; name=$src ;;
+      *) name=${src%.sd} ;;
+    esac
     $compile "$src" > "$tmp/t.c" 2> /dev/null || continue
     $CC -std=c11 -O1 -g -w -o "$tmp/t" "$tmp/t.c" -lm -lpthread || continue
     input=/dev/null; [ -f "$name.in" ] && input="$name.in"

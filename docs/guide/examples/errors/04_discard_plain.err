@@ -1,4 +1,4 @@
 04_discard_plain.sd:7:12: error: the error is discarded with _, so text may be null and must be declared as string?
     7 |     string text, _ = fs.read("notes.txt")
       |            ^
-    hint: and checked against null before use
+    hint: declare it as string? and check it against null before using it

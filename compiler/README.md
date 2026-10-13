@@ -4,25 +4,24 @@ The real Seed compiler, written in Seed. It is compiled by the bootstrap
 compiler `seed0` first, and then compiles itself:
 
 ```
-seed0 compiler/*.sd          -> build/stage1.c -> build/seed1
-seed1 c --strict compiler/*.sd -> build/stage2.c -> build/seed2
-seed2 c --strict compiler/*.sd -> build/stage3.c      (identical to stage2.c)
+seed0 compiler/*.sd   -> build/stage1.c -> build/seed1
+seed1 c compiler/*.sd -> build/stage2.c -> build/seed2
+seed2 c compiler/*.sd -> build/stage3.c      (identical to stage2.c)
 ```
 
 ```
 make verify     # builds all stages and checks stage2.c == stage3.c
 make test       # tests/lang and tests/seed0 with build/seed2
-make test-full  # tests/full with build/seed2 c --strict
+make test-full  # tests/full (programs and packages) and tests/test_cmd.sh (seed test, build, run)
+make test-lib   # the standard library's tests: build/seed2 test lib
 make test-leaks # every test program under macOS leaks --atExit
-make test-strict  # tests/lang with build/seed2 c --strict
 make test-fmt   # seed fmt: self-checks on every .sd file, tests/fmt goldens
 make test0      # tests/lang, tests/seed0 and tests/seed0/only with seed0
 ```
 
 `tests/seed0/only` holds what only seed0 does (64-bit ints that crash on
 overflow, rejecting interfaces); the real compiler's ints grow
-(`tests/full/int_*`). In `make test-full`, `errors/unformatted_code` fails
-until compiling checks formatting (`seed fmt --check` does it today).
+(`tests/full/int_*`).
 
 Because stage 1 is built by seed0, the compiler source may only use the
 seed0 subset (docs/seed0.md) until a snapshot replaces seed0 (see "Adding a
@@ -31,30 +30,119 @@ language feature").
 ## Command line
 
 ```
-seed c [--strict] <file.sd>...       C program on stdout (what tests/run.sh uses)
-seed build -o <out> <file.sd>...     compile to an executable
-seed run <file.sd>... [-- args...]   compile into $TMPDIR and run; passes the exit code
-seed ast <file.sd>...                print the syntax tree (debugging aid)
-seed fmt [--check] <file.sd>...      format in place, or report unformatted files
+seed build [-o out] <dir | file.sd>   compile a program (default output: the directory's or file's name)
+seed run <dir | file.sd> [args...]    compile into $TMPDIR and run; passes the exit code
+seed test [dir...]                    run the tests of every package under the dirs (default .)
+seed fmt [--check] <file.sd>...       format in place, or report unformatted files
+seed c <dir | file.sd...>             C program on stdout (what tests/run.sh uses)
+seed ast <file.sd>...                 print the syntax tree (debugging aid)
 ```
 
-All files given together form one package. Compile errors go to stderr and
-exit with code 1; usage errors exit with 2.
+A program is the `package main` of a directory (all its `.sd` files) or a
+single `.sd` file; `seed c` also takes several files of one directory (the
+bootstrap passes `compiler/*.sd`). The packages it imports are found as
+described in "Packages" below. Compile errors go to stderr and exit with
+code 1; usage errors exit with 2. The pedantic checks and the formatting
+check are always on (there is no `--strict` any more).
 
 The generated C is self-contained: it starts with the runtime of `runtime/`
-(`seed.h`, `seed_internal.h` and the six `seed_*.c` files pasted in that
+(`seed.h`, `seed_internal.h` and the seven `seed_*.c` files pasted in that
 order, without their `#include "seed..."` lines; `readRuntime` in
-`gen.sd`). The compiler finds it through `$SEED_ROOT`, or else relative to
-its own path: the binary is `<root>/build/seedN`, so the root is the parent
-of the binary's directory. The C compiler and its flags for `build`/`run`
-are the constants `cCompiler`, `cFlags` and `cLibs` at the top of `main.sd`
-(the Makefile has the same flags in `SEED_CFLAGS` and `SEED_LIBS`).
+`gen.sd`), followed by the program, into which the C files of the standard
+library packages it uses are pasted (`readNatives`). The compiler finds its
+root (the directory with `runtime/` and `lib/`) through `$SEED_ROOT`, or
+else from its own path: `os.executable()` gives the binary's real path
+(symbolic links resolved, so `seed` works through `$PATH` or a link), and
+the binary is `<root>/build/seedN`. The C compiler and its flags for
+`build`/`run`/`test` are the constants `cCompiler`, `cFlags` and `cLibs` at
+the top of `main.sd` (the Makefile has the same flags in `SEED_CFLAGS` and
+`SEED_LIBS`).
+
+### seed test
+
+`seed test [dir...]` walks each directory (a trailing `/...` is accepted
+and means the same) and finds every package directory that has a `tests/`
+directory with `.sd` files. For each it compiles a test program: the
+package, its `tests/*.sd` files (which belong to the package and see its
+private names) and its imports, with the directory given on the command
+line as the project root. The checker runs in *test mode* (test blocks are
+checked, `main` is not needed) and the generator emits a table of the tests
+and a `main` that calls `sd_test_main` (runtime/README.md, "Native
+functions", for the runner). The program is built in
+`$TMPDIR/seed-test-<path>` and run with the name of a results file; it
+prints one line per failed test and writes its counts there, and `seed
+test` prints the total, `N passed, M failed`, and exits with 1 if anything
+failed. A package that does not compile counts as one failure.
+
+A test block is parsed into a `TestDecl` and also into a `FnDecl` with
+`isTest` set (no parameters, result `error`, the description as its name),
+so it is checked and generated like a function: `try` returns the error,
+and the generator ends the body with `return SD_ERR_NULL`. `return` and
+(outside tests) `assert` are errors. `assert(cond)` (`genAssert`) evaluates
+the operands of a comparison once, and when the condition is false builds
+`<file>:<line>: assert failed: <source> (<a> <op> <b>)` (the source text
+was recorded by the parser, `Stmt.name`; values only for int, float, bool,
+byte, string, error and their `T?`) and returns `sd_assert_error(msg)` like
+`try` returns an error. After an `assert`, the checker narrows on its
+condition (as after `if (!cond) { return }`).
+
+## Packages
+
+`load.sd` (the `Loader`) parses the root package and everything it
+imports into one `Ast`. Each `SourceFile` has the index of its package in
+`Ast.pkgs` (`Package {path, name, dir, cprefix, isLib}`), and each
+`Import` the index of the package it names (`target`).
+
+- `import "x/y"` is resolved, in order, to `$SEED_ROOT/lib/x/y` (the
+  standard library; such packages have `isLib`) and to `<project
+  root>/x/y`, where the project root is the root package's directory (or
+  the directory given to `seed test`). The code calls it by its last
+  element, `y`. Import paths are lowercase names separated by `/`.
+- Every `.sd` file directly in a package's directory belongs to it; all
+  must have the same `package` line, which must be the last element of the
+  directory's path (only `package main` may differ). Package `main` cannot
+  be imported.
+- Every file must be formatted: after parsing, `formatSource` must give
+  the same text, otherwise the error points at the first differing line
+  with the hint `run: seed fmt <file>`.
+- Cycles are found by a depth-first search over the import graph and
+  reported at the import that closes them: `import cycle: a -> b -> a`.
+
+The checker keys package-level names by package (`globals["<pkg>:<name>"]`,
+`Global.pkg`) and finds the package of any node from its position
+(`pkgOf(pos)`, through `SourceFile.pkgIndex`). Imports are per file
+(`imported["<file>:<name>"]`). A qualified name is checked where the
+unqualified one is: `pkg.f(...)` in `checkSelectorCall`, `pkg.name` in
+`checkField`, `pkg.Type` in `resolveQualified`, `pkg.Type{...}` in
+`checkStructLit`, `pkg.Type.Case` through `typeNamed`, and
+`case pkg.Type.Case(...)` in `labelNamesDecl`; all of them go through
+`pkgMember`, which reports names that do not exist or are not `pub`.
+Fields (`fieldVisible`) and methods are checked for `pub` when used outside
+their package, and a struct literal of another package's type needs every
+field to be `pub`. Methods are keyed by declaration (`methodKey`).
+
+Types of other packages are named `cart.Item` in messages and `cart_Item`
+in C (`declDisplayName`, `declCName`; the mangled type name uses the C
+name). Every C name of a declaration has its package's `cprefix`:
+`sd_f_cart_newCart`, `sd_m_cart_Cart__add`, `sd_S_cart_Item`,
+`sd_c_cart_maxItems`; package `main` has no prefix, so its names are as
+they always were.
+
+**Native functions.** A function without a body (`FnDecl.body == -1`) is
+only allowed in a package with `isLib`. The generator (`genNative`) emits a
+prototype of its C implementation `sd_lib_<path>_<name>` (several results:
+the last returned, the others through out-pointers) and a wrapper with the
+normal calling convention under the usual name, so calls, function values,
+`defer` and `spawn` need nothing special. The ABI is in runtime/README.md,
+"Native functions". The checker knows only that `os.exit` and `os.crash`
+never return (`isNoReturn`).
 
 ## Files
 
 | File | Phase | Contents |
 |---|---|---|
-| `main.sd` | driver | CLI, reading files, runtime location, invoking `cc` |
+| `main.sd` | driver | CLI, runtime location, building and running programs, `seed test` |
+| `load.sd` | driver | loading packages: import resolution, package names, formatting check, cycles |
 | `errors.sd` | all | `Pos`, `Diags` (collect, sort and print errors), "did you mean" |
 | `lexer.sd` | lex | `Tok`, `Token`, `Comment`, newline insertion |
 | `ast.sd` | parse | the AST node structs and the `Ast` arenas |
@@ -65,16 +153,16 @@ are the constants `cCompiler`, `cFlags` and `cLibs` at the top of `main.sd`
 | `fmt_layout.sd` | fmt | `Formatter` state, bracket matching and roles |
 | `fmt_print.sd` | fmt | line breaks, indentation, spaces, comments |
 | `types.sd` | check | `Kind`, `Type`, the interned `Types` arena |
-| `check.sd` | check | `Checker`, program passes, type resolution, scopes, narrowing |
+| `check.sd` | check | `Checker`, program passes, packages and visibility, type resolution, scopes, narrowing |
 | `check_expr.sd` | check | expressions, places (lvalues), T/T? conversions |
-| `check_call.sd` | check | calls: functions, methods, function values, interface methods, built-ins, core packages, conversions |
+| `check_call.sd` | check | calls: functions (also of other packages), methods, function values, interface methods, built-ins, conversions |
 | `check_iface.sd` | check | interfaces, `implements`, which types have `==` |
-| `check_stmt.sd` | check | statements, switch, assignment, defer, "always exits" analysis, error guards, select, group, spawn |
-| `check_style.sd` | check | `--strict` checks: unused names/results, unreachable code, naming |
-| `gen.sd` | gen | `Gen`, program layout, C types, retain/release, descriptors, type definitions, vtables, constants, the runtime |
+| `check_stmt.sd` | check | statements, switch and enum patterns, assignment, defer, "always exits" analysis, error guards, select, group, spawn, assert |
+| `check_style.sd` | check | pedantic checks: unused names/imports/results, unreachable code, naming |
+| `gen.sd` | gen | `Gen`, program layout, C types, retain/release, descriptors, type definitions, vtables, constants, natives, the test table, the runtime |
 | `gen_expr.sd` | gen | temporaries and slots, evaluation order, expressions, operators, `try`, `group` |
-| `gen_call.sd` | gen | calls, places, built-in methods, package functions, conversions |
-| `gen_stmt.sd` | gen | statements, scopes, return, `defer`, `spawn`, `select` |
+| `gen_call.sd` | gen | calls, places, built-in methods, conversions |
+| `gen_stmt.sd` | gen | statements, scopes, return, `defer`, `spawn`, `select`, `assert` |
 
 ## Data structures
 
@@ -111,7 +199,7 @@ Comments are not tokens: they are collected separately as
 Seed has no pointers, so the tree is a set of arenas inside `Ast`:
 `exprs`, `stmts`, `blocks`, `targets`, `cases`, `labels`, `typeExprs`,
 `params`, `fns`, `typeDecls`, `enumCases`, `methodSigs`, `consts`, `tests`,
-`imports`, `tops`, `files`, `comments`. A node refers to another by its `int`
+`imports`, `pkgs`, `tops`, `files`, `comments`. A node refers to another by its `int`
 index (-1 for none). A variable-length list of children (call arguments,
 block statements, case labels, ...) is a run of indices in the shared
 `Ast.lists`, stored in the parent as `(start, count)`, and read with
@@ -179,13 +267,14 @@ was checked; the generator emits one vtable per pair.
 `ExprInfo` holds:
 
 - `ty`: the type the parent sees.
-- `res` (an enum) plus `ref`/`sub`/`builtin`/`pkgFn`: what the expression
+- `res` (an enum) plus `ref`/`sub`/`builtin`: what the expression
   resolved to — a local (`ref` = variable), constant, function (a call, or
   a function used as a value), method, call of a function value
   (`ValueCall`), interface method (`ref` = interface decl, `sub` = method),
-  built-in method (`builtin`), core package function (`pkgFn`), conversion,
-  enum constructor or value (`ref` = decl, `sub` = case), struct field
-  (`sub` = field), list/string/map index.
+  built-in method (`builtin`), conversion, enum constructor or value
+  (`ref` = decl, `sub` = case), struct field (`sub` = field),
+  list/string/map index. A name of another package (`fmt.println`,
+  `time.second`) resolves like a name of the current one.
 - `ifaceFrom`: the expression produces a value of this struct or enum type,
   which is converted to the interface (`ty`, or `inner` when `wrap` is set
   too).
@@ -198,9 +287,9 @@ was checked; the generator emits one vtable per pair.
 Variables are an arena `vars []Var {name, ty, kind, pos, used}`. The scope is
 a stack of variable indices with marks for nested blocks.
 
-Package-level names are in `globals` (name → index into `globalList`, which
-records kind and declaration index). Methods are in `methods`, keyed by
-`"Type.name"`.
+Package-level names are in `globals` (`"<package>:<name>"` → index into
+`globalList`, which records kind, declaration index and package). Methods
+are in `methods`, keyed by `"<type declaration>.name"` (`methodKey`).
 
 ## How each phase works
 
@@ -237,9 +326,9 @@ past the offending token. When a file has syntax errors, checking is skipped.
 
 **Checking** (`checkProgram`):
 
-1. Collect package-level names; check that all files share one package;
+1. Collect package-level names (per package); check the names' style;
    check imports (per file: a package must be imported in the file that
-   uses it).
+   uses it, and its name must not clash with a package-level name).
 2. Create a type for every struct, enum and interface, then resolve fields,
    enum case fields and interface method signatures (`methodSigType`), and
    report structs that contain themselves by value.
@@ -249,8 +338,9 @@ past the offending token. When a file has syntax errors, checking is skipped.
    must be an interface (or `error`), and the type must have each of its
    methods with the same parameter and result types and the same `mut`.
    Each checked pair goes into `impls`.
-5. Check `main`'s signature, then constants (lazily, in dependency order),
-   then every function body.
+5. Check `main`'s signature (not in test mode), then constants (lazily,
+   in dependency order), then every function body (natives have none; test
+   bodies only in test files), then that every import is used.
 
 Expression checking mirrors seed0: there are no implicit conversions except
 `T → T?` (`coerce` sets `wrap`), `null → T?/error`, reading a narrowed `T?`
@@ -268,8 +358,9 @@ The same conditions also record paths known to be *null* (keys starting
 with `!`). They drive the **error guards**: after `int n, error err = f()`
 (or `n, err = f()`), `n` carries a `Guard` until `err` is known to be null
 (`if (err != null) { return ... }`, inside `if (err == null)`, after
-`err == null &&`), `n` is assigned again, or the scope ends. Reading a
-guarded variable is an error in `--strict` mode.
+`err == null &&`, after `assert(err == null)` in a test), `n` is assigned
+again, or the scope ends. Reading a guarded variable is an error. A target
+declared `T?` gets no guard.
 
 Function values: a function name used as a value has `Res.Func` and type
 `fn(params) result`; a call whose callee is not a function or method name
@@ -305,20 +396,19 @@ Concurrency (SPEC.md, "Concurrency"):
   exit, exits (`stmtExits`).
 - Package constants cannot hold channels (`hasChan`), because constants are
   cached per goroutine.
-- `time` is a core package: `time.after`/`time.sleep` are `PkgFn`s, and the
-  duration constants are `Res.PkgConst` with the value in `ExprInfo.sub`.
+- `time` is a standard library package (`lib/time`): `after` and `sleep`
+  are natives, the durations are constants.
 
-`--strict` adds the pedantic checks of the full language that seed0 lacks
-(check_style.sd): unused variables, imports and call results, unreachable
-code, locals that shadow package-level names, the naming rules
-(camelCase/PascalCase, with a suggested spelling) and the error guards.
-They are off by default because some seed0-era test programs fail them; the
-compiler itself is always built with `--strict`.
+The pedantic checks of the full language that seed0 lacks are always on
+(check_style.sd and `declare`): unused variables, imports and call results,
+unreachable code, locals that shadow package-level names or imports, the
+naming rules (camelCase/PascalCase, with a suggested spelling), the error
+guards (a plain `T` declared beside an error; a `T?` is never guarded) and
+formatting. The seed0-era test programs were fixed to pass them.
 
-Features that parse but are not implemented (`test`, `assert`) are rejected
-in checking with "X is not implemented by this compiler yet"; imports of
-user packages say that only the core packages (`fmt`, `os`, `fs`, `errors`,
-`time`) can be imported.
+Enum case patterns must match the case exactly (`checkPattern`): a case
+with data binds every field with its type, `_` ignoring one; a case without
+data has no parentheses. A case with several labels may only bind `_`.
 
 **C generation** targets the runtime in `runtime/` (runtime/README.md is
 the reference for every representation and ownership rule):
@@ -340,7 +430,8 @@ the reference for every representation and ownership rule):
 
 Names are prefixed (`l_x`, `f_x`, `sd_f_name`, `sd_m_Type__name`,
 `sd_c_name()`, `_tN`, `sd_dN` for defer thunks, `sd_vt_Type__Iface` for
-vtables).
+vtables, `sd_test_N` for tests); the names of a package other than `main`
+also carry its prefix (`sd_f_cart_newCart`, `sd_S_cart_Item`).
 
 *Memory management.* Ownership follows runtime/README.md section 3:
 parameters are borrowed, results are owned, stores consume. The generator
@@ -418,8 +509,9 @@ generated.
   `sd_select` is dispatched with an `if`/`else if` chain (a C `switch`
   would catch `break`). A receive case declares its variable from
   `cs[i].ok` and the buffer, or releases the buffer when it has none.
-- `time.after(d)` is `sd_time_after(d)` (a `chan int` temporary),
-  `time.sleep(d)` is `sd_time_sleep(d)`, `time.second` is `SD_INT(1000000000)`.
+- `time.after(d)` calls the native `sd_lib_time_after`, which is
+  `sd_time_after(d)` (a `chan int`); `time.sleep(d)` is `sd_time_sleep(d)`;
+  `time.second` is the constant `sd_c_time_second()`.
 - `defer ch.close()` uses the defer machinery with the channel as the one
   operand.
 
@@ -431,8 +523,10 @@ methods on the payload of the interface's box.
 
 The output is: the runtime, type definitions (forward typedefs, function
 pointer typedefs, structs, enum payloads, tuples, descriptors, vtable
-types, static enum boxes), prototypes, helpers, vtables, defer thunks and
-spawn trampolines, constants, functions, `main` (which calls `sd_main`).
+types, static enum boxes), prototypes (including those of the natives), the
+C files of the standard library packages (natives), helpers, vtables, defer
+thunks and spawn trampolines, constants, functions, `main` (which calls
+`sd_main`, or `sd_test_main` with the table of tests).
 
 ## The formatter (`seed fmt`)
 
@@ -486,7 +580,7 @@ depend on the input's indentation or spacing at all; that, together with
 keeping the source's line structure, is what makes it idempotent.
 
 Testing (`make test-fmt`): `seed fmt --verify` runs on every `.sd` file in
-`compiler/` and `tests/` that parses, and checks that formatting the
+`compiler/`, `tests/` and `lib/` that parses, and checks that formatting the
 formatted text changes nothing, that the tokens are unchanged (ignoring
 newlines and commas before closing brackets), and that the comments and the
 syntax tree are unchanged. `tests/fmt/run.sh` runs the golden tests
@@ -494,7 +588,8 @@ syntax tree are unchanged. `tests/fmt/run.sh` runs the golden tests
 `--update` rewrites the expected files). Finally, `seed fmt --check` checks
 that the compiler and the test programs are formatted. The few test files
 with deliberate syntax errors, and `tests/full/errors/unformatted_code.sd`,
-are not formatted.
+are not formatted. Since compiling checks formatting too (load.sd), every
+program the tests compile is formatted anyway.
 
 ## Writing the compiler in Seed
 
@@ -533,7 +628,10 @@ Value semantics shape the code:
 
 Until the first snapshot is taken, stage 0 is seed0, so the compiler source
 is limited to the seed0 subset. For a new check (rather than new syntax),
-teaching may need a `--strict`-style switch until all test programs pass it.
+fix the test programs that fail it in the same change. A small new library
+function the compiler itself needs can also be taught to seed0 directly
+(seed0 got `os.executable()` and `os.cwd()` this way, to find the root
+through symbolic links and to compare directories).
 
 ## Decisions
 
@@ -567,9 +665,10 @@ teaching may need a `--strict`-style switch until all test programs pass it.
 - **Nullable function types need parentheses**: `(fn(int) int)?`, because
   `fn(int) int?` is a function returning `int?`. The type is printed that
   way in messages.
-- **Error guards are `--strict` checks**, like the other pedantic checks, and
-  last until the end of the block that made them (a guard made inside an
-  `if` does not reach the code after it).
+- **Error guards** last until the end of the block that made them (a guard
+  made inside an `if` does not reach the code after it). Only a plain `T`
+  is guarded: `T? x, error err = f()` can read `x` (and compare it with
+  null) at once, because a `T?` is checked before use anyway.
 - **A field of function type can be called directly** (`op.apply(1, 2)`),
   when the struct has no method of that name.
 - **Integer literals may have any size** (decimal or hex); values outside
@@ -587,7 +686,9 @@ teaching may need a `--strict`-style switch until all test programs pass it.
   exact text.
 - **"missing return"** is reported at the closing brace of the function.
 - **Imports are per file.** seed0 treats them as package-wide.
-- **`--strict` is opt-in** (see above); the bootstrap stages use it.
+- **The pedantic checks and the formatting check are always on**; the
+  `--strict` flag is gone. The seed0-era test programs were changed to pass
+  them (they still compile with seed0).
 - **Float literals are emitted as written** (they are valid C and C rounds
   them correctly); seed0 printed them with `%a`.
 - **`select` with `default`** is a syntax error with a hint (select always
@@ -602,8 +703,8 @@ teaching may need a `--strict`-style switch until all test programs pass it.
   returning `error` or nothing, never a mut method; select cases are send,
   receive, `_ =` receive or a receive into a new `T?` variable; channel
   elements are not nullable; constants cannot hold channels; `defer
-  ch.close()` is allowed; `time` (after, sleep, constants) is a core
-  package.
+  ch.close()` is allowed; `time` (after, sleep, constants) is a standard
+  library package.
 - **select dispatches with `if`/`else if`**, not a C `switch`, so that
   `break` and `continue` in a case reach the enclosing loop.
 - **spawn arguments are borrowed** (`sd_spawn` deep-copies them), and one
@@ -625,12 +726,30 @@ teaching may need a `--strict`-style switch until all test programs pass it.
   one-line `const`s may stay grouped, comment indentation before `case`
   follows the source column. `--check` reports to stderr.
 
+- **Packages** (see "Packages"): one `Ast` for the whole program; names
+  keyed by package; import paths resolved in the standard library first,
+  then relative to the project root (no `seed.mod`); the core packages
+  `fmt`, `os`, `fs`, `errors` and `time` are ordinary packages in `lib/`
+  (natives over `runtime/seed_pkg.c` and `seed_task.c`; `errors` in plain
+  Seed), so nothing about them is built into the checker except that
+  `os.exit`/`os.crash` never return.
+- **C names**: package `main` keeps unprefixed names; other packages'
+  declarations get the import path as prefix (`shop/cart` -> `shop_cart_`),
+  for both package-level and native names. Two packages whose paths differ
+  only in `/` vs `_` would clash; import paths cannot contain `_`.
+- **A test block is a function** (`FnDecl.isTest`) returning `error`;
+  `assert` fails the test by returning an error (no crash, so defers run
+  and nothing leaks); `return` is not allowed in a test.
+- **Each test runs in a goroutine of its own group** (runtime
+  `sd_test_main`), one after the other; `seed test` builds one program per
+  package.
+- **Unused enum pattern bindings are errors** like any unused variable;
+  write `_`.
+
 ## Known limitations
 
-- Not implemented yet (rejected by the checker with a clear message):
-  `test`/`assert`, user packages and qualified names.
 - A crash leaks the counted values held by the locals of the unwound C
-  frames (runtime/README.md section 15); normal execution leaks nothing.
+  frames (runtime/README.md section 16); normal execution leaks nothing.
   This includes a goroutine that crashes inside a group, and a goroutine
   stopped while it holds counted locals (the program goes on, so the
   memory is lost for good).
@@ -648,9 +767,14 @@ teaching may need a `--strict`-style switch until all test programs pass it.
   declare a new one in the case.
 - A mut call evaluates its arguments before the receiver's place, so in
   `xs[f()].push(g())` `g` runs before `f`.
-- Formatting is not checked during compilation yet; `seed fmt --check` does
-  the check on its own.
-- Two concurrent `seed run` of files with the same name share a temporary
-  directory.
+- Two concurrent `seed run` (or `seed test`) of programs with the same name
+  share a temporary directory.
+- A deadlock in one test ends the whole test program (deadlock detection is
+  global); `seed test` then reports the package as failed with the exit
+  code.
+- Package identity is by directory path as written: the same directory
+  reached through two different spellings would be loaded twice (cannot
+  happen with the resolution rules unless the project root is itself
+  inside `lib/`).
 - The parser reports at most one syntax error per statement; an error in an
   expression that spans lines may hide a second error on the next line.

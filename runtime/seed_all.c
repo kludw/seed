@@ -7,3 +7,4 @@
 #include "seed_list.c"
 #include "seed_task.c"
 #include "seed_pkg.c"
+#include "seed_test.c"

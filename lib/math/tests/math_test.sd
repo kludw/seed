@@ -2,83 +2,79 @@ package math
 
 import "fmt"
 
-fn testConstants() TestLog {
-    TestLog t = newTestLog()
-    t.eqStr(pi.string(), "3.141592653589793")
-    t.eqStr(e.string(), "2.718281828459045")
-    return t
+test "constants" {
+    assert(pi.string() == "3.141592653589793")
+    assert(e.string() == "2.718281828459045")
 }
 
-fn testAbsMinMaxInt() TestLog {
-    TestLog t = newTestLog()
-    t.eqInt(absInt(-5), 5)
-    t.eqInt(absInt(5), 5)
-    t.eqInt(absInt(0), 0)
-    t.eqInt(absInt(-9223372036854775808), 9223372036854775808)
-    t.eqInt(absInt(-100000000000000000000000), 100000000000000000000000)
-    t.eqInt(minInt(3, -2), -2)
-    t.eqInt(minInt(-2, 3), -2)
-    t.eqInt(minInt(4, 4), 4)
-    t.eqInt(maxInt(3, -2), 3)
-    t.eqInt(maxInt(-2, 3), 3)
-    t.eqInt(maxInt(10000000000000000000000, 1), 10000000000000000000000)
-    return t
+test "abs min max int" {
+    assert(absInt(-5) == 5)
+    assert(absInt(5) == 5)
+    assert(absInt(0) == 0)
+    assert(absInt(-9223372036854775808) == 9223372036854775808)
+    assert(absInt(-100000000000000000000000) == 100000000000000000000000)
+    assert(minInt(3, -2) == -2)
+    assert(minInt(-2, 3) == -2)
+    assert(minInt(4, 4) == 4)
+    assert(maxInt(3, -2) == 3)
+    assert(maxInt(-2, 3) == 3)
+    assert(maxInt(10000000000000000000000, 1) == 10000000000000000000000)
 }
 
-fn testPowInt() TestLog {
-    TestLog t = newTestLog()
-    t.eqInt(powInt(0, 0), 1)
-    t.eqInt(powInt(5, 0), 1)
-    t.eqInt(powInt(0, 5), 0)
-    t.eqInt(powInt(2, 10), 1024)
-    t.eqInt(powInt(-2, 3), -8)
-    t.eqInt(powInt(-2, 4), 16)
-    t.eqInt(powInt(10, 18), 1000000000000000000)
-    t.eqStr(powInt(2, 100).string(), "1267650600228229401496703205376")
-    t.eqStr(powInt(3, 41).string(), "36472996377170786403")
-    t.eqInt(powInt(1, 1000000), 1)
-    return t
+test "pow int" {
+    assert(powInt(0, 0) == 1)
+    assert(powInt(5, 0) == 1)
+    assert(powInt(0, 5) == 0)
+    assert(powInt(2, 10) == 1024)
+    assert(powInt(-2, 3) == -8)
+    assert(powInt(-2, 4) == 16)
+    assert(powInt(10, 18) == 1000000000000000000)
+    assert(powInt(2, 100).string() == "1267650600228229401496703205376")
+    assert(powInt(3, 41).string() == "36472996377170786403")
+    assert(powInt(1, 1000000) == 1)
 }
 
-fn testAbsFloat() TestLog {
-    TestLog t = newTestLog()
-    t.eqFloat(absFloat(-2.5), 2.5)
-    t.eqFloat(absFloat(2.5), 2.5)
-    t.eqStr(absFloat(-0.0).string(), "0.0")
-    t.ok(isNan(absFloat(nanValue())), "abs nan")
-    t.eqFloat(absFloat(-inf()), inf())
-    return t
+test "abs float" {
+    assert(absFloat(-2.5) == 2.5)
+    assert(absFloat(2.5) == 2.5)
+    assert(absFloat(-0.0).string() == "0.0")
+    assert(isNan(absFloat(nanValue())))
+    assert(absFloat(-inf()) == inf())
 }
 
-fn testMinMaxFloat() TestLog {
-    TestLog t = newTestLog()
-    t.eqFloat(minFloat(1.5, -2.0), -2.0)
-    t.eqFloat(maxFloat(1.5, -2.0), 1.5)
-    t.ok(isNan(minFloat(nanValue(), 1.0)), "min nan first")
-    t.ok(isNan(minFloat(1.0, nanValue())), "min nan second")
-    t.ok(isNan(maxFloat(nanValue(), 1.0)), "max nan first")
-    t.ok(isNan(maxFloat(1.0, nanValue())), "max nan second")
-    t.eqStr(minFloat(0.0, -0.0).string(), "-0.0")
-    t.eqStr(minFloat(-0.0, 0.0).string(), "-0.0")
-    t.eqStr(maxFloat(0.0, -0.0).string(), "0.0")
-    t.eqStr(maxFloat(-0.0, 0.0).string(), "0.0")
-    t.eqFloat(minFloat(-inf(), 0.0), -inf())
-    t.eqFloat(maxFloat(inf(), 0.0), inf())
-    return t
+test "min max float" {
+    assert(minFloat(1.5, -2.0) == -2.0)
+    assert(maxFloat(1.5, -2.0) == 1.5)
+    assert(isNan(minFloat(nanValue(), 1.0)))
+    assert(isNan(minFloat(1.0, nanValue())))
+    assert(isNan(maxFloat(nanValue(), 1.0)))
+    assert(isNan(maxFloat(1.0, nanValue())))
+    assert(minFloat(0.0, -0.0).string() == "-0.0")
+    assert(minFloat(-0.0, 0.0).string() == "-0.0")
+    assert(maxFloat(0.0, -0.0).string() == "0.0")
+    assert(maxFloat(-0.0, 0.0).string() == "0.0")
+    assert(minFloat(-inf(), 0.0) == -inf())
+    assert(maxFloat(inf(), 0.0) == inf())
 }
 
-fn testNanInf() TestLog {
-    TestLog t = newTestLog()
-    t.ok(isNan(nanValue()), "nan")
-    t.ok(!isNan(1.0) && !isNan(inf()), "not nan")
-    t.ok(isInf(inf()) && isInf(-inf()), "inf")
-    t.ok(!isInf(1.0e308) && !isInf(nanValue()), "not inf")
-    t.eqStr(inf().string(), "inf")
-    t.eqStr((-inf()).string(), "-inf")
-    t.ok(inf() > 1.0e308, "inf is large")
-    return t
+test "nan inf" {
+    assert(isNan(nanValue()))
+    assert(!isNan(1.0) && !isNan(inf()))
+    assert(isInf(inf()) && isInf(-inf()))
+    assert(!isInf(1.0e308) && !isInf(nanValue()))
+    assert(inf().string() == "inf")
+    assert((-inf()).string() == "-inf")
+    assert(inf() > 1.0e308)
 }
 
 fn crashPowIntNegative() {
     fmt.println(powInt(2, -1).string())
+}
+
+test "pow int negative crashes" {
+    error err = group {
+        spawn crashPowIntNegative()
+    }
+    assert(err != null)
+    assert(err.message() == "crash: math.powInt: exp (-1) must not be negative")
 }

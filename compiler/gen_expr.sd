@@ -215,7 +215,7 @@ fn (Gen g) hasEffects(int e) bool {
         return true
     }
     if (x.kind == ExprKind.Call) {
-        if (i.res == Res.Func || i.res == Res.Method || i.res == Res.Pkg || i.res == Res.ValueCall || i.res == Res.IfaceMethod) {
+        if (i.res == Res.Func || i.res == Res.Method || i.res == Res.ValueCall || i.res == Res.IfaceMethod) {
             return true
         }
         if (i.res == Res.Builtin && (isMutBuiltin(i.builtin) || isChanBuiltin(i.builtin))) {
@@ -300,7 +300,7 @@ fn (Gen g) isStable(int e) bool {
     if (isLiteralKind(x.kind) || x.kind == ExprKind.NullLit) {
         return true
     }
-    return (x.kind == ExprKind.Ident && (r == Res.Const || r == Res.Func)) || (x.kind == ExprKind.Field && (r == Res.EnumVal || r == Res.PkgConst))
+    return (x.kind == ExprKind.Ident && (r == Res.Const || r == Res.Func)) || (x.kind == ExprKind.Field && (r == Res.EnumVal || r == Res.Const || r == Res.Func))
 }
 
 // Generates the operands of an operation, left to right. A borrowed operand
@@ -369,7 +369,7 @@ fn (Gen g) mut toIface(int t, int iface, string v) string {
 fn (Gen g) varValue(int e) string {
     ExprInfo i = g.c.info[e]
     if (i.res == Res.Const) {
-        return "sd_c_" + g.c.ast.consts[i.ref].name + "()"
+        return g.constCName(i.ref) + "()"
     }
     if (i.res == Res.Func) {
         return g.c.fnCName[i.ref]
@@ -429,11 +429,10 @@ fn (Gen g) mut gcore(int e) string {
         return v
     case ExprKind.Field:
         if (i.res == Res.EnumVal) {
-            TypeDecl td = g.c.ast.typeDecls[i.ref]
-            return "SD_BOX_REF(sd_k_" + td.name + "__" + g.c.enumCase(i.ref, i.sub).name + ")"
+            return "SD_BOX_REF(sd_k_" + g.c.declCName(i.ref) + "__" + g.c.enumCase(i.ref, i.sub).name + ")"
         }
-        if (i.res == Res.PkgConst) {
-            return "SD_INT(" + i.sub.string() + ")"
+        if (i.res == Res.Const || i.res == Res.Func) {
+            return g.varValue(e)
         }
         string fv = "(" + g.gexpr(x.a) + ").f_" + x.text
         if (i.narrowed) {
@@ -595,8 +594,12 @@ fn (Gen g) mut gbinary(int e) string {
         return g.gconcat(e)
     }
     []string vals = g.operands([]int{x.a, x.b})
-    string a = vals[0]
-    string b = vals[1]
+    return g.binaryOp(op, t, vals[0], vals[1])
+}
+
+// The operator op (not &&, || or string +) on two evaluated operands of
+// type t.
+fn (Gen g) mut binaryOp(Tok op, int t, string a, string b) string {
     string ops = op.text()
     if (op == Tok.Eq) {
         return g.eqExpr(t, a, b)

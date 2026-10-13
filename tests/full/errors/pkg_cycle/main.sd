@@ -1,0 +1,9 @@
+// expect-error: import cycle: a -> b -> a
+package main
+
+import "a"
+
+fn main([]string args) error {
+    a.hello()
+    return null
+}

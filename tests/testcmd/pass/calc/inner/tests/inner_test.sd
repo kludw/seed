@@ -1,0 +1,9 @@
+package inner
+
+test "add" {
+    assert(add(2, 2) == 4)
+}
+
+test "odd error" {
+    assert(oddError(7).message() == "calc.half: 7 is odd")
+}

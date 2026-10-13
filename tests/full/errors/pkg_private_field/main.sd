@@ -1,0 +1,11 @@
+// expect-error: the field balance of acct.Account is not pub
+package main
+
+import "acct"
+import "fmt"
+
+fn main([]string args) error {
+    acct.Account a = acct.open("ann")
+    fmt.println(a.owner + " " + a.balance.string())
+    return null
+}

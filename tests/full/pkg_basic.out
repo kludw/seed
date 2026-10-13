@@ -1,0 +1,10 @@
+box 4
+circle 1.5, area 6.75
+rect of width 2.0, area 6.0
+empty, area 0.0
+clicks 5
+named: clicks!
+named: robot r2
+max 10, unit cm
+6 16
+100

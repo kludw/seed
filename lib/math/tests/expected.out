@@ -1,8 +1,0 @@
-ok   testConstants (2 checks)
-ok   testAbsMinMaxInt (11 checks)
-ok   testPowInt (10 checks)
-ok   testAbsFloat (5 checks)
-ok   testMinMaxFloat (12 checks)
-ok   testNanInf (7 checks)
-6 tests, 0 failed
-crash crashPowIntNegative: exit 2: crash: math.powInt: exp (-1) must not be negative

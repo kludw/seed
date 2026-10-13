@@ -332,7 +332,7 @@ SD_FN sd_err *sd_str_toint(sd_str s, int64_t *out) {
   *out = neg ? (int64_t)(0 - v) : (int64_t)v;
   return NULL;
 bad:
-  return sd_errf("invalid integer: \"%.*s\"", (int)s.len, s.p);
+  return sd_errf("string.toInt: \"%.*s\": invalid integer", (int)s.len, s.p);
 }
 
 SD_FN sd_err *sd_str_tofloat(sd_str s, double *out) {
@@ -345,7 +345,7 @@ SD_FN sd_err *sd_str_tofloat(sd_str s, double *out) {
   *out = d;
   return NULL;
 bad:
-  return sd_errf("invalid float: \"%.*s\"", (int)s.len, s.p);
+  return sd_errf("string.toFloat: \"%.*s\": invalid float", (int)s.len, s.p);
 }
 
 SD_FN sd_list *sd_str_bytes(sd_str s) {
@@ -830,6 +830,15 @@ SD_FN void sd_eprintln(sd_str s) {
 
 /* ---- os ---- */
 
+
+/* strerror with a lowercase first letter (docs/stdlib.md: reasons are lowercase). */
+static const char *sd_strerror(int e) {
+  static _Thread_local char buf[256];
+  snprintf(buf, sizeof buf, "%s", strerror(e));
+  if (buf[0] >= 'A' && buf[0] <= 'Z' && !(buf[1] >= 'A' && buf[1] <= 'Z')) buf[0] = (char)(buf[0] - 'A' + 'a');
+  return buf;
+}
+
 SD_FN SD_NORET void sd_os_exit(int64_t code) {
   fflush(stdout);
   fflush(stderr);
@@ -844,18 +853,48 @@ SD_FN sd_str sd_os_env(sd_str name) {
 
 SD_FN sd_err *sd_os_run(sd_list *argv, int64_t *code) {
   *code = 0;
-  if (argv->len == 0) return sd_errf("os.run: empty argument list");
+  if (argv->len == 0) sd_crash("os.run: argv is empty");
   char **av = sd_alloc((size_t)(argv->len + 1) * sizeof(char *));
   for (int64_t i = 0; i < argv->len; i++) av[i] = sd_cstr(((sd_str *)argv->data)[i]);
   fflush(stdout);
   fflush(stderr);
   pid_t pid;
   int r = posix_spawnp(&pid, av[0], NULL, NULL, av, environ);
-  if (r != 0) return sd_errf("%s: %s", av[0], strerror(r));
+  if (r != 0) return sd_errf("os.run: %s: %s", av[0], sd_strerror(r));
   int st;
   while (waitpid(pid, &st, 0) < 0)
-    if (errno != EINTR) return sd_errf("%s: %s", av[0], strerror(errno));
+    if (errno != EINTR) return sd_errf("os.run: %s: %s", av[0], sd_strerror(errno));
   *code = WIFEXITED(st) ? WEXITSTATUS(st) : 128 + (WIFSIGNALED(st) ? WTERMSIG(st) : 0);
+  return NULL;
+}
+
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#endif
+#include <limits.h>
+
+/* os.executable(): the real path of the running program (symbolic links
+   resolved), or "" when it cannot be found. */
+SD_FN sd_str sd_os_executable(void) {
+  char raw[PATH_MAX], real[PATH_MAX];
+  raw[0] = 0;
+#ifdef __APPLE__
+  uint32_t size = sizeof raw;
+  if (_NSGetExecutablePath(raw, &size) != 0) raw[0] = 0;
+#else
+  ssize_t n = readlink("/proc/self/exe", raw, sizeof raw - 1);
+  raw[n > 0 ? n : 0] = 0;
+#endif
+  if (raw[0] && realpath(raw, real)) return sd_str_copy(real, (int64_t)strlen(real));
+  return sd_str_copy(raw, (int64_t)strlen(raw));
+}
+
+/* os.cwd(): the absolute path of the current directory. */
+SD_FN sd_err *sd_os_cwd(sd_str *out) {
+  char buf[PATH_MAX];
+  *out = (sd_str){0};
+  if (!getcwd(buf, sizeof buf)) return sd_errf("os.cwd: %s", sd_strerror(errno));
+  *out = sd_str_copy(buf, (int64_t)strlen(buf));
   return NULL;
 }
 
@@ -866,7 +905,7 @@ SD_FN sd_err *sd_fs_read(sd_str path, sd_str *out) {
   *out = (sd_str){0};
   fflush(stdout);
   FILE *f = fopen(cp, "rb");
-  if (!f) return sd_errf("%s: %s", cp, strerror(errno));
+  if (!f) return sd_errf("fs.read: %s: %s", cp, sd_strerror(errno));
   int64_t cap = 4096, n = 0;
   char *buf = sd_xrealloc(NULL, (size_t)cap);
   for (;;) {
@@ -875,9 +914,9 @@ SD_FN sd_err *sd_fs_read(sd_str path, sd_str *out) {
     n += (int64_t)r;
     if (r == 0) break;
   }
-  int bad = ferror(f);
+  int bad = ferror(f) ? errno : 0;
   fclose(f);
-  if (bad) { free(buf); return sd_errf("%s: read error", cp); }
+  if (bad) { free(buf); return sd_errf("fs.read: %s: %s", cp, sd_strerror(bad)); }
   *out = sd_str_copy(buf, n);
   free(buf);
   return NULL;
@@ -886,10 +925,10 @@ SD_FN sd_err *sd_fs_read(sd_str path, sd_str *out) {
 SD_FN sd_err *sd_fs_write(sd_str path, sd_str data) {
   char *cp = sd_cstr(path);
   FILE *f = fopen(cp, "wb");
-  if (!f) return sd_errf("%s: %s", cp, strerror(errno));
+  if (!f) return sd_errf("fs.write: %s: %s", cp, sd_strerror(errno));
   size_t w = fwrite(data.p, 1, (size_t)data.len, f);
   int bad = fclose(f) != 0 || w != (size_t)data.len;
-  if (bad) return sd_errf("%s: write error", cp);
+  if (bad) return sd_errf("fs.write: %s: %s", cp, sd_strerror(errno ? errno : EIO));
   return NULL;
 }
 
@@ -907,7 +946,7 @@ SD_FN sd_err *sd_fs_list(sd_str path, sd_list **out) {
   char *cp = sd_cstr(path);
   *out = NULL;
   DIR *d = opendir(cp);
-  if (!d) return sd_errf("%s: %s", cp, strerror(errno));
+  if (!d) return sd_errf("fs.list: %s: %s", cp, sd_strerror(errno));
   sd_list *l = sd_list_new(sizeof(sd_str), 8);
   struct dirent *de;
   while ((de = readdir(d))) {
@@ -930,18 +969,18 @@ SD_FN sd_err *sd_fs_mkdir(sd_str path) {
     if (mkdir(cp, 0777) != 0 && errno != EEXIST) {
       int e = errno;
       cp[i] = c;
-      return sd_errf("%s: %s", cp, strerror(e));
+      return sd_errf("fs.mkdir: %s: %s", cp, sd_strerror(e));
     }
     cp[i] = c;
   }
   struct stat st;
-  if (stat(cp, &st) != 0 || !S_ISDIR(st.st_mode)) return sd_errf("%s: not a directory", cp);
+  if (stat(cp, &st) != 0 || !S_ISDIR(st.st_mode)) return sd_errf("fs.mkdir: %s: not a directory", cp);
   return NULL;
 }
 
 SD_FN sd_err *sd_fs_remove(sd_str path) {
   char *cp = sd_cstr(path);
-  if (remove(cp) != 0) return sd_errf("%s: %s", cp, strerror(errno));
+  if (remove(cp) != 0) return sd_errf("fs.remove: %s: %s", cp, sd_strerror(errno));
   return NULL;
 }
 

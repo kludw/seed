@@ -7,7 +7,7 @@ This is part of the language spec ([SPEC.md](../SPEC.md)). It lists every method
 | Situation | What happens |
 |-----------|--------------|
 | `main` returns an error | `error: <message>` is printed to stderr, exit code 1. |
-| A crash (index out of range, division by zero, failed conversion, sending on a closed channel, ...) | `crash: <message>` is printed to stderr, exit code 2. Inside a `group`, the crash becomes the group's error instead. |
+| A crash (index out of range, division by zero, failed conversion, sending on a closed channel, `os.crash(message)`, ...) | `crash: <message>` is printed to stderr, exit code 2. Inside a `group`, the crash becomes the group's error instead. Either way the crashing goroutine's deferred calls run first. |
 | `os.exit(n)` | Exits immediately with code `n`. |
 | Every goroutine is blocked on a channel (or waits for a group) and no timer is pending | `crash: deadlock: all goroutines are blocked` is printed to stderr, exit code 2. Defers do not run. |
 
@@ -55,8 +55,8 @@ Strings are immutable UTF-8 bytes. Lengths and indexes count bytes.
 | `s.trim()` | Removes leading and trailing spaces, tabs, `\n` and `\r`. |
 | `s.replace(old, new)` | Replaces every occurrence. Crashes if `old` is empty. |
 | `s.toUpper()`, `s.toLower()` | ASCII letters only. |
-| `s.toInt()` | `(int, error)`. Accepts an optional `-` and decimal digits only. |
-| `s.toFloat()` | `(float, error)`. |
+| `s.toInt()` | `(int, error)`. Accepts an optional `-` and decimal digits only. The error is `string.toInt: "12x": invalid integer`. |
+| `s.toFloat()` | `(float, error)`. The error is `string.toFloat: "abc": invalid float`. |
 | `s.bytes()` | `[]byte`. |
 | `s.chars()` | `[]string`, one string per UTF-8 character. |
 | `string(xs)` | Converts a `[]byte` into a string. |
@@ -111,13 +111,16 @@ Strings are immutable UTF-8 bytes. Lengths and indexes count bytes.
 
 ## Core packages
 
-These exist in every Seed compiler, including the `seed0` bootstrap compiler (except `time`, which needs goroutines). The full standard library is in [stdlib.md](stdlib.md).
+These exist in every Seed compiler, including the `seed0` bootstrap compiler (except `time`, which needs goroutines, and `os.crash`). The real compiler has them as ordinary packages of the standard library (`lib/fmt`, `lib/os`, ...), written with native functions; seed0 builds them in. The full standard library is in [stdlib.md](stdlib.md).
+
+Errors follow [stdlib.md](stdlib.md#error-messages): `<package>.<function>: <subject>: <reason>`, for example `fs.read: notes.txt: no such file or directory` or `os.run: frobnicate: no such file or directory`.
 
 ### errors
 
 | Function | Result |
 |---|---|
 | `errors.new(string msg) error` | An error whose `message()` is `msg`. |
+| `errors.wrap(error err, string context) error` | An error whose `message()` is `context + ": " + err.message()`. Crashes if `err` is null. (Not in seed0.) |
 
 ### fmt
 
@@ -134,7 +137,10 @@ These exist in every Seed compiler, including the `seed0` bootstrap compiler (ex
 |---|---|
 | `os.exit(int code)` | Exits immediately. Output is flushed first. |
 | `os.env(string name) string?` | An environment variable, or `null`. |
-| `os.run([]string argv) (int, error)` | Runs a program (looked up on `PATH`) with the same stdin, stdout and stderr, waits for it and returns its exit code. The error is set only if the program could not be started. |
+| `os.run([]string argv) (int, error)` | Runs a program (looked up on `PATH`) with the same stdin, stdout and stderr, waits for it and returns its exit code. The error is set only if the program could not be started. Crashes if `argv` is empty. |
+| `os.crash(string message)` | Crashes the current goroutine exactly like a runtime fault: `crash: <message>`, its deferred calls run, and inside a `group` the group fails with the error `crash: <message>`. Library code uses it when a caller broke a rule: `os.crash("rand.range: lo (5) must be less than hi (5)")`. Never returns. (Not in seed0.) |
+| `os.executable() string` | The absolute path of the running program, with symbolic links resolved, or `""` if it cannot be found. |
+| `os.cwd() (string, error)` | The absolute path of the current directory. |
 
 ### fs
 

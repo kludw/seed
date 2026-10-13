@@ -91,8 +91,9 @@ fn (Checker c) stmtExits(int s) bool {
     }
 }
 
+// Whether e is a call of os.exit or os.crash, which never return.
 fn (Checker c) isExitCall(int e) bool {
-    return c.ast.exprs[e].kind == ExprKind.Call && c.info[e].res == Res.Pkg && c.info[e].pkgFn == PkgFn.Exit
+    return c.ast.exprs[e].kind == ExprKind.Call && c.info[e].res == Res.Func && c.isNoReturn(c.info[e].ref)
 }
 
 // Whether a loop body contains a break for that loop.
@@ -150,6 +151,10 @@ fn (Checker c) mut checkStmt(int s) {
     case StmtKind.Switch:
         c.checkSwitch(st)
     case StmtKind.Return:
+        if (c.curFn >= 0 && c.ast.fns[c.curFn].isTest) {
+            c.errorHint(st.pos, "return is not allowed in a test", "a test ends at its closing brace; use if and else to skip the rest")
+            return
+        }
         if (c.groupDepth > 0) {
             c.errorHint(st.pos, "return is not allowed inside a group block", "the group must wait for its goroutines first; set a variable in the block and return after it")
         }
@@ -171,8 +176,25 @@ fn (Checker c) mut checkStmt(int s) {
     case StmtKind.Spawn:
         c.checkSpawn(st)
     case StmtKind.Assert:
-        c.unsupported(st.pos, "assert")
+        c.checkAssert(st)
     }
+}
+
+// assert(cond): only in a test (outside group blocks, like try, because a
+// failed assert ends the test).
+fn (Checker c) mut checkAssert(Stmt st) {
+    c.checkValue(st.expr, tyBool, "as the condition of assert")
+    if (c.curFn < 0 || !c.ast.fns[c.curFn].isTest) {
+        c.errorHint(st.pos, "assert can only be used in a test", "return an error, or crash with os.crash(message) when a caller broke a rule")
+        return
+    }
+    if (c.groupDepth > 0) {
+        c.errorHint(st.pos, "assert is not allowed inside a group block", "the group must wait for its goroutines first; check the result after the group")
+    }
+    // A failed assert ends the test, so after assert(x != null) x is not
+    // null, and after assert(err == null) the values returned with err can
+    // be read.
+    c.narrowOn(st.expr, true)
 }
 
 fn (Checker c) mut checkIncDec(Stmt st) {
@@ -194,7 +216,7 @@ fn (Checker c) mut checkExprStmt(Stmt st) {
     if (x.kind == ExprKind.Group) {
         c.allowGroup = e
         c.checkExpr(e)
-        c.errorHint(x.pos, "the error returned by the group is not handled", "use  error err = group {...},  try group {...}  or  _ = group {...}")
+        c.errorHint(x.pos, "the error returned by the group is not handled", "assign it (error err = group {...}), use try group {...}, or discard it with _ = group {...}")
         return
     }
     c.checkExpr(e)
@@ -206,7 +228,7 @@ fn (Checker c) mut checkExprStmt(Stmt st) {
     }
     int t = c.typeOf(e)
     if (x.kind == ExprKind.Call && t != tyInvalid && c.types.endsWithError(t)) {
-        c.errorHint(x.pos, "the error returned by " + c.describe(e) + " is not handled", "use try, assign it (error err = ...), or discard it with  _ = ...")
+        c.errorHint(x.pos, "the error returned by " + c.describe(e) + " is not handled", "use try, assign it (error err = ...), or discard it with _ = ...")
     } else {
         c.checkUnusedResult(e)
     }
@@ -290,7 +312,7 @@ fn (Checker c) mut checkReturn(Stmt st) {
         return
     }
     if (n == 0) {
-        c.errorHint(st.pos, fd.name + " does not return a value", "write  return  on its own, or declare a result type")
+        c.errorHint(st.pos, fd.name + " does not return a value", "write return on its own, or declare a result type")
         for (int i = 0; i < st.count; i++) {
             c.checkExpr(c.ast.at(st.list, i))
         }
@@ -413,7 +435,7 @@ fn (Checker c) mut checkAssign(int s) {
             continue
         }
         if (errSlot && i < n - 1 && !c.types.isOpt(tt) && tt != tyError) {
-            c.errorHint(tg2.pos, "the error is discarded with _, so " + what + " may be null and must be declared as " + c.typeName(tt) + "?", "and checked against null before use")
+            c.errorHint(tg2.pos, "the error is discarded with _, so " + what + " may be null and must be declared as " + c.typeName(tt) + "?", "declare it as " + c.typeName(tt) + "? and check it against null before using it")
         }
     }
     for (int j = 0; j < n; j++) {
@@ -460,6 +482,11 @@ fn (Checker c) mut addGuards(int s, int rt) {
         int ti = c.ast.at(st.list, i)
         Target tg = c.ast.targets[ti]
         int v = -1
+        if (c.types.isOpt(c.targetType[ti])) {
+            // A T? can always be read (and compared with null); only a
+            // plain T may hold the null that comes with an error.
+            continue
+        }
         if (tg.kind == TargetKind.Decl) {
             v = c.targetVar[ti]
         } else if (tg.kind == TargetKind.Place && c.ast.exprs[tg.expr].kind == ExprKind.Ident && c.info[tg.expr].res == Res.Local) {
@@ -532,13 +559,14 @@ fn (Checker c) mut checkSwitch(Stmt st) {
         c.popScope()
     }
     if (!hasDefault) {
-        c.errorHint(st.pos, "a switch over " + c.typeName(t) + " must end with a default case", "add  default:  for the values not listed")
+        c.errorHint(st.pos, "a switch over " + c.typeName(t) + " must end with a default case", "add default: for the values not listed")
     }
 }
 
 fn (Checker c) mut checkEnumSwitch(Stmt st, int t) {
     int d = c.types.decl(t)
     TypeDecl td = c.ast.typeDecls[d]
+    string tname = c.declDisplayName(d)
     []bool seen = []bool{}
     for (int i = 0; i < td.caseCount; i++) {
         seen.push(false)
@@ -546,7 +574,7 @@ fn (Checker c) mut checkEnumSwitch(Stmt st, int t) {
     for (int j = 0; j < st.count; j++) {
         Case cs = c.ast.cases[c.ast.at(st.list, j)]
         if (cs.isDefault) {
-            c.errorHint(cs.pos, "a switch over the enum " + td.name + " cannot have default", "list every case, so that adding a case later shows every switch to update")
+            c.errorHint(cs.pos, "a switch over the enum " + tname + " cannot have default", "list every case, so that adding a case later shows every switch to update")
         }
         c.pushScope()
         for (int k = 0; k < cs.labelCount; k++) {
@@ -555,13 +583,13 @@ fn (Checker c) mut checkEnumSwitch(Stmt st, int t) {
             if (!l.isPattern) {
                 string first = ""
                 if (td.caseCount > 0) {
-                    first = c.enumCase(d, 0).name
+                    first = c.casePattern(d, 0)
                 }
-                c.error(l.pos, "expected a case of " + td.name + ", like  case " + td.name + "." + first + ":")
+                c.errorHint(l.pos, "expected a case of " + tname, "write it as case " + first + ":")
                 continue
             }
-            if (l.typeName != td.name || l.pkg != "") {
-                c.error(l.pos, l.typeName + "." + l.caseName + " is not a case of " + td.name)
+            if (!c.labelNamesDecl(l, d)) {
+                c.error(l.pos, labelText(l) + " is not a case of " + tname)
                 continue
             }
             int ci = c.findCase(d, l.caseName)
@@ -570,43 +598,106 @@ fn (Checker c) mut checkEnumSwitch(Stmt st, int t) {
                 continue
             }
             if (seen[ci]) {
-                c.error(l.pos, "case " + td.name + "." + l.caseName + " is listed twice")
+                c.error(l.pos, "case " + tname + "." + l.caseName + " is listed twice")
             }
             seen[ci] = true
             c.labelCase[li] = ci
-            EnumCase ec = c.enumCase(d, ci)
-            if (!l.parens) {
-                continue
-            }
-            if (cs.labelCount > 1 && l.paramCount > 0) {
-                c.error(l.pos, "a case with bindings must be the only label in its case")
-            }
-            if (l.paramCount != ec.paramCount) {
-                string s = "s"
-                if (ec.paramCount == 1) {
-                    s = ""
-                }
-                c.error(l.pos, td.name + "." + ec.name + " carries " + ec.paramCount.string() + " value" + s + " but the pattern binds " + l.paramCount.string())
-                continue
-            }
-            for (int m = 0; m < l.paramCount; m++) {
-                int pi = c.ast.at(l.params, m)
-                Param p = c.ast.params[pi]
-                int pt = c.resolve(p.typeExpr)
-                int want = c.caseParamType(d, ci, m)
-                if (pt != tyInvalid && want != tyInvalid && pt != want) {
-                    c.error(p.pos, td.name + "." + ec.name + " field " + (m + 1).string() + " has type " + c.typeName(want) + ", not " + c.typeName(pt))
-                }
-                c.paramVar[pi] = c.declare(p.name, pt, VarKind.Local, p.pos)
-            }
+            c.checkPattern(li, d, ci, cs.labelCount > 1)
         }
         c.checkBlock(cs.body)
         c.popScope()
     }
     for (int n = 0; n < td.caseCount; n++) {
         if (!seen[n]) {
-            c.errorHint(st.pos, "switch over " + td.name + " does not handle case " + td.name + "." + c.enumCase(d, n).name, "add a case for it; a switch over an enum must list every case")
+            c.errorHint(st.pos, "switch over " + tname + " does not handle case " + tname + "." + c.enumCase(d, n).name, "add a case for it; a switch over an enum must list every case")
         }
+    }
+}
+
+// Whether a pattern's type name (Shape or pkg.Shape) names the enum d.
+fn (Checker c) mut labelNamesDecl(Label l, int d) bool {
+    int pkg = c.pkgOf(l.pos)
+    if (l.pkg != "") {
+        pkg = c.importedPkg(l.pos.file, l.pkg)
+        if (pkg < 0) {
+            return false
+        }
+        c.usedImports[l.pos.file.string() + ":" + l.pkg] = true
+    }
+    int? g = c.global(pkg, l.typeName)
+    return g != null && c.globalList[g].kind == GlobalKind.Type && c.globalList[g].index == d
+}
+
+fn labelText(Label l) string {
+    if (l.pkg != "") {
+        return l.pkg + "." + l.typeName + "." + l.caseName
+    }
+    return l.typeName + "." + l.caseName
+}
+
+// The pattern for case ci of the enum d, for hints: Shape.Circle(float r)
+// or Shape.Empty.
+fn (Checker c) casePattern(int d, int ci) string {
+    EnumCase ec = c.enumCase(d, ci)
+    string head = c.declDisplayName(d) + "." + ec.name
+    if (ec.paramCount == 0) {
+        return head
+    }
+    []string ps = []string{}
+    for (int i = 0; i < ec.paramCount; i++) {
+        Param p = c.ast.params[c.ast.at(ec.params, i)]
+        ps.push(c.ast.typeExprText(p.typeExpr) + " " + p.name)
+    }
+    return head + "(" + ps.join(", ") + ")"
+}
+
+// A case pattern must match its enum case exactly: a case with data binds
+// every field with its type (_ as the name ignores one), a case without
+// data has no parentheses. In a case with several labels, every binding
+// must be _.
+fn (Checker c) mut checkPattern(int li, int d, int ci, bool shared) {
+    Label l = c.ast.labels[li]
+    EnumCase ec = c.enumCase(d, ci)
+    string cname = c.declDisplayName(d) + "." + ec.name
+    if (ec.paramCount == 0) {
+        if (l.parens) {
+            c.errorHint(l.pos, cname + " carries no data, so its pattern has no parentheses", "write case " + cname + ":")
+        }
+        return
+    }
+    if (!l.parens) {
+        c.errorHint(l.pos, cname + " carries data, so its pattern must bind every field", "write case " + c.casePattern(d, ci) + ": and use _ as the name of a field you do not need")
+        return
+    }
+    if (l.paramCount != ec.paramCount) {
+        string s = "s"
+        if (ec.paramCount == 1) {
+            s = ""
+        }
+        c.errorHint(l.pos, cname + " carries " + ec.paramCount.string() + " value" + s + " but the pattern binds " + l.paramCount.string(), "write case " + c.casePattern(d, ci) + ": and use _ as the name of a field you do not need")
+        // Declare the bindings anyway, so that their uses are not reported.
+        for (int b = 0; b < l.paramCount; b++) {
+            int bi = c.ast.at(l.params, b)
+            Param bp = c.ast.params[bi]
+            c.paramVar[bi] = c.declare(bp.name, c.resolve(bp.typeExpr), VarKind.Local, bp.pos)
+            if (c.paramVar[bi] >= 0) {
+                c.vars[c.paramVar[bi]].used = true
+            }
+        }
+        return
+    }
+    for (int m = 0; m < l.paramCount; m++) {
+        int pi = c.ast.at(l.params, m)
+        Param p = c.ast.params[pi]
+        int pt = c.resolve(p.typeExpr)
+        int want = c.caseParamType(d, ci, m)
+        if (pt != tyInvalid && want != tyInvalid && pt != want) {
+            c.error(p.pos, cname + " field " + (m + 1).string() + " has type " + c.typeName(want) + ", not " + c.typeName(pt))
+        }
+        if (shared && p.name != "_") {
+            c.errorHint(p.pos, "a case with several labels cannot bind names", "use _ for every field, or give " + cname + " a case of its own")
+        }
+        c.paramVar[pi] = c.declare(p.name, pt, VarKind.Local, p.pos)
     }
 }
 
@@ -619,7 +710,7 @@ fn (Checker c) mut checkDefer(Stmt st) {
     Expr x = c.ast.exprs[e]
     if (x.kind != ExprKind.Call) {
         if (x.kind != ExprKind.Bad) {
-            c.errorHint(x.pos, "defer needs a function call", "write  defer f(args)")
+            c.errorHint(x.pos, "defer needs a function call", "write defer f(args)")
         }
         return
     }
@@ -642,7 +733,7 @@ fn (Checker c) mut checkDefer(Stmt st) {
     if (i.res == Res.Builtin && i.builtin == Builtin.Close) {
         return
     }
-    if (i.res != Res.Func && i.res != Res.Method && i.res != Res.ValueCall && i.res != Res.IfaceMethod && i.res != Res.Pkg) {
+    if (i.res != Res.Func && i.res != Res.Method && i.res != Res.ValueCall && i.res != Res.IfaceMethod) {
         if (c.typeOf(e) != tyInvalid) {
             c.errorHint(x.pos, "defer needs a call of a function or method, not " + c.describe(e), "write a function that does the work and defer a call of it")
         }
@@ -653,7 +744,7 @@ fn (Checker c) mut checkDefer(Stmt st) {
         return
     }
     if (c.types.endsWithError(t)) {
-        c.errorHint(x.pos, "the error returned by " + c.describe(e) + " is not handled", "discard it explicitly:  defer _ = " + c.describe(e))
+        c.errorHint(x.pos, "the error returned by " + c.describe(e) + " is not handled", "discard it explicitly: defer _ = " + c.describe(e))
     } else {
         c.checkUnusedResult(e)
     }
@@ -675,7 +766,7 @@ fn (Checker c) isChanOp(int e, bool sendOk) bool {
 // T? v = ch.receive(), whose operands are evaluated before select waits.
 fn (Checker c) mut checkSelect(Stmt st) {
     if (st.count == 0) {
-        c.errorHint(st.pos, "select has no cases and would wait forever", "add a case such as  case int? v = ch.receive():")
+        c.errorHint(st.pos, "select has no cases and would wait forever", "add a case such as case int? v = ch.receive():")
     }
     for (int i = 0; i < st.count; i++) {
         Case cs = c.ast.cases[c.ast.at(st.list, i)]
@@ -691,7 +782,7 @@ fn (Checker c) mut checkSelectComm(int s) {
         return
     }
     Stmt st = c.ast.stmts[s]
-    string hint = "a case is  ch.send(v),  ch.receive()  or  T? v = ch.receive()"
+    string hint = "a case is ch.send(v), ch.receive() or T? v = ch.receive()"
     if (st.kind == StmtKind.ExprStmt) {
         c.checkExpr(st.expr)
         if (c.typeOf(st.expr) != tyInvalid && !c.isChanOp(st.expr, true)) {
@@ -721,7 +812,7 @@ fn (Checker c) mut checkSelectComm(int s) {
     int t = c.resolve(tg.typeExpr)
     c.targetType[ti] = t
     if (t != tyInvalid && rt != tyInvalid && t != rt) {
-        c.errorHint(tg.pos, "the received value has type " + c.typeName(rt) + ", not " + c.typeName(t), "declare it as  " + c.typeName(rt) + " " + tg.name)
+        c.errorHint(tg.pos, "the received value has type " + c.typeName(rt) + ", not " + c.typeName(t), "declare it as " + c.typeName(rt) + " " + tg.name)
     }
     c.targetVar[ti] = c.declare(tg.name, t, VarKind.Local, tg.pos)
 }
@@ -741,7 +832,7 @@ fn (Checker c) mut checkGroup(int e) {
     c.groupDepth = savedDepth
     c.groupLoop = savedLoop
     if (!allowed) {
-        c.errorHint(x.pos, "a group can only be assigned to an error variable, returned, discarded or used with try", "write  error err = group {...},  err = group {...},  return group {...},  _ = group {...}  or  try group {...}")
+        c.errorHint(x.pos, "a group can only be assigned to an error variable, returned, discarded or used with try", "write error err = group {...}, err = group {...}, return group {...}, _ = group {...} or try group {...}")
         c.setType(e, tyInvalid)
         return
     }
@@ -754,13 +845,13 @@ fn (Checker c) mut checkGroup(int e) {
 fn (Checker c) mut checkSpawn(Stmt st) {
     int e = st.expr
     if (c.groupDepth == 0) {
-        c.errorHint(st.pos, "spawn is only allowed inside a group block", "the group waits for its goroutines:  error err = group { spawn f(...) }")
+        c.errorHint(st.pos, "spawn is only allowed inside a group block", "the group waits for its goroutines: error err = group { spawn f(...) }")
     }
     c.checkExpr(e)
     Expr x = c.ast.exprs[e]
     if (x.kind != ExprKind.Call) {
         if (x.kind != ExprKind.Bad) {
-            c.errorHint(x.pos, "spawn needs a function call", "write  spawn f(args)")
+            c.errorHint(x.pos, "spawn needs a function call", "write spawn f(args)")
         }
         return
     }
@@ -779,7 +870,7 @@ fn (Checker c) mut checkSpawn(Stmt st) {
         c.errorHint(x.pos, "spawn cannot call the mut method " + c.describe(e), "goroutines share nothing: the goroutine would change its own copy of " + c.describe(c.ast.exprs[x.a].a) + "; send the result back on a channel instead")
         return
     }
-    if (i.res != Res.Func && i.res != Res.Method && i.res != Res.ValueCall && i.res != Res.IfaceMethod && i.res != Res.Pkg) {
+    if (i.res != Res.Func && i.res != Res.Method && i.res != Res.ValueCall && i.res != Res.IfaceMethod) {
         c.errorHint(x.pos, "spawn needs a call of a function or method, not " + c.describe(e), "write a function that does the work and spawn a call of it")
         return
     }

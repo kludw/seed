@@ -1,6 +1,0 @@
-ok   testSha256FipsVectors (5 checks)
-ok   testSha256PaddingBoundaries (8 checks)
-ok   testSha256MillionA (1 checks)
-ok   testHmacSha256Rfc4231 (6 checks)
-ok   testHmacSha256EdgeKeys (2 checks)
-5 tests, 0 failed

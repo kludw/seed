@@ -18,9 +18,9 @@ type Ev enum {
 
 fn sizeAfterAdd(Ev e) int {
     switch (e) {
-    case Ev.Batch([]int ids):
-        ids.push(99)
-        return ids.len()
+    case Ev.Batch([]int list):
+        list.push(99)
+        return list.len()
     case Ev.One(Item item):
         item.tags.push("changed")
         return item.tags.len()

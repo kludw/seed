@@ -136,7 +136,7 @@ fn main([]string args) error {
 04_ignored_error.sd:7:8: error: the error returned by fs.write() is not handled
     7 |     fs.write("notes.txt", "hello")
       |        ^
-    hint: use try, assign it (error err = ...), or discard it with  _ = ...
+    hint: use try, assign it (error err = ...), or discard it with _ = ...
 ```
 
 In Go, `f.Write(...)` on its own line silently drops the error, and so does `x, _ := ...` without anyone noticing. In Seed an error is either checked, passed up, or visibly discarded. You have three ways to handle one.
@@ -212,7 +212,7 @@ fn main([]string args) error {
 ```
 ok: 2 ports
 error: port out of range: 99999
-error: invalid integer: "http"
+error: string.toInt: "http": invalid integer
 8080
 ```
 
@@ -272,7 +272,7 @@ Declaring the value as a plain `string` is rejected:
 04_discard_plain.sd:7:12: error: the error is discarded with _, so text may be null and must be declared as string?
     7 |     string text, _ = fs.read("notes.txt")
       |            ^
-    hint: and checked against null before use
+    hint: declare it as string? and check it against null before using it
 ```
 
 ### Your own errors

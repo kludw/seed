@@ -1505,7 +1505,7 @@ enum {
 
 enum {
   F_PRINT = 1, F_PRINTLN, F_EPRINT, F_EPRINTLN, F_EXIT, F_ENV, F_RUN, F_READ, F_WRITE, F_EXISTS,
-  F_ISDIR, F_LIST, F_MKDIR, F_REMOVE, F_ERRNEW
+  F_ISDIR, F_LIST, F_MKDIR, F_REMOVE, F_ERRNEW, F_EXECUTABLE, F_CWD
 };
 
 static const struct {
@@ -1516,6 +1516,7 @@ static const struct {
   {"fmt", "eprintln", F_EPRINTLN}, {"os", "exit", F_EXIT}, {"os", "env", F_ENV}, {"os", "run", F_RUN},
   {"fs", "read", F_READ}, {"fs", "write", F_WRITE}, {"fs", "exists", F_EXISTS}, {"fs", "isDir", F_ISDIR},
   {"fs", "list", F_LIST}, {"fs", "mkdir", F_MKDIR}, {"fs", "remove", F_REMOVE}, {"errors", "new", F_ERRNEW},
+  {"os", "executable", F_EXECUTABLE}, {"os", "cwd", F_CWD},
 };
 
 static bool is_pkg(const char *n) {
@@ -1979,6 +1980,8 @@ static void check_pkg_call(Expr *e, const char *pkg, const char *name) {
   case F_LIST: res = t_tuple2(t_list(t_string), t_error); break;
   case F_MKDIR: case F_REMOVE: res = t_error; break;
   case F_ERRNEW: res = t_error; break;
+  case F_EXECUTABLE: np = 0; res = t_string; break;
+  case F_CWD: np = 0; res = t_tuple2(t_string, t_error); break;
   }
   check_args(e, p, np, fmt("%s.%s", pkg, name));
   e->sub = CK_PKG;
@@ -3115,6 +3118,8 @@ static const char *gpkg(Expr *e) {
   case F_MKDIR: r = fmt("sd_fs_mkdir(%s)", xs[0]); break;
   case F_REMOVE: r = fmt("sd_fs_remove(%s)", xs[0]); break;
   case F_ERRNEW: r = fmt("sd_err_new(%s)", xs[0]); break;
+  case F_EXECUTABLE: r = "sd_os_executable()"; break;
+  case F_CWD: r = gtuple_out(e->t, "sd_str", "sd_os_cwd(%s&%s)", ""); break;
   }
   return with_pre(&pre, r);
 }

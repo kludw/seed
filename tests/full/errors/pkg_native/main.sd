@@ -1,0 +1,10 @@
+// expect-error: fn add needs a body
+package main
+
+import "fast"
+import "fmt"
+
+fn main([]string args) error {
+    fmt.println(fast.add(1, 2).string())
+    return null
+}

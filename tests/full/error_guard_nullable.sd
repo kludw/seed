@@ -1,0 +1,31 @@
+// A T? declared next to an error can be read (and compared with null)
+// before the error is checked: only a plain T is guarded (lib/COMPILER_BUGS.md 1).
+package main
+
+import "errors"
+import "fmt"
+
+fn find(string key) (string, error) {
+    if (key == "") {
+        return null, errors.new("empty key")
+    }
+    return "value of " + key, null
+}
+
+fn main([]string args) error {
+    string? s, error err = find("")
+    if (s == null) {
+        fmt.println("null before the error is checked")
+    }
+    if (err != null) {
+        fmt.println(err.message())
+    }
+    s, err = find("k")
+    if (s != null) {
+        fmt.println(s)
+    }
+    if (err == null) {
+        fmt.println("no error")
+    }
+    return null
+}

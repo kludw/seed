@@ -1,0 +1,9 @@
+// expect-error: secret is not pub in package lib1
+package main
+
+import "lib1"
+
+fn main([]string args) error {
+    lib1.secret()
+    return null
+}

@@ -50,7 +50,7 @@ A few things are already different from Go:
 
 ## Arguments
 
-`args[0]` is the program itself, and the real arguments follow it. With `seed run`, everything after `--` is passed to the program:
+`args[0]` is the program itself, and the real arguments follow it. With `seed run`, everything after the program's file (or directory) is passed to it; a `--` in front of the arguments is allowed and skipped:
 
 ```seed
 // Greets the name given on the command line, or the world.
@@ -82,13 +82,14 @@ Hello, world!
 
 | Command | What it does |
 |---|---|
-| `seed run file.sd... [-- args...]` | Compiles the files into a temporary executable and runs it. The exit code is the program's. |
-| `seed build -o out file.sd...` | Compiles the files into the executable `out`: a single binary with no dependencies. |
+| `seed run <file.sd or dir> [args...]` | Compiles the program into a temporary executable and runs it. The exit code is the program's. |
+| `seed build [-o out] <file.sd or dir>` | Compiles the program into an executable (named after the file or directory unless `-o` names it): a single binary with no dependencies. |
+| `seed test [dir...]` | Runs the tests of the packages under the directories (see [chapter 11](11-packages.md)). |
 | `seed fmt file.sd...` | Rewrites the files in the one canonical layout. |
 | `seed fmt --check file.sd...` | Changes nothing, and reports the files that are not formatted (exit code 1). |
-| `seed c [--strict] file.sd...` | Writes the generated C program to stdout. `--strict` turns on the pedantic checks. |
+| `seed c <file.sd or dir>` | Writes the generated C program to stdout. |
 
-All files given together form one package. Compile errors are printed to stderr, and the command exits with code 1.
+A program is a single `.sd` file, or a directory: the `package main` in it and the packages it imports ([chapter 11](11-packages.md)). Compile errors are printed to stderr, and the command exits with code 1.
 
 ```
 $ seed build -o greet 01_greet.sd
@@ -96,11 +97,9 @@ $ ./greet Ada
 Hello, Ada!
 ```
 
-`seed test`, which runs a package's tests, comes with packages (see [chapter 11](11-packages.md)).
-
 ## Formatting
 
-There is exactly one layout for Seed code, and `seed fmt` produces it: 4-space indentation, braces on the same line, one statement per line, single spaces around binary operators. In the finished language, code that isn't formatted does not compile, and the error tells you to run `seed fmt`. There is nothing to configure and nothing to argue about. Run it whenever you save:
+There is exactly one layout for Seed code, and `seed fmt` produces it: 4-space indentation, braces on the same line, one statement per line, single spaces around binary operators. Code that isn't formatted does not compile, and the error tells you to run `seed fmt`. There is nothing to configure and nothing to argue about. Run it whenever you save:
 
 ```
 $ seed fmt hello.sd
@@ -110,10 +109,6 @@ The rules are in [formatting.md](../formatting.md), and [chapter 12](12-the-comp
 
 ## The current compiler
 
-Seed is young, and the compiler doesn't do everything the language describes yet:
-
-- **The pedantic checks are opt-in.** `seed run` and `seed build` check types, null safety and error handling, but the stricter checks (unused variables and imports, shadowing of package-level names, unreachable code, naming rules, reading a value before its error is checked) only run with `seed c --strict`. Every example in this guide passes them. To check a program, run `seed c --strict file.sd > /dev/null`.
-- **Formatting is not enforced** while compiling yet. Use `seed fmt --check`.
-- **Not implemented yet:** concurrency (`chan`, `select`, `group`, `spawn`), user packages and imports other than `fmt`, `os`, `fs` and `errors`, tests (`test`, `assert`, `seed test`), and the rest of the standard library. Chapters 10 and 11 describe these as specified.
+Seed is young, and the compiler doesn't do everything the language describes yet. The language itself is complete, but most of the standard library ([stdlib.md](../stdlib.md)) is not written yet: today there are the core packages `fmt`, `os`, `fs`, `errors` and `time` and the pure-Seed packages `strings`, `path`, `math`, `encoding`, `rand`, `crypto`, `json` and part of `http` (see [lib/README.md](../../lib/README.md)).
 
 Next: [Basics](02-basics.md).

@@ -1,0 +1,11 @@
+// expect-error: discard it explicitly by writing _ = in front of the call
+package main
+
+fn double(int x) int {
+    return x * 2
+}
+
+fn main([]string args) error {
+    double(2)
+    return null
+}

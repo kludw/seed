@@ -9,7 +9,10 @@ replaces `seed0/runtime.c` (64-bit ints, memory never freed) with:
 - goroutines on OS threads, channels, `select`, groups with Erlang-style
   failure, timers,
 - per-goroutine crash handling and a defer stack,
-- interface values, `error`, and the core packages `fmt`, `os`, `fs`, `errors`.
+- interface values, `error`, the OS side of the core packages `fmt`, `os`,
+  `fs`, `errors` and `time` (the packages themselves are in `lib/`, with
+  native functions that call these; see [Native functions](#13-native-functions)),
+- the runner of `seed test` programs.
 
 This file is the reference for the code generator. `seed.h` has the same
 information in shorter form; `tests/example.c` is a complete hand-lowered
@@ -29,9 +32,10 @@ program that follows every rule below.
 10. [Goroutines, groups and spawn](#10-goroutines-groups-and-spawn)
 11. [Channels, select and time](#11-channels-select-and-time)
 12. [Program entry and exit](#12-program-entry-and-exit)
-13. [API reference](#13-api-reference)
-14. [Tests and performance](#14-tests-and-performance)
-15. [Decisions and limitations](#15-decisions-and-limitations)
+13. [Native functions](#13-native-functions)
+14. [API reference](#14-api-reference)
+15. [Tests and performance](#15-tests-and-performance)
+16. [Decisions and limitations](#16-decisions-and-limitations)
 
 ## 1. Building
 
@@ -43,7 +47,8 @@ runtime/seed_int.c       big integers
 runtime/seed_str.c       strings and text conversions
 runtime/seed_list.c      lists and maps
 runtime/seed_task.c      goroutines, crashes, defer, groups, channels, select, timers, sd_main
-runtime/seed_pkg.c       fmt, os, fs
+runtime/seed_pkg.c       the OS side of fmt, os, fs (called by the natives in lib/)
+runtime/seed_test.c      the runner of seed test programs, assert errors
 runtime/seed_all.c       all of the above as one translation unit
 ```
 
@@ -53,7 +58,7 @@ cc -std=c11 -O2 -I runtime prog.c runtime/seed_all.c -lpthread -lm -o prog
 
 The `seed_*.c` files can also be compiled separately (or into a static
 library). To embed the runtime in one generated file, paste `seed.h`,
-`seed_internal.h` and the six `.c` files in that order, dropping their
+`seed_internal.h` and the seven `.c` files in that order, dropping their
 `#include "seed*.h"` lines.
 
 The runtime is C11 plus POSIX threads and two GNU extensions that clang and
@@ -255,7 +260,7 @@ sd_int_release(c);
   `index out of range: <i> with length <len>`.
 - `for (int i = 0; i < n; i++)` lowers naturally: `i` is an `sd_int`;
   `i++` is `t = sd_int_add(i, SD_INT(1)); sd_int_release(i); i = t;` (both
-  calls are a few instructions for small values; see section 14).
+  calls are a few instructions for small values; see section 15).
 - byte: arithmetic is not defined on bytes; comparisons and `& | ^` are
   plain C; shifts use `sd_byte_shl`/`sd_byte_shr` (8 or more gives 0).
 
@@ -406,7 +411,7 @@ Crash unwinding is a `siglongjmp` to the goroutine's top frame, so generated
 code needs no checks after calls. The cost is that **the counted values held
 by the unwound C frames' locals are not released** (they leak). Defer thunks
 own their environments, so those are released normally. This is the main
-known limitation; see section 15.
+known limitation; see section 16.
 
 **Defer API.** A function containing `defer` records the stack depth on entry
 and unwinds to it before every return:
@@ -600,7 +605,115 @@ cache with `sd_goroutine_atexit(fn)`: the runtime calls it on the
 goroutine's thread when the goroutine ends (never for the main goroutine,
 whose caches live until the program exits).
 
-## 13. API reference
+## 13. Native functions
+
+A function or method of a standard library package (a directory under
+`$SEED_ROOT/lib`) may be declared without a body. It is then **native**:
+written in C, in a `.c` file in the package's directory. This section is the
+contract between those C files and the compiler. Elsewhere a missing body is
+a compile error (`fn f needs a body`).
+
+```
+// lib/fs/fs.sd
+pub fn read(string path) (string, error)
+pub fn exists(string path) bool
+
+// lib/net/net.sd (an example: a handle type with a private field)
+pub type Conn struct {
+    int id
+}
+pub fn (Conn c) read(int max) (string?, error)
+pub fn (Conn c) mut setTimeout(int ns)
+```
+
+**Where the C goes.** Every `*.c` file directly in the package's directory
+(by convention `lib/<pkg>/<pkg>.c`) is pasted into each program that
+imports the package, after the runtime, the program's type definitions and
+its prototypes, and before the generated functions. Lines starting with
+`#include "seed` are dropped (the runtime is already there); system headers
+may be included. Name private C helpers `static` and give them the
+package's prefix (`net_...`), since every package's C ends up in one file.
+
+**Symbol.** `sd_lib_<path>_<name>` for a function and
+`sd_lib_<path>_<Type>_<method>` for a method, where `<path>` is the import
+path with `/` replaced by `_`: `fs.read` is `sd_lib_fs_read`, `net.Conn.read`
+is `sd_lib_net_Conn_read`. Define it without `static`. The compiler emits a
+prototype for it from the Seed declaration, so a C definition that does not
+match the declaration is a C compile error. (The compiler calls it through
+a generated wrapper `sd_f_fs_read` with the usual calling convention, so a
+native can also be used as a function value, deferred or spawned.)
+
+**Parameters** use the C type of section 2 and are **borrowed** (section
+3): never release them; retain what you keep. A receiver comes first: by
+value (borrowed) for a plain method, as a pointer to the caller's variable
+for a `mut` method (change it in place; make containers unique first with
+`sd_list_mut`, `sd_box_mut`, ...). A struct type `T` of package `p` is the C
+struct `sd_S_p_T` (`sd_S_net_Conn`), with one member `f_<field>` per field
+(`c.f_id`), whatever the fields' visibility in Seed.
+
+**Results** are **owned** (+1):
+
+| Seed result | C |
+|---|---|
+| none | `void` |
+| `T` | returns `T` |
+| `T?` | returns the nullable representation of section 2: `NULL` for strings, lists, maps, channels and `S?` boxes, `SD_INT_NULL`, `(sd_opt_float){false, 0}`, `SD_IFACE_NULL` |
+| `(A, B, ..., E)` | returns the **last** result; the others come back through out-pointers **appended after the parameters**, in order |
+
+```c
+sd_err sd_lib_fs_read(sd_str path, sd_str *out);                     /* (string, error) */
+sd_err sd_lib_os_run(sd_list *argv, sd_int *code);                   /* (int, error) */
+sd_err sd_lib_net_Conn_read(sd_S_net_Conn c, sd_int max, sd_str *out); /* (string?, error) */
+void sd_lib_net_Conn_setTimeout(sd_S_net_Conn *c, sd_int ns);         /* mut method */
+```
+
+The out-slots are initialised to null (or zero) before the call. When a
+native returns a non-null error, it should leave them that way (or store
+nulls): the caller never reads or releases them (`try`, the error guards).
+Anything stored in an out-slot is owned by the caller.
+
+**Errors** are `sd_err` values made with `sd_errorf` (or `sd_errors_new`).
+Their messages follow docs/stdlib.md: `<package>.<function>: <subject>:
+<reason>`, with a lowercase reason; `sd_strerror(errno)` gives the system's
+reason in that form:
+
+```c
+sd_err sd_lib_fs_read(sd_str path, sd_str *out) {
+  FILE *f = fopen(path->data, "rb");
+  if (!f) return sd_errorf("fs.read: %s: %s", path->data, sd_strerror(errno));
+  ...
+  *out = sd_str_new(buf, n);
+  return SD_ERR_NULL;
+}
+```
+
+**Crashes.** A caller's mistake (docs/stdlib.md, "Errors and crashes") is
+`sd_crash("rand.range: lo (%lld) must be less than hi (%lld)", ...)`, which
+never returns; it crashes the calling goroutine like a runtime fault. Seed
+code does the same with `os.crash(message)`.
+
+**Strings** are `sd_str` (`s->data` is NUL-terminated, `s->len` bytes, and
+may contain NULs): make them with `sd_str_new(bytes, n)` or
+`sd_str_from_cstr`. Ints are `sd_int`: `sd_int_to_i64(v, &i)` (false when
+it does not fit), `sd_int_from_i64(i)`. Lists: `sd_list_new(&sd_type_str,
+cap)`, `SD_LIST_PUSH(&l, sd_str, value)`, `SD_LIST_GET(l, T, i)`.
+
+**Goroutines.** Each goroutine is an OS thread, so a native that blocks
+(reads a socket, waits for a child) blocks only its own goroutine. It is
+not a stop point, though: a goroutine whose group fails is stopped only at
+channel operations and `time.sleep` (section 10). Blocking natives that
+must be stoppable need a runtime hook that does not exist yet.
+
+**What the compiler knows.** Nothing about natives beyond their
+declarations, except that `os.exit` and `os.crash` never return (for
+"missing return" and unreachable code).
+
+The core packages are written this way: `lib/fmt`, `lib/os`, `lib/fs` and
+`lib/time` declare their functions native and call the runtime functions of
+section 14 (`sd_lib_fmt_println` calls `sd_fmt_println`); `lib/errors` is
+plain Seed.
+
+## 14. API reference
 
 Arguments are borrowed and results owned unless marked **consumes** or
 **borrowed result**. `pl`/`pm`/`pb` are places (`sd_list **`, ...).
@@ -751,9 +864,13 @@ Arguments are borrowed and results owned unless marked **consumes** or
 | Function | Seed |
 |---|---|
 | `int sd_main(int argc, char **argv, sd_err (*main_fn)(sd_list *))` | program entry |
+| `int sd_test_main(int argc, char **argv, const sd_test *tests, int n)` | entry of a `seed test` program (below) |
 | `void sd_exit_process(int code)` | flush and `_exit` |
 | `void sd_fmt_print(s)`, `sd_fmt_println(s)`, `sd_fmt_eprint(s)`, `sd_fmt_eprintln(s)` | `fmt.*` |
 | `void sd_os_exit(sd_int code)` | `os.exit` |
+| `void sd_os_crash(sd_str message)` | `os.crash`: like a runtime fault |
+| `sd_str sd_os_executable(void)` | `os.executable` (symbolic links resolved; `""` if unknown) |
+| `sd_err sd_os_cwd(sd_str *out)` | `os.cwd` |
 | `sd_str sd_os_env(sd_str name)` | `os.env` (NULL when unset) |
 | `sd_err sd_os_run(const sd_list *argv, sd_int *code)` | `os.run`; error when the program can't be started |
 | `sd_err sd_fs_read(path, sd_str *out)`, `sd_fs_write(path, data)` | |
@@ -762,11 +879,36 @@ Arguments are borrowed and results owned unless marked **consumes** or
 | `sd_err sd_fs_mkdir(path)` | with parents; ok if it exists |
 | `sd_err sd_fs_remove(path)` | file or empty directory |
 
-Error texts follow seed0: `invalid integer: "x"`, `invalid float: "x"`,
-`<path>: <strerror>`, `<program>: <strerror>`. `os.run` returns `128 + signal`
-for a child killed by a signal.
+| `const char *sd_strerror(int e)` | `strerror` with a lowercase first letter |
 
-## 14. Tests and performance
+Error texts follow docs/stdlib.md (seed0 has the same ones):
+`string.toInt: "x": invalid integer`, `string.toFloat: "x": invalid float`,
+`fs.read: <path>: <reason>` (likewise `fs.write`, `fs.list`, `fs.mkdir`,
+`fs.remove`), `os.run: <program>: <reason>`, `os.cwd: <reason>`. `os.run`
+returns `128 + signal` for a child killed by a signal and crashes on an
+empty argv.
+
+**seed test programs** (`seed_test.c`): the compiler compiles each test
+block as `static sd_err sd_test_N(void)` and emits a table
+`static const sd_test sd_tests[] = {{"description", "path/tests/x_test.sd",
+line, sd_test_N}, ...}` and `main` calling `sd_test_main`. Each test runs in
+a goroutine of its own group, so an error it returns or a crash (`crash:
+...`) fails only that test. A failed `assert` returns an error made by
+`sd_assert_error(msg)` (recognised by `sd_err_is_assert`), whose message
+already has its position. One line is printed per failure:
+
+```
+FAIL "total is rounded": cart/tests/cart_test.sd:12: assert failed: c.total() == 600 (450 == 600)
+FAIL "zero quantity": cart/tests/cart_test.sd:20: error: cart.add: pen: quantity must be at least 1
+FAIL "lookup": cart/tests/cart_test.sd:31: crash: index out of range: 5 with length 2
+```
+
+`"<passed> <failed>"` is written to the file named by `argv[1]`, if any,
+and the program exits with 1 if a test failed. `sd_str_quote(s)` and
+`sd_err_show(e)` give the text a failed assert shows for a string
+(`"a\tb"`) and an error (its quoted message, or `null`).
+
+## 15. Tests and performance
 
 ```
 runtime/tests/run.sh          # asan+ubsan, tsan and plain -O2 builds; ~30 s
@@ -808,7 +950,7 @@ Blocking operations cost an OS thread wake-up (a condition variable), which
 dominates unbuffered channels; buffered channels avoid it when they don't
 fill up.
 
-## 15. Decisions and limitations
+## 16. Decisions and limitations
 
 Decisions made while writing the runtime (nobody was available to ask):
 

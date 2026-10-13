@@ -11,16 +11,22 @@
 // in check_stmt.sd.
 package main
 
+import "fs"
+
 type GlobalKind enum {
     Fn
     Type
     Const
 }
 
+// A package-level name: its kind, the index of its declaration, and its
+// package (globals is keyed by "<package>:<name>").
 type Global struct {
     GlobalKind kind
     int index
     Pos pos
+    int pkg
+    string name
 }
 
 type VarKind enum {
@@ -61,7 +67,7 @@ type Guard struct {
 //
 //   Local       ref = variable           Const     ref = const decl
 //   Func        ref = fn decl            Method    ref = fn decl
-//   Builtin     builtin                  Pkg       pkgFn
+//   Builtin     builtin
 //   Conv        a conversion such as int(x)
 //   EnumNew     ref = type decl, sub = case (Type.Case(args))
 //   EnumVal     ref = type decl, sub = case (Type.Case)
@@ -69,7 +75,9 @@ type Guard struct {
 //   ListIndex, StringIndex, MapIndex
 //   ValueCall   a call of a function value (the callee is any expression)
 //   IfaceMethod ref = interface decl, sub = method index (in its methods)
-//   PkgConst    a core package constant such as time.second (sub = value)
+//
+// A name from another package (cart.newCart, cart.maxItems) resolves like
+// a name of the current package: Func, Const, EnumNew, ...
 type Res enum {
     None
     Local
@@ -77,7 +85,6 @@ type Res enum {
     Func
     Method
     Builtin
-    Pkg
     Conv
     EnumNew
     EnumVal
@@ -87,7 +94,6 @@ type Res enum {
     MapIndex
     ValueCall
     IfaceMethod
-    PkgConst
 }
 
 type Builtin enum {
@@ -127,27 +133,6 @@ type Builtin enum {
     Close
 }
 
-type PkgFn enum {
-    None
-    Print
-    Println
-    Eprint
-    Eprintln
-    Exit
-    Env
-    Run
-    Read
-    Write
-    Exists
-    IsDir
-    List
-    Mkdir
-    Remove
-    ErrNew
-    After
-    Sleep
-}
-
 // The checker's result for one expression.
 //
 // type is the type the parent sees. When wrap is set, the expression itself
@@ -167,7 +152,6 @@ type ExprInfo struct {
     int ref
     int sub
     Builtin builtin
-    PkgFn pkgFn
 }
 
 fn newInfo() ExprInfo {
@@ -182,7 +166,6 @@ fn newInfo() ExprInfo {
         ref: -1,
         sub: -1,
         builtin: Builtin.None,
-        pkgFn: PkgFn.None,
     }
 }
 
@@ -199,7 +182,7 @@ type Checker struct {
     Types types
     map[string]int globals
     []Global globalList
-    map[string]bool imported
+    map[string]int imported
     map[string]bool usedImports
     map[string]int methods
     map[string]bool mutNames
@@ -232,21 +215,21 @@ type Checker struct {
     int groupDepth
     int groupLoop
     int allowGroup
-    bool strict
+    bool testMode
+    string libDir
+    string projectRoot
 }
 
-// strict turns on the pedantic checks that seed0 does not have and that some
-// seed0-era programs fail: unused variables and imports, and locals that
-// shadow package-level names. They will become the default once every
-// program in the test suites passes them.
-fn newChecker(Ast ast, Diags diags, bool strict) Checker {
+// In testMode the program is a test program (seed test): the test blocks
+// of the root package's tests/ files are checked, and main is not needed.
+fn newChecker(Ast ast, Diags diags, bool testMode) Checker {
     Checker c = Checker{
         ast: ast,
         diags: diags,
         types: newTypes(),
         globals: map[string]int{},
         globalList: []Global{},
-        imported: map[string]bool{},
+        imported: map[string]int{},
         usedImports: map[string]bool{},
         methods: map[string]int{},
         mutNames: map[string]bool{},
@@ -279,7 +262,9 @@ fn newChecker(Ast ast, Diags diags, bool strict) Checker {
         groupDepth: 0,
         groupLoop: -1,
         allowGroup: -1,
-        strict: strict,
+        testMode: testMode,
+        libDir: "",
+        projectRoot: "",
     }
     for (int i = 0; i < ast.exprs.len(); i++) {
         c.info.push(newInfo())
@@ -317,12 +302,6 @@ fn (Checker c) mut errorHint(Pos pos, string message, string hint) {
     c.diags.errorHint(pos, message, hint)
 }
 
-// For the features that the parser accepts but this compiler cannot
-// translate yet: tests (test and assert).
-fn (Checker c) mut unsupported(Pos pos, string what) {
-    c.errorHint(pos, what + " is not implemented by this compiler yet", "tests and seed test come with a later version of the compiler")
-}
-
 // ---- small accessors ----
 
 fn (Checker c) typeOf(int e) int {
@@ -350,9 +329,7 @@ fn (Checker c) mut setType(int e, int t) {
 // Checks the whole program in c.ast. Errors end up in c.diags.
 fn (Checker c) mut checkProgram() {
     c.collectGlobals()
-    if (c.strict) {
-        c.checkDeclNames()
-    }
+    c.checkDeclNames()
     c.checkImports()
     for (int i = 0; i < c.ast.typeDecls.len(); i++) {
         TypeDecl td = c.ast.typeDecls[i]
@@ -362,7 +339,7 @@ fn (Checker c) mut checkProgram() {
         } else if (td.kind == DeclKind.Interface) {
             kind = Kind.Interface
         }
-        c.declType.push(c.types.declared(kind, i, td.name))
+        c.declType.push(c.types.declared(kind, i, c.declDisplayName(i), c.declCName(i)))
     }
     for (int j = 0; j < c.ast.typeDecls.len(); j++) {
         c.resolveTypeDecl(j)
@@ -386,45 +363,155 @@ fn (Checker c) mut checkProgram() {
     for (int b = 0; b < c.ast.fns.len(); b++) {
         c.checkFnBody(b)
     }
-    for (int t = 0; t < c.ast.tests.len(); t++) {
-        c.unsupported(c.ast.tests[t].pos, "test")
+    c.checkUnusedImports()
+}
+
+// ---- packages ----
+
+// The package (index in ast.pkgs) of the file a position is in.
+fn (Checker c) pkgOf(Pos pos) int {
+    return c.ast.files[pos.file].pkgIndex
+}
+
+fn (Checker c) declPkg(int d) int {
+    return c.ast.files[c.ast.typeDecls[d].file].pkgIndex
+}
+
+fn (Checker c) fnPkg(int f) int {
+    return c.ast.files[c.ast.fns[f].file].pkgIndex
+}
+
+// The package-level name in a package, or null.
+fn (Checker c) global(int pkg, string name) int? {
+    return c.globals[pkg.string() + ":" + name]
+}
+
+// The name of a type for messages: Item in its own root package, cart.Item
+// when it belongs to an imported package.
+fn (Checker c) declDisplayName(int d) string {
+    int pkg = c.declPkg(d)
+    if (pkg == 0) {
+        return c.ast.typeDecls[d].name
     }
-    if (c.strict) {
-        c.checkUnusedImports()
+    return c.ast.pkgs[pkg].name + "." + c.ast.typeDecls[d].name
+}
+
+// The name of a type in C names: the package's prefix and the type's name
+// (cart_Item; just Item in package main).
+fn (Checker c) declCName(int d) string {
+    return c.ast.pkgs[c.declPkg(d)].cprefix + c.ast.typeDecls[d].name
+}
+
+// The package imported under name in a file, or -1.
+fn (Checker c) importedPkg(int file, string name) int {
+    int? p = c.imported[file.string() + ":" + name]
+    if (p == null) {
+        return -1
     }
+    return p
+}
+
+// Whether e is the name of a package imported in its file (and not a local
+// variable); marks the import as used.
+fn (Checker c) mut pkgNamed(int e) int {
+    Expr x = c.ast.exprs[e]
+    if (x.kind != ExprKind.Ident || c.lookupVar(x.text) >= 0) {
+        return -1
+    }
+    int p = c.importedPkg(x.pos.file, x.text)
+    if (p >= 0) {
+        c.usedImports[x.pos.file.string() + ":" + x.text] = true
+    }
+    return p
+}
+
+// A pub name of another package: pkg.name. Reports names that do not exist
+// or are not pub, and returns null for them.
+fn (Checker c) mut pkgMember(int pkg, string name, Pos pos) int? {
+    int? g = c.global(pkg, name)
+    Package pk = c.ast.pkgs[pkg]
+    if (g == null) {
+        Suggest s = newSuggest(name)
+        for (int i = 0; i < c.globalList.len(); i++) {
+            Global gl = c.globalList[i]
+            if (gl.pkg == pkg && c.globalPub(i)) {
+                s.consider(gl.name)
+            }
+        }
+        c.errorHint(pos, "package " + pk.name + " has no " + name, s.hint())
+        return null
+    }
+    if (!c.globalPub(g)) {
+        c.errorHint(pos, name + " is not pub in package " + pk.name, "only names declared pub can be used outside their package")
+        return null
+    }
+    return g
+}
+
+fn (Checker c) globalPub(int g) bool {
+    Global gl = c.globalList[g]
+    switch (gl.kind) {
+    case GlobalKind.Fn:
+        return c.ast.fns[gl.index].isPub
+    case GlobalKind.Type:
+        return c.ast.typeDecls[gl.index].isPub
+    case GlobalKind.Const:
+        return c.ast.consts[gl.index].isPub
+    }
+}
+
+// Whether field i of the struct d can be used at pos: it is pub, or pos is
+// in the struct's own package.
+fn (Checker c) fieldVisible(int d, int i, Pos pos) bool {
+    if (c.declPkg(d) == c.pkgOf(pos)) {
+        return true
+    }
+    return c.ast.params[c.ast.at(c.ast.typeDecls[d].fields, i)].isPub
+}
+
+fn (Checker c) mut privateField(Pos pos, int d, string name) {
+    c.errorHint(pos, "the field " + name + " of " + c.declDisplayName(d) + " is not pub", "only pub fields can be used outside package " + c.ast.pkgs[c.declPkg(d)].name)
+}
+
+// Whether name is a package that could be imported (in the standard library
+// or the project), for the hint when it is used without an import.
+fn (Checker c) isPackageDir(string name) bool {
+    if (!isCamelCase(name)) {
+        return false
+    }
+    return (c.libDir != "" && fs.isDir(c.libDir + "/" + name)) || (c.projectRoot != "" && fs.isDir(joinPath(c.projectRoot, name)))
+}
+
+// Whether the function f is os.exit or os.crash, which never return.
+fn (Checker c) isNoReturn(int f) bool {
+    FnDecl fd = c.ast.fns[f]
+    Package pk = c.ast.pkgs[c.fnPkg(f)]
+    return fd.body < 0 && pk.isLib && pk.path == "os" && (fd.name == "exit" || fd.name == "crash")
 }
 
 fn (Checker c) mut addGlobal(string name, GlobalKind kind, int index, Pos pos) {
     if (name == "") {
         return
     }
-    int? old = c.globals[name]
+    int pkg = c.pkgOf(pos)
+    int? old = c.global(pkg, name)
     if (old != null) {
         Pos op = c.globalList[old].pos
         c.error(pos, name + " is already declared at " + c.diags.paths[op.file] + ":" + op.line.string() + ":" + op.col.string())
         return
     }
-    c.globalList.push(Global{kind: kind, index: index, pos: pos})
-    c.globals[name] = c.globalList.len() - 1
+    c.globalList.push(Global{kind: kind, index: index, pos: pos, pkg: pkg, name: name})
+    c.globals[pkg.string() + ":" + name] = c.globalList.len() - 1
 }
 
 fn (Checker c) mut collectGlobals() {
-    string pkg = ""
-    for (int f = 0; f < c.ast.files.len(); f++) {
-        SourceFile sf = c.ast.files[f]
-        if (pkg == "") {
-            pkg = sf.pkg
-        } else if (sf.pkg != pkg) {
-            c.error(sf.pkgPos, "all files must belong to one package: found " + sf.pkg + ", expected " + pkg)
-        }
-    }
     for (int i = 0; i < c.ast.typeDecls.len(); i++) {
         TypeDecl td = c.ast.typeDecls[i]
         c.addGlobal(td.name, GlobalKind.Type, i, td.pos)
     }
     for (int j = 0; j < c.ast.fns.len(); j++) {
         FnDecl fd = c.ast.fns[j]
-        if (!fd.isMethod) {
+        if (!fd.isMethod && !fd.isTest) {
             c.addGlobal(fd.name, GlobalKind.Fn, j, fd.pos)
         }
     }
@@ -434,28 +521,26 @@ fn (Checker c) mut collectGlobals() {
     }
 }
 
-fn isCorePackage(string name) bool {
-    return name == "fmt" || name == "os" || name == "fs" || name == "errors" || name == "time"
-}
-
-// Imports are per file: a package must be imported in the file that uses it.
+// Imports are per file: a package must be imported in the file that uses
+// it, under the last element of its path. The loader resolved them (target).
 fn (Checker c) mut checkImports() {
     for (int i = 0; i < c.ast.imports.len(); i++) {
         Import im = c.ast.imports[i]
-        if (!isCorePackage(im.path)) {
-            c.errorHint(im.pos, "this compiler can only import the core packages fmt, os, fs, errors and time, not \"" + im.path + "\"", "user packages are not implemented yet")
+        if (im.target < 0) {
             continue
         }
-        string key = im.file.string() + ":" + im.path
+        string key = im.file.string() + ":" + im.name
         if (c.imported[key] != null) {
-            c.error(im.pos, "\"" + im.path + "\" is imported twice")
+            c.errorHint(im.pos, "\"" + im.path + "\" is imported twice, or another import has the same last name " + im.name, "remove one of the imports")
+            continue
         }
-        c.imported[key] = true
+        int? g = c.global(c.ast.files[im.file].pkgIndex, im.name)
+        if (g != null) {
+            Pos gp = c.globalList[g].pos
+            c.errorHint(im.pos, "the import \"" + im.path + "\" has the same name as " + im.name + " declared at " + c.diags.paths[gp.file] + ":" + gp.line.string(), "rename " + im.name + ", so that " + im.name + ". means the package")
+        }
+        c.imported[key] = im.target
     }
-}
-
-fn (Checker c) isImported(int file, string pkg) bool {
-    return c.imported[file.string() + ":" + pkg] != null
 }
 
 fn (Checker c) mut resolveTypeDecl(int d) {
@@ -519,15 +604,21 @@ fn (Checker c) mut resolveSignature(int f) {
         rs.push(c.resolve(c.ast.at(fd.results, j)))
     }
     c.fnRet.push(c.resultOf(rs))
+    string prefix = c.ast.pkgs[c.fnPkg(f)].cprefix
+    if (fd.isTest) {
+        c.fnRecv.push(-1)
+        c.fnCName.push("sd_test_" + f.string())
+        return
+    }
     if (!fd.isMethod) {
         c.fnRecv.push(-1)
-        c.fnCName.push("sd_f_" + fd.name)
+        c.fnCName.push("sd_f_" + prefix + fd.name)
         return
     }
     TypeExpr rte = c.ast.typeExprs[fd.recvType]
     int? g = null
     if (rte.kind == TypeExprKind.Name && rte.pkg == "") {
-        g = c.globals[rte.name]
+        g = c.global(c.fnPkg(f), rte.name)
     }
     if (g == null || c.globalList[g].kind != GlobalKind.Type) {
         if (c.resolve(fd.recvType) != tyInvalid) {
@@ -547,10 +638,10 @@ fn (Checker c) mut resolveSignature(int f) {
     }
     c.teType[fd.recvType] = c.declType[d]
     c.fnRecv.push(d)
-    c.fnCName.push("sd_m_" + td.name + "__" + fd.name)
-    string key = td.name + "." + fd.name
+    c.fnCName.push("sd_m_" + prefix + td.name + "__" + fd.name)
+    string key = methodKey(d, fd.name)
     if (c.methods[key] != null) {
-        c.error(fd.pos, "method " + key + " is declared twice")
+        c.error(fd.pos, "method " + td.name + "." + fd.name + " is declared twice")
         return
     }
     c.methods[key] = f
@@ -559,8 +650,24 @@ fn (Checker c) mut resolveSignature(int f) {
     }
 }
 
+// The key of a method in Checker.methods: the type declaration and the
+// method's name.
+fn methodKey(int d, string name) string {
+    return d.string() + "." + name
+}
+
+// A program's root package must be package main with a main function (a
+// test program runs its tests instead).
 fn (Checker c) mut checkMain() {
-    int? g = c.globals["main"]
+    if (c.testMode) {
+        return
+    }
+    if (c.ast.pkgs.len() > 0 && c.ast.pkgs[0].name != "main") {
+        Pos pp = c.ast.files[0].pkgPos
+        c.errorHint(pp, "a program must be package main, not package " + c.ast.pkgs[0].name, "build the program that imports this package, or run its tests with seed test")
+        return
+    }
+    int? g = c.global(0, "main")
     if (g == null || c.globalList[g].kind != GlobalKind.Fn) {
         Pos p = Pos{file: 0, line: 1, col: 1}
         c.errorHint(p, "missing fn main([]string args) error", "every program starts at main")
@@ -657,7 +764,7 @@ fn (Checker c) mut unknownCase(Pos pos, int d, string name) {
     for (int i = 0; i < td.caseCount; i++) {
         s.consider(c.enumCase(d, i).name)
     }
-    c.errorHint(pos, "enum " + td.name + " has no case " + name, s.hint())
+    c.errorHint(pos, "enum " + c.declDisplayName(d) + " has no case " + name, s.hint())
 }
 
 fn (Checker c) mut unknownField(Pos pos, int d, string name) {
@@ -666,7 +773,7 @@ fn (Checker c) mut unknownField(Pos pos, int d, string name) {
     for (int i = 0; i < td.fieldCount; i++) {
         s.consider(c.fieldName(d, i))
     }
-    c.errorHint(pos, "struct " + td.name + " has no field " + name, s.hint())
+    c.errorHint(pos, "struct " + c.declDisplayName(d) + " has no field " + name, s.hint())
 }
 
 // ---- type expressions ----
@@ -715,13 +822,16 @@ fn (Checker c) mut resolveUncached(int te) int {
     switch (x.kind) {
     case TypeExprKind.Name:
         if (x.pkg != "") {
-            c.errorHint(x.pos, "unknown type " + x.pkg + "." + x.name, "types from other packages are not implemented yet")
-            return tyInvalid
+            return c.resolveQualified(x)
         }
         if (isBuiltinTypeName(x.name)) {
             return builtinType(x.name)
         }
-        int? g = c.globals[x.name]
+        if (c.importedPkg(x.pos.file, x.name) >= 0) {
+            c.errorHint(x.pos, x.name + " is a package, not a type", "write " + x.name + ".TypeName")
+            return tyInvalid
+        }
+        int? g = c.global(c.pkgOf(x.pos), x.name)
         if (g != null) {
             Global gl = c.globalList[g]
             if (gl.kind == GlobalKind.Type) {
@@ -738,7 +848,9 @@ fn (Checker c) mut resolveUncached(int te) int {
         s.consider("string")
         s.consider("error")
         for (int i = 0; i < c.ast.typeDecls.len(); i++) {
-            s.consider(c.ast.typeDecls[i].name)
+            if (c.declPkg(i) == c.pkgOf(x.pos)) {
+                s.consider(c.ast.typeDecls[i].name)
+            }
         }
         c.errorHint(x.pos, "unknown type " + x.name, s.hint())
         return tyInvalid
@@ -793,6 +905,26 @@ fn (Checker c) mut resolveUncached(int te) int {
     }
 }
 
+// pkg.Type: a pub type of an imported package.
+fn (Checker c) mut resolveQualified(TypeExpr x) int {
+    int p = c.importedPkg(x.pos.file, x.pkg)
+    if (p < 0) {
+        c.errorHint(x.pos, "unknown package " + x.pkg + " in the type " + x.pkg + "." + x.name, "import it: import \"" + x.pkg + "\"")
+        return tyInvalid
+    }
+    c.usedImports[x.pos.file.string() + ":" + x.pkg] = true
+    int? g = c.pkgMember(p, x.name, x.pos)
+    if (g == null) {
+        return tyInvalid
+    }
+    Global gl = c.globalList[g]
+    if (gl.kind != GlobalKind.Type) {
+        c.error(x.pos, x.pkg + "." + x.name + " is not a type")
+        return tyInvalid
+    }
+    return c.declType[gl.index]
+}
+
 // ---- constants and function bodies ----
 
 fn (Checker c) mut checkConst(int i) {
@@ -826,6 +958,20 @@ fn (Checker c) mut checkConst(int i) {
 
 fn (Checker c) mut checkFnBody(int f) {
     FnDecl fd = c.ast.fns[f]
+    if (fd.body < 0) {
+        Package pk = c.ast.pkgs[c.fnPkg(f)]
+        if (!pk.isLib) {
+            c.errorHint(fd.pos, "fn " + fd.name + " needs a body", "only the standard library declares native functions (functions without a body, written in C)")
+        }
+        return
+    }
+    if (fd.isTest) {
+        SourceFile sf = c.ast.files[fd.file]
+        if (!sf.isTest) {
+            c.errorHint(fd.pos, "tests belong in the tests/ directory of their package", "move this test into a file in tests/; it is compiled by seed test only")
+            return
+        }
+    }
     c.curFn = f
     c.scope = []int{}
     c.scopeMarks = []int{}
@@ -845,6 +991,10 @@ fn (Checker c) mut checkFnBody(int f) {
             rk = VarKind.MutRecv
         }
         c.recvVar[f] = c.declare(fd.recvName, c.declType[c.fnRecv[f]], rk, fd.recvPos)
+    } else if (fd.isMethod) {
+        // The receiver's type was rejected; declare it anyway (as invalid,
+        // which keeps its uses quiet) so that they are not reported too.
+        c.recvVar[f] = c.declare(fd.recvName, tyInvalid, VarKind.Recv, fd.recvPos)
     }
     for (int i = 0; i < fd.paramCount; i++) {
         int pi = c.ast.at(fd.params, i)
@@ -852,14 +1002,12 @@ fn (Checker c) mut checkFnBody(int f) {
         c.paramVar[pi] = c.declare(p.name, c.teType[p.typeExpr], VarKind.Param, p.pos)
     }
     c.checkBlock(fd.body)
-    if (fd.resultCount > 0 && !c.blockExits(fd.body)) {
+    if (fd.resultCount > 0 && !fd.isTest && !c.blockExits(fd.body)) {
         c.errorHint(c.ast.blocks[fd.body].end, "missing return at the end of " + fd.name, "every path through a function with results must end in return")
     }
     c.popScope()
     c.curFn = -1
-    if (c.strict) {
-        c.checkUnusedVars(firstVar)
-    }
+    c.checkUnusedVars(firstVar)
 }
 
 // ---- scopes ----
@@ -918,8 +1066,10 @@ fn (Checker c) mut declare(string name, int t, VarKind kind, Pos pos) int {
     } else {
         c.checkCamel(name, pos, "the variable")
     }
-    if (c.strict && c.globals[name] != null) {
+    if (c.global(c.pkgOf(pos), name) != null) {
         c.errorHint(pos, name + " is already declared at the package level; shadowing is not allowed", "choose another name")
+    } else if (c.importedPkg(pos.file, name) >= 0) {
+        c.errorHint(pos, name + " is the name of an imported package; shadowing is not allowed", "choose another name")
     }
     int old = c.lookupVar(name)
     if (old >= 0) {

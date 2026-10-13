@@ -232,6 +232,7 @@ pub type Named interface {
 - Struct fields are private to their package unless marked `pub` (`pub string name`). A struct literal of another package's type is only allowed when every field is `pub`.
 - A struct literal must set every field: `User{name: "k", email: null, tags: []string{}}`.
 - An enum case is always written with its type, both when creating a value and in a `switch`: `Shape.Circle(2.0)`, `case Shape.Circle(float r):`. A case without data has no parentheses: `Token.Eof`.
+- A case pattern matches its enum case exactly: when the case carries data, the pattern binds every field with its type (`case Shape.Rect(float w, float h):`), using `_` as the name of a field it doesn't need (`case Shape.Rect(float w, float _):`); a case without data is written without parentheses (`case Token.Eof:`). A `case` with several labels can't bind names, so all its bindings are `_`: `case Shape.Circle(float _), Shape.Point:`.
 - A name from another package is always written with the package name: `users.User`, `users.Shape.Circle(2.0)`.
 - A type satisfies an interface only by declaring it with `implements`. The compiler then checks that every required method exists, with exactly the same signature (including `mut`). Methods cannot be declared on an interface type.
 - A value of such a type converts to the interface (or the nullable interface) automatically wherever the interface is expected. There is no way to get the original type back out of an interface value (no type switches or assertions).
@@ -378,10 +379,23 @@ case time.after(5 * time.second).receive():
 
 ## Packages
 
-- A package is a directory, and each file starts with `package name`.
-- Imports are package-level, one per line: `import "fmt"`. Import cycles are compile errors.
-- Everything is private. Mark a name `pub` to export it.
-- Nothing runs implicitly when a program starts.
+```
+shop/
+    main.sd                 package main      (the program)
+    cart/
+        cart.sd             package cart      import "cart"
+        tests/cart_test.sd  package cart      (tests, compiled by seed test only)
+    shop/
+        money/money.sd      package money     import "shop/money"
+```
+
+- A package is a directory. Every `.sd` file directly in it belongs to the package and starts with the same `package name` line; the name is the directory's name, except for `package main`. Package `main` (the program) can't be imported.
+- Imports come after the `package` line, one per line: `import "fmt"`. They are per file: a file imports the packages it uses itself. An unused import is a compile error, and so is an import cycle (the error shows it: `import cycle: a -> b -> a`).
+- `import "path"` looks for the package in the standard library first (`lib/path` next to the `seed` toolchain), then in the directory `path` relative to the **project root**, the directory of the program's `package main` (or the directory given to `seed test`). There is no project file. Code calls the package by the last element of the path: after `import "shop/money"`, it writes `money.Amount`.
+- A name from another package is always written with the package name: `cart.newCart()`, `cart.Item`, `cart.maxItems`, `shapes.Shape.Circle(2.0)`, `case shapes.Shape.Circle(float r):`, `cart.Item{name: "pen"}`. A local name can't be the same as an imported package's name.
+- Everything is private. Mark a top-level name (function, method, type, constant) `pub` to make it usable from other packages. Struct fields are private too, unless marked `pub` (`pub string name`); another package can only read and write `pub` fields, and can only write a struct literal of the type if every field is `pub`. Enum cases and interface methods are as visible as their type.
+- Nothing runs implicitly when a program starts or a package is imported.
+- The core packages `fmt`, `os`, `fs`, `errors` and `time` ([builtins.md](docs/builtins.md#core-packages)) are ordinary standard library packages.
 
 ### Program entry
 
@@ -408,11 +422,13 @@ test "load skips empty lines" {
 }
 ```
 
-- Tests live in a `tests/` directory inside the package they test, so they stay out of the package's code.
-- Files in `tests/` belong to the package they test, so tests can reach its private names.
-- A test is a `test "description" { ... }` block, so nothing depends on function naming.
-- `assert(bool)` is built in and only allowed in tests. When it fails, the message shows the value of each side, for example `names.len() == 3 → 2 == 3`.
-- `seed test` runs every test.
+- Tests live in a `tests/` directory inside the package they test, so they stay out of the package's code. They are compiled only by `seed test`; a `test` block anywhere else is a compile error.
+- Files in `tests/` belong to the package they test, so tests can reach its private names. They may also declare helper functions and types, and import packages.
+- A test is a `test "description" { ... }` block, so nothing depends on function naming. Its body is like the body of a function that returns `error`: `try` works, and an error that leaves the test fails it. `return` is not allowed in a test.
+- `assert(bool)` is built in and only allowed in tests (not inside a `group` block). A failed `assert` ends the test. The message shows where it is, the condition as written, and for a comparison of numbers, bools, bytes, strings or errors, the value of each side: `users/tests/load_test.sd:7: assert failed: names.len() == 3 (2 == 3)`. After `assert(x != null)`, `x` is narrowed as after an `if`.
+- A test fails when an `assert` fails, when an error leaves it, or when it crashes. Each test runs in a goroutine of its own group, so a crash fails only that test.
+- `seed test [dir...]` runs the tests of every package under the directories (by default the current one), prints one line per failed test and a summary `N passed, M failed`, and exits with 1 when a test failed (or a package didn't compile).
+- A test of a crash runs the code in a group and checks the error: `error err = group { spawn f() }` then `assert(err.message() == "crash: ...")`.
 
 ## Memory
 
@@ -437,22 +453,27 @@ The compiler rejects:
 - a missing `return`
 - a type whose `implements` declaration doesn't match its methods
 - a name that breaks the naming rules
+- an import cycle, or a name, field or method of another package that isn't `pub`
+- a case pattern that doesn't match its enum case
+- `assert` outside a test
 - unformatted code
 
 ## Toolchain
 
-There is one binary, `seed`, with these commands **(proposed)**:
+There is one binary, `seed`, with these commands:
 
-- `seed run file.sd` compiles a file and runs it.
-- `seed build` compiles a package into a single static binary.
-- `seed test` runs the tests.
-- `seed fmt` formats the code (the rules are in [docs/formatting.md](docs/formatting.md)).
+- `seed run <dir | file.sd> [args...]` compiles a program and runs it with the arguments, exiting with its exit code.
+- `seed build [-o out] <dir | file.sd>` compiles a program (the `package main` of a directory and the packages it imports, or a single file) into one executable, named after the directory or file unless `-o` says otherwise.
+- `seed test [dir...]` runs the tests (see [Tests](#tests)).
+- `seed fmt [--check] <file.sd>...` formats the code (the rules are in [docs/formatting.md](docs/formatting.md)). Compiling a file that is not formatted is an error pointing at the first line that differs, with the hint `run: seed fmt <file>`.
+
+`seed` finds the standard library and the runtime next to itself (through `$PATH` and symbolic links), or in `$SEED_ROOT`.
 
 ## Standard library (planned)
 
 `fmt`, `fs`, `io`, `strings`, `math`, `time`, `os`, `net`, `http`, `json`, `crypto`, `errors`, `path`, `rand`, `encoding`. The API is in [docs/stdlib.md](docs/stdlib.md).
 
-Standard-library functions that need the operating system are declared without a body and implemented in C in the runtime. Only the standard library may do this.
+Standard-library functions that need the operating system are declared without a body (`pub fn read(string path) (string, error)`) and implemented in C, in a `.c` file in the package's directory. Only the standard library may do this; anywhere else a missing body is a compile error. The C side is described in [runtime/README.md](runtime/README.md#13-native-functions).
 
 ## Implementation plan
 
