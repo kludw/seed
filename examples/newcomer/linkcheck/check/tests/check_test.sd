@@ -1,0 +1,58 @@
+package check
+
+import "http"
+import "net"
+import "time"
+
+type Fake struct implements http.Handler {
+    int delay
+}
+
+fn (Fake f) handle(http.Request req) (http.Response, error) {
+    if (req.path() == "/slow") {
+        time.sleep(f.delay)
+    }
+    if (req.path() == "/missing") {
+        return http.textResponse(http.statusNotFound, "no\n"), null
+    }
+    return http.textResponse(http.statusOk, "yes\n"), null
+}
+
+fn checkServer(net.Listener ln, chan []Report out) error {
+    defer ln.close()
+    string base = "http://" + ln.addr()
+    []string urls = []string{base + "/slow", base + "/missing", base + "/a", base + "/b"}
+    out.send(try checkAll(urls, 2, 200 * time.millisecond))
+    return null
+}
+
+test "checkAll reports status, timeout and sorts by url" {
+    net.Listener ln = try net.listen("127.0.0.1:0")
+    string base = "http://" + ln.addr()
+    chan []Report out = chan []Report(1)
+    try group {
+        spawn http.serveListener(ln, Fake{delay: 5 * time.second})
+        spawn checkServer(ln, out)
+    }
+    []Report? reports = out.receive()
+    assert(reports != null)
+    assert(reports.len() == 4)
+    assert(reports[0].url == base + "/a")
+    assert(reports[0].outcome == Outcome.Status(200))
+    assert(reports[1].outcome == Outcome.Status(200))
+    assert(reports[2].url == base + "/missing")
+    assert(reports[2].outcome == Outcome.Status(404))
+    assert(!reports[2].outcome.ok())
+    assert(reports[3].outcome == Outcome.TimedOut)
+}
+
+test "a refused connection is a failure, not an error" {
+    Outcome o = checkOne("http://127.0.0.1:1/", time.second)
+    assert(!o.ok())
+    assert(o.string() == "error: http.get: http://127.0.0.1:1/: connection refused")
+}
+
+test "outcome text" {
+    assert(Outcome.Status(302).ok())
+    assert(Outcome.TimedOut.string() == "timeout")
+}

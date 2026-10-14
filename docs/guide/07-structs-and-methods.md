@@ -164,7 +164,7 @@ fn main([]string args) error {
 07_mut_on_param.sd:6:5: error: cannot call the mut method push() on tags: parameters are read-only
     6 |     tags.push("new")
       |     ^
-    hint: copy it into a local variable first, or make the method mut
+    hint: copy it into a local variable and change that; return the new value if the caller needs it
 ```
 
 To change something, a function returns the new value (`mine = withInterest(mine, 10)`), or the change is a `mut` method called on the caller's own variable (`mine.deposit(10)`). Either way, the line that changes a variable names that variable. Copying a parameter into a local, as `withInterest` does, is cheap: the data is shared until the copy is changed ([copy-on-write](06-lists-and-maps.md#values-and-copy-on-write)).

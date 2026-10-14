@@ -94,6 +94,24 @@ else
   failed "seed fmt on a file with syntax errors" "exit $code: $out"
 fi
 if (cd "$tmp/fmt" && "$seed" fmt --check bad.sd > /dev/null 2>&1); then failed "seed fmt --check bad.sd" "exit code 0 for a file with syntax errors"; else pass=$((pass+1)); fi
+# seed fmt takes files: a directory is an error that says so, rather than
+# a failed read.
+out=$(cd "$tmp/fmt" && "$seed" fmt . 2>&1); code=$?
+if [ "$code" = 1 ] && [ "$out" = "error: seed fmt: . is a directory; name the .sd files, such as seed fmt ./*.sd" ]; then
+  pass=$((pass+1))
+else
+  failed "seed fmt on a directory" "exit $code: $out"
+fi
+
+# seed test on a package's tests/ directory (which holds no package with
+# tests of its own) names the package directory to use instead of reporting
+# "0 passed, 0 failed".
+out=$(cd "$here/testcmd" && "$seed" test pass/calc/tests 2>&1); code=$?
+if [ "$code" = 1 ] && [ "$out" = "error: seed test: pass/calc/tests holds the tests of a package; name the package's directory instead: seed test pass/calc" ]; then
+  pass=$((pass+1))
+else
+  failed "seed test on a tests directory" "exit $code: $out"
+fi
 
 # SPEC "Toolchain": seed build of a single file names the executable after
 # the file, or as -o says; seed ast prints the syntax tree.

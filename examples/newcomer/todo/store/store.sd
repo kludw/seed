@@ -1,0 +1,97 @@
+// Package store keeps todo items in a JSON file.
+package store
+
+import "errors"
+import "fs"
+import "json"
+
+pub type Item struct {
+    pub int id
+    pub string text
+    pub bool done
+}
+
+pub type Store struct {
+    string path
+    []Item items
+    int nextId
+}
+
+pub fn open(string path) (Store, error) {
+    Store s = Store{path: path, items: []Item{}, nextId: 1}
+    if (!fs.exists(path)) {
+        return s, null
+    }
+    string text = try fs.read(path)
+    json.Value doc = try json.parse(text)
+    []json.Value? arr = doc.get("items").asArray()
+    if (arr == null) {
+        return null, errors.new("store.open: " + path + ": missing items array")
+    }
+    for (int i = 0; i < arr.len(); i++) {
+        json.Value v = arr[i]
+        int? id = v.get("id").asInt()
+        string? t = v.get("text").asString()
+        bool? done = v.get("done").asBool()
+        if (id == null || t == null || done == null) {
+            return null, errors.new("store.open: " + path + ": bad item " + i.string())
+        }
+        s.items.push(Item{id: id, text: t, done: done})
+        if (id >= s.nextId) {
+            s.nextId = id + 1
+        }
+    }
+    return s, null
+}
+
+pub fn (Store s) save() error {
+    []json.Value arr = []json.Value{}
+    for (int i = 0; i < s.items.len(); i++) {
+        Item it = s.items[i]
+        arr.push(json.Value.Object(map[string]json.Value{
+            "id": json.Value.Number(float(it.id)),
+            "text": json.Value.String(it.text),
+            "done": json.Value.Bool(it.done),
+        }))
+    }
+    json.Value doc = json.Value.Object(map[string]json.Value{"items": json.Value.Array(arr)})
+    return fs.write(s.path, doc.pretty() + "\n")
+}
+
+pub fn (Store s) mut add(string text) Item {
+    Item it = Item{id: s.nextId, text: text, done: false}
+    s.items.push(it)
+    s.nextId++
+    return it
+}
+
+pub fn (Store s) list() []Item {
+    return s.items
+}
+
+fn (Store s) find(int id) int? {
+    for (int i = 0; i < s.items.len(); i++) {
+        if (s.items[i].id == id) {
+            return i
+        }
+    }
+    return null
+}
+
+pub fn (Store s) mut done(int id) error {
+    int? i = s.find(id)
+    if (i == null) {
+        return errors.new("no item with id " + id.string())
+    }
+    s.items[i].done = true
+    return null
+}
+
+pub fn (Store s) mut remove(int id) error {
+    int? i = s.find(id)
+    if (i == null) {
+        return errors.new("no item with id " + id.string())
+    }
+    s.items.remove(i)
+    return null
+}

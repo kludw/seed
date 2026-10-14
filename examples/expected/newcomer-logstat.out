@@ -1,0 +1,13 @@
+10 requests from 2026-10-14T12:00:00Z to 2026-10-14T12:00:08Z (1 lines skipped)
+by status:
+  200             6
+  302             1
+  304             1
+  404             1
+  500             1
+by path:
+  /index          4
+  /api/items      3
+  /login          2
+  /missing        1
+latency p50 12.0ms, p95 1200.0ms

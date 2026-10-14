@@ -503,6 +503,10 @@ fn (Parser p) mut parseStmt() int {
 // A declaration, assignment, ++/-- or expression statement.
 fn (Parser p) mut parseSimple() int {
     Pos start = p.here()
+    if (p.kind() == Tok.Ident && p.toks[p.pos].text == "var" && p.peek(1) == Tok.Ident) {
+        p.errorHint(start, "there is no var: a declaration starts with its type", "write the type, the name and the value: int count = 0")
+        return p.ast.addStmt(newStmt(StmtKind.Bad, start))
+    }
     []int targets = []int{}
     for (;;) {
         Pos tpos = p.here()
@@ -526,6 +530,10 @@ fn (Parser p) mut parseSimple() int {
         }
     }
     if (p.failed) {
+        return p.ast.addStmt(newStmt(StmtKind.Bad, start))
+    }
+    if (p.kind() == Tok.Colon && p.peek(1) == Tok.Assign) {
+        p.errorHint(p.here(), "there is no :=; a declaration writes the type first", "declare it with its type (int count = 0), or assign an existing variable with =")
         return p.ast.addStmt(newStmt(StmtKind.Bad, start))
     }
     if (p.accept(Tok.Assign)) {

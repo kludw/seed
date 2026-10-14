@@ -1,0 +1,11 @@
+// expect-error: hint: Seed has no len(): use the method, xs.len()
+// expect-errors: 1
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    []int xs = []int{1, 2}
+    fmt.println(len(xs).string())
+    return null
+}

@@ -144,6 +144,7 @@ The documentation:
 - [The guide](docs/guide/README.md) teaches the language by example, in 13 chapters, for programmers who know Go or another C-like language.
 - [SPEC.md](SPEC.md), [docs/grammar.md](docs/grammar.md), [docs/builtins.md](docs/builtins.md), [docs/stdlib.md](docs/stdlib.md) and [docs/formatting.md](docs/formatting.md) are the reference.
 - [compiler/README.md](compiler/README.md), [runtime/README.md](runtime/README.md) and [lib/README.md](lib/README.md) describe the implementation.
+- [docs/first-impressions.md](docs/first-impressions.md) is the friction log of a Go programmer learning Seed from these documents, with what was fixed and what remains.
 
 ## Status
 

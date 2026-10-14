@@ -1,0 +1,123 @@
+// Package check checks URLs concurrently with a pool of workers.
+package check
+
+import "errors"
+import "http"
+import "time"
+
+pub type Outcome enum {
+    Status(int code)
+    Failed(string reason)
+    TimedOut
+}
+
+pub type Report struct {
+    pub string url
+    pub Outcome outcome
+}
+
+pub fn (Outcome o) string() string {
+    switch (o) {
+    case Outcome.Status(int code):
+        return code.string()
+    case Outcome.Failed(string reason):
+        return "error: " + reason
+    case Outcome.TimedOut:
+        return "timeout"
+    }
+}
+
+pub fn (Outcome o) ok() bool {
+    switch (o) {
+    case Outcome.Status(int code):
+        return code >= 200 && code < 400
+    case Outcome.Failed(string _), Outcome.TimedOut:
+        return false
+    }
+}
+
+fn fetch(string url, chan Outcome out) error {
+    http.Response resp, error err = http.get(url)
+    if (err != null) {
+        out.send(Outcome.Failed(err.message()))
+        return null
+    }
+    out.send(Outcome.Status(resp.status))
+    return null
+}
+
+// Waits for fetch's answer. On timeout it reports TimedOut and fails, which
+// stops the group and so the fetch.
+fn wait(chan Outcome answer, chan Outcome result, int timeout) error {
+    select {
+    case Outcome? o = answer.receive():
+        if (o != null) {
+            result.send(o)
+        }
+        return null
+    case time.after(timeout).receive():
+        result.send(Outcome.TimedOut)
+        return errors.new("timeout")
+    }
+}
+
+// Checks one URL, giving up after timeout nanoseconds.
+pub fn checkOne(string url, int timeout) Outcome {
+    chan Outcome answer = chan Outcome(1)
+    chan Outcome result = chan Outcome(1)
+    error err = group {
+        spawn fetch(url, answer)
+        spawn wait(answer, result, timeout)
+    }
+    Outcome? o = result.receive()
+    if (o == null) {
+        return Outcome.Failed(err.message())
+    }
+    return o
+}
+
+fn worker(chan string jobs, chan Report results, int timeout) error {
+    for (;;) {
+        string? url = jobs.receive()
+        if (url == null) {
+            return null
+        }
+        results.send(Report{url: url, outcome: checkOne(url, timeout)})
+    }
+}
+
+fn feed([]string urls, chan string jobs) error {
+    for (int i = 0; i < urls.len(); i++) {
+        jobs.send(urls[i])
+    }
+    jobs.close()
+    return null
+}
+
+fn byUrl(Report a, Report b) bool {
+    return a.url < b.url
+}
+
+// Checks every URL with the given number of workers, and returns the
+// reports sorted by URL.
+pub fn checkAll([]string urls, int workers, int timeout) ([]Report, error) {
+    chan string jobs = chan string(0)
+    chan Report results = chan Report(urls.len())
+    try group {
+        spawn feed(urls, jobs)
+        for (int i = 0; i < workers; i++) {
+            spawn worker(jobs, results, timeout)
+        }
+    }
+    results.close()
+    []Report out = []Report{}
+    for (;;) {
+        Report? r = results.receive()
+        if (r == null) {
+            break
+        }
+        out.push(r)
+    }
+    out.sortBy(byUrl)
+    return out, null
+}

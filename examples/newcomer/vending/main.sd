@@ -1,0 +1,41 @@
+// Drives a vending machine and a turnstile with the same script of events,
+// read from stdin, one per line ("coin 25", "choose cola", "push", ...).
+//
+//     seed run . < script.txt
+package main
+
+import "fmt"
+import "io"
+import "machine"
+
+fn main([]string args) error {
+    []machine.Machine machines = []machine.Machine{
+        machine.newVending(map[string]int{"cola": 150, "chips": 100}, map[string]int{"cola": 1, "chips": 5}),
+        machine.newTurnstile(),
+    }
+    for (;;) {
+        string? line = try io.readLine()
+        if (line == null) {
+            break
+        }
+        if (line.trim() == "" || line.startsWith("#")) {
+            continue
+        }
+        machine.Event e, error err = machine.parseEvent(line)
+        if (err != null) {
+            fmt.println(line + ": " + err.message())
+            continue
+        }
+        []string results = []string{}
+        for (int i = 0; i < machines.len(); i++) {
+            error failed = machines[i].fire(e)
+            string result = machines[i].state()
+            if (failed != null) {
+                result = "refused: " + failed.message()
+            }
+            results.push(machines[i].name() + " " + result)
+        }
+        fmt.println(line + " -> " + results.join(", "))
+    }
+    return null
+}

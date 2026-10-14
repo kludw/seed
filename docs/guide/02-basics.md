@@ -99,7 +99,7 @@ ann@example.com
 The rules:
 
 - **The type comes first and is always written.** There is no `var`, no `:=` and no type inference. Reading a declaration never requires looking at the expression on the right.
-- **Every variable is initialised.** There are no zero values: `int n` alone does not compile. A variable that may have no value yet is a `T?` set to `null`.
+- **Every variable is initialised.** There are no zero values: `int n` alone does not compile. A variable that may have no value yet is a `T?` set to `null`. When the value comes from one of several branches, declare `string? text = null` and assign it in every branch: after the `if`, the compiler knows it is a plain `string` ([narrowing](05-null-safety.md#narrowing)).
 - **No shadowing.** Declaring a name that already exists in an enclosing scope is an error, so a name means the same thing throughout a function. The compiler suggests assigning with `=` instead.
 - **Assignment is `=`, nothing else.** There is no `+=` and the like: write `count = count + 1`. `count++` and `count--` exist, but they are statements, not expressions: `x = i++` doesn't compile.
 - **Names are checked.** Types and enum cases are `PascalCase`; everything else, constants included, is `camelCase`.
@@ -130,7 +130,7 @@ There are no package-level variables, only constants. Goroutines share nothing (
 | Arithmetic | `+ - * / %` | `int`, `float` (`%` only on `int`) |
 | Joining | `+` | `string` |
 | Bitwise | `& \| ^ << >>` | `int`, `byte` |
-| Comparison | `== !=` | Every type except channels and functions. Structs, lists and maps compare by contents. |
+| Comparison | `== !=` | Every type except channels and functions. Structs, lists and maps compare by contents. A nullable `T?` compares only with `null` ([chapter 5](05-null-safety.md#the-rules)). |
 | Ordering | `< <= > >=` | `int`, `float`, `string`, `byte` |
 | Logic | `&& \|\| !` | `bool` |
 

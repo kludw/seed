@@ -1,0 +1,9 @@
+// expect-error: go_short_decl.sd:7:7: error: there is no :=; a declaration writes the type first
+// expect-errors: 1
+package main
+
+fn main([]string args) error {
+    // A Go short declaration.
+    n := 5
+    return null
+}

@@ -1,0 +1,12 @@
+// expect-error: hint: Seed has no append(): add to a list in place with xs.push(x)
+// expect-errors: 1
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    []int xs = []int{1, 2}
+    xs = append(xs, 3)
+    fmt.println(xs.len().string())
+    return null
+}

@@ -1,0 +1,51 @@
+package store
+
+import "fs"
+
+test "add gives increasing ids" {
+    Store s = Store{path: "unused.json", items: []Item{}, nextId: 1}
+    Item a = s.add("one")
+    Item b = s.add("two")
+    assert(a.id == 1)
+    assert(b.id == 2)
+    assert(s.list().len() == 2)
+}
+
+test "done and remove" {
+    Store s = Store{path: "unused.json", items: []Item{}, nextId: 1}
+    _ = s.add("one")
+    _ = s.add("two")
+    try s.done(2)
+    assert(s.list()[1].done)
+    assert(!s.list()[0].done)
+    try s.remove(1)
+    assert(s.list().len() == 1)
+    assert(s.list()[0].text == "two")
+    assert(s.remove(42) != null)
+}
+
+test "save then open keeps every item" {
+    string dir = try fs.makeTemp("todo-test-")
+    defer _ = fs.removeAll(dir)
+    string file = dir + "/todo.json"
+    Store s = try open(file)
+    _ = s.add("buy milk")
+    _ = s.add("write \"tests\"")
+    try s.done(1)
+    try s.save()
+
+    Store back = try open(file)
+    assert(back.list() == s.list())
+    Item c = back.add("third")
+    assert(c.id == 3)
+}
+
+test "a corrupt file is an error" {
+    string dir = try fs.makeTemp("todo-test-")
+    defer _ = fs.removeAll(dir)
+    string file = dir + "/todo.json"
+    try fs.write(file, "{\"items\": [{\"id\": \"x\"}]}")
+    _, error err = open(file)
+    assert(err != null)
+    assert(err.message() == "store.open: " + file + ": bad item 0")
+}

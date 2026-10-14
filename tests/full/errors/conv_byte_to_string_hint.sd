@@ -1,0 +1,12 @@
+// expect-error: hint: a byte is a number: string([]byte{b}) is its character
+// expect-errors: 1
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    string s = "abc"
+    string first = s[0]
+    fmt.println(first)
+    return null
+}

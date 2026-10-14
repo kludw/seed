@@ -1,0 +1,181 @@
+// Package machine has two small state machines, a vending machine and a
+// turnstile, driven through one interface.
+package machine
+
+import "errors"
+
+pub type Event enum {
+    Coin(int cents)
+    Choose(string item)
+    Push
+    Refund
+    Kick
+    Repair
+}
+
+// Anything that reacts to events and can describe its state.
+pub type Machine interface {
+    name() string
+    mut fire(Event e) error
+    state() string
+}
+
+// Parses "coin 25", "choose cola", "push", "refund", "kick", "repair".
+pub fn parseEvent(string text) (Event, error) {
+    []string words = text.trim().split(" ")
+    switch (words[0]) {
+    case "coin":
+        if (words.len() != 2) {
+            return null, errors.new("coin needs an amount")
+        }
+        return Event.Coin(try words[1].toInt()), null
+    case "choose":
+        if (words.len() != 2) {
+            return null, errors.new("choose needs an item")
+        }
+        return Event.Choose(words[1]), null
+    case "push":
+        return Event.Push, null
+    case "refund":
+        return Event.Refund, null
+    case "kick":
+        return Event.Kick, null
+    case "repair":
+        return Event.Repair, null
+    default:
+        return null, errors.new("unknown event " + words[0])
+    }
+}
+
+// The vending machine.
+
+pub type VendState enum {
+    Idle
+    Paid(int cents)
+    Broken(string reason)
+}
+
+pub type Vending struct implements Machine {
+    VendState current
+    map[string]int prices
+    map[string]int stock
+    pub int earned
+    int kicks
+}
+
+pub fn newVending(map[string]int prices, map[string]int stock) Vending {
+    return Vending{current: VendState.Idle, prices: prices, stock: stock, earned: 0, kicks: 0}
+}
+
+pub fn (Vending v) name() string {
+    return "vending"
+}
+
+pub fn (Vending v) state() string {
+    switch (v.current) {
+    case VendState.Idle:
+        return "idle"
+    case VendState.Paid(int cents):
+        return "paid " + cents.string()
+    case VendState.Broken(string reason):
+        return "broken (" + reason + ")"
+    }
+}
+
+pub fn (Vending v) mut fire(Event e) error {
+    switch (v.current) {
+    case VendState.Broken(string _):
+        if (e == Event.Repair) {
+            v.current = VendState.Idle
+            v.kicks = 0
+            return null
+        }
+        return errors.new("out of order")
+    case VendState.Idle:
+        switch (e) {
+        case Event.Coin(int cents):
+            v.current = VendState.Paid(cents)
+        case Event.Kick:
+            v.kick()
+        case Event.Choose(string _), Event.Push, Event.Refund, Event.Repair:
+            return errors.new("insert a coin first")
+        }
+    case VendState.Paid(int paid):
+        switch (e) {
+        case Event.Coin(int cents):
+            v.current = VendState.Paid(paid + cents)
+        case Event.Choose(string item):
+            return v.sell(paid, item)
+        case Event.Refund:
+            v.current = VendState.Idle
+        case Event.Kick:
+            v.kick()
+        case Event.Push, Event.Repair:
+            return errors.new("choose an item or ask for a refund")
+        }
+    }
+    return null
+}
+
+fn (Vending v) mut kick() {
+    v.kicks++
+    if (v.kicks >= 2) {
+        v.current = VendState.Broken("kicked " + v.kicks.string() + " times")
+    }
+}
+
+fn (Vending v) mut sell(int paid, string item) error {
+    int? price = v.prices[item]
+    if (price == null) {
+        return errors.new("no such item: " + item)
+    }
+    int? left = v.stock[item]
+    if (left == null || left == 0) {
+        return errors.new(item + " is sold out")
+    }
+    if (paid < price) {
+        return errors.new(item + " costs " + price.string() + ", paid " + paid.string())
+    }
+    v.stock[item] = left - 1
+    v.earned = v.earned + price
+    v.current = VendState.Idle
+    return null
+}
+
+// The turnstile: a coin unlocks it, a push lets one person through.
+
+pub type Turnstile struct implements Machine {
+    bool locked
+    pub int passed
+}
+
+pub fn newTurnstile() Turnstile {
+    return Turnstile{locked: true, passed: 0}
+}
+
+pub fn (Turnstile t) name() string {
+    return "turnstile"
+}
+
+pub fn (Turnstile t) state() string {
+    if (t.locked) {
+        return "locked"
+    }
+    return "unlocked"
+}
+
+pub fn (Turnstile t) mut fire(Event e) error {
+    switch (e) {
+    case Event.Coin(int _):
+        t.locked = false
+    case Event.Push:
+        if (t.locked) {
+            return errors.new("locked")
+        }
+        t.locked = true
+        t.passed++
+    case Event.Choose(string _), Event.Refund, Event.Kick, Event.Repair:
+        return errors.new("a turnstile ignores that")
+    }
+    return null
+}

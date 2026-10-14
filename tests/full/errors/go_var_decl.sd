@@ -1,0 +1,8 @@
+// expect-error: go_var_decl.sd:6:5: error: there is no var: a declaration starts with its type
+// expect-errors: 1
+package main
+
+fn main([]string args) error {
+    var n int = 5
+    return null
+}

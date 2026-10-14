@@ -1,0 +1,66 @@
+// A command-line todo list stored in a JSON file (todo.json unless -f
+// names another).
+//
+//     seed run . add buy milk
+//     seed run . list
+//     seed run . -f work.json done 1
+//     seed run . remove 1
+package main
+
+import "errors"
+import "fmt"
+import "os"
+import "store"
+
+fn usage() {
+    fmt.eprintln("usage: todo [-f file] add <text...> | list | done <id> | remove <id>")
+    os.exit(2)
+}
+
+fn main([]string argv) error {
+    []string args = argv
+    string file = "todo.json"
+    if (args.len() > 2 && args[1] == "-f") {
+        file = args[2]
+        args = args.slice(2, args.len())
+    }
+    if (args.len() < 2) {
+        usage()
+    }
+    store.Store s = try store.open(file)
+    switch (args[1]) {
+    case "add":
+        if (args.len() < 3) {
+            usage()
+        }
+        store.Item it = s.add(args.slice(2, args.len()).join(" "))
+        try s.save()
+        fmt.println("added " + it.id.string() + ": " + it.text)
+    case "list":
+        []store.Item items = s.list()
+        if (items.len() == 0) {
+            fmt.println("nothing to do")
+        }
+        for (int i = 0; i < items.len(); i++) {
+            string mark = "[ ]"
+            if (items[i].done) {
+                mark = "[x]"
+            }
+            fmt.println(mark + " " + items[i].id.string() + " " + items[i].text)
+        }
+    case "done", "remove":
+        if (args.len() != 3) {
+            usage()
+        }
+        int id = try args[2].toInt()
+        if (args[1] == "done") {
+            try s.done(id)
+        } else {
+            try s.remove(id)
+        }
+        try s.save()
+    default:
+        return errors.new("unknown command " + args[1])
+    }
+    return null
+}

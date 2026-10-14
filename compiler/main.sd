@@ -411,6 +411,9 @@ fn testCommand(string root, []string args) (int, error) {
             return 2, errors.new("seed test: " + base + " is not a directory")
         }
         []string pkgs = try testPackages(base, []string{})
+        if (pkgs.len() == 0 && baseName(base) == "tests") {
+            return 2, errors.new("seed test: " + base + " holds the tests of a package; name the package's directory instead: seed test " + dirName(base))
+        }
         for (int j = 0; j < pkgs.len(); j++) {
             built++
             string work = tmp + "/" + built.string()

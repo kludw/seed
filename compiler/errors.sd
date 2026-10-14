@@ -254,6 +254,38 @@ fn (Suggest s) hint() string {
     return "did you mean " + s.best + "?"
 }
 
+// A hint for a name that Go has built in and Seed does not, or "".
+fn goBuiltinHint(string name) string {
+    switch (name) {
+    case "len":
+        return "Seed has no len(): use the method, xs.len()"
+    case "cap":
+        return "lists have no capacity; xs.len() is the number of elements"
+    case "append":
+        return "Seed has no append(): add to a list in place with xs.push(x)"
+    case "make":
+        return "Seed has no make(): write a literal, such as []int{}, map[string]int{} or chan int(10)"
+    case "new":
+        return "Seed has no new() and no pointers: write a literal, such as Point{x: 1, y: 2}"
+    case "delete":
+        return "Seed has no delete(): use the method, m.delete(key)"
+    case "close":
+        return "Seed has no close(): use the method, ch.close()"
+    case "copy":
+        return "lists are values: assigning one ([]int b = a) copies it"
+    case "panic":
+        return "Seed has no panic(): return an error, or call os.crash(message) for a bug"
+    case "recover":
+        return "Seed has no recover(): a crash inside a group becomes the group's error"
+    case "print", "println", "printf":
+        return "printing is in package fmt: fmt.println(s), with values turned into text by .string()"
+    case "nil":
+        return "Seed has no nil: use null, which only nullable types (T?) and error can hold"
+    default:
+        return ""
+    }
+}
+
 // The word with "a" or "an" before it, for messages: "an int", "an error",
 // "a string", "a []int". A word that starts with a, e, i or o takes "an";
 // one that starts with u takes "an" unless it sounds like "you" (User,

@@ -74,6 +74,10 @@ fn (Checker c) mut coerce(int e, int want, string context) {
         c.errorHint(pos, c.describe(e) + " is nullable (" + c.typeName(t) + ") and cannot be used as " + c.typeName(want) + " " + context, "check " + c.describe(e) + " != null first")
     } else if ((c.kindOf(want) == Kind.Interface || want == tyError) && (c.kindOf(t) == Kind.Struct || c.kindOf(t) == Kind.Enum)) {
         c.errorHint(pos, "cannot use " + c.describe(e) + " (type " + c.typeName(t) + ") as " + c.typeName(want) + " " + context + ": " + c.typeName(t) + " does not declare that it implements " + c.typeName(want), "add implements " + c.typeName(want) + " to the declaration of " + c.typeName(t))
+    } else if (want == tyString && (t == tyInt || t == tyFloat || t == tyBool)) {
+        c.errorHint(pos, "cannot use " + c.describe(e) + " (type " + c.typeName(t) + ") as " + c.typeName(want) + " " + context + "; there are no implicit conversions", "turn it into text with .string()")
+    } else if (want == tyString && t == tyByte) {
+        c.errorHint(pos, "cannot use " + c.describe(e) + " (type " + c.typeName(t) + ") as " + c.typeName(want) + " " + context + "; there are no implicit conversions", "a byte is a number: string([]byte{b}) is its character, s.slice(i, i + 1) a one-byte string, b.string() its digits")
     } else {
         c.error(pos, "cannot use " + c.describe(e) + " (type " + c.typeName(t) + ") as " + c.typeName(want) + " " + context + "; there are no implicit conversions")
     }
@@ -194,7 +198,7 @@ fn (Checker c) mut requireMutable(int e, string what) {
     if (v.kind == VarKind.Recv) {
         c.errorHint(pos, "cannot " + what + " " + target + ": parameters are read-only, and " + v.name + " is the receiver of a method that is not mut", "make the method mut, or copy " + v.name + " into a local variable first")
     } else if (v.kind == VarKind.Param) {
-        c.errorHint(pos, "cannot " + what + " " + target + ": parameters are read-only", "copy it into a local variable first, or make the method mut")
+        c.errorHint(pos, "cannot " + what + " " + target + ": parameters are read-only", "copy it into a local variable and change that; return the new value if the caller needs it")
     } else if (v.kind == VarKind.LocalConst) {
         c.error(pos, "cannot " + what + " the constant " + v.name)
     }
@@ -316,7 +320,11 @@ fn (Checker c) mut undefinedName(int e) {
             s.consider(c.ast.consts[j].name)
         }
     }
-    c.errorHint(x.pos, "undefined: " + x.text, s.hint())
+    string hint = goBuiltinHint(x.text)
+    if (hint == "") {
+        hint = s.hint()
+    }
+    c.errorHint(x.pos, "undefined: " + x.text, hint)
     c.setType(e, tyInvalid)
 }
 

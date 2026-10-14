@@ -1,0 +1,45 @@
+package machine
+
+fn stocked() Vending {
+    return newVending(map[string]int{"cola": 150}, map[string]int{"cola": 1})
+}
+
+test "a sale takes the money and the item" {
+    Vending v = stocked()
+    try v.fire(Event.Coin(100))
+    try v.fire(Event.Coin(100))
+    assert(v.state() == "paid 200")
+    try v.fire(Event.Choose("cola"))
+    assert(v.state() == "idle")
+    assert(v.earned == 150)
+    try v.fire(Event.Coin(150))
+    error err = v.fire(Event.Choose("cola"))
+    assert(err != null)
+    assert(err.message() == "cola is sold out")
+}
+
+test "two kicks break it until repaired" {
+    Vending v = stocked()
+    try v.fire(Event.Kick)
+    try v.fire(Event.Kick)
+    assert(v.current == VendState.Broken("kicked 2 times"))
+    assert(v.fire(Event.Coin(5)) != null)
+    try v.fire(Event.Repair)
+    assert(v.current == VendState.Idle)
+}
+
+test "turnstile lets one person through per coin" {
+    Machine m = newTurnstile()
+    assert(m.fire(Event.Push) != null)
+    try m.fire(Event.Coin(25))
+    assert(m.state() == "unlocked")
+    try m.fire(Event.Push)
+    assert(m.state() == "locked")
+}
+
+test "parseEvent" {
+    assert(try parseEvent("coin 25") == Event.Coin(25))
+    assert(try parseEvent("  push ") == Event.Push)
+    _, error err = parseEvent("coin")
+    assert(err != null)
+}

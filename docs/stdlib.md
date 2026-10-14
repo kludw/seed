@@ -746,7 +746,7 @@ Any other response is a struct literal: `http.Response{status: 302, headers: map
 - The library adds `host`, `content-length` (when the body is not empty, or the method is `POST`, `PUT` or `PATCH`) and `connection: close`. Each request uses a new connection.
 - **Any response is a success**, including `404` and `500`: check `resp.status`. The error is set only when no response arrived (connection refused, timeout, malformed response).
 - **Redirects are not followed**; a `3xx` response is returned as it is, with its `location` header.
-- The client gives up with a `timeout` error when connecting, or any single read or write, makes no progress for 30 seconds. To wait less, run the request in a goroutine and `select` on its result channel and `time.after`.
+- The client gives up with a `timeout` error when connecting, or any single read or write, makes no progress for 30 seconds. To wait less, run the request in a goroutine and `select` on its result channel and `time.after`, in a second goroutine of the same group that fails when the time is up, so that the group stops the request (a `select` in the group block itself would see the timeout, but the group would still wait for the request; see the example below).
 - Responses with `transfer-encoding: chunked` are decoded. Bodies larger than 64 MiB are an error. Compressed responses are never requested.
 
 ```
@@ -765,6 +765,41 @@ fn main([]string args) error {
     return group {
         spawn http.serve(":8080", App{greeting: "hello"})
     }
+}
+```
+
+A request with a shorter time limit. `deadline` fails when the time is up, which stops the group and so the `http.get` waiting in `fetch`; when `fetch` fails first, its error is the group's:
+
+```
+fn fetch(string url, chan http.Response out) error {
+    out.send(try http.get(url))
+    return null
+}
+
+fn deadline(chan http.Response answer, chan http.Response result, int d) error {
+    select {
+    case http.Response? resp = answer.receive():
+        if (resp != null) {
+            result.send(resp)
+        }
+        return null
+    case time.after(d).receive():
+        return errors.new("no response within " + (d / time.millisecond).string() + " ms")
+    }
+}
+
+fn getWithin(string url, int d) (http.Response, error) {
+    chan http.Response answer = chan http.Response(1)
+    chan http.Response result = chan http.Response(1)
+    try group {
+        spawn fetch(url, answer)
+        spawn deadline(answer, result, d)
+    }
+    http.Response? resp = result.receive()
+    if (resp == null) {
+        return null, errors.new("no response")
+    }
+    return resp, null
 }
 ```
 

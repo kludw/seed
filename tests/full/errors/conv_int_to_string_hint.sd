@@ -1,0 +1,11 @@
+// expect-error: hint: turn it into text with .string()
+// expect-errors: 1
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    int n = 3
+    fmt.println(n)
+    return null
+}

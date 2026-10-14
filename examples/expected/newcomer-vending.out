@@ -1,0 +1,19 @@
+coin 100 -> vending paid 100, turnstile unlocked
+coin 50 -> vending paid 150, turnstile unlocked
+choose cola -> vending idle, turnstile refused: a turnstile ignores that
+choose cola -> vending refused: insert a coin first, turnstile refused: a turnstile ignores that
+coin 200 -> vending paid 200, turnstile unlocked
+choose cola -> vending refused: cola is sold out, turnstile refused: a turnstile ignores that
+refund -> vending idle, turnstile refused: a turnstile ignores that
+push -> vending refused: insert a coin first, turnstile locked
+coin 25 -> vending paid 25, turnstile unlocked
+push -> vending refused: choose an item or ask for a refund, turnstile locked
+dance: unknown event dance
+coin x: string.toInt: "x": invalid integer
+choose chips -> vending refused: chips costs 100, paid 25, turnstile refused: a turnstile ignores that
+kick -> vending paid 25, turnstile refused: a turnstile ignores that
+kick -> vending broken (kicked 2 times), turnstile refused: a turnstile ignores that
+coin 100 -> vending refused: out of order, turnstile unlocked
+repair -> vending idle, turnstile refused: a turnstile ignores that
+coin 100 -> vending paid 100, turnstile unlocked
+choose chips -> vending idle, turnstile refused: a turnstile ignores that

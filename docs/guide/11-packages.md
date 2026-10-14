@@ -178,7 +178,7 @@ test "clamp keeps values in range" {
 }
 ```
 
-`seed test` runs the tests of every package under the current directory (or under the directories you name), each test in a goroutine of its own, so that one crash fails only that test:
+`seed test` runs the tests of every package under the current directory (or under the directories you name: `seed test cart` for one package, not `seed test cart/tests`), each test in a goroutine of its own, so that one crash fails only that test:
 
 ```
 $ seed test

@@ -14,6 +14,7 @@
 // fmt_print.sd prints the tokens.
 package main
 
+import "errors"
 import "fmt"
 import "fs"
 import "os"
@@ -43,6 +44,9 @@ fn fmtCommand([]string args) (int, error) {
     int skipped = 0
     for (int i = 0; i < files.len(); i++) {
         string path = files[i]
+        if (fs.isDir(path)) {
+            return null, errors.new("seed fmt: " + path + " is a directory; name the .sd files, such as seed fmt " + path + "/*.sd")
+        }
         string src = try fs.read(path)
         if (mode == "--verify") {
             if (fmtParse(path, src).diags.count() > 0) {

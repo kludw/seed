@@ -1,0 +1,3 @@
+--- stderr
+error: no item with id 7
+--- exit 1

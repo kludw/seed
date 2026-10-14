@@ -1,0 +1,15 @@
+// expect-error: hint: Seed has no nil: use null, which only nullable types (T?) and error can hold
+// expect-errors: 1
+package main
+
+fn check() error {
+    return null
+}
+
+fn main([]string args) error {
+    error err = check()
+    if (err != nil) {
+        return err
+    }
+    return null
+}

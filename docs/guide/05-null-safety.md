@@ -123,6 +123,8 @@ The compiler narrows a variable, or a field of a variable such as `u.email` or `
 - through `!`: `if (!(x == null))` narrows like `if (x != null)`;
 - after an assignment of a value that is never null (a `T`, not a `T?`): after `if (x == null) { x = "none" }`, `x` is a `string` on every path, as `greeting` above shows.
 
+A `T?` that is not narrowed can only be compared with `null`: for an `int? n`, `n == 2` is an error. Write `n != null && n == 2`. (Nullable fields and elements inside a struct, list or enum compare as part of it, so `[](int?){1, null} == [](int?){1, null}` is fine.)
+
 Narrowing ends:
 
 - when the variable (or a part of the path, such as `u` for `u.email`) is assigned a value that may be null;

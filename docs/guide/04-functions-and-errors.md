@@ -89,6 +89,8 @@ Parameters are read-only: a function cannot change its caller's variables throug
 
 A function that can fail returns an `error` as its last result. `error` is a built-in interface with one method, `message() string`, and it is the one type that can be `null` without a `?`: a `null` error means success. `errors.new(text)` makes a simple error.
 
+Unlike a `T?`, an `error` is not null-checked by the compiler: calling `err.message()` on a `null` error compiles, and crashes (`crash: message() called on a null error`). Check `err != null` first, as every example here does.
+
 When the error is not `null`, the other results are `null` too. That's why `divide` above returns `null, errors.new(...)`, even though its first result is a plain `int`. The compiler makes sure you never see those nulls: it won't let you read `q` until `err` has been checked.
 
 ```seed
@@ -266,7 +268,9 @@ no such file, and that is fine here
 false
 ```
 
-Declaring the value as a plain `string` is rejected:
+The other way round, `_` in place of a value keeps only the error: `_, error err = fs.read(path)`.
+
+Declaring the value as a plain `string` beside a discarded error is rejected:
 
 ```
 04_discard_plain.sd:7:12: error: the error is discarded with _, so text may be null and must be declared as string?

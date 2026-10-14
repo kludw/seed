@@ -1,0 +1,144 @@
+// Package stats parses access-log lines and aggregates them.
+package stats
+
+import "errors"
+import "strings"
+import "time"
+
+// One request: "2026-10-14T12:00:00Z GET /path 200 12ms".
+pub type Entry struct {
+    pub int at // Unix nanoseconds
+    pub string method
+    pub string path
+    pub int status
+    pub int latency // nanoseconds
+}
+
+pub type Count struct {
+    pub string key
+    pub int n
+}
+
+pub type Summary struct {
+    pub int requests
+    pub int skipped
+    pub int first
+    pub int last
+    pub []Count byStatus
+    pub []Count byPath
+    pub int p50
+    pub int p95
+}
+
+// Parses a duration such as "12ms", "250us", "1.5s" or "800ns".
+pub fn parseDuration(string text) (int, error) {
+    []string units = []string{"ns", "us", "ms", "s"}
+    []int scales = []int{time.nanosecond, time.microsecond, time.millisecond, time.second}
+    for (int i = 0; i < units.len(); i++) {
+        if (text.endsWith(units[i]) && !(units[i] == "s" && text.endsWith("ns"))) {
+            string number = text.slice(0, text.len() - units[i].len())
+            float f = try number.toFloat()
+            if (f < 0.0) {
+                return null, errors.new("negative duration " + text)
+            }
+            return int(f * float(scales[i])), null
+        }
+    }
+    return null, errors.new("bad duration " + text)
+}
+
+pub fn parseLine(string line) (Entry, error) {
+    []string f = strings.fields(line)
+    if (f.len() != 5) {
+        return null, errors.new("expected 5 fields, got " + f.len().string())
+    }
+    int at = try time.parse(f[0])
+    int status = try f[3].toInt()
+    int latency = try parseDuration(f[4])
+    return Entry{at: at, method: f[1], path: f[2], status: status, latency: latency}, null
+}
+
+fn bump(map[string]int m, string key) map[string]int {
+    map[string]int out = m
+    int? seen = out[key]
+    if (seen == null) {
+        out[key] = 1
+    } else {
+        out[key] = seen + 1
+    }
+    return out
+}
+
+fn toCounts(map[string]int m) []Count {
+    []Count out = []Count{}
+    []string keys = m.keys()
+    for (int i = 0; i < keys.len(); i++) {
+        int? n = m[keys[i]]
+        if (n != null) {
+            out.push(Count{key: keys[i], n: n})
+        }
+    }
+    out.sortBy(byCountThenKey)
+    return out
+}
+
+fn byCountThenKey(Count a, Count b) bool {
+    if (a.n != b.n) {
+        return a.n > b.n
+    }
+    return a.key < b.key
+}
+
+// The nearest-rank percentile of sorted values: the smallest value with at
+// least p percent of the values at or below it.
+pub fn percentile([]int sorted, int p) int {
+    if (sorted.len() == 0) {
+        return 0
+    }
+    int rank = (p * sorted.len() + 99) / 100
+    if (rank < 1) {
+        rank = 1
+    }
+    return sorted[rank - 1]
+}
+
+// Summarises the lines of a log. Lines that don't parse are counted as
+// skipped.
+pub fn summarize([]string lines) Summary {
+    map[string]int statuses = map[string]int{}
+    map[string]int paths = map[string]int{}
+    []int latencies = []int{}
+    int skipped = 0
+    int first = 0
+    int last = 0
+    for (int i = 0; i < lines.len(); i++) {
+        if (lines[i].trim() == "") {
+            continue
+        }
+        Entry? e, _ = parseLine(lines[i])
+        if (e == null) {
+            skipped++
+            continue
+        }
+        if (latencies.len() == 0 || e.at < first) {
+            first = e.at
+        }
+        if (latencies.len() == 0 || e.at > last) {
+            last = e.at
+        }
+        statuses = bump(statuses, e.status.string())
+        paths = bump(paths, e.path)
+        latencies.push(e.latency)
+    }
+    latencies.sort()
+    return Summary{
+        requests: latencies.len(),
+        skipped: skipped,
+        first: first,
+        last: last,
+        byStatus: toCounts(statuses),
+        byPath: toCounts(paths),
+        p50: percentile(latencies, 50),
+        p95: percentile(latencies, 95),
+    }
+}

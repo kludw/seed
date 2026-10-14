@@ -98,7 +98,11 @@ fn (Checker c) mut checkNamedCall(int e, string n) {
     for (int k = c.scope.len() - 1; k >= 0; k--) {
         s.consider(c.vars[c.scope[k]].name)
     }
-    c.errorHint(cpos, "undefined function " + n, s.hint())
+    string hint = goBuiltinHint(n)
+    if (hint == "") {
+        hint = s.hint()
+    }
+    c.errorHint(cpos, "undefined function " + n, hint)
     for (int m = 0; m < x.count; m++) {
         c.checkExpr(c.ast.at(x.list, m))
     }

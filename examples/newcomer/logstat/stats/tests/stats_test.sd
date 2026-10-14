@@ -1,0 +1,52 @@
+package stats
+
+import "time"
+
+test "parseLine reads every field" {
+    Entry e = try parseLine("2026-10-14T12:00:00Z GET /path 200 12ms")
+    assert(e.method == "GET")
+    assert(e.path == "/path")
+    assert(e.status == 200)
+    assert(e.latency == 12 * time.millisecond)
+    assert(time.format(e.at) == "2026-10-14T12:00:00Z")
+}
+
+test "parseLine rejects bad lines" {
+    _, error err = parseLine("2026-10-14T12:00:00Z GET /path 200")
+    assert(err != null)
+    assert(err.message() == "expected 5 fields, got 4")
+}
+
+test "durations" {
+    assert(try parseDuration("800ns") == 800)
+    assert(try parseDuration("250us") == 250 * time.microsecond)
+    assert(try parseDuration("1.5s") == 1500 * time.millisecond)
+    int? bad, error err = parseDuration("12m")
+    assert(bad == null)
+    assert(err != null)
+    assert(err.message() == "bad duration 12m")
+}
+
+test "percentiles use the nearest rank" {
+    []int xs = []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
+    assert(percentile(xs, 50) == 5)
+    assert(percentile(xs, 95) == 10)
+    assert(percentile([]int{7}, 95) == 7)
+    assert(percentile([]int{}, 50) == 0)
+}
+
+test "summarize counts and sorts" {
+    Summary s = summarize([]string{
+        "2026-10-14T12:00:02Z GET /b 200 3ms",
+        "2026-10-14T12:00:01Z GET /a 404 1ms",
+        "junk",
+        "2026-10-14T12:00:03Z GET /b 200 2ms",
+        "",
+    })
+    assert(s.requests == 3)
+    assert(s.skipped == 1)
+    assert(s.byStatus[0] == Count{key: "200", n: 2})
+    assert(s.byPath[1] == Count{key: "/a", n: 1})
+    assert(s.p50 == 2 * time.millisecond)
+    assert(time.format(s.first) == "2026-10-14T12:00:01Z")
+}

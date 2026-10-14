@@ -1,0 +1,43 @@
+// Summarises an access log: requests per status and per path, and the
+// median and 95th-percentile latency.
+//
+//     seed run . access.log
+//     seed run . < access.log
+package main
+
+import "fmt"
+import "fs"
+import "io"
+import "stats"
+import "strings"
+import "time"
+
+fn ms(int d) string {
+    return fmt.fixed(float(d) / float(time.millisecond), 1) + "ms"
+}
+
+fn printCounts(string title, []stats.Count counts) {
+    fmt.println(title)
+    for (int i = 0; i < counts.len(); i++) {
+        fmt.println("  " + strings.padRight(counts[i].key, 12, ' ') + strings.padLeft(counts[i].n.string(), 5, ' '))
+    }
+}
+
+fn main([]string args) error {
+    string text = ""
+    if (args.len() > 1) {
+        text = try fs.read(args[1])
+    } else {
+        text = try io.readAll()
+    }
+    stats.Summary s = stats.summarize(text.split("\n"))
+    if (s.requests == 0) {
+        fmt.println("no requests")
+        return null
+    }
+    fmt.println(s.requests.string() + " requests from " + time.format(s.first) + " to " + time.format(s.last) + " (" + s.skipped.string() + " lines skipped)")
+    printCounts("by status:", s.byStatus)
+    printCounts("by path:", s.byPath)
+    fmt.println("latency p50 " + ms(s.p50) + ", p95 " + ms(s.p95))
+    return null
+}

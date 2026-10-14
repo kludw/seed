@@ -1,0 +1,13 @@
+FAIL http://127.0.0.1:1/refused error: http.get: http://127.0.0.1:1/refused: connection refused
+ok   http://SERVER/ 200
+FAIL http://SERVER/boom 500
+FAIL http://SERVER/missing 404
+ok   http://SERVER/moved 302
+ok   http://SERVER/ok 200
+FAIL http://SERVER/slow timeout
+FAIL https://example.com/ error: http.get: https://example.com/: https is not supported
+8 checked, 5 failed
+--- stderr
+http: GET /boom: the handler failed
+error: 5 of 8 links failed
+--- exit 1

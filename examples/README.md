@@ -20,6 +20,7 @@ Complete Seed programs, each with a header comment saying what it shows. Run the
 | [todo.sd](todo.sd) | A to-do list kept in a JSON file. | `seed run examples/todo.sd add buy milk` |
 | [server.sd](server.sd) | A small HTTP server with a counter owned by a goroutine. | `seed run examples/server.sd :8080` |
 | [fetch.sd](fetch.sd) | Fetching URLs concurrently with a pool of workers. | `seed run examples/fetch.sd http://localhost:8080/` |
+| [newcomer/](newcomer/) | Four projects written by a Go programmer learning Seed from the docs ([first impressions](../docs/first-impressions.md)): `todo` (a JSON-file store package), `linkcheck` (a worker pool checking URLs with a per-request timeout, against its own local server), `logstat` (log parsing with `time.parse`, maps, percentiles and `sortBy`) and `vending` (two state machines, enums behind one interface). | `seed run examples/newcomer/linkcheck --demo`, `seed test examples/newcomer` |
 
 A directory example is a project: `main.sd` is `package main`, and its packages are subdirectories (`calc/expr`, `bank/bank`, `kvstore/store`, `httpapi/api`), found relative to the project directory. Their tests are in `tests/` inside each package, and `seed test examples/NAME` runs them.
 

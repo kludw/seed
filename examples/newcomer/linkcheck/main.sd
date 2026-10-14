@@ -1,0 +1,116 @@
+// Checks the links listed in a file, one URL per line, with a pool of
+// workers, and prints a report sorted by URL.
+//
+//     seed run . urls.txt
+//     seed run . --demo       checks a local test server
+package main
+
+import "check"
+import "errors"
+import "fmt"
+import "fs"
+import "http"
+import "net"
+import "time"
+
+const int workers = 4
+const int timeout = 500 * time.millisecond
+
+// The demo server: a few paths with known answers.
+type Demo struct implements http.Handler {}
+
+fn (Demo d) handle(http.Request req) (http.Response, error) {
+    switch (req.path()) {
+    case "/", "/ok":
+        return http.textResponse(http.statusOk, "ok\n"), null
+    case "/moved":
+        return http.Response{status: http.statusFound, headers: map[string]string{"location": "/ok"}, body: ""}, null
+    case "/slow":
+        time.sleep(3 * time.second)
+        return http.textResponse(http.statusOk, "finally\n"), null
+    case "/boom":
+        return null, errors.new("the handler failed")
+    default:
+        return http.textResponse(http.statusNotFound, "not found\n"), null
+    }
+}
+
+fn readUrls(string file) ([]string, error) {
+    string text = try fs.read(file)
+    []string lines = text.split("\n")
+    []string urls = []string{}
+    for (int i = 0; i < lines.len(); i++) {
+        string line = lines[i].trim()
+        if (line != "" && !line.startsWith("#")) {
+            urls.push(line)
+        }
+    }
+    return urls, null
+}
+
+// Prints the report. URLs of the demo server are shown as http://SERVER, so
+// that the output does not depend on the port.
+fn printReport([]check.Report reports, string? base) int {
+    int bad = 0
+    for (int i = 0; i < reports.len(); i++) {
+        check.Report r = reports[i]
+        string mark = "ok  "
+        if (!r.outcome.ok()) {
+            mark = "FAIL"
+            bad++
+        }
+        string line = mark + " " + r.url + " " + r.outcome.string()
+        if (base != null) {
+            line = line.replace(base, "http://SERVER")
+        }
+        fmt.println(line)
+    }
+    fmt.println(reports.len().string() + " checked, " + bad.string() + " failed")
+    return bad
+}
+
+fn run(string file, string? base) error {
+    []string urls = try readUrls(file)
+    []check.Report reports = try check.checkAll(urls, workers, timeout)
+    int bad = printReport(reports, base)
+    if (bad > 0) {
+        return errors.new(bad.string() + " of " + reports.len().string() + " links failed")
+    }
+    return null
+}
+
+// Serves the demo, checks it, then closes the listener to stop the server.
+fn demoChecks(net.Listener ln, string dir) error {
+    defer ln.close()
+    string base = "http://" + ln.addr()
+    []string paths = []string{"/ok", "/moved", "/missing", "/slow", "/boom", "/"}
+    []string lines = []string{"# demo links"}
+    for (int i = 0; i < paths.len(); i++) {
+        lines.push(base + paths[i])
+    }
+    lines.push("http://127.0.0.1:1/refused")
+    lines.push("https://example.com/")
+    string file = dir + "/urls.txt"
+    try fs.write(file, lines.join("\n") + "\n")
+    return run(file, base)
+}
+
+fn demo() error {
+    string dir = try fs.makeTemp("linkcheck-")
+    defer _ = fs.removeAll(dir)
+    net.Listener ln = try net.listen("127.0.0.1:0")
+    return group {
+        spawn http.serveListener(ln, Demo{})
+        spawn demoChecks(ln, dir)
+    }
+}
+
+fn main([]string args) error {
+    if (args.len() != 2) {
+        return errors.new("usage: linkcheck <file> | --demo")
+    }
+    if (args[1] == "--demo") {
+        return demo()
+    }
+    return run(args[1], null)
+}

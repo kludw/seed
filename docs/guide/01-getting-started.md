@@ -107,6 +107,8 @@ There is exactly one layout for Seed code, and `seed fmt` produces it: 4-space i
 $ seed fmt hello.sd
 ```
 
+`seed fmt` takes files, not directories; for a project with packages, name them all: `seed fmt *.sd */*.sd */tests/*.sd`.
+
 The rules are in [formatting.md](../formatting.md), and [chapter 12](12-the-compiler.md) shows the formatter at work.
 
 ## The current compiler

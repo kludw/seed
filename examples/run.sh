@@ -35,9 +35,10 @@ if [ ! -x "$seed" ]; then
 fi
 
 # --- build every single-file example and every project directory
-for src in "$here"/*.sd "$here"/*/main.sd; do
+# (newcomer/NAME/ projects are built as newcomer-NAME)
+for src in "$here"/*.sd "$here"/*/main.sd "$here"/newcomer/*/main.sd; do
   [ -e "$src" ] || continue
-  case $src in */main.sd) name=$(basename "$(dirname "$src")"); target=$(dirname "$src") ;;
+  case $src in */main.sd) target=$(dirname "$src"); name=$(echo "${target#"$here"/}" | tr / -) ;;
     *) name=$(basename "$src" .sd); target=$src ;; esac
   if "$seed" build -o "$bin/$name" "$target" > "$tmp/build.out" 2>&1; then
     pass=$((pass+1))
@@ -99,6 +100,14 @@ check kvstore-reload "<testdata/kv2.txt" kvstore "$tmp/kv.json"
 check wc wc testdata
 check wc-ext wc -e .json testdata
 check wc-missing wc testdata/nope
+check newcomer-todo-add newcomer-todo -f "$tmp/todo.json" add buy milk
+check newcomer-todo-add2 newcomer-todo -f "$tmp/todo.json" add walk the dog
+check newcomer-todo-done newcomer-todo -f "$tmp/todo.json" done 1
+check newcomer-todo-list newcomer-todo -f "$tmp/todo.json" list
+check newcomer-todo-missing newcomer-todo -f "$tmp/todo.json" remove 7
+check newcomer-linkcheck newcomer-linkcheck --demo
+check newcomer-logstat newcomer-logstat newcomer/logstat/access.log
+check newcomer-vending "<newcomer/vending/script.txt" newcomer-vending
 
 # --- the tests of every project directory with a tests/ directory in it
 for dir in "$here"/*/; do
