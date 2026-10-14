@@ -1,0 +1,41 @@
+package main
+
+import "fs"
+import "path"
+
+test "count matches wc" {
+    assert(count("") == Counts{files: 1, lines: 0, words: 0, bytes: 0})
+    assert(count("one two\nthree\n") == Counts{files: 1, lines: 2, words: 3, bytes: 14})
+    // A last line without a newline has words but is not a line.
+    assert(count("a b\nc") == Counts{files: 1, lines: 1, words: 3, bytes: 5})
+    assert(count("  \t\n\n") == Counts{files: 1, lines: 2, words: 0, bytes: 5})
+}
+
+test "add sums every field" {
+    Counts total = none()
+    total.add(count("a\n"))
+    total.add(count("b c\n"))
+    assert(total == Counts{files: 2, lines: 2, words: 3, bytes: 6})
+}
+
+test "walk finds files in sorted order and skips hidden ones" {
+    string dir = try fs.makeTemp("wc-test-")
+    defer _ = fs.removeAll(dir)
+    try fs.mkdir(path.join([]string{dir, "sub", "deeper"}))
+    try fs.mkdir(path.join([]string{dir, ".git"}))
+    try fs.write(path.join([]string{dir, "b.txt"}), "b")
+    try fs.write(path.join([]string{dir, "a.txt"}), "a")
+    try fs.write(path.join([]string{dir, ".hidden"}), "h")
+    try fs.write(path.join([]string{dir, ".git", "config"}), "c")
+    try fs.write(path.join([]string{dir, "sub", "deeper", "c.sd"}), "c")
+    []string files = try walk(dir)
+    assert(files.len() == 3)
+    assert(files[0] == dir + "/a.txt")
+    assert(files[1] == dir + "/b.txt")
+    assert(files[2] == dir + "/sub/deeper/c.sd")
+}
+
+test "walk reports a missing path" {
+    _, error err = walk("no/such/place")
+    assert(err.message() == "no/such/place: no such file or directory")
+}

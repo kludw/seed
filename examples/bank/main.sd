@@ -1,0 +1,72 @@
+// A month in a small bank: accounts with private balances, mut methods,
+// two kinds of account behind one interface, and transactions as an enum.
+//
+//     seed run examples/bank
+//     seed test examples/bank
+//
+// main can read an account's pub fields (id, owner) but not its balance
+// field: the balance only changes through Bank's methods, which keep every
+// account's history and balance in step.
+package main
+
+import "bank"
+import "fmt"
+import "strings"
+
+fn statement(bank.Account a) {
+    fmt.println(a.id + " (" + a.owner + ", " + a.planName() + ")")
+    []bank.Transaction history = a.history()
+    for (int i = 0; i < history.len(); i++) {
+        bank.Transaction t = history[i]
+        fmt.println("  " + strings.padRight(t.describe(), 32, ' ') + strings.padLeft(bank.formatCents(t.amount()), 12, ' '))
+    }
+    fmt.println("  " + strings.padRight("balance", 32, ' ') + strings.padLeft(bank.formatCents(a.balance()), 12, ' '))
+}
+
+// Prints what went wrong and carries on: a refused operation is an
+// ordinary outcome for a bank, not a reason to stop.
+fn attempt(string what, error err) {
+    if (err != null) {
+        fmt.println("refused: " + err.message())
+    } else {
+        fmt.println("ok: " + what)
+    }
+}
+
+fn main([]string args) error {
+    bank.Bank b = bank.newBank("Seed Savings & Loan")
+    string ada = b.open("Ada", bank.standardChecking())
+    string bob = b.open("Bob", bank.standardChecking())
+    string nest = b.open("Ada", bank.Savings{basisPoints: 125})
+
+    try b.deposit(ada, 250000, "salary")
+    try b.deposit(bob, 30000, "salary")
+    attempt("rent", b.withdraw(ada, 120000, "rent"))
+    attempt("savings", b.transfer(ada, nest, 100000))
+    attempt("Bob's car", b.withdraw(bob, 90000, "car"))
+    attempt("Bob's bike", b.withdraw(bob, 75000, "bike"))
+    attempt("from savings", b.transfer(nest, bob, 150000))
+    attempt("to nowhere", b.transfer(ada, "ACC-99", 100))
+    attempt("negative deposit", b.deposit(ada, -5, "oops"))
+
+    // A copy of an account is just a value: changing it does nothing to
+    // the bank.
+    bank.Account copy = try b.account(ada)
+    try copy.deposit(1000000, "wishful thinking")
+    bank.Account real = try b.account(ada)
+    fmt.println("copy has " + bank.formatCents(copy.balance()) + ", the bank has " + bank.formatCents(real.balance()))
+
+    []error problems = b.closeMonth()
+    for (int i = 0; i < problems.len(); i++) {
+        fmt.println("problem: " + problems[i].message())
+    }
+
+    fmt.println("")
+    []string ids = b.ids()
+    for (int i = 0; i < ids.len(); i++) {
+        statement(try b.account(ids[i]))
+    }
+    fmt.println("")
+    fmt.println(b.name + " holds " + bank.formatCents(b.deposits()) + " in " + ids.len().string() + " accounts")
+    return null
+}

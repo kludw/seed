@@ -1,0 +1,255 @@
+// The syntax tree and a recursive-descent parser for it.
+//
+//     stmt    = "let" NAME "=" expr | "def" NAME "(" [NAME {"," NAME}] ")" "=" expr | expr
+//     expr    = "if" expr "then" expr "else" expr | compare
+//     compare = sum [("==" | "!=" | "<" | "<=" | ">" | ">=") sum]
+//     sum     = product {("+" | "-") product}
+//     product = unary {("*" | "/" | "%") unary}
+//     unary   = "-" unary | power
+//     power   = atom ["^" unary]                  (right-associative)
+//     atom    = NUM | NAME | NAME "(" [expr {"," expr}] ")" | "(" expr ")"
+//
+// The tree is made of enums whose cases hold other expressions, directly
+// or in a list: no pointers and no arena are needed for a tree that is
+// built once and then only read.
+package expr
+
+import "errors"
+
+pub type Expr enum {
+    Num(int value)
+    Var(string name, int pos)
+    Neg(Expr operand)
+    Binary(string op, Expr left, Expr right, int pos)
+    Call(string name, []Expr args, int pos)
+    If(Expr cond, Expr then, Expr otherwise)
+}
+
+pub type Stmt enum {
+    Let(string name, Expr value)
+    Def(string name, []string params, Expr body)
+    Eval(Expr value)
+}
+
+// The parser's state: the tokens and how far it has got. Its methods are
+// mut because they move `at`; when one fails it records where, so the
+// caller can point at the column.
+pub type Parser struct {
+    []Tok toks
+    int at
+    pub int errorPos
+}
+
+pub fn newParser(string line) Parser {
+    return Parser{toks: tokenize(line), at: 0, errorPos: -1}
+}
+
+fn (Parser p) peek() Token {
+    return p.toks[p.at].token
+}
+
+fn (Parser p) mut next() Tok {
+    Tok t = p.toks[p.at]
+    if (p.at < p.toks.len() - 1) {
+        p.at++
+    }
+    return t
+}
+
+fn (Parser p) mut fail(int pos, string message) error {
+    p.errorPos = pos
+    return errors.new(message)
+}
+
+// Reports the current token as unexpected.
+fn (Parser p) mut unexpected(string wanted) error {
+    Tok t = p.toks[p.at]
+    switch (t.token) {
+    case Token.Bad(string message):
+        return p.fail(t.pos, message)
+    case Token.Num(int _), Token.Name(string _), Token.Op(string _), Token.Keyword(string _), Token.End:
+        return p.fail(t.pos, "expected " + wanted + ", found " + t.token.describe())
+    }
+}
+
+fn (Parser p) isOp(string symbol) bool {
+    return p.peek() == Token.Op(symbol)
+}
+
+fn (Parser p) mut expectOp(string symbol) error {
+    if (!p.isOp(symbol)) {
+        return p.unexpected("'" + symbol + "'")
+    }
+    _ = p.next()
+    return null
+}
+
+fn (Parser p) mut expectKeyword(string word) error {
+    if (p.peek() != Token.Keyword(word)) {
+        return p.unexpected("'" + word + "'")
+    }
+    _ = p.next()
+    return null
+}
+
+fn (Parser p) mut expectName() (string, error) {
+    switch (p.peek()) {
+    case Token.Name(string name):
+        _ = p.next()
+        return name, null
+    case Token.Num(int _), Token.Op(string _), Token.Keyword(string _), Token.Bad(string _), Token.End:
+        return null, p.unexpected("a name")
+    }
+}
+
+// Parses a whole line, which must hold exactly one statement.
+pub fn (Parser p) mut statement() (Stmt, error) {
+    Stmt s = Stmt.Eval(Expr.Num(0))
+    if (p.peek() == Token.Keyword("let")) {
+        _ = p.next()
+        string name = try p.expectName()
+        try p.expectOp("=")
+        s = Stmt.Let(name, try p.expr())
+    } else if (p.peek() == Token.Keyword("def")) {
+        _ = p.next()
+        string name = try p.expectName()
+        try p.expectOp("(")
+        []string params = []string{}
+        for (; !p.isOp(")"); ) {
+            if (params.len() > 0) {
+                try p.expectOp(",")
+            }
+            params.push(try p.expectName())
+        }
+        _ = p.next()
+        try p.expectOp("=")
+        s = Stmt.Def(name, params, try p.expr())
+    } else {
+        s = Stmt.Eval(try p.expr())
+    }
+    if (p.peek() != Token.End) {
+        return null, p.unexpected("an operator or the end of the line")
+    }
+    return s, null
+}
+
+fn (Parser p) mut expr() (Expr, error) {
+    if (p.peek() != Token.Keyword("if")) {
+        return p.compare()
+    }
+    _ = p.next()
+    Expr cond = try p.expr()
+    try p.expectKeyword("then")
+    Expr then = try p.expr()
+    try p.expectKeyword("else")
+    return Expr.If(cond, then, try p.expr()), null
+}
+
+fn (Parser p) mut compare() (Expr, error) {
+    Expr left = try p.sum()
+    []string ops = []string{"==", "!=", "<", "<=", ">", ">="}
+    for (int i = 0; i < ops.len(); i++) {
+        if (p.isOp(ops[i])) {
+            Tok op = p.next()
+            return Expr.Binary(ops[i], left, try p.sum(), op.pos), null
+        }
+    }
+    return left, null
+}
+
+fn (Parser p) mut sum() (Expr, error) {
+    Expr left = try p.product()
+    for (; p.isOp("+") || p.isOp("-"); ) {
+        Tok op = p.next()
+        left = Expr.Binary(opSymbol(op.token), left, try p.product(), op.pos)
+    }
+    return left, null
+}
+
+fn (Parser p) mut product() (Expr, error) {
+    Expr left = try p.unary()
+    for (; p.isOp("*") || p.isOp("/") || p.isOp("%"); ) {
+        Tok op = p.next()
+        left = Expr.Binary(opSymbol(op.token), left, try p.unary(), op.pos)
+    }
+    return left, null
+}
+
+fn (Parser p) mut unary() (Expr, error) {
+    if (p.isOp("-")) {
+        _ = p.next()
+        return Expr.Neg(try p.unary()), null
+    }
+    Expr base = try p.atom()
+    if (p.isOp("^")) {
+        Tok op = p.next()
+        return Expr.Binary("^", base, try p.unary(), op.pos), null
+    }
+    return base, null
+}
+
+fn (Parser p) mut atom() (Expr, error) {
+    Tok t = p.toks[p.at]
+    switch (t.token) {
+    case Token.Num(int value):
+        _ = p.next()
+        return Expr.Num(value), null
+    case Token.Name(string name):
+        _ = p.next()
+        if (!p.isOp("(")) {
+            return Expr.Var(name, t.pos), null
+        }
+        _ = p.next()
+        []Expr args = []Expr{}
+        for (; !p.isOp(")"); ) {
+            if (args.len() > 0) {
+                try p.expectOp(",")
+            }
+            args.push(try p.expr())
+        }
+        _ = p.next()
+        return Expr.Call(name, args, t.pos), null
+    case Token.Op(string symbol):
+        if (symbol == "(") {
+            _ = p.next()
+            Expr inner = try p.expr()
+            try p.expectOp(")")
+            return inner, null
+        }
+        return null, p.unexpected("a number, a name or '('")
+    case Token.Keyword(string _), Token.Bad(string _), Token.End:
+        return null, p.unexpected("a number, a name or '('")
+    }
+}
+
+fn opSymbol(Token t) string {
+    switch (t) {
+    case Token.Op(string symbol):
+        return symbol
+    case Token.Num(int _), Token.Name(string _), Token.Keyword(string _), Token.Bad(string _), Token.End:
+        return "?"
+    }
+}
+
+// The expression with every operation in parentheses, to show how it was
+// parsed.
+pub fn (Expr e) string() string {
+    switch (e) {
+    case Expr.Num(int value):
+        return value.string()
+    case Expr.Var(string name, int _):
+        return name
+    case Expr.Neg(Expr operand):
+        return "(-" + operand.string() + ")"
+    case Expr.Binary(string op, Expr left, Expr right, int _):
+        return "(" + left.string() + " " + op + " " + right.string() + ")"
+    case Expr.Call(string name, []Expr args, int _):
+        []string parts = []string{}
+        for (int i = 0; i < args.len(); i++) {
+            parts.push(args[i].string())
+        }
+        return name + "(" + parts.join(", ") + ")"
+    case Expr.If(Expr cond, Expr then, Expr otherwise):
+        return "(if " + cond.string() + " then " + then.string() + " else " + otherwise.string() + ")"
+    }
+}

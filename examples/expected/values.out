@@ -1,0 +1,10 @@
+1. a = [1 2 3 4], b = [1 2 99]
+2. y = [0 0 0 1], z = [0 0 0 2], x = [0 0 0]
+3. a = ann new, b = bob admin
+4. ann 1, bob 6, copy of ann 2
+5. config has 1 keys, filled has 2
+   after config = filled: timeout, retries
+6. ann has 2 visits
+7. received: cy sent; sender has: changed after send
+8. sent on b, received on a: 8
+9. equal by contents: true

@@ -1,0 +1,127 @@
+// Pretty-prints or validates the JSON document on stdin.
+//
+//     seed run examples/jsonfmt.sd < data.json        (indented)
+//     seed run examples/jsonfmt.sd -c < data.json     (compact)
+//     seed run examples/jsonfmt.sd -q < data.json     (only check it)
+//
+// On malformed input it shows the line with a marker under the column where
+// the parser stopped, and exits with 1:
+//
+//     error: stdin: line 3, column 18: expected ',' or ']'
+//         3 |   "items": [1, 2 3],
+//           |                  ^
+//
+// json.Value is an enum, so walking a document is a switch that must
+// handle every kind of value (see stats).
+package main
+
+import "errors"
+import "fmt"
+import "io"
+import "json"
+import "math"
+import "strings"
+
+const string usage = "usage: jsonfmt [-c | -q] < file.json"
+
+// The line and column of a json.parse error, whose message reads
+// "json.parse: line 3, column 18: expected ...", or 0, 0 if it has none.
+fn position(string message) (int, int) {
+    []string parts = message.split(": ")
+    if (parts.len() < 3) {
+        return 0, 0
+    }
+    []string where = parts[1].split(", column ")
+    if (where.len() != 2 || !where[0].startsWith("line ")) {
+        return 0, 0
+    }
+    int line, error err = where[0].slice(5, where[0].len()).toInt()
+    if (err != null) {
+        return 0, 0
+    }
+    int column, err = where[1].toInt()
+    if (err != null) {
+        return 0, 0
+    }
+    return line, column
+}
+
+// The error for malformed input: the parser's message, the line it is
+// about, and a marker under the column.
+fn syntaxError(string text, string message) error {
+    string summary = "stdin: " + message.replace("json.parse: ", "")
+    int line, int column = position(message)
+    []string lines = text.split("\n")
+    if (line < 1 || line > lines.len()) {
+        return errors.new(summary)
+    }
+    string number = line.string()
+    string shown = lines[line - 1].replace("\t", " ").replace("\r", "")
+    string gutter = strings.repeat(" ", number.len())
+    return errors.new(summary + "\n    " + number + " | " + shown + "\n    " + gutter + " | " + strings.repeat(" ", math.maxInt(column - 1, 0)) + "^")
+}
+
+// Counts the values in a document and how deeply it nests.
+fn stats(json.Value v) (int, int) {
+    switch (v) {
+    case json.Value.Array([]json.Value items):
+        int count = 1
+        int deepest = 0
+        for (int i = 0; i < items.len(); i++) {
+            int n, int depth = stats(items[i])
+            count = count + n
+            deepest = math.maxInt(deepest, depth)
+        }
+        return count, deepest + 1
+    case json.Value.Object(map[string]json.Value fields):
+        int count = 1
+        int deepest = 0
+        []string keys = fields.keys()
+        for (int i = 0; i < keys.len(); i++) {
+            json.Value? field = fields[keys[i]]
+            if (field != null) {
+                int n, int depth = stats(field)
+                count = count + n
+                deepest = math.maxInt(deepest, depth)
+            }
+        }
+        return count, deepest + 1
+    case json.Value.Null, json.Value.Bool(bool _), json.Value.Number(float _), json.Value.String(string _):
+        return 1, 0
+    }
+}
+
+fn main([]string args) error {
+    string mode = "pretty"
+    if (args.len() > 2) {
+        return errors.new(usage)
+    }
+    if (args.len() == 2) {
+        switch (args[1]) {
+        case "-c":
+            mode = "compact"
+        case "-q":
+            mode = "quiet"
+        default:
+            return errors.new(usage)
+        }
+    }
+    string text = try io.readAll()
+    if (text.trim() == "") {
+        return errors.new("stdin: no JSON document, the input is empty")
+    }
+    json.Value doc, error err = json.parse(text)
+    if (err != null) {
+        return syntaxError(text, err.message())
+    }
+    switch (mode) {
+    case "compact":
+        fmt.println(doc.string())
+    case "quiet":
+        int count, int depth = stats(doc)
+        fmt.println("valid JSON: " + count.string() + " values, nested " + depth.string() + " deep")
+    default:
+        fmt.println(doc.pretty())
+    }
+    return null
+}

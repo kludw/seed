@@ -1,0 +1,173 @@
+// Counts lines, words and bytes in files and directory trees, with a
+// summary per file extension.
+//
+//     seed run examples/wc [-e EXT]... [-g] PATH...
+//
+//     -e .sd   only count files with this extension (may be repeated)
+//     -g       only count files that git tracks (asks `git ls-files`)
+//
+// Directories are walked recursively, skipping hidden entries; binary files
+// (those containing a zero byte) are skipped. Uses fs for files, path for
+// joining names and extensions, strings for words and padding, and
+// os.output to run git.
+//
+//     seed test examples/wc
+package main
+
+import "errors"
+import "fmt"
+import "fs"
+import "os"
+import "path"
+import "strings"
+
+const string usage = "usage: wc [-e EXT]... [-g] PATH..."
+
+type Counts struct {
+    int files
+    int lines
+    int words
+    int bytes
+}
+
+fn none() Counts {
+    return Counts{files: 0, lines: 0, words: 0, bytes: 0}
+}
+
+fn (Counts c) mut add(Counts other) {
+    c.files = c.files + other.files
+    c.lines = c.lines + other.lines
+    c.words = c.words + other.words
+    c.bytes = c.bytes + other.bytes
+}
+
+// Counts like wc: lines are newline characters, so a last line without a
+// newline adds words and bytes but no line.
+fn count(string text) Counts {
+    int lines = text.split("\n").len() - 1
+    return Counts{files: 1, lines: lines, words: strings.fields(text).len(), bytes: text.len()}
+}
+
+fn row(Counts c, string name) string {
+    return strings.padLeft(c.lines.string(), 8, ' ') + strings.padLeft(c.words.string(), 9, ' ') + strings.padLeft(c.bytes.string(), 9, ' ') + "  " + name
+}
+
+// Every file under p (or p itself), in sorted order, skipping hidden names.
+fn walk(string p) ([]string, error) {
+    if (!fs.isDir(p)) {
+        if (!fs.exists(p)) {
+            return null, errors.new(p + ": no such file or directory")
+        }
+        return []string{p}, null
+    }
+    []string files = []string{}
+    []string names = try fs.list(p)
+    for (int i = 0; i < names.len(); i++) {
+        if (names[i].startsWith(".")) {
+            continue
+        }
+        []string inner = try walk(path.join([]string{p, names[i]}))
+        for (int j = 0; j < inner.len(); j++) {
+            files.push(inner[j])
+        }
+    }
+    return files, null
+}
+
+// The files git tracks under the given paths.
+fn tracked([]string paths) ([]string, error) {
+    []string argv = []string{"git", "ls-files", "--"}
+    for (int i = 0; i < paths.len(); i++) {
+        argv.push(paths[i])
+    }
+    string out, int code, error err = os.output(argv)
+    if (err != null) {
+        return null, errors.wrap(err, "-g needs git")
+    }
+    if (code != 0) {
+        return null, errors.new("git ls-files failed with exit code " + code.string())
+    }
+    []string files = []string{}
+    []string lines = out.split("\n")
+    for (int i = 0; i < lines.len(); i++) {
+        if (lines[i] != "") {
+            files.push(lines[i])
+        }
+    }
+    return files, null
+}
+
+fn main([]string args) error {
+    []string exts = []string{}
+    bool gitOnly = false
+    []string paths = []string{}
+    for (int i = 1; i < args.len(); i++) {
+        if (args[i] == "-e" && i + 1 < args.len()) {
+            exts.push(args[i + 1])
+            i++
+        } else if (args[i] == "-g") {
+            gitOnly = true
+        } else if (args[i].startsWith("-")) {
+            return errors.new(usage)
+        } else {
+            paths.push(args[i])
+        }
+    }
+    if (paths.len() == 0) {
+        return errors.new(usage)
+    }
+
+    []string files = []string{}
+    if (gitOnly) {
+        files = try tracked(paths)
+    } else {
+        for (int i = 0; i < paths.len(); i++) {
+            []string found = try walk(paths[i])
+            for (int j = 0; j < found.len(); j++) {
+                files.push(found[j])
+            }
+        }
+    }
+
+    fmt.println("   lines    words    bytes  file")
+    Counts total = none()
+    map[string]Counts byExt = map[string]Counts{}
+    for (int i = 0; i < files.len(); i++) {
+        string ext = path.ext(files[i])
+        if (exts.len() > 0 && !exts.contains(ext)) {
+            continue
+        }
+        string text = try fs.read(files[i])
+        if (text.contains("\x00")) {
+            fmt.println(strings.padLeft("binary, skipped", 26, ' ') + "  " + files[i])
+            continue
+        }
+        Counts c = count(text)
+        fmt.println(row(c, files[i]))
+        total.add(c)
+        if (ext == "") {
+            ext = "(none)"
+        }
+        Counts? seen = byExt[ext]
+        if (seen == null) {
+            byExt[ext] = c
+        } else {
+            seen.add(c)
+            byExt[ext] = seen
+        }
+    }
+    fmt.println(row(total, "total, " + total.files.string() + " files"))
+
+    if (byExt.len() > 1) {
+        fmt.println("")
+        []string keys = byExt.keys()
+        keys.sort()
+        for (int i = 0; i < keys.len(); i++) {
+            Counts? c = byExt[keys[i]]
+            if (c != null) {
+                fmt.println(row(c, keys[i] + ", " + c.files.string() + " files"))
+            }
+        }
+    }
+    return null
+}

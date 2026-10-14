@@ -1,0 +1,32 @@
+1 + 2 * 3
+(1 + 2) * 3
+2 ^ 3 ^ 2
+-2 ^ 2
+7 / 2
+-7 % 3
+ans * 10
+let r = 10
+def fact(n) = if n < 2 then 1 else n * fact(n - 1)
+fact(25) / r
+def fib(n) = if n < 2 then n else fib(n - 1) + fib(n - 2)
+fib(20)
+def gcd(a, b) = if b == 0 then a else gcd(b, a % b)
+gcd(1071, 462)
+max(abs(-5), min(3, 4))
+2 ^ 200
+
+1 + * 2
+x + 1
+1 / (r - 10)
+fact(1, 2)
+nope(3)
+let 5 = 3
+2 $ 3
+(1 + 2
+def inv(x) = 100 / x
+1 + inv(0)
+def loop(n) = loop(n + 1)
+loop(0)
+:vars
+:quit
+1 + 1

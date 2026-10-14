@@ -1,0 +1,4 @@
+   lines    words    bytes  file
+       5       10       56  testdata/bad.json
+       4       32      267  testdata/order.json
+       9       42      323  total, 2 files

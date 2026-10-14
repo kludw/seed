@@ -1,0 +1,94 @@
+// A concurrent prime sieve: the classic Go example, Seed-style.
+//
+//     seed run examples/primes.sd [limit]
+//
+// A generator sends 2, 3, 4, ... into a chain of filters. Each prime found
+// adds one more filter to the chain that drops its multiples. In Go the
+// chain is built by `go filter(...)` in a loop; in Seed every goroutine
+// belongs to a group, so each sieve stage starts the next one in a group of
+// its own. The groups nest as deep as the chain, and when the generator
+// closes its channel, every stage closes its output and returns in turn.
+package main
+
+import "errors"
+import "fmt"
+import "strings"
+
+// Sends 2..limit, then closes the channel.
+fn generate(int limit, chan int out) error {
+    for (int n = 2; n <= limit; n++) {
+        out.send(n)
+    }
+    out.close()
+    return null
+}
+
+// Passes on every number that is not a multiple of prime.
+fn filter(int prime, chan int input, chan int out) error {
+    defer out.close()
+    for (;;) {
+        int? n = input.receive()
+        if (n == null) {
+            return null
+        }
+        if (n % prime != 0) {
+            out.send(n)
+        }
+    }
+}
+
+// The first number to arrive is a prime: report it, then sieve the rest
+// through a filter for it.
+fn sieve(chan int input, chan int primes) error {
+    int? prime = input.receive()
+    if (prime == null) {
+        primes.close()
+        return null
+    }
+    primes.send(prime)
+    chan int rest = chan int(0)
+    return group {
+        spawn filter(prime, input, rest)
+        spawn sieve(rest, primes)
+    }
+}
+
+// Prints the primes ten to a line.
+fn printer(chan int primes) error {
+    []string row = []string{}
+    int count = 0
+    for (;;) {
+        int? p = primes.receive()
+        if (p == null) {
+            break
+        }
+        count++
+        row.push(strings.padLeft(p.string(), 5, ' '))
+        if (row.len() == 10) {
+            fmt.println(row.join(""))
+            row = []string{}
+        }
+    }
+    if (row.len() > 0) {
+        fmt.println(row.join(""))
+    }
+    fmt.println(count.string() + " primes")
+    return null
+}
+
+fn main([]string args) error {
+    int limit = 200
+    if (args.len() > 2) {
+        return errors.new("usage: primes [limit]")
+    }
+    if (args.len() == 2) {
+        limit = try args[1].toInt()
+    }
+    chan int numbers = chan int(0)
+    chan int primes = chan int(0)
+    return group {
+        spawn generate(limit, numbers)
+        spawn sieve(numbers, primes)
+        spawn printer(primes)
+    }
+}

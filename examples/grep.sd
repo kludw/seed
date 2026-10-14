@@ -1,0 +1,135 @@
+// Searches files for a substring and prints the matching lines with their
+// line numbers.
+//
+//     seed run examples/grep.sd [-i] [-v] [-c] [-l] PATTERN FILE...
+//
+//     -i   ignore case (ASCII)
+//     -v   print the lines that do not match
+//     -c   print only the number of matching lines per file
+//     -l   print only the names of files with a match
+//
+// Like grep, it exits with 0 when something matched, 1 when nothing did, and
+// 2 when a file could not be read; a bad file is reported and the others
+// are still searched. Files are read a line at a time with fs.File, so
+// their size doesn't matter.
+package main
+
+import "errors"
+import "fmt"
+import "fs"
+import "os"
+
+const string usage = "usage: grep [-i] [-v] [-c] [-l] PATTERN FILE..."
+
+type Options struct {
+    bool ignoreCase
+    bool invert
+    bool countOnly
+    bool namesOnly
+    string pattern
+    []string files
+}
+
+// Flags come first; "--" ends them, so a pattern may start with '-'.
+fn parseArgs([]string args) (Options, error) {
+    Options opts = Options{ignoreCase: false, invert: false, countOnly: false, namesOnly: false, pattern: "", files: []string{}}
+    int i = 1
+    for (; i < args.len() && args[i].startsWith("-"); i++) {
+        string flag = args[i]
+        if (flag == "--") {
+            i++
+            break
+        }
+        switch (flag) {
+        case "-i":
+            opts.ignoreCase = true
+        case "-v":
+            opts.invert = true
+        case "-c":
+            opts.countOnly = true
+        case "-l":
+            opts.namesOnly = true
+        default:
+            return null, errors.new("unknown flag " + flag + "\n" + usage)
+        }
+    }
+    if (args.len() - i < 2) {
+        return null, errors.new(usage)
+    }
+    if (args[i] == "") {
+        return null, errors.new("the pattern must not be empty")
+    }
+    opts.pattern = args[i]
+    opts.files = args.slice(i + 1, args.len())
+    if (opts.ignoreCase) {
+        opts.pattern = opts.pattern.toLower()
+    }
+    return opts, null
+}
+
+fn (Options opts) matches(string line) bool {
+    string text = line
+    if (opts.ignoreCase) {
+        text = line.toLower()
+    }
+    return text.contains(opts.pattern) != opts.invert
+}
+
+// Searches one file and returns how many lines matched. With several
+// files, each line is prefixed with the file name, as grep does.
+fn search(Options opts, string file, bool showName) (int, error) {
+    fs.File f = try fs.open(file)
+    defer f.close()
+    int count = 0
+    for (int lineNo = 1; ; lineNo++) {
+        string? line = try f.readLine()
+        if (line == null) {
+            break
+        }
+        if (!opts.matches(line)) {
+            continue
+        }
+        count++
+        if (opts.namesOnly) {
+            fmt.println(file)
+            return count, null // one match is enough
+        }
+        if (!opts.countOnly) {
+            string prefix = lineNo.string() + ":"
+            if (showName) {
+                prefix = file + ":" + prefix
+            }
+            fmt.println(prefix + line)
+        }
+    }
+    if (opts.countOnly) {
+        string prefix = ""
+        if (showName) {
+            prefix = file + ":"
+        }
+        fmt.println(prefix + count.string())
+    }
+    return count, null
+}
+
+fn main([]string args) error {
+    Options opts = try parseArgs(args)
+    int total = 0
+    bool failed = false
+    for (int i = 0; i < opts.files.len(); i++) {
+        int count, error err = search(opts, opts.files[i], opts.files.len() > 1)
+        if (err != null) {
+            fmt.eprintln("grep: " + err.message())
+            failed = true
+            continue
+        }
+        total = total + count
+    }
+    if (failed) {
+        os.exit(2)
+    }
+    if (total == 0) {
+        os.exit(1)
+    }
+    return null
+}

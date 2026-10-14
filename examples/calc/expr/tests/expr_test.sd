@@ -1,0 +1,120 @@
+package expr
+
+// Parses a line and shows the tree, or the error and its column.
+fn parsed(string line) string {
+    Parser p = newParser(line)
+    Stmt s, error err = p.statement()
+    if (err != null) {
+        return p.errorPos.string() + ": " + err.message()
+    }
+    switch (s) {
+    case Stmt.Let(string name, Expr value):
+        return "let " + name + " = " + value.string()
+    case Stmt.Def(string name, []string params, Expr body):
+        return "def " + name + "(" + params.join(", ") + ") = " + body.string()
+    case Stmt.Eval(Expr value):
+        return value.string()
+    }
+}
+
+// Runs lines in one session and returns the output of the last one, or its
+// error and column.
+fn runAll([]string lines) string {
+    Session s = newSession()
+    string last = ""
+    for (int i = 0; i < lines.len(); i++) {
+        string out, error err = s.run(lines[i])
+        if (err != null) {
+            return s.errorPos.string() + ": " + err.message()
+        }
+        last = out
+    }
+    return last
+}
+
+test "tokenize reads numbers, names, operators and keywords" {
+    []Tok toks = tokenize("let x1 = 42 <= y")
+    assert(toks.len() == 7)
+    assert(toks[0].token == Token.Keyword("let"))
+    assert(toks[1].token == Token.Name("x1"))
+    assert(toks[3].token == Token.Num(42))
+    assert(toks[3].pos == 9)
+    assert(toks[4].token == Token.Op("<="))
+    assert(toks[6].token == Token.End)
+    assert(toks[6].pos == 16)
+}
+
+test "tokenize turns an unknown character into a Bad token" {
+    []Tok toks = tokenize("1 # 2")
+    assert(toks[1].token == Token.Bad("unexpected character '#'"))
+    assert(toks[1].pos == 2)
+}
+
+test "precedence and associativity" {
+    assert(parsed("1 + 2 * 3") == "(1 + (2 * 3))")
+    assert(parsed("1 - 2 - 3") == "((1 - 2) - 3)")
+    assert(parsed("2 ^ 3 ^ 2") == "(2 ^ (3 ^ 2))")
+    assert(parsed("-2 ^ 2") == "(-(2 ^ 2))")
+    assert(parsed("a < b + 1") == "(a < (b + 1))")
+    assert(parsed("f(1, g(x)) * 2") == "(f(1, g(x)) * 2)")
+    assert(parsed("if a then b else c + 1") == "(if a then b else (c + 1))")
+}
+
+test "statements" {
+    assert(parsed("let x = 1") == "let x = 1")
+    assert(parsed("def add(a, b) = a + b") == "def add(a, b) = (a + b)")
+    assert(parsed("def zero() = 0") == "def zero() = 0")
+}
+
+test "syntax errors give the column" {
+    assert(parsed("1 +") == "3: expected a number, a name or '(', found the end of the line")
+    assert(parsed("(1 + 2") == "6: expected ')', found the end of the line")
+    assert(parsed("1 2") == "2: expected an operator or the end of the line, found the number 2")
+    assert(parsed("let = 2") == "4: expected a name, found '='")
+    assert(parsed("if 1 then 2") == "11: expected 'else', found the end of the line")
+    assert(parsed("1 + @") == "4: unexpected character '@'")
+}
+
+test "arithmetic on big integers" {
+    assert(runAll([]string{"2 ^ 100"}) == "1267650600228229401496703205376")
+    assert(runAll([]string{"7 / 2 + 7 % 2"}) == "4")
+    assert(runAll([]string{"(3 > 2) == 1"}) == "1")
+    // Comparisons don't chain: a < b < c is an error, not (a < b) < c.
+    assert(runAll([]string{"1 < 2 < 3"}) == "6: expected an operator or the end of the line, found '<'")
+}
+
+test "variables, ans and functions" {
+    assert(runAll([]string{"let x = 6", "x * 7"}) == "42")
+    assert(runAll([]string{"5", "ans + 1"}) == "6")
+    assert(runAll([]string{"def sq(n) = n * n", "sq(sq(3))"}) == "81")
+    // A parameter hides a global with the same name.
+    assert(runAll([]string{"let n = 100", "def id(n) = n", "id(1) + n"}) == "101")
+}
+
+test "recursion" {
+    []string lines = []string{"def fact(n) = if n < 2 then 1 else n * fact(n - 1)", "fact(30)"}
+    assert(runAll(lines) == "265252859812191058636308480000000")
+}
+
+test "runtime errors give the column" {
+    assert(runAll([]string{"1 / 0"}) == "2: division by zero")
+    assert(runAll([]string{"y + 1"}) == "0: unknown variable y")
+    assert(runAll([]string{"2 ^ -1"}) == "2: negative exponent -1")
+    assert(runAll([]string{"def f(x) = x", "f()"}) == "0: f takes 1 argument(s), got 0")
+    assert(runAll([]string{"def f(a, a) = a"}) == "-1: f: parameter a is listed twice")
+}
+
+test "an error inside a function points at the call" {
+    assert(runAll([]string{"def inv(x) = 100 / x", "1 + inv(0)"}) == "4: division by zero")
+    assert(runAll([]string{"def down(n) = down(n - 1)", "down(5)"}) == "0: too many nested calls (more than 400)")
+}
+
+test "a session keeps working after an error" {
+    Session s = newSession()
+    _, error err = s.run("let x = 1 / 0")
+    assert(err != null)
+    string out, err = s.run("let x = 2")
+    assert(err == null)
+    assert(out == "x = 2")
+    assert(s.errorPos == -1)
+}

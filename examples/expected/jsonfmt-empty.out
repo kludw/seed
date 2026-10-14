@@ -1,0 +1,3 @@
+--- stderr
+error: stdin: no JSON document, the input is empty
+--- exit 1

@@ -1,0 +1,154 @@
+// A worker pool, and what happens when a job fails or takes too long.
+//
+//     seed run examples/workers.sd
+//
+// Three batches go through the same pool: one that succeeds, one with a
+// job that fails, and one with a job that hangs. A failing worker returns
+// an error, and its group stops every other goroutine in the batch (the
+// Erlang way: no error codes to collect, no cancellation to plumb through).
+// The collector waits with a deadline using select and time.after, and its
+// error stops the hung worker in time.sleep.
+package main
+
+import "errors"
+import "fmt"
+import "strings"
+import "time"
+
+const int workers = 3
+
+type Job struct {
+    int id
+    string input
+    int millis // how long the job pretends to work
+}
+
+type Result struct {
+    int id
+    int value
+    int steps
+}
+
+// The work: the number of Collatz steps from the input down to 1.
+fn collatz(int n) int {
+    int steps = 0
+    for (int x = n; x != 1; steps++) {
+        if (x % 2 == 0) {
+            x = x / 2
+        } else {
+            x = 3 * x + 1
+        }
+    }
+    return steps
+}
+
+fn worker(chan Job jobs, chan Result results) error {
+    for (;;) {
+        Job? job = jobs.receive()
+        if (job == null) {
+            return null
+        }
+        time.sleep(job.millis * time.millisecond)
+        int n, error err = job.input.toInt()
+        if (err != null) {
+            return errors.wrap(err, "job " + job.id.string())
+        }
+        if (n < 1) {
+            return errors.new("job " + job.id.string() + ": " + n.string() + " is not positive")
+        }
+        results.send(Result{id: job.id, value: n, steps: collatz(n)})
+    }
+}
+
+// Receives `count` results, or gives up when the deadline passes. The
+// deadline is one timer for the whole batch, made before the loop.
+fn collect(chan Result results, int count, int timeout, chan []Result out) error {
+    chan int deadline = time.after(timeout)
+    []Result got = []Result{}
+    for (; got.len() < count; ) {
+        select {
+        case Result? r = results.receive():
+            if (r != null) {
+                got.push(r)
+            }
+        case deadline.receive():
+            return errors.new("timed out after " + (timeout / time.millisecond).string() + " ms with " + got.len().string() + " of " + count.string() + " results")
+        }
+    }
+    out.send(got)
+    return null
+}
+
+fn byId(Result a, Result b) bool {
+    return a.id < b.id
+}
+
+fn runBatch([]Job batch, int timeout) ([]Result, error) {
+    chan Job jobs = chan Job(batch.len())
+    for (int i = 0; i < batch.len(); i++) {
+        jobs.send(batch[i])
+    }
+    jobs.close()
+    chan Result results = chan Result(batch.len())
+    chan []Result out = chan []Result(1)
+    error err = group {
+        for (int i = 0; i < workers; i++) {
+            spawn worker(jobs, results)
+        }
+        spawn collect(results, batch.len(), timeout, out)
+    }
+    if (err != null) {
+        return null, err
+    }
+    []Result? done = out.receive()
+    if (done == null) {
+        return null, errors.new("collector sent nothing")
+    }
+    []Result sorted = done
+    sorted.sortBy(byId)
+    return sorted, null
+}
+
+// Makes jobs from inputs; each one "works" for 20 ms, except the ones in
+// slow, which work for a minute.
+fn makeJobs([]string inputs, []int slow) []Job {
+    []Job jobs = []Job{}
+    for (int i = 0; i < inputs.len(); i++) {
+        int millis = 20
+        if (slow.contains(i + 1)) {
+            millis = 60000
+        }
+        jobs.push(Job{id: i + 1, input: inputs[i], millis: millis})
+    }
+    return jobs
+}
+
+fn report(string title, []Job batch) {
+    fmt.println(title + " (" + batch.len().string() + " jobs, " + workers.string() + " workers)")
+    int start = time.monotonic()
+    []Result results, error err = runBatch(batch, 2 * time.second)
+    int elapsed = time.monotonic() - start
+    if (err != null) {
+        fmt.println("  failed: " + err.message())
+    } else {
+        for (int i = 0; i < results.len(); i++) {
+            Result r = results[i]
+            fmt.println("  job " + r.id.string() + ": " + strings.padLeft(r.value.string(), 6, ' ') + " takes " + r.steps.string() + " steps")
+        }
+    }
+    // A failed batch ends long before the slow jobs could have finished.
+    if (elapsed < 10 * time.second) {
+        fmt.println("  finished in under 10 s")
+    }
+}
+
+fn main([]string args) error {
+    []string inputs = []string{"27", "97", "871", "6171", "77031", "837799"}
+    report("all good", makeJobs(inputs, []int{}))
+
+    []string bad = []string{"27", "97", "eight", "6171", "77031", "837799"}
+    report("one bad input", makeJobs(bad, []int{6}))
+
+    report("one job hangs", makeJobs(inputs, []int{2}))
+    return null
+}

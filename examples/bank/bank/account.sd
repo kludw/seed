@@ -1,0 +1,141 @@
+// Package bank keeps accounts, their history, and the rules of the two
+// kinds of account the bank offers.
+//
+// Amounts are int cents: int never overflows, and money should never be a
+// float.
+package bank
+
+import "errors"
+
+// Everything that can happen to an account. A switch over it must handle
+// every case, so adding a kind of transaction makes the compiler point at
+// every place that needs to know about it.
+pub type Transaction enum {
+    Deposit(int cents, string memo)
+    Withdrawal(int cents, string memo)
+    TransferIn(string from, int cents)
+    TransferOut(string to, int cents)
+    Fee(int cents, string reason)
+    Interest(int cents)
+}
+
+// The change to the balance.
+pub fn (Transaction t) amount() int {
+    switch (t) {
+    case Transaction.Deposit(int cents, string _):
+        return cents
+    case Transaction.Withdrawal(int cents, string _):
+        return -cents
+    case Transaction.TransferIn(string _, int cents):
+        return cents
+    case Transaction.TransferOut(string _, int cents):
+        return -cents
+    case Transaction.Fee(int cents, string _):
+        return -cents
+    case Transaction.Interest(int cents):
+        return cents
+    }
+}
+
+pub fn (Transaction t) describe() string {
+    switch (t) {
+    case Transaction.Deposit(int _, string memo):
+        return "deposit: " + memo
+    case Transaction.Withdrawal(int _, string memo):
+        return "withdrawal: " + memo
+    case Transaction.TransferIn(string from, int _):
+        return "transfer from " + from
+    case Transaction.TransferOut(string to, int _):
+        return "transfer to " + to
+    case Transaction.Fee(int _, string reason):
+        return "fee: " + reason
+    case Transaction.Interest(int _):
+        return "interest"
+    }
+}
+
+// The id and owner can be read by anyone; the balance and history only
+// change through the methods below, which keep them consistent: the balance
+// is always the sum of the history, and never below what the plan allows.
+pub type Account struct {
+    pub string id
+    pub string owner
+    Plan plan
+    int balance
+    []Transaction history
+}
+
+pub fn newAccount(string id, string owner, Plan plan) Account {
+    return Account{id: id, owner: owner, plan: plan, balance: 0, history: []Transaction{}}
+}
+
+pub fn (Account a) balance() int {
+    return a.balance
+}
+
+pub fn (Account a) history() []Transaction {
+    return a.history
+}
+
+pub fn (Account a) planName() string {
+    return a.plan.name()
+}
+
+// Applies a transaction, or fails without changing anything.
+pub fn (Account a) mut apply(Transaction t) error {
+    int amount = t.amount()
+    if (amount == 0) {
+        return errors.new(a.id + ": " + t.describe() + ": the amount must not be zero")
+    }
+    if (amount < 0 && a.balance + amount < -a.plan.overdraftLimit()) {
+        return errors.new(a.id + ": " + t.describe() + ": insufficient funds (balance " + formatCents(a.balance) + ", " + a.plan.name() + " overdraft limit " + formatCents(a.plan.overdraftLimit()) + ")")
+    }
+    a.balance = a.balance + amount
+    a.history.push(t)
+    return null
+}
+
+pub fn (Account a) mut deposit(int cents, string memo) error {
+    if (cents < 0) {
+        return errors.new(a.id + ": cannot deposit a negative amount")
+    }
+    return a.apply(Transaction.Deposit(cents, memo))
+}
+
+pub fn (Account a) mut withdraw(int cents, string memo) error {
+    if (cents < 0) {
+        return errors.new(a.id + ": cannot withdraw a negative amount")
+    }
+    return a.apply(Transaction.Withdrawal(cents, memo))
+}
+
+// Runs the plan's month-end rules: fees and interest.
+pub fn (Account a) mut closeMonth() error {
+    []Transaction due = a.plan.monthEnd(a.balance)
+    for (int i = 0; i < due.len(); i++) {
+        try a.apply(due[i])
+    }
+    return null
+}
+
+// 123456 becomes "1,234.56", and -5 becomes "-0.05".
+pub fn formatCents(int cents) string {
+    string sign = ""
+    int n = cents
+    if (n < 0) {
+        sign = "-"
+        n = -n
+    }
+    string whole = (n / 100).string()
+    []string groups = []string{}
+    for (; whole.len() > 3; ) {
+        groups.insert(0, whole.slice(whole.len() - 3, whole.len()))
+        whole = whole.slice(0, whole.len() - 3)
+    }
+    groups.insert(0, whole)
+    string fraction = (n % 100).string()
+    if (fraction.len() == 1) {
+        fraction = "0" + fraction
+    }
+    return sign + groups.join(",") + "." + fraction
+}

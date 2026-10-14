@@ -1,0 +1,192 @@
+// Value semantics, next to the aliasing surprises they replace in Go.
+//
+//     seed run examples/values.sd
+//
+// In Go, slices, maps and structs holding them share memory in ways that
+// depend on capacity and on where a copy happened. In Seed every value is an
+// independent copy (made cheap by copy-on-write), parameters are read-only,
+// and only a `mut` method or an assignment can change a variable. Each
+// section shows the Go code in a comment, what Go prints, and the Seed
+// version, whose output is always the "obvious" one.
+package main
+
+import "fmt"
+
+type User struct {
+    string name
+    int visits
+    []string tags
+}
+
+fn (User u) mut visit() {
+    u.visits++
+}
+
+fn show([]int xs) string {
+    []string parts = []string{}
+    for (int i = 0; i < xs.len(); i++) {
+        parts.push(xs[i].string())
+    }
+    return "[" + parts.join(" ") + "]"
+}
+
+// 1. A sub-slice shares the backing array of the original.
+//
+//     a := []int{1, 2, 3, 4}
+//     b := a[:2]
+//     b = append(b, 99)       // writes into a[2]
+//     fmt.Println(a)          // [1 2 99 4]
+fn subSlices() {
+    []int a = []int{1, 2, 3, 4}
+    []int b = a.slice(0, 2) // a new list
+    b.push(99)
+    fmt.println("1. a = " + show(a) + ", b = " + show(b))
+}
+
+// 2. Whether append copies depends on the capacity.
+//
+//     x := make([]int, 3, 10)
+//     y := append(x, 1)
+//     z := append(x, 2)       // overwrites y[3]: same backing array
+//     fmt.Println(y[3], z[3]) // 2 2
+fn appendSharing() {
+    []int x = []int{0, 0, 0}
+    []int y = x
+    y.push(1)
+    []int z = x
+    z.push(2)
+    fmt.println("2. y = " + show(y) + ", z = " + show(z) + ", x = " + show(x))
+}
+
+// 3. Copying a struct copies the slice header, not the elements.
+//
+//     a := User{Name: "ann", Tags: []string{"new"}}
+//     b := a
+//     b.Tags[0] = "admin"     // also changes a.Tags[0]
+//     fmt.Println(a.Tags)     // [admin]
+fn structCopies() {
+    User a = User{name: "ann", visits: 0, tags: []string{"new"}}
+    User b = a
+    b.tags[0] = "admin"
+    b.name = "bob"
+    fmt.println("3. a = " + a.name + " " + a.tags.join(",") + ", b = " + b.name + " " + b.tags.join(","))
+}
+
+// 4. The range variable is a copy, so changing it is silently lost.
+//
+//     for _, u := range users {
+//         u.Visits++          // changes the copy only
+//     }
+//
+// Seed has no range loop: the loop indexes the list, and users[i].visit()
+// changes the element in place.
+fn loopVariables() {
+    []User users = []User{User{name: "ann", visits: 0, tags: []string{}}, User{name: "bob", visits: 5, tags: []string{}}}
+    for (int i = 0; i < users.len(); i++) {
+        users[i].visit()
+    }
+    // Taking an element out gives a copy, and the compiler makes that
+    // visible: `first` is a new variable with its own value.
+    User first = users[0]
+    first.visit()
+    fmt.println("4. ann " + users[0].visits.string() + ", bob " + users[1].visits.string() + ", copy of ann " + first.visits.string())
+}
+
+// 5. A function can change the caller's map (and slice elements) through
+// its parameter.
+//
+//     func addDefaults(m map[string]int) { m["retries"] = 3 }
+//     addDefaults(config)     // config changed behind the caller's back
+//
+// In Seed parameters are read-only. A function that wants to change
+// something returns the new value, and the caller assigns it, so the line
+// that changes `config` names `config`.
+fn withDefaults(map[string]int config) map[string]int {
+    map[string]int out = config
+    if (out["retries"] == null) {
+        out["retries"] = 3
+    }
+    return out
+}
+
+fn functionArguments() {
+    map[string]int config = map[string]int{"timeout": 30}
+    map[string]int filled = withDefaults(config)
+    fmt.println("5. config has " + config.len().string() + " keys, filled has " + filled.len().string())
+    config = filled
+    fmt.println("   after config = filled: " + config.keys().join(", "))
+}
+
+// 6. Map values can't be changed in place in Go (m["a"].Visits++ does not
+// compile), so Go programs store pointers, *User, which brings aliasing back.
+// In Seed a map lookup gives a copy as User?: take it out, change it, put
+// it back.
+fn mapValues() {
+    map[string]User byName = map[string]User{"ann": User{name: "ann", visits: 1, tags: []string{}}}
+    User? ann = byName["ann"]
+    if (ann != null) {
+        ann.visit()
+        byName["ann"] = ann
+    }
+    User? again = byName["ann"]
+    if (again != null) {
+        fmt.println("6. ann has " + again.visits.string() + " visits")
+    }
+}
+
+// 7. Sending a value on a channel in Go shares any slice or map inside it,
+// so sender and receiver can race on it. In Seed the receiver gets a copy:
+// the sender may go on changing its own.
+fn receiver(chan User users, chan string done) error {
+    User? u = users.receive()
+    if (u != null) {
+        done.send(u.name + " " + u.tags.join(","))
+    }
+    return null
+}
+
+fn channels() error {
+    chan User users = chan User(1)
+    chan string done = chan string(1)
+    User u = User{name: "cy", visits: 0, tags: []string{"sent"}}
+    users.send(u)
+    u.tags[0] = "changed after send"
+    error err = group {
+        spawn receiver(users, done)
+    }
+    if (err != null) {
+        return err
+    }
+    string? got = done.receive()
+    if (got != null) {
+        fmt.println("7. received: " + got + "; sender has: " + u.tags[0])
+    }
+    return null
+}
+
+// 8. Channels are the one reference type: a copy of a channel is another
+// handle to the same channel. That is how reply channels work.
+fn handles() {
+    chan int a = chan int(2)
+    chan int b = a
+    b.send(8)
+    int? n = a.receive()
+    if (n != null) {
+        fmt.println("8. sent on b, received on a: " + n.string())
+    }
+}
+
+fn main([]string args) error {
+    subSlices()
+    appendSharing()
+    structCopies()
+    loopVariables()
+    functionArguments()
+    mapValues()
+    try channels()
+    handles()
+    // Lists, maps, structs and enums compare by contents, so "is this the
+    // same data?" never depends on identity.
+    fmt.println("9. equal by contents: " + ([]int{1, 2} == []int{1, 2}).string())
+    return null
+}

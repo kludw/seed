@@ -1,0 +1,4 @@
+{"id": 1042, "customer": {"name": "Ada Lovelace", "email": "ada@example.com"},
+ "items": [{"sku": "PEN-01", "qty": 3, "price": 1.25},
+           {"sku": "PAD-07", "qty": 1, "price": 4.5}],
+ "notes": "leave at the door\ttab", "paid": true, "coupon": null, "tags": []}

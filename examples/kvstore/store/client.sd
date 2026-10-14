@@ -1,0 +1,95 @@
+// Client hides the request and reply channels behind ordinary methods.
+// A Client is a plain value holding a channel, so it can be copied freely
+// and handed to any number of goroutines: every copy talks to the same
+// store.
+package store
+
+import "errors"
+
+pub type Client struct {
+    chan Request requests
+}
+
+pub fn newClient(chan Request requests) Client {
+    return Client{requests: requests}
+}
+
+// Waits for the store's answer to one request. A Failed reply becomes an
+// error. Each request has a reply channel of its own, so answers can't get
+// mixed up between clients.
+fn (Client c) wait(chan Reply reply) (Reply, error) {
+    Reply? r = reply.receive()
+    if (r == null) {
+        return null, errors.new("store: no reply")
+    }
+    switch (r) {
+    case Reply.Failed(string message):
+        return null, errors.new("store: " + message)
+    case Reply.Value(string _), Reply.Missing, Reply.List([]string _), Reply.Done:
+        return r, null
+    }
+}
+
+// The value of key, or null if it is not set.
+pub fn (Client c) get(string key) (string?, error) {
+    chan Reply reply = chan Reply(1)
+    c.requests.send(Request.Get(key, reply))
+    switch (try c.wait(reply)) {
+    case Reply.Value(string value):
+        return value, null
+    case Reply.Missing, Reply.List([]string _), Reply.Done, Reply.Failed(string _):
+        return null, null
+    }
+}
+
+pub fn (Client c) set(string key, string value) error {
+    chan Reply reply = chan Reply(1)
+    c.requests.send(Request.Set(key, value, reply))
+    _ = try c.wait(reply)
+    return null
+}
+
+// Removes key, and reports whether it was there.
+pub fn (Client c) delete(string key) (bool, error) {
+    chan Reply reply = chan Reply(1)
+    c.requests.send(Request.Delete(key, reply))
+    return try c.wait(reply) == Reply.Done, null
+}
+
+// Adds by to the number stored at key (a missing key counts as 0) and
+// returns the new value. Fails if the key holds something else.
+pub fn (Client c) incr(string key, int by) (int, error) {
+    chan Reply reply = chan Reply(1)
+    c.requests.send(Request.Incr(key, by, reply))
+    switch (try c.wait(reply)) {
+    case Reply.Value(string value):
+        return value.toInt()
+    case Reply.Missing, Reply.List([]string _), Reply.Done, Reply.Failed(string _):
+        return null, errors.new("store: unexpected reply to incr")
+    }
+}
+
+// Every key, sorted.
+pub fn (Client c) keys() ([]string, error) {
+    chan Reply reply = chan Reply(1)
+    c.requests.send(Request.Keys(reply))
+    switch (try c.wait(reply)) {
+    case Reply.List([]string keys):
+        return keys, null
+    case Reply.Value(string _), Reply.Missing, Reply.Done, Reply.Failed(string _):
+        return null, errors.new("store: unexpected reply to keys")
+    }
+}
+
+// Writes a snapshot now.
+pub fn (Client c) save() error {
+    chan Reply reply = chan Reply(1)
+    c.requests.send(Request.Save(reply))
+    _ = try c.wait(reply)
+    return null
+}
+
+// Tells the store there will be no more requests: it saves and returns.
+pub fn (Client c) close() {
+    c.requests.close()
+}

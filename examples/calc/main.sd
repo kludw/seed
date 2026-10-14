@@ -1,0 +1,60 @@
+// A calculator REPL for the expression language in package expr.
+//
+//     seed run examples/calc
+//     > let r = 10
+//     r = 10
+//     > def fact(n) = if n < 2 then 1 else n * fact(n - 1)
+//     defined fact(n)
+//     > fact(25) / r
+//     1551121004333098598400000
+//     > 1 + * 2
+//     error: expected a number, a name or '(', found '*'
+//         1 + * 2
+//             ^
+//
+// :vars lists what is defined, :quit (or end of input) leaves. Errors are
+// reported with a marker under the column they are about, and the session
+// carries on.
+//
+//     seed test examples/calc         (the tests of package expr)
+package main
+
+import "expr"
+import "fmt"
+import "io"
+import "strings"
+
+fn main([]string args) error {
+    expr.Session session = expr.newSession()
+    for (;;) {
+        fmt.print("> ")
+        string? line = try io.readLine()
+        if (line == null) {
+            fmt.println("")
+            return null
+        }
+        if (line.trim() == ":quit") {
+            return null
+        }
+        if (line.trim() == ":vars") {
+            []string names = session.names()
+            if (names.len() == 0) {
+                fmt.println("nothing defined yet")
+            }
+            for (int i = 0; i < names.len(); i++) {
+                fmt.println(names[i])
+            }
+            continue
+        }
+        string out, error err = session.run(line)
+        if (err != null) {
+            fmt.println("error: " + err.message())
+            if (session.errorPos >= 0) {
+                fmt.println("    " + line)
+                fmt.println("    " + strings.repeat(" ", session.errorPos) + "^")
+            }
+        } else if (out != "") {
+            fmt.println(out)
+        }
+    }
+}

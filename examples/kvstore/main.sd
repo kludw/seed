@@ -1,0 +1,116 @@
+// A key-value store with a command line on stdin, saved as JSON.
+//
+//     seed run examples/kvstore data.json
+//     set greeting hello world
+//     get greeting
+//     incr visits 5
+//     bench 8 250        (8 goroutines add 1 to "hits" 250 times each)
+//     keys
+//     del greeting
+//     save
+//
+// The store runs in its own goroutine (package store); this program's
+// command loop and the bench goroutines are all just clients of it. At the
+// end of input the loop closes the request channel, and the store writes
+// its snapshot and returns, which ends the group.
+package main
+
+import "errors"
+import "fmt"
+import "io"
+import "store"
+import "strings"
+
+const string help = "commands: get KEY | set KEY VALUE... | del KEY | incr KEY [N] | keys | save | bench CLIENTS TIMES"
+
+// One bench client: adds 1 to "hits", `times` times.
+fn hammer(store.Client c, int times) error {
+    for (int i = 0; i < times; i++) {
+        _ = try c.incr("hits", 1)
+    }
+    return null
+}
+
+// Runs one command line.
+fn command(store.Client c, []string words) error {
+    string cmd = words[0]
+    int argc = words.len() - 1
+    if (cmd == "get" && argc == 1) {
+        string? value = try c.get(words[1])
+        if (value == null) {
+            fmt.println("(not set)")
+        } else {
+            fmt.println(value)
+        }
+    } else if (cmd == "set" && argc >= 2) {
+        try c.set(words[1], words.slice(2, words.len()).join(" "))
+        fmt.println("ok")
+    } else if (cmd == "del" && argc == 1) {
+        if (try c.delete(words[1])) {
+            fmt.println("deleted")
+        } else {
+            fmt.println("(not set)")
+        }
+    } else if (cmd == "incr" && (argc == 1 || argc == 2)) {
+        int by = 1
+        if (argc == 2) {
+            by = try words[2].toInt()
+        }
+        fmt.println((try c.incr(words[1], by)).string())
+    } else if (cmd == "keys" && argc == 0) {
+        []string keys = try c.keys()
+        fmt.println(keys.len().string() + " keys: " + keys.join(", "))
+    } else if (cmd == "save" && argc == 0) {
+        try c.save()
+        fmt.println("saved")
+    } else if (cmd == "bench" && argc == 2) {
+        int clients = try words[1].toInt()
+        int times = try words[2].toInt()
+        // A group inside a goroutine: the bench clients run concurrently,
+        // and the store serialises their increments.
+        try group {
+            for (int i = 0; i < clients; i++) {
+                spawn hammer(c, times)
+            }
+        }
+        string? hits = try c.get("hits")
+        if (hits != null) {
+            fmt.println("hits = " + hits)
+        }
+    } else {
+        return errors.new(help)
+    }
+    return null
+}
+
+// Reads commands until the end of input. A failed command is reported and
+// the loop goes on.
+fn repl(store.Client c) error {
+    defer c.close()
+    for (;;) {
+        string? line = try io.readLine()
+        if (line == null) {
+            return null
+        }
+        []string words = strings.fields(line)
+        if (words.len() == 0 || words[0].startsWith("#")) {
+            continue
+        }
+        fmt.println("> " + line)
+        error err = command(c, words)
+        if (err != null) {
+            fmt.println("error: " + err.message())
+        }
+    }
+}
+
+fn main([]string args) error {
+    if (args.len() != 2) {
+        return errors.new("usage: kvstore SNAPSHOT.json < commands")
+    }
+    chan store.Request requests = chan store.Request(16)
+    return group {
+        spawn store.serve(args[1], requests)
+        spawn repl(store.newClient(requests))
+    }
+}

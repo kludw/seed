@@ -1,0 +1,5 @@
+# The second session starts from the snapshot the first one left.
+keys
+get greeting
+get note
+incr visits
