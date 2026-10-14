@@ -48,7 +48,7 @@ matters (lib/encoding/tests, lib/json/tests).
 
 ## 2. `pub` on struct fields is not parsed
 
-SPEC.md ("Structs, enums, interfaces") and DECISIONS.md 20 say struct fields
+SPEC.md ("Structs, enums, interfaces") and DECISIONS.md say struct fields
 are private unless marked `pub` (`pub string name`), and docs/stdlib.md
 relies on it (`http.Request`, `http.Response` have public fields;
 `rand.Source`, handles have private ones).

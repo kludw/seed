@@ -50,9 +50,9 @@ total: 55
 ```
 
 - `spawn f(args)` starts `f` in a new goroutine. The arguments are evaluated and copied first.
-- A spawned function returns an `error`: that is how a goroutine reports failure to its group.
+- A spawned function returns an `error` (or nothing): the error is how a goroutine reports failure to its group. Other results come back on channels, and a `mut` method can't be spawned, since the goroutine would only change its own copy.
 - `group { ... }` is an expression of type `error`. It runs its block, then waits until every goroutine spawned in it has finished. It returns `null` if all of them succeeded, or the first error.
-- A group block is ordinary code: `spawn` can appear in loops and `if`s, so the number of goroutines can depend on the data (see the [worker pool](#worker-pool)).
+- A group block is ordinary code: `spawn` can appear in loops and `if`s, so the number of goroutines can depend on the data (see the [worker pool](#worker-pool)). The block can't be left early, though: `return` and `try` are not allowed inside it, because the group must wait for its goroutines first.
 
 The group's error must be handled like any other error. If nothing handles it, it ends up as the error `main` returns, and the program exits with its message.
 
@@ -171,7 +171,7 @@ group failed: checker: disk is full
 main carries on
 ```
 
-A goroutine is never interrupted in the middle of its work. It is stopped only at a **stop point**: a channel send or receive (including in `select`), or a standard-library call that blocks, such as `time.sleep`, file and socket I/O, `io.readLine`, `os.run` and `net.dial`. A goroutine that computes for a long time without reaching one finishes its work before it notices.
+A goroutine is never interrupted in the middle of its work. It is stopped only at a **stop point**: a channel send or receive (including in `select`), or a standard-library call that blocks, such as `time.sleep`, reading stdin with `io.readLine`, socket I/O in `net` (and so `http`), `net.dial` and `os.run`. (Reading and writing regular files with `fs` is not a stop point: it doesn't block for long.) A goroutine that computes for a long time without reaching one finishes its work before it notices.
 
 This is Erlang's "let it crash" idea, with the structure of the code deciding who cleans up: a failure is contained by the nearest enclosing `group`, and the code after that group decides what to do about it.
 

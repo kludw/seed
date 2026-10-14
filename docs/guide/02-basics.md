@@ -270,7 +270,7 @@ He
 | `fmt.println(s)` | `s` and a newline to stdout |
 | `fmt.eprint(s)`, `fmt.eprintln(s)` | the same, to stderr |
 
-Each takes exactly one `string`. Every built-in type has a `string()` method, and pieces are joined with `+`:
+Each takes exactly one `string`. `int`, `float`, `bool`, `byte` and `string` have a `string()` method, and pieces are joined with `+` (lists and maps have no text form: build it yourself, as `show` does in [chapter 6](06-lists-and-maps.md)):
 
 ```seed
 fmt.println("count: " + count.string() + ", ratio: " + ratio.string())

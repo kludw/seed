@@ -106,15 +106,17 @@ true
 The compiler narrows a variable, or a field of a variable such as `u.email` or `cfg.server.host`:
 
 - inside `if (x != null) { ... }`, and in the `else` of `if (x == null)`;
-- after `if (x == null) { return ... }`, or any `if` whose body always leaves (with `return`, `break`, `continue` or `os.exit`);
-- to the right of `x != null &&`, and to the right of `x == null ||`.
+- after `if (x == null) { return ... }`, or any `if` whose body always leaves (with `return`, `break`, `continue`, `os.exit` or `os.crash`);
+- to the right of `x != null &&`, and to the right of `x == null ||`;
+- through `!`: `if (!(x == null))` narrows like `if (x != null)`;
+- after an assignment of a non-null value: after `if (x == null) { x = "none" }`, `x` is a `string` on every path. (This rule is specified but still being implemented; until it lands, declare a non-null variable with the default and set it inside `if (v != null)`.)
 
 Narrowing ends:
 
-- when the variable (or a part of the path, such as `u` for `u.email`) is assigned again;
+- when the variable (or a part of the path, such as `u` for `u.email`) is assigned a value that may be null;
 - when a `mut` method is called on it or on something that contains it, because the method might have set it back to `null`;
 - at the end of the block where the check was made;
-- inside a loop, for anything the loop assigns, since the check may not hold on the next iteration.
+- inside a loop, for anything the loop assigns or calls a `mut` method on, since the check may not hold on the next iteration.
 
 For example, assigning inside the narrowed block ends the narrowing:
 

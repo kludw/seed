@@ -1,0 +1,35 @@
+{
+  "name": "seed-lang",
+  "displayName": "Seed",
+  "description": "Syntax highlighting and editor settings for the Seed language (.sd files)",
+  "publisher": "seed-lang",
+  "version": "0.1.0",
+  "engines": {
+    "vscode": "^1.60.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "seed",
+        "aliases": [
+          "Seed",
+          "seed"
+        ],
+        "extensions": [
+          ".sd"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "seed",
+        "scopeName": "source.seed",
+        "path": "./syntaxes/seed.tmLanguage.json"
+      }
+    ]
+  }
+}

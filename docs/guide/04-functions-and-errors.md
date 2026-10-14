@@ -113,7 +113,7 @@ fn main([]string args) error {
     hint: check err != null first (and return or handle it), or use try
 ```
 
-The value can be read once the error is known to be null: inside `if (err == null) { ... }`, after `if (err != null) { return ... }`, or to the right of `err == null &&`.
+The value can be read once the error is known to be null: inside `if (err == null) { ... }`, after `if (err != null) { return ... }`, or to the right of `err == null &&`. Assigning the variable a new value also makes it readable. A value declared as a nullable `T?` (`string? s, error err = f()`) is not guarded at all, because it has to be checked against `null` before use anyway.
 
 ## Every error must be handled
 
@@ -318,7 +318,7 @@ There is no `panic` and no `recover`. To stop a program on purpose, return an er
 | `main` returns `null` | nothing | 0 |
 | `main` returns an error | `error: <message>` on stderr | 1 |
 | A crash | `crash: <message>` on stderr | 2 |
-| `os.exit(n)` | nothing (stdout is flushed) | `n` |
+| `os.exit(n)` | nothing (stdout is flushed) | `n` (its low 8 bits, so use 0–255) |
 
 Returning an error from `main` is the normal way to fail, and `try` makes it easy:
 

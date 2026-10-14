@@ -2,7 +2,7 @@
 
 This is part of the language spec ([SPEC.md](../SPEC.md)). It defines every package in the Seed standard library: the types, the function signatures, and the exact behaviour, including errors and crashes. Built-in methods on `int`, `string`, lists, maps and so on are in [builtins.md](builtins.md) and are not repeated here.
 
-Everything in this document is **(proposed)**. It was designed in one pass and has not been agreed yet. Changes it would need in the language itself are listed in [Spec changes this design relies on](#spec-changes-this-design-relies-on).
+Every package and every function in this document is implemented, in [lib/](../lib/) (the `pub` declarations there are the source of truth; [lib/README.md](../lib/README.md) has the implementation notes). The few places where the implementation does not do everything described here yet are marked **(not implemented yet)**. The changes the design needed in the language itself are listed in [Spec changes this design relied on](#spec-changes-this-design-relied-on); they are all in SPEC.md now.
 
 | Package | Purpose |
 |---|---|
@@ -120,7 +120,8 @@ Writing text to stdout and stderr. There is no format-string language: values be
 
 - Each call is a single write. Output from two goroutines can interleave between calls, but never inside one.
 - Bytes are written as they are, without checking UTF-8.
-- Stdout is buffered. The buffer is flushed when it fills, after every call while stdout is a terminal, before `io` reads stdin, before `os.run` and `os.output` start a child, and when the program exits for any reason, including `os.exit` and crashes. Stderr is not buffered.
+- Stdout is buffered. The buffer is flushed when it fills, before anything is written to stderr, before `io` reads stdin, before `os.run` and `os.output` start a child, and when the program exits for any reason, including `os.exit` and crashes. Stderr is not buffered.
+- Stdout should also be flushed after every call while it is a terminal. **(not implemented yet:** stdout is always fully buffered, with a 64 KiB buffer, even on a terminal.)
 - Write failures (a closed pipe, a full disk) are ignored. A program that must know whether its output arrived should write to a file with `fs`.
 
 `fmt.fixed` is here, rather than in `strings` or `math`, because it is the one place where a number needs a format other than `.string()`: prices, percentages and timings.
@@ -161,7 +162,7 @@ The running process and its environment. A program's arguments are not here: `ma
 
 | Function | Result |
 |---|---|
-| `os.exit(int code)` | Exits immediately with `code`, after flushing stdout. `defer`s do not run. Crashes unless `0 <= code <= 255`. |
+| `os.exit(int code)` | Exits immediately with `code`, after flushing stdout. `defer`s do not run. Only the low 8 bits of `code` are used, as by the OS: `os.exit(300)` exits with 44 and `os.exit(-1)` with 255. |
 | `os.env(string name) string?` | The environment variable `name`, or `null` if it is not set. A variable set to `""` returns `""`. |
 | `os.run([]string argv) (int, error)` | Runs a program and waits for it. See below. |
 | `os.output([]string argv) (string, int, error)` | Like `os.run`, but captures the child's stdout and returns it with the exit code. |
@@ -176,7 +177,7 @@ The running process and its environment. A program's arguments are not here: `ma
 - The child inherits the environment, the current directory, stdin and stderr. With `os.run` it also inherits stdout.
 - The exit code is the child's exit code. A child killed by a signal reports `128 + signal`, as shells do.
 - The error is set only when the child could not be started: `os.run: frobnicate: no such file or directory`. A child that runs and fails is not an error; check the exit code.
-- They are stop points: if the calling goroutine's group is stopped while a child runs, the child is killed (`SIGKILL`) and waited for.
+- They are stop points: if the calling goroutine's group is stopped while a child runs, the child is killed (`SIGKILL`) and waited for. **(not implemented yet** for `os.output`, which blocks its goroutine until the child ends; `os.run` is a stop point.)
 
 There is deliberately no `os.setEnv` and no `os.chdir`. The environment and the current directory are shared by every goroutine, so changing them would be shared mutable state. Pass values as arguments instead.
 
@@ -210,7 +211,7 @@ pub type File struct {
 }
 ```
 
-`Info`'s fields are `pub` (fields are private unless marked, see [Spec changes](#spec-changes-this-design-relies-on) 2), so a program can read them.
+`Info`'s fields are `pub` (fields are private unless marked, see [Spec changes](#spec-changes-this-design-relied-on) 2), so a program can read them.
 
 ### Functions
 
@@ -246,6 +247,7 @@ pub type File struct {
 - Every operation after `close()` returns an error ending in `file is closed`: `fs.File.readLine: notes.txt: file is closed`.
 - `f.read(0)` crashes with `fs.File.read: max (0) must be at least 1`.
 - Paths are passed to the OS unchanged. Relative paths are relative to the current directory.
+- File operations are not stop points: reading and writing regular files does not block for long, so a goroutine whose group is stopped stops at its next channel operation or blocking call instead.
 
 ```
 fs.File f = try fs.open("access.log")
@@ -511,7 +513,7 @@ pub type Value enum {
 
 - Object keys keep their order, because maps keep insertion order: parsing and printing a document keeps its keys in place.
 - Numbers are `float`, as in JavaScript. Whole numbers up to 2^53 are exact; larger ones lose precision.
-- Two `Value`s compare with `==` by contents, like every enum. Object key order counts in the comparison, as it does for maps.
+- Two `Value`s compare with `==` by contents, like every enum. Object key order does not count in the comparison, because map `==` ignores insertion order: `{"x":1,"y":2}` equals `{"y":2,"x":1}`.
 
 ### Functions
 
@@ -668,17 +670,17 @@ An HTTP/1.1 server and client, written in Seed on top of `net`. **There is no TL
 
 ```
 pub type Request struct {
-    string method                   // "GET", "POST", ... (uppercase)
-    string url                      // server: the request target, "/todos?done=1"
+    pub string method               // "GET", "POST", ... (uppercase)
+    pub string url                  // server: the request target, "/todos?done=1"
                                     // client: the full URL, "http://example.com/todos?done=1"
-    map[string]string headers       // names are lowercase
-    string body
+    pub map[string]string headers   // names are lowercase
+    pub string body
 }
 
 pub type Response struct {
-    int status                      // 200, 404, ...
-    map[string]string headers       // names are lowercase
-    string body
+    pub int status                  // 200, 404, ...
+    pub map[string]string headers   // names are lowercase
+    pub string body
 }
 
 pub type Handler interface {
@@ -786,12 +788,12 @@ There is no testing package. Tests are `test "..." { ... }` blocks in a package'
 ```
 test "save then load keeps every todo" {
     string dir = try fs.makeTemp("todo-test-")
-    defer fs.removeAll(dir)
+    defer _ = fs.removeAll(dir)
     ...
 }
 ```
 
-(`defer fs.removeAll(dir)` discards an error. See the spec questions below.)
+(`fs.removeAll` returns an error, so the deferred call discards it explicitly with `_ =`, as SPEC.md requires.)
 
 ## Implementation notes
 
@@ -801,11 +803,11 @@ test "save then load keeps every todo" {
 - Code that needs the operating system is written in C, in `.c` files in the package's directory (`lib/<pkg>/<pkg>.c`), which may call the runtime. Everything else is Seed. Packages may import each other, without cycles:
 
 ```
-errors, strings, math, path, encoding    (no imports, apart from errors)
-fmt, io, os, fs, time, rand, crypto      (mostly native)
-json      → strings, math, errors
-net       → time, errors
-http      → net, json, encoding, strings, time, fmt, errors
+fmt, io, os, fs, net, crypto, path      (no imports)
+errors, strings, math, rand             → os (for os.crash)
+encoding                                → errors
+time, json                              → errors, os
+http                                    → net, json, encoding, time, fmt, errors
 ```
 
 ### Native functions
@@ -829,9 +831,9 @@ pub fn (Conn c) read(int max) (string?, error)
 | Package | Native | Written in Seed |
 |---|---|---|
 | `errors` | — | `new` (a private struct implementing `error`), `wrap` |
-| `fmt` | `print`, `eprint`, `fixed` (correct rounding needs the C library) | `println`, `eprintln` (one `print` of `s + "\n"`, so they stay atomic) |
+| `fmt` | `print`, `println`, `eprint`, `eprintln` (each one locked write, so it stays atomic), `fixed` (correct rounding needs the C library) | — |
 | `io` | `readLine`, `readAll` (they share the stdin buffer) | — |
-| `os` | `exit`, `env`, `run`, `output`, `cwd`, `hostname` | — |
+| `os` | `exit`, `crash`, `env`, `run`, `output`, `executable`, `cwd`, `hostname` | — |
 | `fs` | `read`, `write`, `append`, `exists`, `isDir`, `stat`, `list`, `mkdir`, `rename`, `remove`, `removeAll` (needs `lstat` to avoid following links), `makeTemp`, `open`, `create`, and the four `File` methods | — |
 | `path` | — | all |
 | `strings` | — | all |
@@ -892,18 +894,18 @@ fn callHandler(Handler h, Request req) Response {
 }
 ```
 
-## Spec changes this design relies on
+## Spec changes this design relied on
 
-These are questions or changes for [SPEC.md](../SPEC.md). The design above assumes the answer given here.
+The design needed these changes to the language. All of them have been decided, are in [SPEC.md](../SPEC.md) and [DECISIONS.md](../DECISIONS.md), and are implemented by the compiler.
 
-1. **Native functions.** `FnDecl` needs an optional body, allowed only in the standard library.
-2. **Private struct fields.** Handle types (`net.Conn`, `fs.File`) and `rand.Source` need fields that other packages can't read or set, or a program could forge a handle. Proposal: fields are private unless marked `pub`, and a struct literal of another package's type is only allowed if every field is `pub`.
-3. **Stop points.** The spec says a goroutine can only be stopped at a channel operation. A server's goroutines spend their lives in `accept` and `read`. Proposal: blocking standard-library calls (`time.sleep`, I/O on handles, `io.readLine`, `os.run`, `net.dial`) are stop points too.
-4. **`spawn` inside loops in a `group`.** Servers and worker pools spawn a number of goroutines that is only known at run time. Proposal: a `group` block is ordinary code, `spawn` may appear anywhere inside it (in loops and `if`s), and finished goroutines are freed while the group is still running. It also needs saying what `try` and `return` mean inside a group block.
-5. **Strings hold any bytes.** The design stores raw data in strings. The spec should say a string is a sequence of bytes that is usually, but not necessarily, UTF-8.
-6. **Float division by zero.** The spec says division by zero crashes. For `float`, IEEE results (`inf`, `nan`) fit `math` and `f.string()` better; proposal: only `int` division by zero crashes.
-7. **`defer` and errors.** `defer fs.removeAll(dir)` returns an error. Either `defer` may discard an error (proposed: only as `defer _ = f()`), or such calls can't be deferred.
-8. **Distinguishing errors.** With no type switch or assertion on interfaces, a program can't tell error kinds apart. The library is designed around that (nullable results, statuses), but the spec should decide whether interface type switches will exist.
-9. **Names that match type names.** `rand.int` or `rand.float` would clash with the built-in types inside the `rand` package (shadowing). The library avoids them (`rand.range`, `rand.fraction`); the spec should say whether such names are allowed at all.
-10. **Values carrying channels.** `examples/server.sd` sends an enum whose cases hold a `chan int` (a reply channel). The spec should confirm that channels can be stored in structs and enums and sent over channels, with copying giving another reference to the same channel.
-11. **The planned package list** in SPEC.md should add `path`, `rand` and `encoding`.
+1. **Native functions.** A function may be declared without a body, only in the standard library (SPEC.md, "Standard library").
+2. **Private struct fields.** Fields are private unless marked `pub`, and a struct literal of another package's type is only allowed if every field is `pub`, so a program can't forge a handle (`net.Conn`, `fs.File`) or a `rand.Source` (SPEC.md, "Packages").
+3. **Stop points.** Blocking standard-library calls are stop points as well as channel operations (SPEC.md, "Concurrency"). What the library implements: `time.sleep`, `time.after`, `io`, every blocking `net` operation and `os.run`; not `os.output` yet, and not `fs` (regular files don't block for long).
+4. **`spawn` inside loops in a `group`.** A `group` block is ordinary code, `spawn` may appear anywhere inside it, finished goroutines are freed while the group runs, and `return` and `try` are not allowed inside the block (SPEC.md, "Groups").
+5. **Strings hold any bytes** (SPEC.md, "Types").
+6. **Float division by zero** gives `inf` or `nan`; only `int` division by zero crashes (SPEC.md, "Operators").
+7. **`defer` and errors.** A deferred call that returns an error must discard it: `defer _ = fs.removeAll(dir)` (SPEC.md, "Control flow").
+8. **Distinguishing errors.** There are no type switches or assertions on interfaces (SPEC.md, "Structs, enums, interfaces"), so the library reports conditions through nullable results and statuses, never error types.
+9. **Names that match type names.** A function may not be named after a built-in type (`fn float()` is an error: "float is the name of a built-in type"), so the library uses `rand.range` and `rand.fraction`.
+10. **Values carrying channels.** Channels are the one reference type: copying one into a struct, an enum, a list or a message gives another handle to the same channel (SPEC.md, "Concurrency").
+11. **The package list** in SPEC.md includes `path`, `rand` and `encoding`.

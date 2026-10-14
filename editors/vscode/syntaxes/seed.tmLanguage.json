@@ -1,0 +1,436 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Seed",
+  "scopeName": "source.seed",
+  "fileTypes": [
+    "sd"
+  ],
+  "patterns": [
+    {
+      "include": "#comments"
+    },
+    {
+      "include": "#test-decl"
+    },
+    {
+      "include": "#package-decl"
+    },
+    {
+      "include": "#enum-decl"
+    },
+    {
+      "include": "#type-decl"
+    },
+    {
+      "include": "#fn-decl"
+    },
+    {
+      "include": "#strings"
+    },
+    {
+      "include": "#bytes"
+    },
+    {
+      "include": "#numbers"
+    },
+    {
+      "include": "#keywords"
+    },
+    {
+      "include": "#builtin-types"
+    },
+    {
+      "include": "#enum-member"
+    },
+    {
+      "include": "#function-call"
+    },
+    {
+      "include": "#type-name"
+    },
+    {
+      "include": "#operators"
+    },
+    {
+      "include": "#punctuation"
+    }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.seed",
+          "match": "(//).*$",
+          "captures": {
+            "1": {
+              "name": "punctuation.definition.comment.seed"
+            }
+          }
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.seed",
+          "begin": "\"",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.begin.seed"
+            }
+          },
+          "end": "(\")|$",
+          "endCaptures": {
+            "1": {
+              "name": "punctuation.definition.string.end.seed"
+            }
+          },
+          "patterns": [
+            {
+              "name": "constant.character.escape.seed",
+              "match": "\\\\(?:[ntr0\\\\\\\"']|x[0-9A-Fa-f]{2})"
+            },
+            {
+              "name": "invalid.illegal.unknown-escape.seed",
+              "match": "\\\\.?"
+            }
+          ]
+        }
+      ]
+    },
+    "bytes": {
+      "patterns": [
+        {
+          "name": "string.quoted.single.seed",
+          "begin": "'",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.begin.seed"
+            }
+          },
+          "end": "(')|$",
+          "endCaptures": {
+            "1": {
+              "name": "punctuation.definition.string.end.seed"
+            }
+          },
+          "patterns": [
+            {
+              "name": "constant.character.escape.seed",
+              "match": "\\\\(?:[ntr0\\\\\\\"']|x[0-9A-Fa-f]{2})"
+            },
+            {
+              "name": "invalid.illegal.unknown-escape.seed",
+              "match": "\\\\.?"
+            }
+          ]
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.hex.seed",
+          "match": "\\b0[xX][0-9A-Fa-f]+(?![A-Za-z0-9_])"
+        },
+        {
+          "name": "constant.numeric.float.seed",
+          "match": "\\b[0-9]+\\.[0-9]+(?:[eE][+-]?[0-9]+)?(?![A-Za-z0-9_])"
+        },
+        {
+          "name": "invalid.illegal.numeric.seed",
+          "match": "\\b[0-9]+(?:\\.[0-9]+)?[A-Za-z_][A-Za-z0-9_]*"
+        },
+        {
+          "name": "constant.numeric.decimal.seed",
+          "match": "\\b[0-9]+\\b"
+        }
+      ]
+    },
+    "test-decl": {
+      "comment": "test \"name\" { ... } (only in a package's tests/ directory)",
+      "name": "meta.test.seed",
+      "begin": "\\b(test)\\s+(?=\\\")",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.other.test.seed"
+        }
+      },
+      "end": "(?<=\\\")|$",
+      "patterns": [
+        {
+          "name": "string.quoted.double.seed",
+          "begin": "\"",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.begin.seed"
+            }
+          },
+          "end": "(\")|$",
+          "endCaptures": {
+            "1": {
+              "name": "punctuation.definition.string.end.seed"
+            }
+          },
+          "contentName": "entity.name.function.test.seed",
+          "patterns": [
+            {
+              "name": "constant.character.escape.seed",
+              "match": "\\\\(?:[ntr0\\\\\\\"']|x[0-9A-Fa-f]{2})"
+            },
+            {
+              "name": "invalid.illegal.unknown-escape.seed",
+              "match": "\\\\.?"
+            }
+          ]
+        }
+      ]
+    },
+    "package-decl": {
+      "match": "\\b(package)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+      "captures": {
+        "1": {
+          "name": "keyword.other.package.seed"
+        },
+        "2": {
+          "name": "entity.name.namespace.seed"
+        }
+      }
+    },
+    "enum-decl": {
+      "comment": "type Name enum [implements ...] { Case, Case(params) }: case names are enum members",
+      "name": "meta.enum.seed",
+      "begin": "\\b(type)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s+(enum)\\b",
+      "beginCaptures": {
+        "1": {
+          "name": "storage.type.type.seed"
+        },
+        "2": {
+          "name": "entity.name.type.enum.seed"
+        },
+        "3": {
+          "name": "storage.type.enum.seed"
+        }
+      },
+      "end": "\\}",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.definition.block.end.seed"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#comments"
+        },
+        {
+          "match": "\\{",
+          "name": "punctuation.definition.block.begin.seed"
+        },
+        {
+          "match": "^\\s*([A-Za-z_][A-Za-z0-9_]*)\\b",
+          "captures": {
+            "1": {
+              "name": "variable.other.enummember.seed"
+            }
+          }
+        },
+        {
+          "include": "$self"
+        }
+      ]
+    },
+    "type-decl": {
+      "match": "\\b(type)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s+(struct|interface)\\b",
+      "captures": {
+        "1": {
+          "name": "storage.type.type.seed"
+        },
+        "2": {
+          "name": "entity.name.type.seed"
+        },
+        "3": {
+          "name": "storage.type.seed"
+        }
+      }
+    },
+    "fn-decl": {
+      "patterns": [
+        {
+          "comment": "method: fn (Type t) [mut] name(",
+          "match": "\\b(fn)\\s*(\\()\\s*([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)?)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(\\))\\s*(?:(mut)\\s+)?([A-Za-z_][A-Za-z0-9_]*)\\s*(?=\\()",
+          "captures": {
+            "1": {
+              "name": "storage.type.function.seed"
+            },
+            "2": {
+              "name": "punctuation.definition.parameters.begin.seed"
+            },
+            "3": {
+              "name": "entity.name.type.seed"
+            },
+            "4": {
+              "name": "variable.parameter.receiver.seed"
+            },
+            "5": {
+              "name": "punctuation.definition.parameters.end.seed"
+            },
+            "6": {
+              "name": "storage.modifier.mut.seed"
+            },
+            "7": {
+              "name": "entity.name.function.seed"
+            }
+          }
+        },
+        {
+          "comment": "function: fn name(",
+          "match": "\\b(fn)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(?=\\()",
+          "captures": {
+            "1": {
+              "name": "storage.type.function.seed"
+            },
+            "2": {
+              "name": "entity.name.function.seed"
+            }
+          }
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.seed",
+          "match": "\\b(?:if|else|for|switch|case|default|break|continue|return|defer|try|select|spawn|group)\\b"
+        },
+        {
+          "name": "keyword.control.import.seed",
+          "match": "\\bimport\\b"
+        },
+        {
+          "name": "keyword.other.package.seed",
+          "match": "\\bpackage\\b"
+        },
+        {
+          "name": "keyword.other.seed",
+          "match": "\\b(?:test|assert)\\b"
+        },
+        {
+          "name": "storage.type.function.seed",
+          "match": "\\bfn\\b"
+        },
+        {
+          "name": "storage.type.seed",
+          "match": "\\b(?:type|struct|enum|interface|const|chan|map)\\b"
+        },
+        {
+          "name": "storage.modifier.seed",
+          "match": "\\b(?:pub|mut|implements)\\b"
+        },
+        {
+          "name": "constant.language.boolean.seed",
+          "match": "\\b(?:true|false)\\b"
+        },
+        {
+          "name": "constant.language.null.seed",
+          "match": "\\bnull\\b"
+        }
+      ]
+    },
+    "builtin-types": {
+      "comment": "Built-in type names are ordinary identifiers in the lexer, but always name built-in types",
+      "name": "storage.type.builtin.seed",
+      "match": "\\b(?:int|float|bool|byte|string|error)\\b"
+    },
+    "enum-member": {
+      "comment": "Type.Case: a PascalCase name after a PascalCase name and a dot",
+      "match": "\\b([A-Z][A-Za-z0-9_]*)(\\.)([A-Z][A-Za-z0-9_]*)\\b",
+      "captures": {
+        "1": {
+          "name": "entity.name.type.seed"
+        },
+        "2": {
+          "name": "punctuation.accessor.seed"
+        },
+        "3": {
+          "name": "variable.other.enummember.seed"
+        }
+      }
+    },
+    "function-call": {
+      "match": "\\b([A-Za-z_][A-Za-z0-9_]*)(?=\\()",
+      "captures": {
+        "1": {
+          "name": "entity.name.function.call.seed"
+        }
+      }
+    },
+    "type-name": {
+      "name": "entity.name.type.seed",
+      "match": "\\b[A-Z][A-Za-z0-9_]*\\b"
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.logical.seed",
+          "match": "&&|\\|\\||!(?!=)"
+        },
+        {
+          "name": "keyword.operator.comparison.seed",
+          "match": "==|!=|<=|>=|<(?!<)|>(?!>)"
+        },
+        {
+          "name": "keyword.operator.increment-decrement.seed",
+          "match": "\\+\\+|--"
+        },
+        {
+          "name": "keyword.operator.bitwise.seed",
+          "match": "<<|>>|&|\\||\\^"
+        },
+        {
+          "name": "keyword.operator.arithmetic.seed",
+          "match": "[-+*/%]"
+        },
+        {
+          "name": "keyword.operator.assignment.seed",
+          "match": "="
+        },
+        {
+          "name": "keyword.operator.optional.seed",
+          "match": "\\?"
+        }
+      ]
+    },
+    "punctuation": {
+      "patterns": [
+        {
+          "name": "punctuation.separator.comma.seed",
+          "match": ","
+        },
+        {
+          "name": "punctuation.terminator.seed",
+          "match": ";"
+        },
+        {
+          "name": "punctuation.separator.colon.seed",
+          "match": ":"
+        },
+        {
+          "name": "punctuation.accessor.seed",
+          "match": "\\."
+        },
+        {
+          "name": "punctuation.brackets.round.seed",
+          "match": "[()]"
+        },
+        {
+          "name": "punctuation.brackets.square.seed",
+          "match": "[\\[\\]]"
+        },
+        {
+          "name": "punctuation.brackets.curly.seed",
+          "match": "[{}]"
+        }
+      ]
+    }
+  }
+}
