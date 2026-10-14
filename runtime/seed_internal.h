@@ -20,16 +20,54 @@ extern _Atomic int64_t sd_live_count_;
 #define SD_COUNT_FREE() ((void)0)
 #endif
 
+/* The small-object allocator (seed_core.c; runtime/README.md, section 15):
+ * size classes up to 2 KB with per-thread caches over a central pool, malloc
+ * above that. Memory from sd_mem_alloc is freed with sd_mem_free and resized
+ * with sd_mem_realloc only, never with free/realloc (and the other way
+ * round). Payloads are 16-byte aligned.
+ *
+ * Under sanitizers (and with SD_PLAIN_MALLOC, which tests/leaks.sh defines)
+ * these are plain malloc/realloc/free, so that ASan, TSan, LeakSanitizer and
+ * macOS leaks see every object. */
+#if !defined(SD_PLAIN_MALLOC)
+#if defined(__SANITIZE_ADDRESS__) || defined(__SANITIZE_THREAD__) || defined(SD_LEAK_CHECK)
+#define SD_PLAIN_MALLOC 1
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer) || __has_feature(thread_sanitizer) || __has_feature(leak_sanitizer) || \
+    __has_feature(memory_sanitizer)
+#define SD_PLAIN_MALLOC 1
+#endif
+#endif
+#endif
+
+#if defined(SD_PLAIN_MALLOC)
+SD_INLINE void *sd_mem_alloc(size_t n) { return sd_alloc(n); }
+SD_INLINE void sd_mem_free(void *p) { free(p); }
+SD_INLINE void *sd_mem_realloc(void *p, size_t n) { return sd_realloc(p, n); }
+SD_INLINE size_t sd_mem_usable(const void *p, size_t n) { return (void)p, n; }
+#else
+/* Out of line on purpose: each call finds the calling thread's cache
+ * itself, so no caller can keep a thread-local address across a point where
+ * its goroutine may move to another thread (README section 15). */
+__attribute__((noinline)) void *sd_mem_alloc(size_t n);
+__attribute__((noinline)) void sd_mem_free(void *p);
+void *sd_mem_realloc(void *p, size_t n);
+/* The bytes usable at p, which was allocated (or resized) for n bytes:
+ * at least n, the whole size class for a small object. */
+size_t sd_mem_usable(const void *p, size_t n);
+#endif
+
 /* Counted objects (strings, lists, maps, boxes, bigints, channels) are
  * allocated and freed with these, so that SD_COUNT_OBJECTS can count them. */
 SD_INLINE void *sd_obj_alloc(size_t n) {
   SD_COUNT_ALLOC();
-  return sd_alloc(n);
+  return sd_mem_alloc(n);
 }
 SD_INLINE void sd_obj_free(void *p) {
   SD_COUNT_FREE();
-  free(p);
+  sd_mem_free(p);
 }
+SD_INLINE void *sd_obj_realloc(void *p, size_t n) { return sd_mem_realloc(p, n); }
 
 SD_NORETURN void sd_fatal(const char *msg); /* out of memory and other unrecoverable faults */
 
@@ -58,6 +96,7 @@ sd_list *sd_list_new_len_(const sd_type *et, int64_t len); /* len elements, unin
  * sd_map_free_ queue the object; the outermost call frees the queue. */
 enum { SD_DEAD_BOX = 1, SD_DEAD_LIST = 2, SD_DEAD_MAP = 3 };
 void sd_free_queued_(void *obj, int kind);
+void sd_free_queue_reset_(void);
 void sd_list_destroy_(sd_list *l);
 void sd_map_destroy_(sd_map *m);
 

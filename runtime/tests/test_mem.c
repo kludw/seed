@@ -3,6 +3,8 @@
  * that leaks show up as a non-zero live object count. */
 #include "check.h"
 
+#include <pthread.h>
+#include <stdatomic.h>
 #include <sys/resource.h>
 #include <unistd.h>
 #if defined(__APPLE__)
@@ -386,6 +388,89 @@ static void test_stress(long rounds) {
 #endif
 }
 
+/* Objects freed on another thread than the one that allocated them (the
+ * allocator's thread caches, runtime/README.md section 15): each round,
+ * every thread allocates strings and lists of every size class and some
+ * large ones, then every thread checks and frees the objects of the next
+ * thread, and the threads end (returning their caches). The live count
+ * returns to the start and resident memory stays flat. */
+enum { XT_THREADS = 6, XT_OBJS = 3000 };
+static sd_str xt_strs[XT_THREADS][XT_OBJS];
+static sd_list *xt_lists[XT_THREADS][XT_OBJS / 10];
+static atomic_int xt_bad;
+
+typedef struct {
+  int id, phase;
+  long round;
+} xt_arg;
+
+static int xt_len(int i, long round, int id) { return (int)((i * 7919 + round * 31 + id) % (i % 50 == 0 ? 5000 : 600)); }
+
+static void *xt_thread(void *p) {
+  xt_arg *a = p;
+  if (a->phase == 0) {
+    static _Thread_local char buf[5000];
+    for (int i = 0; i < XT_OBJS; i++) {
+      int len = xt_len(i, a->round, a->id);
+      memset(buf, 'a' + (i + a->id) % 26, (size_t)len);
+      xt_strs[a->id][i] = sd_str_new(buf, len);
+    }
+    for (int i = 0; i < XT_OBJS / 10; i++) {
+      sd_list *l = sd_list_new(&sd_type_int, 0);
+      for (int k = 0; k < i % 40; k++) SD_LIST_PUSH(&l, sd_int, SD_INT(k + a->id));
+      xt_lists[a->id][i] = l;
+    }
+    return NULL;
+  }
+  int from = (a->id + 1) % XT_THREADS; /* another thread's objects */
+  for (int i = 0; i < XT_OBJS; i++) {
+    sd_str s = xt_strs[from][i];
+    int len = xt_len(i, a->round, from);
+    char want = (char)('a' + (i + from) % 26);
+    if (s->len != len || s->data[len] != 0 || (len > 0 && (s->data[0] != want || s->data[len - 1] != want)))
+      atomic_fetch_add(&xt_bad, 1);
+    sd_str_release(s);
+  }
+  for (int i = 0; i < XT_OBJS / 10; i++) {
+    sd_list *l = xt_lists[from][i];
+    if (l->len != i % 40 || (l->len && sd_int_small_value(((sd_int *)sd_list_data(l))[l->len - 1]) != l->len - 1 + from))
+      atomic_fetch_add(&xt_bad, 1);
+    sd_list_release(l);
+  }
+  return NULL;
+}
+
+static void test_cross_thread(long rounds) {
+  int64_t live0 = sd_live_objects();
+  size_t rss_after_warmup = 0;
+  for (long r = 0; r < rounds; r++) {
+    if (r == rounds / 10) rss_after_warmup = rss_now();
+    for (int phase = 0; phase < 2; phase++) {
+      pthread_t th[XT_THREADS];
+      xt_arg args[XT_THREADS];
+      for (int i = 0; i < XT_THREADS; i++) {
+        args[i] = (xt_arg){i, phase, r};
+        if (pthread_create(&th[i], NULL, xt_thread, &args[i]) != 0) {
+          fprintf(stderr, "test_mem: pthread_create failed\n");
+          exit(1);
+        }
+      }
+      for (int i = 0; i < XT_THREADS; i++) pthread_join(th[i], NULL);
+    }
+  }
+  size_t rss_end = rss_now();
+  CHECK(atomic_load(&xt_bad) == 0);
+  CHECK(sd_live_objects() == live0);
+  long growth_kb = (long)((rss_end > rss_after_warmup ? rss_end - rss_after_warmup : 0) / 1024);
+  printf("cross-thread: %ld rounds (%ld objects freed on another thread), RSS growth after warm-up: %ld KB\n", rounds,
+         rounds * XT_THREADS * (XT_OBJS + XT_OBJS / 10), growth_kb);
+  /* (Not with plain malloc: glibc's per-thread arenas fragment under this
+   * pattern, about 4 KB per round.) */
+#if !defined(SD_TEST_ASAN) && !defined(__SANITIZE_ADDRESS__) && !defined(SD_PLAIN_MALLOC)
+  CHECK(growth_kb < 4096);
+#endif
+}
+
 /* Dropping long chains frees them without recursion (a recursive free of
  * a million-node list overflows the stack): a linked list of boxes
  * (type Node struct { int v; Node? next }), a list nested in lists, and a
@@ -461,7 +546,7 @@ static sd_err frame_inner_catch(void *arg) {
   L.s = sd_str_from_cstr("outer");
   int depth = 2;
   sd_err e = sd_catch(frame_crash, &depth); /* releases the 3 inner frames only */
-  CHECK(!sd_err_is_null(e) && frame_releases == 3 && sd_lf_top == &L.h);
+  CHECK(!sd_err_is_null(e) && frame_releases == 3 && *sd_lf_top_() == &L.h);
   sd_err_release(e);
   SD_LF_LEAVE(L);
   sd_str_release(L.s);
@@ -482,11 +567,11 @@ static void test_frames(void) {
   int depth = 4;
   frame_releases = 0;
   sd_err e = sd_catch(frame_crash, &depth);
-  CHECK(!sd_err_is_null(e) && frame_releases == 5 && sd_lf_top == NULL);
+  CHECK(!sd_err_is_null(e) && frame_releases == 5 && *sd_lf_top_() == NULL);
   sd_err_release(e);
   frame_releases = 0;
   e = sd_catch(frame_inner_catch, NULL);
-  CHECK(sd_err_is_null(e) && frame_releases == 3 && sd_lf_top == NULL);
+  CHECK(sd_err_is_null(e) && frame_releases == 3 && *sd_lf_top_() == NULL);
   CHECK(sd_live_objects() == live0);
   /* sortBy: a crash in less leaves the list as it was */
   sort_list = sd_list_new(&sd_type_str, 0);
@@ -514,5 +599,6 @@ int main(int argc, char **argv) {
   CHECK(sd_live_objects() == live0);
   if (sd_live_objects() != live0) fprintf(stderr, "leaked %lld objects\n", (long long)(sd_live_objects() - live0));
   test_stress(argc > 1 ? atol(argv[1]) : 200000);
+  test_cross_thread(argc > 2 ? atol(argv[2]) : argc > 1 && atol(argv[1]) >= 1000000 ? 300 : 30);
   return check_done("test_mem");
 }

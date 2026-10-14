@@ -29,6 +29,7 @@
 #define _DARWIN_C_SOURCE 1
 #endif
 
+#include <errno.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -37,6 +38,26 @@
 
 #define SD_INLINE static inline __attribute__((unused))
 #define SD_NORETURN __attribute__((noreturn))
+/* A function the C compiler must neither inline nor analyse across calls
+ * (GCC's noipa): every call runs it. Thread-local storage is read only in
+ * such functions (runtime/README.md, "Thread-local storage"). */
+#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ >= 8
+#define SD_NOINLINE __attribute__((noipa))
+#else
+#define SD_NOINLINE __attribute__((noinline))
+#endif
+
+/* errno is thread-local, and a goroutine may continue on another thread
+ * after any call that can park. glibc declares the function behind errno
+ * const, so a compiler may compute errno's address once and use it after
+ * such a call (reading another thread's errno). This errno is read through
+ * a function that is called every time. */
+SD_NOINLINE __attribute__((unused)) static int *sd_errno_loc_(void) {
+  __asm__ __volatile__("");
+  return &errno;
+}
+#undef errno
+#define errno (*sd_errno_loc_())
 #define SD_LIKELY(x) __builtin_expect(!!(x), 1)
 #define SD_UNLIKELY(x) __builtin_expect(!!(x), 0)
 #define SD_PRINTF(a, b) __attribute__((format(printf, a, b)))
@@ -594,24 +615,30 @@ void sd_defer_run(size_t mark);
 typedef struct sd_lframe {
   struct sd_lframe *prev;
   void (*release)(struct sd_lframe *f);
+  struct sd_lframe **top; /* the goroutine's chain (its address never changes) */
 } sd_lframe;
-extern _Thread_local sd_lframe *sd_lf_top;
-/* The compiler barrier makes the frame complete before it is published (a
+/* The current goroutine's chain. The chain belongs to the goroutine, not
+ * to the thread: the frame keeps where it is, so that leaving it after the
+ * goroutine moved to another thread unlinks it from the right chain. The
+ * compiler barrier makes the frame complete before it is published (a
  * stack overflow can fault anywhere). */
+sd_lframe **sd_lf_top_(void);
 #define SD_LF_ENTER(L, fn) \
   do { \
-    (L).h.prev = sd_lf_top; \
+    sd_lframe **sd_lt_ = sd_lf_top_(); \
+    (L).h.top = sd_lt_; \
+    (L).h.prev = *sd_lt_; \
     (L).h.release = (fn); \
     __asm__ __volatile__("" ::: "memory"); \
-    sd_lf_top = &(L).h; \
+    *sd_lt_ = &(L).h; \
   } while (0)
-#define SD_LF_LEAVE(L) (sd_lf_top = (L).h.prev)
+#define SD_LF_LEAVE(L) (*(L).h.top = (L).h.prev)
 
 /* ---- groups and spawn ----
  *   sd_group *g = sd_group_begin();
  *   sd_spawn(g, body, &T_args, &args);  (args borrowed: deep-copied for the goroutine)
  *   sd_err err = sd_group_wait(g);       (owned; g is freed)
- * body(args) runs on its own thread with a borrowed pointer to its private
+ * body(args) runs in the new goroutine with a borrowed pointer to its private
  * copy of the arguments, and returns an owned error. */
 typedef struct sd_group sd_group;
 typedef sd_err (*sd_task_fn)(void *args);
@@ -619,10 +646,26 @@ sd_group *sd_group_begin(void);
 void sd_spawn(sd_group *g, sd_task_fn body, const sd_type *args_type, const void *args);
 sd_err sd_group_wait(sd_group *g);
 
-/* Runs fn on the current goroutine's thread when the goroutine ends (newest
- * first); never for the main goroutine. Generated code uses it to release
- * the constants a goroutine computed for itself (_Thread_local caches). */
+/* Runs fn in the current goroutine when it ends (newest first); never for
+ * the main goroutine. Generated code uses it to release the constants a
+ * goroutine computed for itself (in goroutine-local storage). */
 void sd_goroutine_atexit(void (*fn)(void));
+
+/* Goroutine-local storage: size zeroed bytes that belong to the current
+ * goroutine, one block per key (a static int, 0 before first use); freed
+ * when the goroutine ends, after its sd_goroutine_atexit functions. The
+ * address stays valid while the goroutine lives, whichever thread runs it.
+ * Use this, not _Thread_local, for anything that belongs to a goroutine. */
+void *sd_goroutine_local(int *key, size_t size);
+
+/* A block section: a native about to make a call that may block in the OS
+ * for long (a file, waitpid, a write to a pipe that may be full) marks it
+ * with these, so that the scheduler runs other goroutines on another thread
+ * meanwhile. The code in between must not park (no channel operations, no
+ * sd_wait_*). sd_block_end may move the goroutine to another thread; it
+ * keeps errno. Sections nest. */
+void sd_block_begin(void);
+void sd_block_end(void);
 
 /* ---- channels ---- (channel handles are shared between goroutines; their
  * count is atomic) */

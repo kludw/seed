@@ -63,7 +63,17 @@ static int fs_write_all(int fd, const char *p, size_t n) {
   return 0;
 }
 
+static int fs_open_retry_blocking(const char *path, int flags, mode_t mode);
+
+/* open() may block (a FIFO waits for its other end): in a block section. */
 static int fs_open_retry(const char *path, int flags, mode_t mode) {
+  sd_block_begin();
+  int fd = fs_open_retry_blocking(path, flags, mode);
+  sd_block_end();
+  return fd;
+}
+
+static int fs_open_retry_blocking(const char *path, int flags, mode_t mode) {
   int fd;
   do fd = open(path, flags | O_CLOEXEC, mode);
   while (fd < 0 && errno == EINTR);
@@ -77,7 +87,7 @@ sd_err sd_lib_fs_read(sd_str path, sd_str *out) {
   return sd_fs_read(path, out);
 }
 
-sd_err sd_lib_fs_write(sd_str path, sd_str data) {
+static sd_err fs_write_blocking(sd_str path, sd_str data) {
   FS_CHECK_PATH("write", path);
   int fd = fs_open_retry(path->data, O_WRONLY | O_CREAT | O_TRUNC, 0644);
   if (fd < 0) return fs_errorf("write", path->data, errno);
@@ -92,7 +102,7 @@ sd_err sd_lib_fs_write(sd_str path, sd_str data) {
  * writes from different processes apart on a local file system. */
 static pthread_mutex_t fs_append_mu = PTHREAD_MUTEX_INITIALIZER;
 
-sd_err sd_lib_fs_append(sd_str path, sd_str data) {
+static sd_err fs_append_blocking(sd_str path, sd_str data) {
   FS_CHECK_PATH("append", path);
   int fd = fs_open_retry(path->data, O_WRONLY | O_CREAT | O_APPEND, 0644);
   if (fd < 0) return fs_errorf("append", path->data, errno);
@@ -108,7 +118,7 @@ bool sd_lib_fs_exists(sd_str path) { return !fs_has_nul(path) && sd_fs_exists(pa
 
 bool sd_lib_fs_isDir(sd_str path) { return !fs_has_nul(path) && sd_fs_is_dir(path); }
 
-sd_err sd_lib_fs_stat(sd_str path, sd_S_fs_Info *out) {
+static sd_err fs_stat_blocking(sd_str path, sd_S_fs_Info *out) {
   FS_CHECK_PATH("stat", path);
   struct stat st;
   if (stat(path->data, &st) != 0) return fs_errorf("stat", path->data, errno);
@@ -132,7 +142,7 @@ sd_err sd_lib_fs_list(sd_str dir, sd_list **out) {
 
 /* Like the runtime's sd_fs_mkdir (error messages included), with the mode
  * docs/stdlib.md gives. */
-sd_err sd_lib_fs_mkdir(sd_str path) {
+static sd_err fs_mkdir_blocking(sd_str path) {
   FS_CHECK_PATH("mkdir", path);
   char *cp = sd_alloc((size_t)path->len + 1);
   memcpy(cp, path->data, (size_t)path->len + 1);
@@ -155,7 +165,7 @@ sd_err sd_lib_fs_mkdir(sd_str path) {
   return err;
 }
 
-sd_err sd_lib_fs_rename(sd_str from, sd_str to) {
+static sd_err fs_rename_blocking(sd_str from, sd_str to) {
   if (fs_has_nul(from) || fs_has_nul(to)) {
     char *a = fs_show(from), *b = fs_show(to);
     sd_err e = sd_errorf("fs.rename: %s -> %s: path contains a NUL byte", a, b);
@@ -167,7 +177,7 @@ sd_err sd_lib_fs_rename(sd_str from, sd_str to) {
   return SD_ERR_NULL;
 }
 
-sd_err sd_lib_fs_remove(sd_str path) {
+static sd_err fs_remove_blocking(sd_str path) {
   FS_CHECK_PATH("remove", path);
   return sd_fs_remove(path);
 }
@@ -219,13 +229,13 @@ static sd_err fs_remove_tree(const char *path) {
   return SD_ERR_NULL;
 }
 
-sd_err sd_lib_fs_removeAll(sd_str path) {
+static sd_err fs_removeAll_blocking(sd_str path) {
   FS_CHECK_PATH("removeAll", path);
   if (path->len == 0) return SD_ERR_NULL;
   return fs_remove_tree(path->data);
 }
 
-sd_err sd_lib_fs_makeTemp(sd_str prefix, sd_str *out) {
+static sd_err fs_makeTemp_blocking(sd_str prefix, sd_str *out) {
   FS_CHECK_PATH("makeTemp", prefix);
   const char *dir = getenv("TMPDIR");
   if (!dir || !*dir) dir = "/tmp";
@@ -343,4 +353,64 @@ sd_err sd_lib_fs_File_write(sd_S_fs_File f, sd_str data) {
 void sd_lib_fs_File_close(sd_S_fs_File f) {
   int64_t id;
   if (sd_int_to_i64(f.f_id, &id)) (void)sd_handle_close(id);
+}
+
+/* The natives above that use the file system directly run in block
+ * sections (seed.h): a slow disk or a FIFO must not hold up the other
+ * goroutines. */
+
+sd_err sd_lib_fs_write(sd_str path, sd_str data) {
+  sd_block_begin();
+  sd_err r = fs_write_blocking(path, data);
+  sd_block_end();
+  return r;
+}
+
+sd_err sd_lib_fs_append(sd_str path, sd_str data) {
+  sd_block_begin();
+  sd_err r = fs_append_blocking(path, data);
+  sd_block_end();
+  return r;
+}
+
+sd_err sd_lib_fs_stat(sd_str path, sd_S_fs_Info *out) {
+  sd_block_begin();
+  sd_err r = fs_stat_blocking(path, out);
+  sd_block_end();
+  return r;
+}
+
+sd_err sd_lib_fs_mkdir(sd_str path) {
+  sd_block_begin();
+  sd_err r = fs_mkdir_blocking(path);
+  sd_block_end();
+  return r;
+}
+
+sd_err sd_lib_fs_rename(sd_str from, sd_str to) {
+  sd_block_begin();
+  sd_err r = fs_rename_blocking(from, to);
+  sd_block_end();
+  return r;
+}
+
+sd_err sd_lib_fs_remove(sd_str path) {
+  sd_block_begin();
+  sd_err r = fs_remove_blocking(path);
+  sd_block_end();
+  return r;
+}
+
+sd_err sd_lib_fs_removeAll(sd_str path) {
+  sd_block_begin();
+  sd_err r = fs_removeAll_blocking(path);
+  sd_block_end();
+  return r;
+}
+
+sd_err sd_lib_fs_makeTemp(sd_str prefix, sd_str *out) {
+  sd_block_begin();
+  sd_err r = fs_makeTemp_blocking(prefix, out);
+  sd_block_end();
+  return r;
 }

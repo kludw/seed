@@ -7,8 +7,9 @@ memory never freed) with:
 - integers that grow (tagged 64-bit words, big integers on the heap),
 - reference counting with value semantics (copy-on-write) for strings, lists,
   maps and boxes, driven by **type descriptors** that generated code supplies,
-- goroutines on OS threads, channels, `select`, groups with Erlang-style
-  failure, timers,
+- goroutines scheduled M:N (user-space context switches onto one worker
+  thread per CPU, with work stealing), channels, `select`, groups with
+  Erlang-style failure, timers and a poller (epoll or kqueue),
 - blocking calls that are stop points (`sd_wait_fd`, `sd_wait_child`) and
   the process-wide handle table that `io`, `net` and `fs` use,
 - per-goroutine crash handling and a defer stack,
@@ -73,8 +74,14 @@ the `SD_STR_LIT` and `SD_INT_BIGLIT` macros. It builds warning-free with
 | Macro | Effect |
 |---|---|
 | `SD_COUNT_OBJECTS` | Count live heap objects (`sd_live_objects()`); the tests use it to find leaks. |
-| `SD_LEAK_CHECK` | Run LeakSanitizer's check in `sd_exit_process` (programs end with `_exit`, which skips its own); for `-fsanitize=leak` builds (`tests/leaks.sh` on Linux). |
-| `SD_GOROUTINE_STACK` | Stack size of goroutine threads in bytes (default 8 MB). |
+| `SD_LEAK_CHECK` | Run LeakSanitizer's check in `sd_exit_process` (programs end with `_exit`, which skips its own); for `-fsanitize=leak` builds (`tests/leaks.sh` on Linux). Implies `SD_PLAIN_MALLOC`. |
+| `SD_PLAIN_MALLOC` | Allocate counted objects with `malloc`/`free` instead of the runtime's small-object allocator (section 15), so that leak checkers and sanitizers see each object. Automatic under ASan and TSan. |
+| `SD_GOROUTINE_STACK` | Stack size of goroutines in bytes (default 8 MB, reserved and committed as used; section 10). |
+| `SD_CTX_UCONTEXT` | Switch goroutines with `swapcontext` instead of the runtime's own assembly (automatic on architectures other than x86_64 and aarch64; slower). |
+
+At run time, `SEED_PROCS=n` sets the number of processors (worker threads
+running goroutines at once; default: the number of CPUs), like Go's
+`GOMAXPROCS`.
 
 ## 2. Representation of every Seed type
 
@@ -425,7 +432,10 @@ environments, so those are released normally.
 **Cleanup frames.** A generated function keeps the counted values that its
 locals and temporaries own across a point where it may crash or be stopped
 in one struct that starts with an `sd_lframe`, and links it into the
-thread's chain (`sd_lf_top`) on entry:
+goroutine's chain on entry (`SD_LF_ENTER` finds the chain with
+`sd_lf_top_()` and keeps its address in the frame, so that `SD_LF_LEAVE`
+unlinks it from the same chain after the goroutine moved to another
+thread):
 
 ```c
 /* fn work(string path) error { string text = ...; []string lines = ... } */
@@ -509,9 +519,9 @@ Rules:
 
 ## 10. Goroutines, groups and spawn
 
-Each goroutine runs on an OS thread of its own (8 MB stack by default);
-threads are kept and reused by later goroutines (worker threads, below). A
-`group` block is lowered to `sd_group_begin`, one `sd_spawn` per `spawn`
+Goroutines are scheduled M:N: each has a stack of its own and is switched
+in user space onto a few worker threads, one per CPU (the scheduler,
+below). A `group` block is lowered to `sd_group_begin`, one `sd_spawn` per `spawn`
 statement (which may be inside loops or ifs in the block), and
 `sd_group_wait`:
 
@@ -565,18 +575,17 @@ sd_err l_err;
   the next `sd_spawn` in the group (or `sd_group_wait`) frees those tasks.
   A server's group, which spawns a goroutine per connection for as long as
   it runs, so holds only the connections that are open.
-- **Worker threads.** `sd_spawn` hands the goroutine to an idle worker
-  thread if there is one, and creates a thread otherwise. A worker whose
-  goroutine returned (with an error or not) waits for the next one,
-  spinning for up to 20 us and then on a condition variable; it ends after
-  2 s without work, or at once when 1024 workers are idle. A worker whose
-  goroutine crashed or was stopped ends instead of being reused, so that
-  thread-local state a crash may have left half-made (a package constant
-  being computed, `seed_core.c`'s free queue) never reaches another
-  goroutine. Thread-local caches that live longer than a goroutine must be
-  released or reset by an `sd_goroutine_atexit` function, which runs at
-  the end of every goroutine (the generated constant caches and `rand`'s
-  generator do this).
+- **Starting a goroutine** takes a finished goroutine's structure and
+  stack from the current processor's free list (or makes new ones), copies
+  the arguments into it (inline when they take 64 bytes or less), and puts
+  it in the processor's `runnext` slot (below): about 1 us, with no system
+  call. State that belongs to a goroutine lives in its task or in
+  goroutine-local storage (`sd_goroutine_local`), which is freed when it
+  ends, after its `sd_goroutine_atexit` functions (the generated constant
+  caches release their values with one). Nothing of a goroutine stays on a
+  thread (see "Thread-local storage" below), so a crash leaves nothing
+  half-made for the next goroutine; the one exception, the thread's
+  free queue of `seed_core.c`, is reset when a crash unwinds.
 - **Nesting.** A goroutine may run its own groups. Cancelling a goroutine that
   is waiting in `sd_group_wait` cancels that inner group too, so whole trees
   stop. A group is always waited for: if the goroutine that owns it crashes
@@ -607,6 +616,113 @@ sd_err l_err;
   locks.
 - Crashes in the main goroutine (including in a group block) end the program
   as in section 9, after stopping and waiting for its groups.
+
+### The scheduler
+
+The design is Go's (`seed_task.c` uses its names): a **G** is a goroutine
+(`sd_task`), an **M** a worker thread (`sd_m`), a **P** a processor
+(`sd_p`), the right to run goroutines. There are as many Ps as CPUs
+(`SEED_PROCS` overrides it); an M runs goroutines while it holds a P, so at
+most that many run at once.
+
+- **Stacks.** A goroutine's stack is 8 MB of address space
+  (`SD_GOROUTINE_STACK`) reserved with `mmap(MAP_NORESERVE)`, so memory is
+  used only as deep as it grows, with 64 KB of inaccessible memory below it
+  (a guard: a stack overflow faults, and the fault handler crashes the
+  goroutine, section 9). The main goroutine's stack is the stack limit
+  (`ulimit -s`, 8 MB by default), as a main thread's would be. A finished
+  goroutine keeps its stack for the next one; a stack found to have been
+  used deeper than 64 KB gives the memory below that back (`madvise`) when
+  it is pooled. Each guarded stack costs two kernel memory maps, and Linux
+  allows 65,530 by default (`vm.max_map_count`): beyond a budget derived
+  from that limit (about 24,000 stacks by default), stacks come from shared
+  mappings without guards, so that 100,000 goroutines and more can exist;
+  an overflow of one of those is not caught (decision 25).
+- **Switching.** `sd_ctx_swap_` saves the callee-saved registers on the
+  current stack, stores the stack pointer, loads another and returns into
+  it: hand-written for x86_64 (System V) and aarch64 (Linux and Apple:
+  x19-x30 and d8-d15; x18 is never touched), `swapcontext` elsewhere. A
+  goroutine never switches straight to another: it switches to its M's own
+  stack (the scheduler context, "g0"), which decides what runs next. The
+  sanitizers are told about every switch (`__sanitizer_start_switch_fiber`
+  and `__tsan_switch_to_fiber`).
+- **Run queues.** Each P has a queue of 256 runnable goroutines that only
+  its owner adds to, plus a `runnext` slot; there is also a global queue
+  (under a lock). A goroutine readied by another (a channel hand-off, a
+  group's last member waking the waiter) or spawned goes to the readier's
+  `runnext`, so it runs on the same CPU as soon as the readier parks: a
+  ping-pong never leaves one CPU. An M whose P has nothing to run steals
+  half of another P's queue (and, after a short sleep, its `runnext`, if
+  that P ran nothing meanwhile); without anything to steal it gives its P
+  back and sleeps. Readying a goroutine wakes a sleeping M only when a P is
+  idle and no M is already looking for work.
+- **Parking.** A goroutine that waits makes itself findable by its waker (a
+  channel's wait queue, the group, the poller), then parks: its state goes
+  from running to parked on g0, unless a waker marked it notified first, in
+  which case it continues at once. Exactly one waker readies each park:
+  the one that claimed what it waits for (the select's done flag, the
+  wait's result, the group's waiter slot).
+- **The poller.** One thread waits in epoll (Linux, with a timerfd for the
+  earliest timer) or kqueue (macOS and the BSDs) for the descriptors that
+  goroutines wait on and for the timers, and readies those goroutines
+  (section 13).
+- **Block sections and sysmon.** A native about to make a call that may
+  block in the OS for long marks it with `sd_block_begin` /
+  `sd_block_end` (`fmt` output, the file system, starting a program,
+  `waitpid`, reading a regular file or stdin once it is ready). A monitor
+  thread (sysmon) checks every 20 us to 10 ms; a P whose goroutine has been
+  in the same block section since its last look is handed to another M, so
+  however many goroutines block in the OS, the others keep running. When
+  the call returns, the goroutine takes its P back, or an idle one, or
+  queues itself.
+- **No preemption.** A goroutine runs until it parks, blocks or ends. A
+  goroutine that computes for a long time without a channel operation
+  keeps its CPU; the others run on the other CPUs, but with as many such
+  goroutines as CPUs, the rest wait (as in Go before 1.14).
+- **Threads that the scheduler does not run** (the main thread of a C test
+  that calls the runtime without `sd_main`, say) get a task on first use
+  and park by blocking on a condition variable; everything else works the
+  same for them.
+
+### Thread-local storage
+
+A goroutine may continue on another OS thread after any call that can park
+(a channel operation, a select, a group wait, `time.sleep`, a blocking
+wait, `sd_block_end`, a handle's operation lock, and every function that
+calls one of these). GCC and Clang treat the address of a `_Thread_local`
+variable as constant within a function: they may compute it once and use it
+after such a call, which then reads or writes another thread's variable,
+while that thread uses it. The runtime is pasted into the same C file as the
+generated code and inlined into it, so this applies to every function. The
+rule:
+
+1. **Per-goroutine state lives in the goroutine**: in `sd_task`, or, for
+   code outside `seed_task.c` (natives, generated code), in goroutine-local
+   storage: `sd_goroutine_local(&key, size)` returns zeroed memory that
+   belongs to the current goroutine, valid while it lives, wherever it
+   runs. Never in a `_Thread_local`.
+2. **A `_Thread_local` is only read or written inside a function marked
+   `SD_NOINLINE`** (seed.h: `noipa` with GCC, `noinline` with Clang), and
+   that function never parks. Each call computes the address afresh; the
+   caller keeps values, never the address. `seed_task.c`'s current
+   goroutine and current M (`tls_task`, `tls_m`), the allocator's thread
+   caches and free queue (`sd_mem_alloc`, `sd_mem_free`,
+   `sd_free_queued_`), and the per-thread text buffers of `sd_strerror` and
+   `net`'s error texts follow it. A pointer that such a function returns
+   into a thread's buffer must be used before the caller can park.
+3. **Per-thread state is only a cache between two parks**: it must be
+   correct for whichever goroutine runs next on the thread. State that a
+   crash can leave half-made must be reset when the crash unwinds (the
+   free queue is: `protect` calls `sd_free_queue_reset_`).
+4. **errno** is thread-local too, and glibc declares the function behind
+   it `const`, so a compiler may reuse its address after a park. seed.h
+   redefines `errno` to go through a noinline function (`sd_errno_loc_`),
+   so any code that includes seed.h reads the current thread's. Other
+   functions that glibc declares `const` and that depend on the thread
+   (`pthread_self`) must not be used in goroutine code.
+5. The generated code follows the rule: cleanup frames are linked into the
+   goroutine's chain (`sd_lf_top_()`, section 9) and package constants are
+   cached in goroutine-local storage (section 12).
 
 ## 11. Channels, select and time
 
@@ -661,7 +777,7 @@ Single `send`/`receive` are one-case selects.
 **time.** `sd_time_after(ns)` returns a new `chan int` (owned) that receives
 the wall-clock time (Unix nanoseconds, `time.now()` in docs/stdlib.md) once,
 after `ns` nanoseconds, and is then closed, so a second receive returns null
-instead of waiting forever (one timer thread serves all timers).
+instead of waiting forever (the poller thread serves all timers: section 10).
 `sd_time_sleep(ns)` waits (a stopping point for cancellation).
 `sd_time_now()` is the monotonic clock in nanoseconds. The compiler exposes
 them as `time.after` and `time.sleep`.
@@ -693,10 +809,23 @@ Constants: package-level `const` values of counted types must not be shared
 between goroutines unless immortal. Strings and big integers are (use
 `SD_STR_LIT`/`SD_STR_STATIC` and `SD_INT_BIGLIT`). For list/map constants,
 build the value where it is used (a fresh owned value each time), or cache it
-per goroutine with `_Thread_local` and register a function that releases the
-cache with `sd_goroutine_atexit(fn)`: the runtime calls it on the
-goroutine's thread when the goroutine ends (never for the main goroutine,
-whose caches live until the program exits).
+per goroutine in goroutine-local storage (`sd_goroutine_local`; never in a
+`_Thread_local`: a goroutine moves between threads, section 10) and
+register a function that releases the cache with
+`sd_goroutine_atexit(fn)`: the runtime calls it in the goroutine when it
+ends (never for the main goroutine, whose caches live until the program
+exits). The compiler does this for a constant `C` of type `T`:
+
+```c
+typedef struct { T v; int s; } sd_ct_C;     /* s: 0 not computed, 1 being computed, 2 done */
+static int sd_ck_C;                          /* its goroutine-local storage key */
+static void sd_cf_C(void) { sd_ct_C *sd_cc_ = sd_goroutine_local(&sd_ck_C, sizeof(sd_ct_C)); release(sd_cc_->v); sd_cc_->s = 0; }
+static T sd_c_C(void) {
+  sd_ct_C *sd_cc_ = sd_goroutine_local(&sd_ck_C, sizeof(sd_ct_C));
+  if (sd_cc_->s == 2) return sd_cc_->v;      /* borrowed */
+  ... compute it into sd_cc_->v, then sd_cc_->s = 2; sd_goroutine_atexit(sd_cf_C); ...
+}
+```
 
 ## 13. Native functions
 
@@ -791,10 +920,15 @@ may contain NULs): make them with `sd_str_new(bytes, n)` or
 it does not fit), `sd_int_from_i64(i)`. Lists: `sd_list_new(&sd_type_str,
 cap)`, `SD_LIST_PUSH(&l, sd_str, value)`, `SD_LIST_GET(l, T, i)`.
 
-**Blocking calls.** Each goroutine runs on an OS thread, so a native that
-blocks blocks only its own goroutine. To be a **stop point** (SPEC.md,
-DECISIONS.md, "Concurrency": a goroutine whose group fails must stop there too), a
-native never blocks in the OS directly; it waits through the runtime:
+**Blocking calls.** A native that blocks in the OS would hold up its
+worker thread, and with it every goroutine queued there. So a native never
+blocks in the OS directly: it either waits through the runtime, which
+parks the goroutine (and is a **stop point**: SPEC.md, DECISIONS.md,
+"Concurrency": a goroutine whose group fails must stop there too), or, for
+a call that cannot wait that way (a file, `waitpid`, a FIFO's `open`),
+makes it inside a block section (`sd_block_begin` / `sd_block_end`,
+section 10), which is not a stop point. The code between those two must
+not park. The waits:
 
 ```c
 int sd_wait_fd(int fd, bool for_write, int64_t timeout_ns);  /* <= 0: no limit */
@@ -804,10 +938,17 @@ bool sd_stopping(void);
 SD_NORETURN void sd_stop(void);
 ```
 
-`sd_wait_fd` `poll`s the descriptor together with the goroutine's
-**wake-up pipe** (made on its first wait, closed when the goroutine is
-freed). Cancelling a goroutine sets its flag and, if it is waiting, writes
-a byte to the pipe, so the wait returns `SD_WAIT_STOP` at once. The native
+`sd_wait_fd` registers the descriptor with the poller (epoll or kqueue,
+one-shot) and parks the goroutine until the poller sees it ready, its
+deadline passes (a timer of the poller), or it is cancelled: cancelling a
+goroutine sets its flag and, if it is waiting, claims the wait's result
+and readies it, so the wait returns `SD_WAIT_STOP` at once. A descriptor
+the poller cannot watch is waited for the old way, in a block section:
+`poll` on it together with the goroutine's **wake-up pipe** (made on its
+first such wait), which a stop writes to (epoll refuses regular files, and
+`poll` would report them ready at once, so they are; on macOS kqueue is
+used only for sockets, pipes and FIFOs, and terminals and devices are
+polled). The native
 then releases what it holds (closes a half-made socket, frees memory) and
 calls `sd_stop()`, which unwinds the goroutine exactly like a cancelled
 channel operation (the cleanup frames of the generated callers are
@@ -817,10 +958,10 @@ stopped too (as a channel operation would be). `sd_wait_child` waits for a
 child process (a helper thread does the blocking `waitpid` and signals a
 pipe); on `SD_WAIT_STOP` it has already killed the child with `SIGKILL`
 and reaped it. `os.run` uses it, so it is a stop point. A goroutine
-waiting in `poll` counts as running for the deadlock check: something
-outside the program can still wake it. If no descriptors are left for the
-wake-up pipe, waits poll in slices of 50 ms instead and still notice a
-stop. (docs/stdlib.md sketched a pair `sd_block_begin`/`sd_block_end`
+waiting for a descriptor counts as running for the deadlock check:
+something outside the program can still wake it. If no descriptors are
+left for a wake-up pipe, a wait that polls does so in slices of 50 ms
+instead and still notices a stop. (docs/stdlib.md sketched a pair `sd_block_begin`/`sd_block_end`
 around a native's own wait; a single call that does the waiting is harder
 to get wrong, and a native with an unusual wait can still use `sd_wait_fd`
 on a pipe of its own, as `sd_wait_child` and `net.dial`'s name lookup do.)
@@ -853,8 +994,8 @@ sd_err sd_handle_error(const char *fn, const sd_handle *h, int kind, int result,
 ```
 
 - `sd_handle_acquire` takes the entry's **operation lock**, so each
-  operation is atomic; a second goroutine using the same handle waits for
-  it (a stop point, checked every 20 ms). Release it with
+  operation is atomic; a second goroutine using the same handle parks
+  until the first releases it (a stop point). Release it with
   `sd_handle_release` on every path.
 - The I/O functions return `SD_IO_OK` (a read got at least one byte),
   `SD_IO_EOF` (nothing: end of input), `SD_IO_ERROR` (the errno value in
@@ -869,12 +1010,13 @@ sd_err sd_handle_error(const char *fn, const sd_handle *h, int kind, int result,
   `read_all` can be mixed (lines end at `"\n"`, with a `"\r"` before it
   removed; the last line may lack the `"\n"`). A non-blocking descriptor
   is read first and polled on `EAGAIN`; a blocking one (stdin, which may
-  be shared with other processes) is always polled first, so that the
-  wait stays a stop point. Writes to a `SD_HANDLE_CONN` use `send` without
-  `SIGPIPE`.
+  be shared with other processes, or a file) is always polled first, so
+  that the wait stays a stop point, and then read in a block section.
+  Writes to a `SD_HANDLE_CONN` use `send` without `SIGPIPE`; writes to a
+  blocking descriptor are made in a block section.
 - `sd_handle_close` marks the entry closed, takes it out of the table and
-  wakes a goroutine waiting on it (through its wake-up pipe), which gets
-  `SD_IO_CLOSED`. The descriptor itself is closed when the last operation
+  wakes a goroutine waiting on it (and those waiting for its operation
+  lock), which gets `SD_IO_CLOSED`. The descriptor itself is closed when the last operation
   using it releases it, so its number is never reused under a running
   operation. Handles are not closed when the last Seed copy disappears;
   the process's exit closes them.
@@ -1030,7 +1172,10 @@ Arguments are borrowed and results owned unless marked **consumes** or
 | `sd_group *sd_group_begin(void)` | |
 | `void sd_spawn(sd_group *g, sd_task_fn body, const sd_type *args_type, const void *args)` | args deep-copied |
 | `sd_err sd_group_wait(sd_group *g)` | frees `g` |
-| `void sd_goroutine_atexit(void (*fn)(void))` | `fn()` runs on this goroutine's thread when it ends (newest first; not for main) |
+| `void sd_goroutine_atexit(void (*fn)(void))` | `fn()` runs in this goroutine when it ends (newest first; not for main) |
+| `void *sd_goroutine_local(int *key, size_t size)` | the goroutine's zeroed block for `key` (a static int, 0 before first use); freed when it ends |
+| `sd_lframe **sd_lf_top_(void)` | the goroutine's cleanup-frame chain (used by `SD_LF_ENTER`) |
+| `void sd_block_begin(void)`, `void sd_block_end(void)` | around a call that may block in the OS; no parking in between; `sd_block_end` keeps `errno` |
 | `sd_chan *sd_chan_new(const sd_type *et, sd_int cap)` | crashes if `cap < 0` |
 | `sd_chan_retain`, `sd_chan_release` | atomic; NULL-safe (a null `(chan T)?`) |
 | `void sd_chan_send(c, const void *val)` | val borrowed |
@@ -1108,7 +1253,7 @@ runtime/tests/run.sh asan     # or tsan, plain, bench
 |---|---|
 | `test_int.c` | factorial 30, 2^100, tests/full/bigint_arith values, ~400 Python-generated vectors (`int_vectors.h`: + - * / % & \| ^ << >> and float conversion with negatives and every boundary around 2^31, 2^32, 2^62, 2^63, 2^64), 200,000 random differential checks against `__int128`, algebraic identities on random 400-bit values, crash messages |
 | `test_str.c` | every string method, `chars` on UTF-8 and invalid UTF-8, float formatting (20,000 random doubles compared with seed0's formatter, kept in `ref_float.c`) |
-| `test_mem.c` | lists, maps, boxes, enums, struct descriptors, copy-on-write through nested places, stable `sortBy`, interfaces and user error types, deep copies share nothing, cleanup frames released by a crash (nested, and a crash contained by an inner `sd_catch`), a `sortBy` whose `less` crashes leaving the list unchanged, no leaks (live object count), and a stress test: 2M rounds / 54M allocations freed with flat resident memory |
+| `test_mem.c` | lists, maps, boxes, enums, struct descriptors, copy-on-write through nested places, stable `sortBy`, interfaces and user error types, deep copies share nothing, cleanup frames released by a crash (nested, and a crash contained by an inner `sd_catch`), a `sortBy` whose `less` crashes leaving the list unchanged, no leaks (live object count), and a stress test: 2M rounds / 54M allocations freed with flat resident memory; objects of every size class allocated on one thread and checked and freed on another, by threads that then end (300 rounds, 6M objects, flat resident memory) |
 | `test_pkg.c` | `os.env`, `os.run` (exit codes, program not found), `fs.*` |
 | `test_block.c` | blocking calls as stop points: cancelling goroutines blocked in `time.sleep`, in `sd_wait_fd` on a pipe, in a handle read on a non-blocking and on a blocking descriptor, in accept, in `os.run` (a `sleep 30` child is killed), and one waiting for another goroutine's operation lock; close waking a reader; read timeouts; line reading (CRLF, empty lines, a last line without newline, a 200 KB line); 3 MB over a socket pair; 20,000 goroutines spawned one after another in one group (freed while it runs) |
 | `test_conc.c` | buffered/unbuffered channels, copy semantics, ping-pong, 1000 goroutines in a group with deep-copied arguments, group error and crash with cancellation and defers (order checked), nested group cancellation, crash inside defers, select fairness (100,000 selects within 45-55%), select send/receive/closed/timeout, cancelling goroutines blocked in select, a 50-stage pipeline, the parallel word count |
@@ -1132,7 +1277,24 @@ test programs of `lib/net`, `lib/http`, `lib/fs`, `lib/time` and
 No failure and no report, apart from one test-isolation bug in `lib/fs`'s
 tests (lib/BUGS_FIXED.md).
 
-Performance on an Apple M-series laptop (`-O2`, `run.sh bench`):
+Soak of the M:N scheduler (section 10; Linux x86_64, 4 cores, on a machine
+shared with other builds): the 38 concurrency programs of `tests/full`
+above ran 52 times each with `SEED_PROCS=1`, `SEED_PROCS=2` and the default
+4 processors, four copies at once (5,928 runs); `test_conc` and
+`test_block` 52 times each per setting (312 runs); `seed test lib/net
+lib/http lib/fs lib/time lib/rand` (94 tests) 20 times per setting (60
+runs). No failure. The `net`, `http`, `fs`, `time` and `rand` tests also
+passed 3 times each with everything (the runtime included) built under
+`-fsanitize=thread` and under `-fsanitize=address,undefined`, with no
+reports, and the runtime's tests passed on aarch64 under qemu (plain
+build, both context-switch implementations: the assembly and
+`SD_CTX_UCONTEXT`).
+
+Performance on an Apple M-series laptop (`-O2`, `run.sh bench`), with
+goroutines as threads (before the M:N scheduler; its numbers on Linux are
+in docs/performance.md, "Goroutine scheduler (M:N)": a `chan int(0)`
+hand-off 0.3 us, `chan int(1024)` 75-105 ns per value, spawn + join 2 us
+from a thread outside the scheduler and about 1 us from a goroutine):
 
 | Operation | Cost |
 |---|---|
@@ -1148,16 +1310,118 @@ Performance on an Apple M-series laptop (`-O2`, `run.sh bench`):
 | `select` over two ready channels | 20 ns |
 | spawn + join, one at a time | 1.4 us per goroutine (15 us before worker threads) |
 
-A blocked goroutine that has to sleep costs an OS thread wake-up (a
-condition variable, several microseconds on macOS). `park` therefore spins
-on the goroutine's wake flag for up to 20 us first, when there are idle
-CPUs (fewer running goroutines than CPUs) and fewer than half the CPUs are
-spinning already; a hand-off that arrives meanwhile costs neither the
-signal nor the wake-up. Buffered channels avoid parking when they don't
-fill up. The `group` and worker-pool locks are taken with a short
-`trylock` loop before blocking, since many threads take them at once when
-goroutines start and end in bursts. bench/ and docs/performance.md compare
-whole programs with Go.
+With the M:N scheduler (section 10), a hand-off between goroutines is two
+user-space switches on one CPU, with no system call: the readied
+goroutine runs next on the readier's processor. A thread is woken only
+when a processor is idle and nobody is looking for work. Channel and
+group locks spin before they sleep. bench/ and docs/performance.md
+compare whole programs with Go.
+
+### Memory: the small-object allocator
+
+Counted objects (strings, lists, maps with their entry and index arrays,
+boxes, big integers, channels) are allocated with `sd_obj_alloc`, which
+uses the runtime's own allocator (`sd_mem_alloc` / `sd_mem_free` /
+`sd_mem_realloc` in `seed_core.c`) instead of `malloc`. Everything else
+(`sd_alloc`, the natives' buffers, tasks, handles) still uses `malloc`, and
+the two never mix: a block from one is never freed or resized by the
+other. Allocation-heavy programs got 25-45% faster (docs/performance.md,
+"Allocator").
+
+**Blocks and size classes.** Every block has an 8-byte header word just
+before its payload: its size class, or 0 for a large block. Payloads are
+16-byte aligned. There are 24 size classes of slots of 16 to 2048 bytes,
+header included: steps of 16 up to 128, then four per doubling (160, 192,
+224, 256, 320, ...). A request of more than 2040 bytes is large: a `malloc`
+block with the payload 16 bytes into it. Small slots are carved from 1 MB
+chunks (themselves malloc'ed), a batch at a time. A free slot keeps its
+header and links to the next free slot through its first payload word.
+Strings and lists take the whole slot as their capacity (`cap`), so
+appending to a short string or pushing onto a short list often needs no
+reallocation.
+
+**Thread caches and cross-thread frees.** Each thread has a cache: one
+free list per class. `sd_mem_alloc` pops from the calling thread's list and
+`sd_mem_free` pushes onto it, *whichever thread allocated the block*. That
+is how frees from another thread are handled: values move between
+goroutines (a channel's deep copy is made by one side and freed by the
+other; with M:N scheduling a goroutine itself moves), and the block simply
+joins the freeing thread's cache. A list that grows past twice its class's
+batch size (64 blocks for classes up to 128 bytes, fewer for larger ones,
+4 for 2 KB) moves a batch to the central pool; an empty list takes a batch
+from the central pool, or carves a new one. The central pool is a stack of
+batches per class under a mutex, so a producer that allocates and a
+consumer that frees exchange whole batches, with one lock operation per
+batch on each side. When a thread ends, a `pthread_key` destructor gives
+its blocks back to the central pool (full batches, the rest as loose
+blocks) and keeps the cache structure for the next thread.
+
+**Memory stays flat but is not returned.** Chunks are never given back to
+the system. Freed slots are reused by every thread, so a long-running
+program's resident memory is its peak of live small objects plus at most
+two batches per class per thread (about 25 KB per class at most).
+`test_mem` checks this with 2 million rounds of a mixed workload, and with
+300 rounds of 6 threads that each allocate 3,300 strings and lists of every
+class and free another thread's (both stay flat; glibc's `malloc` grows by
+about 4 KB a round on the second).
+
+**The thread-local rule** (stated for the whole runtime in section 10,
+"Thread-local storage"; this is how the allocator follows it). The
+runtime is pasted into the same C file as
+the generated code, so the C compiler can inline runtime functions into
+generated functions. GCC and Clang may compute the address of a
+`_Thread_local` variable once and reuse it for the rest of a function. With
+M:N scheduling, a goroutine can park at a channel operation, a wait or I/O
+and resume on another OS thread, so a reused address would be the old
+thread's cache, and two threads would corrupt one free list. Therefore:
+
+- the thread cache is read only inside `sd_mem_alloc`, `sd_mem_free` and
+  their slow paths. These are `__attribute__((noinline))` (declared so in
+  `seed_internal.h`) and never park, so each call reads its own thread's
+  cache, and no address survives into a caller;
+- the address is passed through an empty `__asm__ volatile("" : "+r"(p))`
+  after it is taken, so that it is never reused even within the allocator's
+  own functions;
+- nothing assumes consecutive calls run on the same thread. A block
+  allocated on one thread and freed on another just joins the second
+  thread's cache;
+- `sd_free_queued_` (the non-recursive free queue, decision 16) is also
+  noinline, for the same reason. Its loop holds the queue's thread-local
+  state while it releases objects, which is safe because releasing never
+  parks. A custom descriptor's `release` must not park either.
+
+Any new per-thread state in the runtime has to follow the same rule:
+access it through a noinline function that does not park, or through an
+asm-laundered pointer that is re-read after every call that may park.
+
+**The free path.** `sd_mem_free` reads the header, the thread pointer and
+the list head, pushes the block, and decrements the list's room counter:
+about 15 instructions, with no lock, atomic operation or call. (On Linux,
+thread-local storage in an executable is one load off `%fs`; on macOS it
+is a call to `tlv_get_addr`.) Boxes, lists and maps whose elements hold
+nothing counted (`t->trivial`) no longer go through the free queue's
+thread-local state at all: they are freed at once.
+
+**Sanitizers and leak checkers.** A custom allocator would hide
+use-after-free from ASan and leaks from LeakSanitizer and macOS `leaks`:
+a leaked object would sit in a chunk that the allocator still points to.
+So with `SD_PLAIN_MALLOC` the `sd_mem_*` functions are plain
+`malloc`/`realloc`/`free`. It is defined automatically under ASan or TSan
+(`__SANITIZE_ADDRESS__`, `__SANITIZE_THREAD__`, or Clang's
+`__has_feature(address_sanitizer / thread_sanitizer / leak_sanitizer /
+memory_sanitizer)`) and with `SD_LEAK_CHECK`. `tests/leaks.sh` defines
+`SD_LEAK_CHECK` for LeakSanitizer and `SD_PLAIN_MALLOC` for `leaks` on
+macOS. A deliberate leak and a deliberate use-after-free were checked to
+be reported under these builds. GCC's `-fsanitize=leak` alone defines no
+macro, so a build that uses it without `SD_LEAK_CHECK` (or
+`SD_PLAIN_MALLOC`) sees no leaks. `SD_COUNT_OBJECTS` counts in
+`sd_obj_alloc`/`sd_obj_free` and works with either allocator.
+
+**Errors.** A header that is not a valid class when a block is freed or
+resized (a double free that reached a recycled block, or a pointer that
+did not come from `sd_mem_alloc`) ends the program with `crash: corrupt
+heap: bad block header`. Most double frees are not detected: run the ASan
+build to find them.
 
 ## 16. Decisions and limitations
 
@@ -1180,9 +1444,9 @@ Decisions made while writing the runtime (nobody was available to ask):
 7. **Deep copy on send happens once, by whichever side completes the
    transfer**, under the channel lock. Immortal objects and channels are
    shared instead of copied.
-8. **Goroutines are OS threads** with 8 MB (lazily committed) stacks,
-   reused by later goroutines (section 10). The runtime keeps a count of
-   running goroutines to detect deadlocks.
+8. **Goroutines are scheduled M:N** (section 10; until the scheduler,
+   each goroutine was an OS thread, reused by later goroutines). The
+   runtime keeps a count of running goroutines to detect deadlocks.
 9. **Cancellation points are send, receive, select, sleep and the blocking
    calls of section 13** (handle I/O, `sd_wait_fd`, `sd_wait_child`), not
    `close`; cancelled goroutines run their defers; a channel operation or
@@ -1209,24 +1473,67 @@ Decisions made while writing the runtime (nobody was available to ask):
     `seed_core.c`; `test_mem.c` frees a million-node box chain, list nesting
     and map nesting).
 
-17. **Blocking calls wait in `poll` with a per-goroutine wake-up pipe**
-    (section 13) rather than with signals (`pthread_kill` + `EINTR` races
-    with the call being entered) or an event loop (goroutines are threads).
-    It costs two descriptors per goroutine that ever blocks.
+17. **Blocking calls park on the poller** (sections 10 and 13); a stop
+    claims the wait and readies the goroutine. Descriptors the poller
+    cannot watch are polled in a block section with a per-goroutine
+    wake-up pipe (rather than signals: `pthread_kill` + `EINTR` races with
+    the call being entered).
 18. **Finished goroutines are reaped at the next spawn** in their group
     (section 10), so long-running groups don't keep their tasks.
-19. **Worker threads are reused** (section 10) rather than one thread being
-    created and joined per goroutine: starting a goroutine went from about
-    15 us to 1.4 us. Only threads whose goroutine returned are reused.
-20. **Spinning before sleeping** (section 15), bounded to half the CPUs
-    and to times when CPUs are idle, for parked goroutines (20 us) and idle
-    workers (20 us). An unbuffered round trip went from 3.3 us to 0.7 us.
+19. **Finished goroutines are reused** with their stacks (section 10),
+    per processor and then shared (in the thread-per-goroutine runtime,
+    worker threads were reused: starting a goroutine went from 15 us to
+    1.4 us; with the scheduler it is under 1 us and no system call).
+20. **Hand-offs stay on one CPU** (section 10, run queues): a readied
+    goroutine runs next on the readier's processor, and another processor
+    takes it only if it waited there for a scheduler tick (a 3 us sleep,
+    about 50-80 us with Linux's timer slack, as in Go) while its processor
+    ran nothing else. Taking it at once split producer/consumer pairs over
+    two CPUs, where each hand-off wakes a thread and a buffered channel is
+    fought over (three times slower). (The thread-per-goroutine runtime
+    spun before sleeping instead.)
 21. **Cleanup frames are released before the `siglongjmp`** (section 9), on
     the stack that is being abandoned (or the fault handler's alternate
     stack), because the unwound frames' memory is reused by the defers that
     run afterwards. Their order relative to the defers does not matter:
     defer environments own their values, and goroutines of an aborted group
     have their own copies.
+22. **A small-object allocator with thread caches** (section 15) for
+    counted objects, instead of `malloc`. Blocks freed on another thread
+    join that thread's cache, which is simpler than mimalloc-style
+    remote-free lists and needs no atomic operations on the fast paths.
+    The price is that memory is reused but never returned to the system,
+    and that caches can hold blocks of a class that the thread no longer
+    uses (at most two batches per class per thread).
+23. **No short-string optimisation.** `sd_str` is a pointer to a public
+    struct. Generated code passes it as one word, uses `NULL` for a null
+    `string?`, and builds literals as static structs of that layout
+    (`SD_STR_LIT`). Natives read `s->data` and `s->len` directly. Inlining
+    short strings would change the C type of every string in generated
+    code and every native, so it was not done with the allocator. The
+    allocator makes short strings cheap instead: one header plus one
+    16-48-byte slot from the thread cache.
+24. **Go's scheduler design** (G, M, P, per-P run queues with `runnext`,
+    spinning Ms, sysmon handing off Ps blocked in system calls) rather than
+    a simpler global queue: per-P queues keep hand-offs on one CPU and
+    spawns cheap, and Go has shown how to avoid lost wake-ups with them.
+    Goroutines switch to their M's scheduler context to park (two switches
+    per hand-off rather than one), which keeps the race between a parking
+    goroutine and its waker in one place (`handle_act`).
+25. **Fixed-size stacks with guards, then without.** Stacks cannot grow or
+    move (C code holds pointers into them), so each is a large lazily
+    committed reservation. The guard costs two kernel memory maps per
+    stack, and Linux's default limit of 65,530 maps would stop a program at
+    about 32,000 goroutines; past a budget derived from the limit, stacks
+    have no guard (their overflow is not detected) rather than spawn
+    failing.
+26. **No preemption** (section 10): a goroutine keeps its CPU until it
+    parks or blocks. Preempting C code would need signals and could stop a
+    goroutine inside `malloc` or holding a lock.
+27. **Thread-local state is read only through noinline functions**
+    (section 10, "Thread-local storage"), and `errno` is redefined to one.
+    Saving and restoring the thread's variables at each switch would not
+    help: the compiler caches the variables' addresses, not their values.
 
 Limitations and things left for later:
 
@@ -1237,20 +1544,67 @@ Limitations and things left for later:
   leaks its locals). Section 17 has the history of the design.
 - Big integers use quadratic algorithms; `int.string()` of a number with
   millions of digits is slow.
-- Each running goroutine is a thread: tens of thousands of simultaneous goroutines
-  will hit OS limits (`ulimit -u`, kernel thread limits); `sd_spawn` ends the
-  program with `crash: cannot start a goroutine (out of threads)` when
-  thread creation fails.
+- Goroutines use memory for their stacks as deep as they grow, a page or
+  two for most (an idle goroutine costs about 8 KB plus its task); 100,000
+  goroutines at once are fine. Past about 24,000 at once on Linux (the
+  default `vm.max_map_count`), new stacks have no guard (decision 25).
+  `sd_spawn` ends the program with `crash: cannot start a goroutine (out of
+  memory for its stack)` when no stack can be mapped.
+- No preemption: as many goroutines computing without parking as there are
+  CPUs keep the others (and timers' goroutines) waiting.
+- A call that blocks in the OS without a block section (a native that
+  forgot it) holds up its worker until sysmon cannot help: sysmon hands off
+  only Ps in block sections.
 - Package-level constants of list/map type must not be cached in shared
   memory (section 12).
-- Two goroutines using one handle at once take turns on its operation lock;
-  the one waiting checks for a stop every 20 ms rather than being woken.
-- Tested on macOS (arm64, Apple clang) and Linux (x86_64, glibc, GCC). The
-  code uses only C11 and POSIX (`pthread`, `posix_spawnp`, `sigaltstack`,
-  `clock_gettime`). On glibc, `posix_spawnp` may report a missing program as
-  exit status 127 rather than an error.
+- The scheduler was developed and tested on Linux (x86_64, glibc, GCC and
+  Clang; aarch64 under qemu). macOS (arm64) uses the same aarch64 switch
+  (with Apple's symbol names) and kqueue instead of epoll; that path has
+  not been run on a Mac yet. Before the scheduler, the runtime was tested
+  on macOS (arm64, Apple clang) and Linux (x86_64, glibc, GCC). The code
+  uses C11, POSIX (`pthread`, `posix_spawnp`, `sigaltstack`,
+  `clock_gettime`, `mmap`), epoll/timerfd on Linux and kqueue on macOS and
+  the BSDs. On glibc, `posix_spawnp` may report a missing program as exit
+  status 127 rather than an error.
 
 ## 17. Future work
+
+### Goroutines in user space (done: the M:N scheduler)
+
+Goroutines were OS threads, reused by later goroutines, with spinning to
+avoid sleeping: starting one cost about 1.4 us on macOS and a channel
+hand-off a thread wake-up (several microseconds), which made `spawn` 5.7
+times and `pingpong` 5.1 times slower than Go on Linux. Section 10
+describes what replaced it: Go's G/M/P scheduler with user-space switches,
+per-processor run queues, a poller and block sections. Both benchmarks are
+now within about 1.5 times of Go (docs/performance.md, "Goroutine
+scheduler (M:N)"). The parts that made it work:
+
+- switching through the M's own stack (g0), with one atomic state per
+  goroutine that decides between a parking goroutine and its waker;
+- keeping a readied goroutine on the readier's processor (`runnext`, and
+  stealing it only after the owner ran nothing for a tick): stealing it at
+  once was three times slower on a buffered channel and doubled the cost of
+  an unbuffered ping-pong;
+- spinning on channel and group locks before sleeping (glibc's adaptive
+  mutexes), and spawn arguments kept in the goroutine.
+
+What is left:
+
+- **Preemption** of goroutines that compute for long (section 10). Go does
+  it with signals at safe points; for generated C, a check of a
+  per-processor flag at loop back-edges would be simpler.
+- **Growable or smaller stacks.** Stacks are 8 MB reservations; a
+  goroutine costs its touched pages (8 KB or more) where Go starts at
+  2 KB. Stacks that move need every pointer into them known, which C does
+  not give; segmented stacks (GCC's `-fsplit-stack`) are not portable.
+- **The poller's thread hop.** Descriptors and timers are watched by one
+  thread, so a goroutine woken by I/O or a timer goes through the global
+  queue. Go's idle Ms poll the network themselves; doing the same would
+  save a thread wake-up per event for network servers.
+- **Child processes** are still waited for by a helper thread per
+  `sd_wait_child`; `pidfd_open` (Linux) and `EVFILT_PROC` (kqueue) would
+  let the poller do it.
 
 ### Freeing what an unwound frame held (done: cleanup frames)
 
@@ -1283,7 +1637,8 @@ compiler/README.md describe them. Two details differ from the first
 design, which put the frames on the defer stack and released them while
 unwinding: the frames are released *before* the `siglongjmp` (afterwards,
 the defers that run reuse the unwound stack), and they form a chain of
-their own through a thread-local pointer. The compiler keeps a value in
+their own (through a thread-local pointer then; through the goroutine
+since the scheduler, section 10). The compiler keeps a value in
 the frame only when it owns it across a call that may crash or stop
 (other slots stay plain C locals), and leaves out ints and enums whose
 cases have no data (their values never own memory, except big integers).

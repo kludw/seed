@@ -13,7 +13,9 @@ static void io_stdin_init(void) { io_stdin_id = sd_handle_new(SD_HANDLE_STDIN, 0
 
 static sd_handle *io_stdin(void) {
   pthread_once(&io_stdin_once, io_stdin_init);
+  sd_block_begin(); /* stdout may be a full pipe */
   fflush(stdout);
+  sd_block_end();
   return sd_handle_acquire(io_stdin_id, SD_HANDLE_STDIN);
 }
 
