@@ -104,7 +104,9 @@ sd_err sd_lib_net_listen(sd_str addr, sd_S_net_Listener *out) {
   hints.ai_socktype = SOCK_STREAM;
   hints.ai_flags = AI_PASSIVE;
   if (!host[0]) hints.ai_family = AF_INET; /* ":8080": every IPv4 interface */
+  sd_block_begin(); /* a name may need a lookup */
   int rc = getaddrinfo(host[0] ? host : NULL, port, &hints, &res);
+  sd_block_end();
   free(host);
   free(port);
   if (rc != 0) return sd_errorf("net.listen: %s: %s", addr->data, net_gai_reason(rc));

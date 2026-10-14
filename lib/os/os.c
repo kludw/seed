@@ -83,10 +83,12 @@ sd_err sd_lib_os_output(sd_list *argv, sd_str *out, sd_int *code) {
   posix_spawn_file_actions_t fa;
   posix_spawn_file_actions_init(&fa);
   posix_spawn_file_actions_adddup2(&fa, fds[1], 1);
+  sd_block_begin(); /* the flushes may block, and so may posix_spawnp */
   fflush(stdout);
   fflush(stderr);
   pid_t pid;
   int r = posix_spawnp(&pid, av[0], &fa, NULL, av, environ);
+  sd_block_end();
   posix_spawn_file_actions_destroy(&fa);
   close(fds[1]);
   if (r != 0) {

@@ -27,34 +27,46 @@ SD_NOINLINE const char *sd_strerror(int e) {
   return buf;
 }
 
-/* ------------------------------------------------------------------ fmt */
+/* ------------------------------------------------------------------ fmt
+ *
+ * Calls that may block in the OS (stdout into a full pipe, the file
+ * system, starting a program) run in block sections (seed.h), so that the
+ * other goroutines keep running meanwhile. */
 
 void sd_fmt_print(sd_str s) {
+  sd_block_begin();
   flockfile(stdout);
   fwrite(s->data, 1, (size_t)s->len, stdout);
   funlockfile(stdout);
+  sd_block_end();
 }
 
 void sd_fmt_println(sd_str s) {
+  sd_block_begin();
   flockfile(stdout);
   fwrite(s->data, 1, (size_t)s->len, stdout);
   putc_unlocked('\n', stdout);
   funlockfile(stdout);
+  sd_block_end();
 }
 
 void sd_fmt_eprint(sd_str s) {
+  sd_block_begin();
   fflush(stdout);
   flockfile(stderr);
   fwrite(s->data, 1, (size_t)s->len, stderr);
   funlockfile(stderr);
+  sd_block_end();
 }
 
 void sd_fmt_eprintln(sd_str s) {
+  sd_block_begin();
   fflush(stdout);
   flockfile(stderr);
   fwrite(s->data, 1, (size_t)s->len, stderr);
   putc_unlocked('\n', stderr);
   funlockfile(stderr);
+  sd_block_end();
 }
 
 /* ------------------------------------------------------------------- os */
@@ -102,10 +114,12 @@ sd_err sd_os_run(const sd_list *argv, sd_int *code) {
   char **av = sd_alloc((size_t)(argv->len + 1) * sizeof(char *));
   for (int64_t i = 0; i < argv->len; i++) av[i] = (char *)xs[i]->data;
   av[argv->len] = NULL;
+  sd_block_begin();
   fflush(stdout);
   fflush(stderr);
   pid_t pid;
   int r = posix_spawnp(&pid, av[0], NULL, NULL, av, environ);
+  sd_block_end();
   if (r != 0) {
     sd_err e = sd_errorf("os.run: %s: %s", av[0], sd_strerror(r));
     free(av);
@@ -132,7 +146,7 @@ sd_err sd_os_run(const sd_list *argv, sd_int *code) {
 
 static sd_err fs_err(const char *fn, sd_str path, int e) { return sd_errorf("fs.%s: %s: %s", fn, path->data, sd_strerror(e)); }
 
-sd_err sd_fs_read(sd_str path, sd_str *out) {
+static sd_err sd_fs_read_blocking_(sd_str path, sd_str *out) {
   *out = NULL;
   FILE *f = fopen(path->data, "rb");
   if (!f) return fs_err("read", path, errno);
@@ -158,7 +172,7 @@ sd_err sd_fs_read(sd_str path, sd_str *out) {
   return SD_ERR_NULL;
 }
 
-sd_err sd_fs_write(sd_str path, sd_str data) {
+static sd_err sd_fs_write_blocking_(sd_str path, sd_str data) {
   FILE *f = fopen(path->data, "wb");
   if (!f) return fs_err("write", path, errno);
   size_t w = fwrite(data->data, 1, (size_t)data->len, f);
@@ -167,17 +181,17 @@ sd_err sd_fs_write(sd_str path, sd_str data) {
   return SD_ERR_NULL;
 }
 
-bool sd_fs_exists(sd_str path) {
+static bool sd_fs_exists_blocking_(sd_str path) {
   struct stat st;
   return stat(path->data, &st) == 0;
 }
 
-bool sd_fs_is_dir(sd_str path) {
+static bool sd_fs_is_dir_blocking_(sd_str path) {
   struct stat st;
   return stat(path->data, &st) == 0 && S_ISDIR(st.st_mode);
 }
 
-sd_err sd_fs_list(sd_str dir, sd_list **out) {
+static sd_err sd_fs_list_blocking_(sd_str dir, sd_list **out) {
   *out = NULL;
   DIR *d = opendir(dir->data);
   if (!d) return fs_err("list", dir, errno);
@@ -193,7 +207,7 @@ sd_err sd_fs_list(sd_str dir, sd_list **out) {
   return SD_ERR_NULL;
 }
 
-sd_err sd_fs_mkdir(sd_str path) {
+static sd_err sd_fs_mkdir_blocking_(sd_str path) {
   char *cp = sd_alloc((size_t)path->len + 1);
   memcpy(cp, path->data, (size_t)path->len + 1);
   size_t n = strlen(cp);
@@ -216,7 +230,56 @@ sd_err sd_fs_mkdir(sd_str path) {
   return err;
 }
 
-sd_err sd_fs_remove(sd_str path) {
+static sd_err sd_fs_remove_blocking_(sd_str path) {
   if (remove(path->data) != 0) return fs_err("remove", path, errno);
   return SD_ERR_NULL;
+}
+
+sd_err sd_fs_read(sd_str path, sd_str *out) {
+  sd_block_begin();
+  sd_err r = sd_fs_read_blocking_(path, out);
+  sd_block_end();
+  return r;
+}
+
+sd_err sd_fs_write(sd_str path, sd_str data) {
+  sd_block_begin();
+  sd_err r = sd_fs_write_blocking_(path, data);
+  sd_block_end();
+  return r;
+}
+
+bool sd_fs_exists(sd_str path) {
+  sd_block_begin();
+  bool r = sd_fs_exists_blocking_(path);
+  sd_block_end();
+  return r;
+}
+
+bool sd_fs_is_dir(sd_str path) {
+  sd_block_begin();
+  bool r = sd_fs_is_dir_blocking_(path);
+  sd_block_end();
+  return r;
+}
+
+sd_err sd_fs_list(sd_str dir, sd_list **out) {
+  sd_block_begin();
+  sd_err r = sd_fs_list_blocking_(dir, out);
+  sd_block_end();
+  return r;
+}
+
+sd_err sd_fs_mkdir(sd_str path) {
+  sd_block_begin();
+  sd_err r = sd_fs_mkdir_blocking_(path);
+  sd_block_end();
+  return r;
+}
+
+sd_err sd_fs_remove(sd_str path) {
+  sd_block_begin();
+  sd_err r = sd_fs_remove_blocking_(path);
+  sd_block_end();
+  return r;
 }
