@@ -209,6 +209,7 @@ struct sd_task {
   void *args;
   const sd_type *args_type;
   sd_err result;            /* what the body returned, handed to the group on g0 */
+  _Alignas(16) char argbuf[64]; /* the arguments, when they fit */
   uint64_t rng;
   void (**atexit_fns)(void); /* sd_goroutine_atexit, run when the goroutine ends */
   size_t natexit, capatexit;
@@ -283,12 +284,13 @@ struct sd_p {
   _Atomic(sd_task *) runnext;
   _Atomic int status;            /* SD_P_* */
   _Atomic uint32_t syscalltick;  /* counts block sections */
-  uint32_t schedtick;
+  _Atomic uint32_t schedtick;    /* counts goroutines run (written by the owner) */
   uint32_t sm_tick;              /* sysmon's view of syscalltick, and when it changed */
   int64_t sm_when;
   sd_p *link;                    /* in the idle list */
   sd_task *gfree;                /* finished goroutines kept for reuse */
   int ngfree;
+  uint32_t ntrim;
 };
 
 /* A worker thread. g0sp is its own stack (the scheduler context), saved
@@ -330,7 +332,10 @@ static struct {
 
 static pthread_once_t sched_once = PTHREAD_ONCE_INIT;
 static sd_task *sd_main_task; /* the task of sd_main: the root of the deadlock report */
-static atomic_long sd_running; /* goroutines not parked (waits in the OS count), plus pending timers */
+/* Goroutines not parked (waits in the OS count), plus pending timers. Every
+ * thread changes it: it has a cache line of its own. */
+static _Alignas(64) atomic_long sd_running;
+static char sd_running_pad_[64 - sizeof(atomic_long)] __attribute__((unused));
 static atomic_ulong sd_seed_counter;
 static bool sd_fault_installed;
 static size_t sd_pagesize;
@@ -777,7 +782,6 @@ static sd_task *g_get(size_t stack) {
   }
   if (t) {
     t->schedlink = NULL;
-    t->rng = seed_new(t);
     return t;
   }
   t = task_alloc();
@@ -795,7 +799,6 @@ static void g_put(sd_task *t) {
     task_destroy(t);
     return;
   }
-  stack_trim(&t->stk);
 #if defined(SD_ASAN)
   /* Frames of the goroutine that never returned leave their redzones
    * poisoned; the stack's top part is what the next one uses. */
@@ -807,6 +810,10 @@ static void g_put(sd_task *t) {
 #endif
   sd_p *p = cur_p();
   if (p) {
+    /* A stack that went deep gives its memory back (stack_trim). Looking
+     * costs a page of the stack the goroutine did not use, so a P checks
+     * every fourth one it keeps, and every one it passes on. */
+    if ((++p->ntrim & 3) == 0) stack_trim(&t->stk);
     t->schedlink = p->gfree;
     p->gfree = t;
     if (++p->ngfree <= SD_GFREE_LOCAL) return;
@@ -819,6 +826,7 @@ static void g_put(sd_task *t) {
       p->ngfree--;
       g->schedlink = batch;
       batch = g;
+      stack_trim(&g->stk);
       n++;
     }
     pthread_mutex_lock(&sched.gmu);
@@ -844,6 +852,7 @@ static void g_put(sd_task *t) {
     (void)n;
     return;
   }
+  stack_trim(&t->stk);
   pthread_mutex_lock(&sched.gmu);
   bool keep = sched.ngfree < SD_GFREE_GLOBAL;
   if (keep) {
@@ -973,15 +982,37 @@ static int64_t mono_ns(void) {
   return (int64_t)ts.tv_sec * 1000000000 + ts.tv_nsec;
 }
 
-/* Locks m, trying for a short while before blocking: the group locks are
- * held for a few instructions at a time, but by many threads at once when
- * goroutines start and end in bursts, and a blocked pthread_mutex_lock costs
- * a system call to sleep and another to wake. */
+/* Channel and group locks are held for a few instructions at a time, but
+ * taken by several CPUs at once (a producer and a consumer, goroutines of
+ * a group starting and ending in bursts), and a lock that blocks at once
+ * costs a system call to sleep and another to wake. So they spin for a
+ * while first: glibc's adaptive mutexes do (watching the lock without
+ * writing to it); elsewhere, a short trylock loop. */
+#if defined(__GLIBC__)
+#define SD_SPIN_LOCKS 0
+#else
+#define SD_SPIN_LOCKS 1
+#endif
+
+static void spin_mutex_init(pthread_mutex_t *m) {
+#if defined(__GLIBC__)
+  pthread_mutexattr_t a;
+  pthread_mutexattr_init(&a);
+  pthread_mutexattr_settype(&a, 3); /* PTHREAD_MUTEX_ADAPTIVE_NP (a _GNU_SOURCE name) */
+  pthread_mutex_init(m, &a);
+  pthread_mutexattr_destroy(&a);
+#else
+  pthread_mutex_init(m, NULL);
+#endif
+}
+
 static void lock_briefly(pthread_mutex_t *m) {
+#if SD_SPIN_LOCKS
   for (int i = 0; i < 100; i++) {
     if (pthread_mutex_trylock(m) == 0) return;
     cpu_relax();
   }
+#endif
   pthread_mutex_lock(m);
 }
 
@@ -1090,9 +1121,17 @@ static uint32_t runq_grab(sd_p *p, _Atomic(sd_task *) *batch, uint32_t bhead, bo
         sd_task *next = atomic_load_explicit(&p->runnext, memory_order_acquire);
         if (next) {
           if (atomic_load_explicit(&p->status, memory_order_relaxed) == SD_P_RUNNING) {
-            int64_t until = mono_ns() + 5000;
-            while (mono_ns() < until && atomic_load_explicit(&p->runnext, memory_order_relaxed) == next)
-              for (int i = 0; i < 50; i++) cpu_relax();
+            /* As Go does: a 3 us sleep, which Linux's timer slack makes
+             * about 50 us. Stealing it at once would split a goroutine
+             * that hands values to another (and parks) from that one: each
+             * hand-off would then wake a thread, and a buffered channel
+             * would be fought over by two CPUs. */
+            uint32_t tick = atomic_load_explicit(&p->schedtick, memory_order_relaxed);
+            struct timespec ts = {0, 3000};
+            nanosleep(&ts, NULL);
+            /* The owner ran something meanwhile (maybe this goroutine, which
+             * is back in runnext after a round): leave it. */
+            if (atomic_load_explicit(&p->schedtick, memory_order_relaxed) != tick) return 0;
           }
           if (atomic_compare_exchange_strong_explicit(&p->runnext, &next, NULL, memory_order_acq_rel, memory_order_relaxed)) {
             atomic_store_explicit(&batch[bhead % SD_RUNQ], next, memory_order_relaxed);
@@ -1375,7 +1414,7 @@ static sd_task *find_runnable(sd_m *m) {
 top:;
   sd_p *p = m->p;
   sd_task *g;
-  if (p->schedtick % 61 == 0 && atomic_load_explicit(&sched.runq_size, memory_order_relaxed) > 0) {
+  if (atomic_load_explicit(&p->schedtick, memory_order_relaxed) % 61 == 0 && atomic_load_explicit(&sched.runq_size, memory_order_relaxed) > 0) {
     pthread_mutex_lock(&sched.mu);
     g = globrunq_get_locked(p, 1);
     pthread_mutex_unlock(&sched.mu);
@@ -1511,7 +1550,8 @@ static SD_NORETURN void schedule(sd_m *m) {
     while (g) {
       m->curg = g;
       tls_set_task(g);
-      m->p->schedtick++;
+      atomic_store_explicit(&m->p->schedtick, atomic_load_explicit(&m->p->schedtick, memory_order_relaxed) + 1,
+                            memory_order_relaxed);
       switch_to_g(m, g);
       tls_set_task(NULL);
       m->curg = NULL;
@@ -1943,7 +1983,7 @@ sd_group *sd_group_begin(void) {
   sd_task *t = task_current();
   sd_group *g = calloc(1, sizeof *g);
   if (!g) sd_fatal("out of memory");
-  pthread_mutex_init(&g->mu, NULL);
+  spin_mutex_init(&g->mu);
   cl_push(t, (sd_cleanup){NULL, g, t->arena_len, 0});
   return g;
 }
@@ -1988,7 +2028,7 @@ static SD_NORETURN void goroutine_main(sd_task *t) {
   }
   if (t->args_type) {
     sd_release(t->args_type, t->args);
-    free(t->args);
+    if (t->args != (void *)t->argbuf) free(t->args);
     t->args = NULL;
   }
   while (t->natexit > 0) t->atexit_fns[--t->natexit]();
@@ -2041,6 +2081,11 @@ static void reap(sd_task *m) {
 void sd_spawn(sd_group *g, sd_task_fn body, const sd_type *args_type, const void *args) {
   sd_task *parent = task_current();
   sd_task *c = g_get(SD_GOROUTINE_STACK);
+  /* The select generator's seed, from the parent's (no shared counter). */
+  uint64_t x = sd_rand(parent) ^ (uint64_t)(uintptr_t)c;
+  x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ULL;
+  x = (x ^ (x >> 27)) * 0x94d049bb133111ebULL;
+  c->rng = (x ^ (x >> 31)) | 1;
   c->body = body;
   c->group = g;
   c->args_type = args_type;
@@ -2048,7 +2093,7 @@ void sd_spawn(sd_group *g, sd_task_fn body, const sd_type *args_type, const void
    * spawn ("spawn worker(i, jobs)"): the goroutine's name in reports. */
   if (args_type && args_type->name && strncmp(args_type->name, "spawn ", 6) == 0) c->name = args_type->name + 6;
   if (args_type) {
-    c->args = sd_alloc(args_type->size);
+    c->args = args_type->size <= sizeof c->argbuf ? (void *)c->argbuf : sd_alloc(args_type->size);
     sd_clone_deep(args_type, c->args, args);
   }
   lock_briefly(&g->mu);
@@ -2068,7 +2113,7 @@ void sd_spawn(sd_group *g, sd_task_fn body, const sd_type *args_type, const void
     /* The group is already failing: the goroutine is not started. */
     if (args_type) {
       sd_release(args_type, c->args);
-      free(c->args);
+      if (c->args != (void *)c->argbuf) free(c->args);
       c->args = NULL;
     }
     c->next = NULL;
@@ -2149,7 +2194,7 @@ sd_chan *sd_chan_new(const sd_type *et, sd_int cap) {
   sd_chan *c = sd_obj_alloc(sizeof *c);
   memset(c, 0, sizeof *c);
   atomic_init(&c->rc, 1);
-  pthread_mutex_init(&c->mu, NULL);
+  spin_mutex_init(&c->mu);
   c->et = et;
   c->cap = n;
   c->buf = n ? sd_alloc((size_t)n * et->size) : NULL;
@@ -2199,6 +2244,10 @@ static sd_waiter *waitq_claim(sd_waitq *q) {
   }
   return NULL;
 }
+
+/* (spin_mutex_init and lock_briefly: a producer and a consumer on two
+ * CPUs take a channel's lock all the time.) */
+static void chan_lock(sd_chan *c) { lock_briefly(&c->mu); }
 
 static void *slot(sd_chan *c, int64_t i) { return c->buf + (size_t)(i % c->cap) * c->et->size; }
 
@@ -2260,7 +2309,7 @@ static void close_locked(sd_chan *c) {
 }
 
 void sd_chan_close(sd_chan *c) {
-  pthread_mutex_lock(&c->mu);
+  chan_lock(c);
   if (c->closed) {
     pthread_mutex_unlock(&c->mu);
     sd_crash("close of closed channel");
@@ -2286,7 +2335,7 @@ static int sort_unique_chans(sd_chan **cs, int n) {
 }
 
 static void lock_all(sd_chan **cs, int n) {
-  for (int i = 0; i < n; i++) pthread_mutex_lock(&cs[i]->mu);
+  for (int i = 0; i < n; i++) chan_lock(cs[i]);
 }
 static void unlock_all(sd_chan **cs, int n) {
   for (int i = n; i-- > 0;) pthread_mutex_unlock(&cs[i]->mu);
@@ -2382,12 +2431,26 @@ int sd_select(sd_select_case *cases, int n) {
   return chosen;
 }
 
+/* A send or receive is a select of one case; when it can proceed at once
+ * (the common case of a buffered channel), it does without the select's
+ * bookkeeping. */
 void sd_chan_send(sd_chan *c, const void *val) {
+  check_cancel(task_current());
+  chan_lock(c);
+  int r = try_send(c, val);
+  pthread_mutex_unlock(&c->mu);
+  if (r == 1) return;
+  if (r == 0) sd_crash("send on closed channel");
   sd_select_case sc = {c, SD_SEND, (void *)val, false};
   sd_select(&sc, 1);
 }
 
 bool sd_chan_receive(sd_chan *c, void *out) {
+  check_cancel(task_current());
+  chan_lock(c);
+  int r = try_recv(c, out);
+  pthread_mutex_unlock(&c->mu);
+  if (r >= 0) return r == 1;
   sd_select_case sc = {c, SD_RECV, out, false};
   sd_select(&sc, 1);
   return sc.ok;
