@@ -246,10 +246,9 @@ much faster; it can replace the Seed one without changing any output.
 
 The package functions `rand.range`, `rand.fraction` and `rand.permutation`
 draw from a per-goroutine generator: the native `nextOs()` (rand.c) is a
-thread-local SplitMix64 state (each goroutine is a thread), seeded with
-`getentropy` (or `/dev/urandom`) on the goroutine's first use (an
-`sd_goroutine_atexit` function forgets the seed when the goroutine ends,
-since threads are reused by later goroutines). `Source` has
+SplitMix64 state in goroutine-local storage (`sd_goroutine_local`: a
+goroutine may run on several threads), seeded with `getentropy` (or
+`/dev/urandom`) on the goroutine's first use and freed when it ends. `Source` has
 a private `bool fromOs` (false from `seeded`); when it is set, `next`
 returns `nextOs()`, and each package function is
 `Source{state: 0, fromOs: true}` followed by the method call, so the

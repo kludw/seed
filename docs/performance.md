@@ -50,7 +50,9 @@ here).
 
 Sequential code is within 1.2x of Go; tight integer loops and string
 building are now faster than Go's versions, as are maps and sorting. The
-two concurrency benchmarks are where goroutines being threads shows.
+two concurrency benchmarks are where goroutines being threads shows (they
+were; with the M:N scheduler they are within about 1.1-1.4x of Go: section
+"Goroutine scheduler (M:N)").
 
 Runtime micro-benchmarks (`runtime/tests/run.sh bench`):
 
@@ -84,13 +86,13 @@ and maps (the queue that makes freeing non-recursive). The runtime's own
 allocator has since replaced `malloc` for these objects (section
 "Allocator").
 
-**`pingpong`: waking threads.** Goroutines are OS threads, so a goroutine
+**`pingpong`: waking threads** (before the M:N scheduler). Goroutines were OS threads, so a goroutine
 blocked on a channel sleeps on a condition variable, and waking it costs a
 system call to signal and the scheduler's latency to resume it, several
 microseconds each on macOS. An unbuffered round trip needs two such
 hand-offs. Go switches goroutines in user space in about 100-200 ns.
 
-**`spawn`: starting threads.** Each `spawn` created a thread
+**`spawn`: starting threads** (before the M:N scheduler). Each `spawn` created a thread
 (`pthread_create` with an 8 MB stack), and the group joined it
 (`pthread_join`): about 12 us per goroutine. After that, contention: when
 1,000 goroutines end at once they all take the group's lock, which a
@@ -161,11 +163,9 @@ its allocation), tighter bounds for lengths (`i + 1` with `i < xs.len()` is
 not proven small, because a length is only known to be below 2^62), and
 intervals for fields and parameters (`fib`).
 
-What would need more than the compiler: goroutines in user space (an M:N
-scheduler with growable stacks) to get `spawn` and `pingpong` to Go's
-level. Threads are a deliberate simplification (runtime/README.md, decision
-8); the worker pool and spinning recover most of the cost for the patterns
-programs use (a goroutine per request, short hand-offs).
+What needed more than the compiler: goroutines in user space, to get
+`spawn` and `pingpong` to Go's level. That is the M:N scheduler of the
+last section.
 
 ## Allocator
 
@@ -236,3 +236,99 @@ Not done:
   the details.
 - **Returning memory to the system.** Freed slots are reused, so memory
   stays flat at the peak of live objects, but chunks are never unmapped.
+
+## Goroutine scheduler (M:N)
+
+Goroutines used to be OS threads (reused by later goroutines, with
+spinning before sleeping). They are now scheduled M:N, as in Go: each
+goroutine has a stack of its own (8 MB reserved, committed as it grows,
+pooled) and is switched in user space (a hand-written register swap for
+x86_64 and aarch64) onto one worker thread per CPU. Each processor has a
+run queue; idle workers steal. Channels, selects and group waits park the
+goroutine instead of a thread; descriptors and timers are watched by one
+poller thread (epoll or kqueue). runtime/README.md, section 10, has the
+design, including the rule for thread-local storage that a goroutine
+moving between threads requires.
+
+**Results.** Linux x86_64, 4 cores, GCC 13, `-O2`, on a machine shared
+with other builds. "Before" is the runtime with the allocator and a thread
+per goroutine (branch `seed-v2-xdbfs9`); "after" is this scheduler. The
+three were run alternately, best of 7; the after/before ratio is the
+stable number (the absolute times moved by 20-50% between windows).
+
+| Benchmark | Before (s) | After (s) | After / before | Go (s) | After / Go |
+|---|---|---|---|---|---|
+| `fib` | 1.77 | 1.75 | 0.99 | 0.58 | 3.0 |
+| `intloop` | 0.84 | 0.90 | 1.06 | 0.42 | 2.1 |
+| `json` | 1.16 | 1.20 | 1.04 | 1.11 | 1.1 |
+| `maps` | 1.20 | 1.21 | 1.01 | 2.05 | 0.6 |
+| `pingpong` | 0.59 | **0.13** | **0.23** | 0.12 | **1.1** (was 5.0) |
+| `sort` | 0.51 | 0.50 | 0.98 | 0.98 | 0.5 |
+| `spawn` | 1.01 | **0.10** | **0.10** | 0.075 | **1.3** (was 13) |
+| `strings` | 0.80 | 0.78 | 0.97 | 2.14 | 0.4 |
+
+The sequential benchmarks do not change beyond noise: a second window
+gave `intloop` 0.97, `json` 1.08, `fib` 1.02 and `strings` 1.06. Instruction
+counts (`valgrind --tool=callgrind`) are steadier: `strings` executes the
+same instructions, `json` 1.3% more and the compiler compiling itself 1.5%
+more (376 ms before, 367 ms after). That is the cleanup frames: a function
+with a frame now finds its goroutine's chain with a call
+(`sd_lf_top_`), where it used to read a thread-local variable, because the
+goroutine may continue on another thread. `spawn` measured 1.2-1.6x Go
+in other windows, `pingpong` 1.1-1.2x.
+
+Runtime micro-benchmarks (`runtime/tests/run.sh bench`, same machine, the
+test's goroutines started from a thread outside the scheduler):
+
+| Operation | Before | After |
+|---|---|---|
+| `chan int(0)` producer -> consumer | 1.0-1.2 us per value | 0.30-0.36 us per value |
+| `chan int(1024)` producer -> consumer | 385-530 ns per value | 74-107 ns per value |
+| buffered send + receive, one goroutine | 79-135 ns | 71 ns |
+| spawn + join, one goroutine at a time | 15 us | 2.0-2.3 us |
+
+**Where the time went, and what made the difference.**
+
+- **Hand-offs.** A goroutine readied by another (a channel hand-off, the
+  last member of a group waking its waiter) goes to the readier's
+  `runnext` slot and runs on the same CPU as soon as the readier parks:
+  two user-space switches through the worker's scheduler context, no
+  system call. `pingpong`'s unbuffered half (100,000 round trips) went
+  from 0.18 s to 0.05 s (0.5 us per round trip; Go: 0.055 s), its
+  buffered half (1 million values through `chan int(1024)`) from 0.44 s
+  to 0.08 s (Go: 0.07-0.09 s).
+- **Not stealing a hand-off too early.** At first, an idle worker stole a
+  readied goroutine from `runnext` after 5 us of spinning. That split
+  producer/consumer pairs over two CPUs: the buffered half of `pingpong`
+  took 0.25 s (Go: 0.09 s), with both CPUs fighting over the channel's
+  lock, and the unbuffered half 0.11 s, because every hand-off between
+  CPUs wakes a thread. Go waits `usleep(3)` before stealing `runnext`,
+  which Linux's timer slack makes about 50-80 us. Seed now does the same
+  and also leaves it if the owning processor ran anything meanwhile (a
+  goroutine can be back in `runnext` after a whole round, which the first
+  version mistook for one that had waited): the buffered half takes
+  0.09 s, the steals fell from about 280 to 15 per run.
+- **Spawning.** A goroutine's task and stack come from the processor's
+  free list (a few hundred stacks are mapped at the start of `spawn`, then
+  reused), its arguments are copied into the task when they fit in 64
+  bytes, and it is queued with two atomic operations. One processor runs
+  `spawn` in 0.07 s, as fast as Go; with four, the goroutines of a batch
+  run on other CPUs and fight over the group's and the channel's locks,
+  hence 0.10 s.
+- **Locks.** Channel and group locks are glibc adaptive mutexes, which
+  spin on a load before sleeping; with the default mutexes, contended
+  operations went to the kernel at once (a third of `pingpong`'s buffered
+  half was system time). A first version that looped on `trylock` made
+  `spawn` slower: the loop's writes took the lock's cache line away from
+  the holder.
+- **False sharing.** The count of running goroutines (for the deadlock
+  check) is updated by every thread; a counter used to seed each new
+  goroutine's select generator sat on the same cache line. New goroutines
+  now take their seed from their parent's generator.
+
+What was measured and not kept: spinning in `park` before switching away
+(the thread-per-goroutine design needed it; with user-space switches it
+only burns CPU), and checking every pooled stack for deep use (touching a
+second page of each stack at exit cost about 10% of `spawn`; a processor
+now checks every fourth stack it keeps).
+

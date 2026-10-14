@@ -1277,7 +1277,24 @@ test programs of `lib/net`, `lib/http`, `lib/fs`, `lib/time` and
 No failure and no report, apart from one test-isolation bug in `lib/fs`'s
 tests (lib/BUGS_FIXED.md).
 
-Performance on an Apple M-series laptop (`-O2`, `run.sh bench`):
+Soak of the M:N scheduler (section 10; Linux x86_64, 4 cores, on a machine
+shared with other builds): the 38 concurrency programs of `tests/full`
+above ran 52 times each with `SEED_PROCS=1`, `SEED_PROCS=2` and the default
+4 processors, four copies at once (5,928 runs); `test_conc` and
+`test_block` 52 times each per setting (312 runs); `seed test lib/net
+lib/http lib/fs lib/time lib/rand` (94 tests) 20 times per setting (60
+runs). No failure. The `net`, `http`, `fs`, `time` and `rand` tests also
+passed 3 times each with everything (the runtime included) built under
+`-fsanitize=thread` and under `-fsanitize=address,undefined`, with no
+reports, and the runtime's tests passed on aarch64 under qemu (plain
+build, both context-switch implementations: the assembly and
+`SD_CTX_UCONTEXT`).
+
+Performance on an Apple M-series laptop (`-O2`, `run.sh bench`), with
+goroutines as threads (before the M:N scheduler; its numbers on Linux are
+in docs/performance.md, "Goroutine scheduler (M:N)": a `chan int(0)`
+hand-off 0.3 us, `chan int(1024)` 75-105 ns per value, spawn + join 2 us
+from a thread outside the scheduler and about 1 us from a goroutine):
 
 | Operation | Cost |
 |---|---|
@@ -1293,16 +1310,12 @@ Performance on an Apple M-series laptop (`-O2`, `run.sh bench`):
 | `select` over two ready channels | 20 ns |
 | spawn + join, one at a time | 1.4 us per goroutine (15 us before worker threads) |
 
-A blocked goroutine that has to sleep costs an OS thread wake-up (a
-condition variable, several microseconds on macOS). `park` therefore spins
-on the goroutine's wake flag for up to 20 us first, when there are idle
-CPUs (fewer running goroutines than CPUs) and fewer than half the CPUs are
-spinning already; a hand-off that arrives meanwhile costs neither the
-signal nor the wake-up. Buffered channels avoid parking when they don't
-fill up. The `group` and worker-pool locks are taken with a short
-`trylock` loop before blocking, since many threads take them at once when
-goroutines start and end in bursts. bench/ and docs/performance.md compare
-whole programs with Go.
+With the M:N scheduler (section 10), a hand-off between goroutines is two
+user-space switches on one CPU, with no system call: the readied
+goroutine runs next on the readier's processor. A thread is woken only
+when a processor is idle and nobody is looking for work. Channel and
+group locks spin before they sleep. bench/ and docs/performance.md
+compare whole programs with Go.
 
 ### Memory: the small-object allocator
 
@@ -1352,7 +1365,9 @@ two batches per class per thread (about 25 KB per class at most).
 class and free another thread's (both stay flat; glibc's `malloc` grows by
 about 4 KB a round on the second).
 
-**The thread-local rule.** The runtime is pasted into the same C file as
+**The thread-local rule** (stated for the whole runtime in section 10,
+"Thread-local storage"; this is how the allocator follows it). The
+runtime is pasted into the same C file as
 the generated code, so the C compiler can inline runtime functions into
 generated functions. GCC and Clang may compute the address of a
 `_Thread_local` variable once and reuse it for the rest of a function. With

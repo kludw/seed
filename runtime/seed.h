@@ -638,7 +638,7 @@ sd_lframe **sd_lf_top_(void);
  *   sd_group *g = sd_group_begin();
  *   sd_spawn(g, body, &T_args, &args);  (args borrowed: deep-copied for the goroutine)
  *   sd_err err = sd_group_wait(g);       (owned; g is freed)
- * body(args) runs on its own thread with a borrowed pointer to its private
+ * body(args) runs in the new goroutine with a borrowed pointer to its private
  * copy of the arguments, and returns an owned error. */
 typedef struct sd_group sd_group;
 typedef sd_err (*sd_task_fn)(void *args);
