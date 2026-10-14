@@ -88,7 +88,7 @@ echo "the cat and the dog and the bird" | build/seed2 run examples/wordcount.sd 
 build/seed2 build -o wordcount examples/wordcount.sd
 ```
 
-`make install PREFIX=$HOME/.local` (being added) installs the toolchain under `PREFIX` and puts `seed` on your `PATH` as `$PREFIX/bin/seed`. Until then, use `build/seed2` wherever this document says `seed`, or link to it: `seed` finds its standard library and runtime from its own path, through symbolic links.
+`make install` puts `seed` on your `PATH`: it links `$PREFIX/bin/seed` (`PREFIX` is `/usr/local` unless you give another, as in `make install PREFIX=$HOME/.local`) to `build/seed2`, and `make uninstall` removes the link. `seed` finds its standard library and runtime from its own path, through the link, so it works from any directory as long as the repository stays where it is. Without installing, use `build/seed2` wherever this document says `seed`.
 
 To learn the language, start with [the guide](docs/guide/README.md).
 
@@ -111,15 +111,18 @@ The Makefile has the development targets:
 
 | Target | What it does |
 |---|---|
-| `make` | Bootstraps the compiler: `build/seed2`. |
-| `make verify` | Checks the fixed point: the compiler compiled by itself generates exactly the same C again. |
-| `make test` | The language tests in `tests/lang` and `tests/seed0`. |
+| `make` | Bootstraps the compiler from the snapshot `bootstrap/seed.c`: `build/seed2`. |
+| `make verify` | Checks the fixed point (the compiler compiled by itself generates exactly the same C again) and, while the compiler is unchanged, that the snapshot is that C. |
+| `make release` | Verifies, then refreshes the snapshot `bootstrap/seed.c` from the current compiler. |
+| `make install` | Links `$PREFIX/bin/seed` to `build/seed2` (`make uninstall` removes it). |
+| `make test` | The language tests in `tests/lang` and `tests/core`. |
 | `make test-full` | The features outside the bootstrap subset, packages and `seed test`. |
 | `make test-lib` | The standard library's tests. |
 | `make test-fmt` | The formatter's self-checks and golden tests. |
-| `make test-examples` | Builds `examples/` and runs the ones that need no person. |
+| `make test-examples` | Builds every example and checks its output, its tests and its formatting. |
 | `make test-leaks` | Every test program under macOS `leaks` (slow). |
 | `docs/guide/check.sh` | Every example of the guide, against its expected output. |
+| `runtime/tests/run.sh` | The runtime's own C tests, under the address, undefined-behaviour and thread sanitizers. |
 
 ## The repository
 
@@ -131,10 +134,9 @@ The Makefile has the development targets:
 | [compiler/](compiler/README.md) | The compiler, written in Seed: lexer, parser, checker, C generator, formatter, `seed` command line. |
 | [runtime/](runtime/README.md) | The runtime in C (integers, strings, lists, maps, goroutines, channels, crashes), pasted into every program. |
 | [lib/](lib/README.md) | The standard library: one directory per package, in Seed with native functions in C. |
-| [seed0/](seed0/README.md) | The bootstrap compiler, written in C, for a subset of Seed (being retired). |
-| `bootstrap/` | The C snapshot of the compiler that replaces `seed0` (being added). |
+| `bootstrap/` | `seed.c`, the C snapshot of the compiler that `make` starts from, and `inputs.sha256`, the files it was made from. |
 | [tests/](tests/README.md) | Conformance tests: programs with their expected output, and programs the compiler must reject. |
-| `examples/` | Example programs: `wordcount`, `todo`, an HTTP `server` and a concurrent `fetch`. |
+| [examples/](examples/README.md) | Sixteen example programs, from `wordcount` to an expression language, a concurrent prime sieve, a key-value store and a JSON HTTP API, with a checked runner. |
 | [editors/vscode/](editors/vscode/README.md) | Syntax highlighting for VS Code. |
 
 The documentation:
@@ -149,12 +151,11 @@ The documentation:
 
 **Known limitations:**
 
-- Narrowing a nullable variable by assigning it a non-null value (`if (x == null) { x = "default" }`) is specified but still being implemented.
 - A crash, or a goroutine stopped by its group, leaks the memory held by the locals of the unwound frames. Normal execution leaks nothing.
 - Each goroutine is an OS thread, so tens of thousands of simultaneous goroutines hit OS limits.
 - Deadlock detection is global: it fires only when every goroutine is blocked. A goroutine stuck while others keep running waits forever, and defers do not run on a deadlock.
 - When a group fails, the code of the group block itself is not stopped, only the goroutines it started.
-- File I/O and `os.output` are not stop points, so a goroutine blocked in them is stopped only when the call returns.
+- File I/O is not a stop point, so a goroutine blocked in it is stopped only when the call returns.
 - A `select` case can only receive into a new variable.
 - Big integers use quadratic algorithms, so converting a number with millions of digits to text is slow.
 - Only tested on macOS (arm64, Apple clang). The runtime is C11 and POSIX, but Linux is untested.
@@ -165,12 +166,11 @@ Bugs found in passing are recorded in [compiler/BUGS_FIXED.md](compiler/BUGS_FIX
 
 ## How the bootstrap works
 
-The compiler is written in Seed, so something has to compile it the first time:
+The compiler is written in Seed, so something has to compile it the first time. That was **seed0**, a small compiler written in C for a subset of Seed; it is retired now ([docs/seed0.md](docs/seed0.md) tells its story). Today the compiler is built from a snapshot of its own generated C:
 
-1. **seed0** ([seed0/](seed0/README.md), [docs/seed0.md](docs/seed0.md)) is a small compiler written in C for a subset of Seed. It has fixed-size integers, no interfaces and no concurrency, and few checks.
-2. The real compiler ([compiler/](compiler/README.md)) is written in that subset. `seed0` compiles it to `build/stage1.c`, which becomes `build/seed1`.
-3. `seed1` compiles the compiler again (`build/stage2.c`, `build/seed2`), now with the full language and all checks. `seed2` compiling itself gives `build/stage3.c`, which must be byte-for-byte identical to `stage2.c`: the **fixed point** (`make verify`).
-4. The generated C of the compiler is committed as a snapshot, `bootstrap/seed.c`. From then on, `make` builds the compiler from the snapshot with `cc`, and `seed0` is deleted.
-5. A new language feature follows "teach, snapshot, use": teach the compiler the feature without using it, take a new snapshot, then use the feature in the compiler's own source.
+1. `bootstrap/seed.c` is the compiler's generated C, committed: self-contained (runtime and standard-library natives pasted in), so `cc` alone builds it into `build/seed-boot`.
+2. `seed-boot` compiles the compiler's current source (`compiler/*.sd`) into `build/stage1.c`, which becomes `build/seed1`.
+3. `seed1` compiles the compiler again (`build/stage2.c`, `build/seed2`). `seed2` compiling itself gives `build/stage3.c`, which must be byte-for-byte identical to `stage2.c`: the **fixed point** (`make verify`). While the compiler, runtime and library are unchanged since the snapshot, `stage3.c` must also be `bootstrap/seed.c` itself.
+4. `make release` verifies and writes `stage3.c` to `bootstrap/seed.c`, so the next build starts from the newest compiler.
 
-Steps 1 to 3 are how `make` works today. Step 4, the snapshot that retires `seed0`, is being finished.
+A new language feature follows "teach, snapshot, use": teach the compiler the feature without using it, take a new snapshot with `make release`, then use the feature in the compiler's own source ([compiler/README.md](compiler/README.md), "Adding a language feature").

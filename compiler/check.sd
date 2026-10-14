@@ -191,6 +191,7 @@ type Checker struct {
     map[string]bool usedImports
     map[string]int methods
     map[string]bool mutNames
+    map[string]bool builtinNamed
     []Impl impls
     []int methodSigType
     []int declType
@@ -243,6 +244,7 @@ fn newChecker(Ast ast, Diags diags, bool testMode) Checker {
         usedImports: map[string]bool{},
         methods: map[string]int{},
         mutNames: map[string]bool{},
+        builtinNamed: map[string]bool{},
         impls: []Impl{},
         methodSigType: []int{},
         declType: []int{},
@@ -511,6 +513,7 @@ fn (Checker c) mut addGlobal(string name, GlobalKind kind, int index, Pos pos) {
     int pkg = c.pkgOf(pos)
     if (isBuiltinTypeName(name)) {
         c.errorHint(pos, name + " is the name of a built-in type", "choose another name")
+        c.builtinNamed[pkg.string() + ":" + name] = true
         return
     }
     int? old = c.global(pkg, name)

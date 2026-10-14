@@ -296,6 +296,12 @@ fn (Checker c) mut checkLvalue(int e) {
 
 fn (Checker c) mut undefinedName(int e) {
     Expr x = c.ast.exprs[e]
+    if (c.builtinNamed[c.pkgOf(x.pos).string() + ":" + x.text] != null) {
+        // Declared with the name of a built-in type, which was reported
+        // there (addGlobal).
+        c.setType(e, tyInvalid)
+        return
+    }
     if (c.isPackageDir(x.text)) {
         c.errorHint(x.pos, "package " + x.text + " is not imported", "add import \"" + x.text + "\" after the package line")
         c.setType(e, tyInvalid)

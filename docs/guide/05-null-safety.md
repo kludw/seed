@@ -62,6 +62,16 @@ fn orDefault(string? s, string fallback) string {
     return s
 }
 
+// Assigning a value that is never null narrows too: after the if, who is
+// a plain string on both paths.
+fn greeting(string? name) string {
+    string? who = name
+    if (who == null) {
+        who = "stranger"
+    }
+    return "hello, " + who
+}
+
 fn main([]string args) error {
     User ann = User{name: "Ann", email: "ann@example.com"}
     User bob = User{name: "Bob", email: null}
@@ -70,6 +80,7 @@ fn main([]string args) error {
     fmt.println(domain(ann.email) + " " + domain(bob.email) + " " + domain("nope"))
     fmt.println(isLong("seedling").string() + " " + isLong(null).string())
     fmt.println(orDefault(null, "anonymous") + " " + orDefault("kam", "anonymous"))
+    fmt.println(greeting(null) + ", " + greeting("Ann"))
 
     // A map lookup gives a V?. Store it in a variable to check it.
     map[string]int stock = map[string]int{"apples": 3}
@@ -96,6 +107,7 @@ Bob (no email)
 example.com unknown invalid
 true false
 anonymous kam
+hello, stranger, hello, Ann
 no pears
 6 half-apples
 true
@@ -109,7 +121,7 @@ The compiler narrows a variable, or a field of a variable such as `u.email` or `
 - after `if (x == null) { return ... }`, or any `if` whose body always leaves (with `return`, `break`, `continue`, `os.exit` or `os.crash`);
 - to the right of `x != null &&`, and to the right of `x == null ||`;
 - through `!`: `if (!(x == null))` narrows like `if (x != null)`;
-- after an assignment of a non-null value: after `if (x == null) { x = "none" }`, `x` is a `string` on every path. (This rule is specified but still being implemented; until it lands, declare a non-null variable with the default and set it inside `if (v != null)`.)
+- after an assignment of a value that is never null (a `T`, not a `T?`): after `if (x == null) { x = "none" }`, `x` is a `string` on every path, as `greeting` above shows.
 
 Narrowing ends:
 

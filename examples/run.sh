@@ -11,8 +11,9 @@
 # "--- exit N". Programs run in examples/, so they see testdata/ and
 # expected/ by relative paths, and with $TMPDIR set to a scratch directory.
 #
-# tests/examples.sh (make test-examples) builds every examples/*.sd too; this
-# script is the one that checks the output of the examples listed here.
+# make test-examples runs this script after tests/examples.sh, which checks
+# the examples that need a temporary file or a running server (wordcount,
+# todo, server and fetch).
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/.." && pwd)

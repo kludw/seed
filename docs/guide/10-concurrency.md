@@ -171,7 +171,7 @@ group failed: checker: disk is full
 main carries on
 ```
 
-A goroutine is never interrupted in the middle of its work. It is stopped only at a **stop point**: a channel send or receive (including in `select`), or a standard-library call that blocks, such as `time.sleep`, reading stdin with `io.readLine`, socket I/O in `net` (and so `http`), `net.dial` and `os.run`. (Reading and writing regular files with `fs` is not a stop point: it doesn't block for long.) A goroutine that computes for a long time without reaching one finishes its work before it notices.
+A goroutine is never interrupted in the middle of its work. It is stopped only at a **stop point**: a channel send or receive (including in `select`), or a standard-library call that blocks, such as `time.sleep`, reading stdin with `io.readLine`, socket I/O in `net` (and so `http`), `net.dial`, `os.run` and `os.output`. (Reading and writing regular files with `fs` is not a stop point: it doesn't block for long.) A goroutine that computes for a long time without reaching one finishes its work before it notices.
 
 This is Erlang's "let it crash" idea, with the structure of the code deciding who cleans up: a failure is contained by the nearest enclosing `group`, and the code after that group decides what to do about it.
 

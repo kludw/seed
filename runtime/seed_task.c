@@ -1593,7 +1593,11 @@ static void run_main(void *p) {
 static char sd_stdout_buf[1 << 16];
 
 int sd_main(int argc, char **argv, sd_err (*main_fn)(sd_list *args)) {
-  setvbuf(stdout, sd_stdout_buf, _IOFBF, sizeof sd_stdout_buf);
+  /* stdout is line-buffered on a terminal, so that output shows as it is
+   * printed, and fully buffered otherwise; stderr is unbuffered. stdout is
+   * also flushed before reading stdin, starting a child and exiting. */
+  setvbuf(stdout, sd_stdout_buf, isatty(1) ? _IOLBF : _IOFBF, sizeof sd_stdout_buf);
+  setvbuf(stderr, NULL, _IONBF, 0);
   install_fault_handler();
   sd_task *t = task_current();
   setup_altstack(t);

@@ -6,7 +6,8 @@
 #   todo        add, done, remove and list, on a list file in a temporary directory
 #   server      on a free loopback port, with fetch (and curl, if installed) as clients
 #
-#   tests/examples.sh [seed]        (make test-examples runs it with build/seed2)
+#   tests/examples.sh [seed]        (make test-examples runs it with build/seed2,
+#                                    then examples/run.sh for the other examples)
 #
 # Executables go to build/examples/. Exits non-zero if anything failed.
 set -u

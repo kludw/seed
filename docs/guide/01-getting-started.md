@@ -2,7 +2,7 @@
 
 ## Building the toolchain
 
-Seed has one toolchain binary, `seed`, which compiles, runs, builds and formats programs. It is written in Seed itself and bootstrapped from a small C compiler, so all you need is a C compiler (`cc`, such as clang or gcc) and `make`:
+Seed has one toolchain binary, `seed`, which compiles, runs, builds and formats programs. It is written in Seed itself, and the repository carries a C snapshot of it, so all you need is a C compiler (`cc`, such as clang or gcc) and `make`:
 
 ```
 git clone <the seed repository>
@@ -10,14 +10,16 @@ cd seed
 make
 ```
 
-`make` builds the bootstrap compiler `build/seed0` from C, uses it to compile the real compiler (`build/seed1`), and then lets that compiler compile itself into `build/seed2`. `build/seed2` is the `seed` command.
+`make` compiles the snapshot `bootstrap/seed.c` with `cc` into `build/seed-boot`, uses it to compile the compiler's current source (`build/seed1`), and then lets that compiler compile itself into `build/seed2`. `build/seed2` is the `seed` command.
 
-`seed` turns your program into C and calls `cc` to compile it, so `cc` must stay installed. It also needs the runtime in the repository's `runtime/` directory. When you run it as `build/seed2` it finds the runtime by itself; to run it as plain `seed` from anywhere, set `SEED_ROOT` to the repository and put the binary on your `PATH`:
+`seed` turns your program into C and calls `cc` to compile it, so `cc` must stay installed. It also needs the runtime and the standard library in the repository's `runtime/` and `lib/` directories, which it finds from its own path. To run it as plain `seed` from anywhere, install a link to it on your `PATH`:
 
 ```
-export SEED_ROOT="$PWD"
-ln -s "$PWD/build/seed2" /usr/local/bin/seed
+make install                        # links /usr/local/bin/seed to build/seed2
+make install PREFIX=$HOME/.local    # or $HOME/.local/bin/seed
 ```
+
+The link keeps working as long as the repository stays where it is; `make uninstall` removes it.
 
 The rest of this guide writes `seed`.
 
@@ -109,6 +111,6 @@ The rules are in [formatting.md](../formatting.md), and [chapter 12](12-the-comp
 
 ## The current compiler
 
-Seed is young. The language described in this guide is complete and implemented, and so is the standard library ([stdlib.md](../stdlib.md)): `errors`, `fmt`, `io`, `os`, `fs`, `path`, `strings`, `math`, `rand`, `time`, `encoding`, `json`, `crypto`, `net` and `http` are all written. The few details that still differ from stdlib.md are marked there as "not implemented yet", and [lib/README.md](../../lib/README.md) has the notes on each package.
+Seed is young. The language described in this guide is complete and implemented, and so is the standard library ([stdlib.md](../stdlib.md)): `errors`, `fmt`, `io`, `os`, `fs`, `path`, `strings`, `math`, `rand`, `time`, `encoding`, `json`, `crypto`, `net` and `http` are all written, and [lib/README.md](../../lib/README.md) has the notes on each package. The known limitations of the implementation are listed in the [top-level README](../../README.md#status).
 
 Next: [Basics](02-basics.md).

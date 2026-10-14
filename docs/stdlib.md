@@ -2,7 +2,7 @@
 
 This is part of the language spec ([SPEC.md](../SPEC.md)). It defines every package in the Seed standard library: the types, the function signatures, and the exact behaviour, including errors and crashes. Built-in methods on `int`, `string`, lists, maps and so on are in [builtins.md](builtins.md) and are not repeated here.
 
-Every package and every function in this document is implemented, in [lib/](../lib/) (the `pub` declarations there are the source of truth; [lib/README.md](../lib/README.md) has the implementation notes). The few places where the implementation does not do everything described here yet are marked **(not implemented yet)**. The changes the design needed in the language itself are listed in [Spec changes this design relied on](#spec-changes-this-design-relied-on); they are all in SPEC.md now.
+Every package and every function in this document is implemented, in [lib/](../lib/) (the `pub` declarations there are the source of truth; [lib/README.md](../lib/README.md) has the implementation notes). The changes the design needed in the language itself are listed in [Spec changes this design relied on](#spec-changes-this-design-relied-on); they are all in SPEC.md now.
 
 | Package | Purpose |
 |---|---|
@@ -120,8 +120,7 @@ Writing text to stdout and stderr. There is no format-string language: values be
 
 - Each call is a single write. Output from two goroutines can interleave between calls, but never inside one.
 - Bytes are written as they are, without checking UTF-8.
-- Stdout is buffered. The buffer is flushed when it fills, before anything is written to stderr, before `io` reads stdin, before `os.run` and `os.output` start a child, and when the program exits for any reason, including `os.exit` and crashes. Stderr is not buffered.
-- Stdout should also be flushed after every call while it is a terminal. **(not implemented yet:** stdout is always fully buffered, with a 64 KiB buffer, even on a terminal.)
+- Stdout is buffered: line by line while it is a terminal, so each line shows as soon as it is printed, and in blocks of 64 KiB otherwise (a pipe or a file). The buffer is also flushed before anything is written to stderr, before `io` reads stdin (so a prompt printed without a newline shows), before `os.run` and `os.output` start a child, and when the program exits for any reason, including `os.exit` and crashes. Stderr is not buffered.
 - Write failures (a closed pipe, a full disk) are ignored. A program that must know whether its output arrived should write to a file with `fs`.
 
 `fmt.fixed` is here, rather than in `strings` or `math`, because it is the one place where a number needs a format other than `.string()`: prices, percentages and timings.
@@ -177,7 +176,7 @@ The running process and its environment. A program's arguments are not here: `ma
 - The child inherits the environment, the current directory, stdin and stderr. With `os.run` it also inherits stdout.
 - The exit code is the child's exit code. A child killed by a signal reports `128 + signal`, as shells do.
 - The error is set only when the child could not be started: `os.run: frobnicate: no such file or directory`. A child that runs and fails is not an error; check the exit code.
-- They are stop points: if the calling goroutine's group is stopped while a child runs, the child is killed (`SIGKILL`) and waited for. **(not implemented yet** for `os.output`, which blocks its goroutine until the child ends; `os.run` is a stop point.)
+- They are stop points: if the calling goroutine's group is stopped while a child runs, the child is killed (`SIGKILL`) and waited for.
 
 There is deliberately no `os.setEnv` and no `os.chdir`. The environment and the current directory are shared by every goroutine, so changing them would be shared mutable state. Pass values as arguments instead.
 
@@ -899,7 +898,7 @@ The design needed these changes to the language. All of them have been decided, 
 
 1. **Native functions.** A function may be declared without a body, only in the standard library (SPEC.md, "Standard library").
 2. **Private struct fields.** Fields are private unless marked `pub`, and a struct literal of another package's type is only allowed if every field is `pub`, so a program can't forge a handle (`net.Conn`, `fs.File`) or a `rand.Source` (SPEC.md, "Packages").
-3. **Stop points.** Blocking standard-library calls are stop points as well as channel operations (SPEC.md, "Concurrency"). What the library implements: `time.sleep`, `time.after`, `io`, every blocking `net` operation and `os.run`; not `os.output` yet, and not `fs` (regular files don't block for long).
+3. **Stop points.** Blocking standard-library calls are stop points as well as channel operations (SPEC.md, "Concurrency"). What the library implements: `time.sleep`, `time.after`, `io`, every blocking `net` operation, `os.run` and `os.output`; not `fs` (regular files don't block for long).
 4. **`spawn` inside loops in a `group`.** A `group` block is ordinary code, `spawn` may appear anywhere inside it, finished goroutines are freed while the group runs, and `return` and `try` are not allowed inside the block (SPEC.md, "Groups").
 5. **Strings hold any bytes** (SPEC.md, "Types").
 6. **Float division by zero** gives `inf` or `nan`; only `int` division by zero crashes (SPEC.md, "Operators").

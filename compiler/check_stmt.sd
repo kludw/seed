@@ -580,7 +580,7 @@ fn (Checker c) mut checkReturn(Stmt st) {
             // function returns; see genReturn).
             c.setType(e, rt)
             if (errIsNull) {
-                c.errorHint(c.ast.exprs[e].pos, fd.name + " returns null as its " + c.typeName(rt) + " result beside an error that is null, so the caller would read a null " + c.typeName(rt), "return a " + c.typeName(rt) + " value, or return an error such as errors.new(...)")
+                c.errorHint(c.ast.exprs[e].pos, fd.name + " returns null as its " + c.typeName(rt) + " result beside an error that is null, so the caller would read a null " + c.typeName(rt), "return " + withArticle(c.typeName(rt)) + " value, or return an error such as errors.new(...)")
             }
             continue
         }

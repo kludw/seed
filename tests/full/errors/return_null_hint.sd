@@ -1,0 +1,18 @@
+// expect-error: hint: return an int value, or return an error such as errors.new(...)
+// The hint uses "an" before a type that starts with a vowel.
+package main
+
+import "fmt"
+
+fn find(string s) (int, error) {
+    if (s == "") {
+        return null, null
+    }
+    return s.len(), null
+}
+
+fn main([]string args) error {
+    int n = try find("abc")
+    fmt.println(n.string())
+    return null
+}

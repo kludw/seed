@@ -1,5 +1,7 @@
-// expect-error: builtin_type_name.sd:8:12: error: float is the name of a built-in type
-// A variable named like a built-in type would hide the conversion float(x).
+// expect-error: builtin_type_name.sd:10:12: error: float is the name of a built-in type
+// expect-errors: 1
+// A variable named like a built-in type would hide the conversion float(x);
+// the call is not reported again.
 package main
 
 import "fmt"

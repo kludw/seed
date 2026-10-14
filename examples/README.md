@@ -25,17 +25,4 @@ A directory example is a project: `main.sd` is `package main`, and its packages 
 
 ## Checking the examples
 
-```
-make
-examples/run.sh
-```
-
-`run.sh` builds every example into `build/examples/`, runs the non-interactive ones (the REPLs with input from `testdata/`) and compares their stdout, stderr and exit code with `expected/CASE.out`, runs `seed test` on every project, and checks that every file is formatted. `examples/run.sh build/seed2 --update` rewrites the expected files after a deliberate change; review the diff before committing it.
-
-`make test-examples` (`tests/examples.sh`) also builds every single-file example, and checks wordcount, todo, server and fetch, which need a temporary file or a running server. To make it run these checks too, add a line to its recipe in the Makefile:
-
-```
-test-examples: build/seed2
-	tests/examples.sh build/seed2
-	examples/run.sh build/seed2
-```
+`make test-examples` runs two checkers. `examples/run.sh` builds every example into `build/examples/`, runs the non-interactive ones (the REPLs with input from `testdata/`) and compares their stdout, stderr and exit code with `expected/CASE.out`, runs `seed test` on every project, and checks that every file is formatted. `examples/run.sh build/seed2 --update` rewrites the expected files after a deliberate change; review the diff before committing it. `tests/examples.sh` checks wordcount, todo, server and fetch, which need a temporary file or a running server.

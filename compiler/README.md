@@ -23,7 +23,7 @@ make test-full  # tests/full (programs and packages) and tests/test_cmd.sh (seed
 make test-lib   # the standard library's tests: build/seed2 test lib
 make test-leaks # every test program under macOS leaks --atExit
 make test-fmt   # seed fmt: self-checks on every .sd file, tests/fmt goldens
-make test-examples  # builds examples/ and runs the ones that need no person
+make test-examples  # tests/examples.sh and examples/run.sh: every example built, run and checked
 make install    # links $(PREFIX)/bin/seed (PREFIX=/usr/local) to build/seed2; make uninstall removes it
 ```
 
@@ -209,8 +209,8 @@ The lexer produces `[]Token {kind, pos, text, raw}`: `text` is the identifier,
 the decoded bytes of a string or byte literal, or the number as written;
 `raw` is the exact source text. Newline tokens are inserted with Go's rule.
 Comments are not tokens: they are collected separately as
-`Comment {pos, text, ownLine}` and stored in `Ast.comments`, for a future
-`seed fmt`.
+`Comment {pos, text, ownLine}` and stored in `Ast.comments`, where
+`seed fmt` finds them (see "The formatter").
 
 ### The AST: arenas
 
@@ -331,14 +331,15 @@ and imports of any path.
 - `Ident.Ident{` is a qualified struct literal. As in seed0, `Name{` is
   always a struct literal (conditions are always parenthesised).
 - `-` directly before an int literal is folded into it, so that
-  `-9223372036854775808` is valid; the literal keeps its raw text, and the
-  checker reports literals that do not fit in 64 bits (the full language
-  will have integers that grow, so this is not a syntax error).
+  `-9223372036854775808` is valid; the literal keeps its raw text. Integer
+  literals may have any size, because integers grow (see "Decisions").
 - Comparisons do not chain; `x += 1` gets a specific message.
 
 Error recovery: the first error in a statement sets `failed`, and parse
 functions then return quickly without reporting more. The block loop skips
-to the end of the statement (`syncStatement`) and continues; the top level
+to the end of the statement (`syncStatementFrom`: a newline outside
+brackets, where the brackets the statement opened before the error, such as
+the `(` of `if (a < b < c) {`, count as open) and continues; the top level
 skips to the next line that starts a declaration (`syncTop`), always moving
 past the offending token. When a file has syntax errors, checking is skipped.
 
@@ -730,7 +731,10 @@ forward one release at a time.
 - **Arenas plus parallel result lists**, with `ExprInfo.wrap`,
   `ExprInfo.narrowed` and `ExprInfo.ifaceFrom` instead of rewriting the tree.
 - **Diagnostics**: up to 20, sorted, deduplicated by position, one error per
-  failing expression (`tyInvalid` suppresses cascades). "did you mean x?"
+  failing expression (`tyInvalid` suppresses cascades). A declaration named
+  like a built-in type (`fn float(...)`) is reported once; its uses are not
+  reported again (`Checker.builtinNamed`), so `float(x)` does not also
+  fail as a conversion. "did you mean x?"
   hints are written without backticks because the tests (from seed0's time) look for that
   exact text.
 - **"missing return"** is reported at the closing brace of the function.
@@ -760,7 +764,7 @@ forward one release at a time.
   with the same name do not collide. `seed test` builds each package in a
   numbered subdirectory, as `test`.
 - **`seed ast`** exists only for debugging the parser.
-- **Concurrency** (the language decisions are DECISIONS.md 38-47):
+- **Concurrency** (the language decisions are in DECISIONS.md, "Concurrency"):
   `group` is an expression of type `error`, used only whole (assigned,
   returned, discarded or with `try`); its block cannot `return`, `try`, or
   `break`/`continue` out of it; `spawn` takes the calls `defer` takes,

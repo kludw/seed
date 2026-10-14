@@ -1,7 +1,7 @@
 #!/bin/sh
 # Tests of the seed command itself: `seed test`, `seed build`, `seed run`,
 # finding the root through $PATH and a symbolic link, temporary
-# directories, the runtime cache, and make install.
+# directories, the runtime cache, stdout on a terminal, and make install.
 #
 #   tests/test_cmd.sh <seed>        (make test-full runs it with build/seed2)
 #
@@ -88,6 +88,36 @@ else
   failed "runtime cache fallback" "$out; $(ls -R "$tmp/tmp2")"
 fi
 chmod 755 "$tmp/fakeroot/build"
+
+# On a terminal, stdout is line-buffered and flushed before reading stdin:
+# testcmd/tty_flush.sd runs under script (a pseudo-terminal); "tick" must
+# show while it sleeps, and its prompt while it waits for a line. The
+# feeder watches the typescript, records what it saw in time, then types
+# the line. (macOS script; skipped elsewhere.)
+tty_feeder() { # TYPESCRIPT RESULT
+  : > "$2"
+  for want in "tick 15" "name? 30"; do
+    text=${want% *}; tenths=${want##* }; i=0
+    until grep -qF "$text" "$1" 2>/dev/null; do
+      i=$((i+1))
+      if [ "$i" -gt "$tenths" ]; then echo "missed '$text'" >> "$2"; break; fi
+      sleep 0.1
+    done
+  done
+  echo Ada
+}
+if [ "$(uname)" = Darwin ] && command -v script > /dev/null 2>&1; then
+  if "$seed" build -o "$tmp/tty_flush" "$here/testcmd/tty_flush.sd" > "$tmp/tty.err" 2>&1; then
+    tty_feeder "$tmp/tty.out" "$tmp/tty.result" | script -q -F "$tmp/tty.out" "$tmp/tty_flush" > /dev/null 2>&1
+    if [ ! -s "$tmp/tty.result" ] && grep -qF "hello Ada" "$tmp/tty.out"; then
+      pass=$((pass+1))
+    else
+      failed "stdout on a terminal" "$(cat "$tmp/tty.result"); typescript: $(cat "$tmp/tty.out")"
+    fi
+  else
+    failed "build testcmd/tty_flush.sd" "$(cat "$tmp/tty.err")"
+  fi
+fi
 
 # make install links $(PREFIX)/bin/seed to the compiler; uninstall removes it.
 if [ "$seed" = "$root/build/seed2" ]; then

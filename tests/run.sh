@@ -12,7 +12,9 @@
 #   NAME.err   text that must appear in stderr (optional)
 #   NAME.in    stdin for the program (optional)
 # For every <dir>/errors/NAME.sd: compiling must fail, and stderr must contain
-# the text after "// expect-error: " on the file's first line.
+# the text after "// expect-error: " on the file's first line. When the second
+# line is "// expect-errors: N", stderr must report exactly N errors (lines
+# with ": error: "), so that a cascade of follow-up errors fails the test.
 # A program made of packages is a directory <dir>/NAME/ (with NAME.out next
 # to it): the compile command gets the directory, which holds package main
 # and the packages it imports (NAME/cart/, ...). <dir>/errors/NAME/ is a
@@ -61,6 +63,10 @@ for dir in "$@"; do
     fi
     if ! grep -qF "$want" "$tmp/cerr"; then
       failed "$src" "error should contain '$want', got: $(head -c 300 "$tmp/cerr")"; continue
+    fi
+    count=$(sed -n '2s|^// expect-errors: ||p' "$first")
+    if [ -n "$count" ] && [ "$(grep -c ': error: ' "$tmp/cerr")" != "$count" ]; then
+      failed "$src" "want exactly $count error(s), got: $(head -c 600 "$tmp/cerr")"; continue
     fi
     pass=$((pass+1))
   done

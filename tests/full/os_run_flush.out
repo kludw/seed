@@ -1,0 +1,4 @@
+before run
+child of run
+after run, exit 0
+before output, after output: child of output, exit 0

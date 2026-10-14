@@ -86,10 +86,14 @@ test-leaks: build/seed2
 test-lib: build/seed2
 	build/seed2 test lib
 
-# Builds every program in examples/ and runs the ones that need no person:
-# wordcount on stdin, todo, and server with fetch (and curl) as clients.
+# The example programs: tests/examples.sh builds every examples/*.sd and
+# checks wordcount on stdin, todo, and server with fetch (and curl) as
+# clients; examples/run.sh builds every example (projects too), compares
+# the output of the others with examples/expected/, runs their tests and
+# checks that they are formatted.
 test-examples: build/seed2
 	tests/examples.sh build/seed2
+	examples/run.sh build/seed2
 
 # seed fmt. --verify runs the formatter's own checks on every .sd file under
 # compiler/, tests/ and lib/ (files with syntax errors are skipped): formatting the

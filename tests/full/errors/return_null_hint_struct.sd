@@ -1,0 +1,22 @@
+// expect-error: hint: return a User value, or return an error such as errors.new(...)
+// A type that starts with a "you" sound takes "a".
+package main
+
+import "fmt"
+
+type User struct {
+    string name
+}
+
+fn find(string s) (User, error) {
+    if (s == "") {
+        return null, null
+    }
+    return User{name: s}, null
+}
+
+fn main([]string args) error {
+    User u = try find("abc")
+    fmt.println(u.name)
+    return null
+}

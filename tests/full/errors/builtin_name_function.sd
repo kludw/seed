@@ -1,0 +1,26 @@
+// expect-error: builtin_name_function.sd:10:4: error: float is the name of a built-in type
+// expect-errors: 3
+// Package-level names cannot be built-in type names. Each declaration is
+// reported once; its uses (as a call, which would be a conversion, or as a
+// value) are not reported again.
+package main
+
+import "fmt"
+
+fn float(string s) float {
+    return 1.5
+}
+
+fn string(int a, int b) string {
+    return "x"
+}
+
+const int bool = 1
+
+fn main([]string args) error {
+    fmt.println(float("x").string())
+    fmt.println(string(1, 2))
+    fn(string) float f = float
+    fmt.println(f("y").string() + bool.string())
+    return null
+}

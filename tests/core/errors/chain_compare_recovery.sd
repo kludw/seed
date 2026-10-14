@@ -1,0 +1,17 @@
+// expect-error: chain_compare_recovery.sd:10:15: error: comparison operators do not chain
+// expect-errors: 1
+// After the error inside the parentheses, the parser skips the whole if
+// statement (its block included) instead of ending the function early.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    if (1 < 2 < 3) {
+        fmt.println("yes")
+    }
+    for (int i = 0; i < 3; i++) {
+        fmt.println(i.string())
+    }
+    return null
+}

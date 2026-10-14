@@ -353,7 +353,7 @@ if (err != null) {
 - `spawn` is only allowed inside a `group` block, and the group waits for every goroutine it started. Goroutines cannot leak.
 - Failures work like Erlang:
   - When a goroutine returns an error or crashes, the other goroutines in its group are stopped, and the group returns the first error. A crash becomes the error `crash: <message>`.
-  - A goroutine can only be stopped at a *stop point*, and its `defer`s still run. The stop points are channel sends and receives, `select`, `time.sleep`, and the standard library's blocking calls: reading stdin (`io.readLine`, `io.readAll`), network I/O (`net`, and so `http`), and waiting for a child process (`os.run`). File I/O (`fs`) and `os.output` are not stop points.
+  - A goroutine can only be stopped at a *stop point*, and its `defer`s still run. The stop points are channel sends and receives, `select`, `time.sleep`, and the standard library's blocking calls: reading stdin (`io.readLine`, `io.readAll`), network I/O (`net`, and so `http`), and waiting for a child process (`os.run`, `os.output`). File I/O (`fs`) is not a stop point.
   - An error that nothing handles ends up in `main`, and the program exits with a clear message.
 - Goroutines share nothing. Sending a value on a channel copies it, so data races are impossible.
 - A `group` block is ordinary code: `spawn` may appear anywhere inside it, including in loops and `if`s.
@@ -516,8 +516,6 @@ The compiler bootstraps itself:
 3. The compiler compiles itself until it reaches a fixed point, where its output reproduces itself exactly (`make verify`).
 4. A snapshot of the generated C is committed to `bootstrap/seed.c`, and `seed0` is deleted. From then on, the compiler is built from the snapshot.
 5. New features are added with the "teach, snapshot, use" cycle: teach the compiler the feature without using it, take a new snapshot, then use the feature in the compiler itself ([compiler/README.md](compiler/README.md#adding-a-language-feature-teach-snapshot-use)).
-
-Steps 1–3 are done; step 4 is in progress.
 
 Steps 1–4 are done: seed0 is retired, and the compiler is built from its own snapshot, `bootstrap/seed.c` (`make release` refreshes it; see compiler/README.md).
 

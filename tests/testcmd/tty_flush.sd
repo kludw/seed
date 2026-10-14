@@ -1,0 +1,20 @@
+// Run on a terminal by tests/test_cmd.sh (under script): stdout is
+// line-buffered there, so "tick" shows while the program sleeps, and the
+// prompt without a newline shows before io.readLine waits for input.
+package main
+
+import "fmt"
+import "io"
+import "time"
+
+fn main([]string args) error {
+    fmt.println("tick")
+    time.sleep(2 * time.second)
+    fmt.print("name? ")
+    string? name = try io.readLine()
+    if (name == null) {
+        return null
+    }
+    fmt.println("hello " + name)
+    return null
+}

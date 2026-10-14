@@ -14,7 +14,7 @@ exact stdout (and exit code, where it isn't 0) is checked.
 | `full/` | Programs for the rest of the language: interfaces, function values and `sortBy`, `defer`, channels, `select`, `group`/`spawn` with Erlang-style failure, integers wider than 64 bits, `s.chars()`, `os.crash`, the core packages' error messages, enum patterns. `full/NAME/` directories are programs made of packages (`pkg_basic`). | `make test-full` |
 | `full/errors/` | The pedantic checks: unused names and imports, shadowing, switch coverage, missing returns, unreachable code, naming rules, `implements`, unhandled errors, formatting, enum patterns and so on. `full/errors/NAME/` directories are package errors: cycles, visibility (`pub` names, fields, methods, struct literals), unknown and wrongly named packages, natives outside the standard library, tests outside `tests/`. | `make test-full` |
 | `testcmd/` | Projects for `seed test` (`test_cmd.sh`): `NAME.out` is the exact stdout of `seed test testcmd/NAME` (run in `tests/`), `NAME.exit` its exit code. | `make test-full` |
-| `core/` | More programs in the same subset as `lang/` (written for the bootstrap compiler seed0, as `tests/seed0/`): crashes, exit codes, equality, narrowing, value copies, an interpreter; `core/errors/` has more programs that must be rejected. | `make test` |
+| `core/` | More programs in the same subset as `lang/` (written for the retired bootstrap compiler seed0): crashes, exit codes, equality, narrowing, value copies, an interpreter; `core/errors/` has more programs that must be rejected. | `make test` |
 | `fmt/` | Golden tests for `seed fmt`: `NAME.sd` must format to `NAME.expected` (`tests/fmt/run.sh <seed>`, or `make test-fmt`). | `make test-fmt` |
 
 The `lang/` and `core/` programs are written to pass the compiler's pedantic checks: they
@@ -36,7 +36,10 @@ The format is defined in the header of `run.sh`. For every `NAME.sd`:
   frames.
 
 For every `errors/NAME.sd`, compiling must fail, and stderr must contain the
-text after `// expect-error: ` on the file's first line.
+text after `// expect-error: ` on the file's first line. When the second
+line is `// expect-errors: N`, stderr must also report exactly `N` errors
+(lines with `: error: `): those tests check that one mistake does not
+produce a cascade of follow-up errors.
 
 A directory `NAME/` with a `NAME.out` next to it is a program made of
 packages: the compile command gets the directory (`seed c full/pkg_basic`),
@@ -94,7 +97,9 @@ crash unwinds.
   formatting error, `seed` found through `$PATH` as a symbolic link
   without `$SEED_ROOT`, concurrent runs of programs with the same name,
   that no temporary directory is left behind, the runtime cache (and its
-  `$TMPDIR` fallback when the root is read-only), and `make install` /
-  `make uninstall` into a temporary `PREFIX`.
+  `$TMPDIR` fallback when the root is read-only), stdout on a terminal
+  (`testcmd/tty_flush.sd` under `script`: line-buffered, and flushed before
+  reading stdin; macOS only), and `make install` / `make uninstall` into a
+  temporary `PREFIX`.
 - The standard library's own tests are run by `make test-lib`
   (`seed test lib`).

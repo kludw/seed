@@ -181,27 +181,65 @@ fn (Parser p) mut expectIdent(string context) string {
 // After a syntax error inside a block: skip to the end of the statement (a
 // newline outside brackets) or to the `}` that closes the block.
 fn (Parser p) mut syncStatement() {
-    int depth = 0
+    p.syncStatementFrom(p.pos)
+}
+
+// The same, for a statement that started at token `from`: the brackets it
+// opened before the error (the `(` of `if (a < b < c) {`) are still open,
+// so the statement ends only after they are closed.
+fn (Parser p) mut syncStatementFrom(int from) {
+    []Tok open = []Tok{}
+    for (int i = from; i < p.pos; i++) {
+        Tok k = p.toks[i].kind
+        if (k == Tok.LBrace || k == Tok.LParen || k == Tok.LBrack) {
+            open.push(k)
+        } else if (k == Tok.RBrace || k == Tok.RParen || k == Tok.RBrack) {
+            for (int n = matchingOpener(open, k); n >= 0 && open.len() > n; ) {
+                _ = open.pop()
+            }
+        }
+    }
     for (;;) {
         Tok k = p.kind()
         if (k == Tok.Eof) {
             break
         }
-        if (depth == 0 && k == Tok.RBrace) {
-            break
-        }
-        if (depth == 0 && k == Tok.Newline) {
+        if (open.len() == 0 && k == Tok.Newline) {
             p.pos++
             break
         }
         if (k == Tok.LBrace || k == Tok.LParen || k == Tok.LBrack) {
-            depth++
+            open.push(k)
         } else if (k == Tok.RBrace || k == Tok.RParen || k == Tok.RBrack) {
-            depth--
+            int n = matchingOpener(open, k)
+            if (n < 0 && k == Tok.RBrace) {
+                // The `}` of the enclosing block.
+                break
+            }
+            for (; n >= 0 && open.len() > n; ) {
+                _ = open.pop()
+            }
         }
         p.pos++
     }
     p.failed = false
+}
+
+// The index in open of the innermost bracket that the closing bracket k
+// closes, or -1 when none does.
+fn matchingOpener([]Tok open, Tok k) int {
+    Tok want = Tok.LBrace
+    if (k == Tok.RParen) {
+        want = Tok.LParen
+    } else if (k == Tok.RBrack) {
+        want = Tok.LBrack
+    }
+    for (int i = open.len() - 1; i >= 0; i--) {
+        if (open[i] == want) {
+            return i
+        }
+    }
+    return -1
 }
 
 // ---- types (scanning) ----
@@ -354,12 +392,13 @@ fn (Parser p) mut parseBlockBody(string context, Pos start) int {
     p.skipNewlines()
     []int stmts = []int{}
     for (; p.kind() != Tok.RBrace && p.kind() != Tok.Eof; ) {
+        int from = p.pos
         stmts.push(p.parseStmt())
         if (!p.failed && p.kind() != Tok.RBrace) {
             p.expect(Tok.Newline, "")
         }
         if (p.failed) {
-            p.syncStatement()
+            p.syncStatementFrom(from)
         }
         p.skipNewlines()
     }
@@ -604,12 +643,13 @@ fn (Parser p) mut parseCaseBody(Pos start) int {
     p.skipNewlines()
     []int stmts = []int{}
     for (; p.kind() != Tok.KwCase && p.kind() != Tok.KwDefault && p.kind() != Tok.RBrace && p.kind() != Tok.Eof; ) {
+        int from = p.pos
         stmts.push(p.parseStmt())
         if (!p.failed && p.kind() != Tok.RBrace) {
             p.expect(Tok.Newline, "")
         }
         if (p.failed) {
-            p.syncStatement()
+            p.syncStatementFrom(from)
         }
         p.skipNewlines()
     }

@@ -4369,7 +4369,11 @@ static void run_main(void *p) {
 static char sd_stdout_buf[1 << 16];
 
 int sd_main(int argc, char **argv, sd_err (*main_fn)(sd_list *args)) {
-  setvbuf(stdout, sd_stdout_buf, _IOFBF, sizeof sd_stdout_buf);
+  /* stdout is line-buffered on a terminal, so that output shows as it is
+   * printed, and fully buffered otherwise; stderr is unbuffered. stdout is
+   * also flushed before reading stdin, starting a child and exiting. */
+  setvbuf(stdout, sd_stdout_buf, isatty(1) ? _IOLBF : _IOFBF, sizeof sd_stdout_buf);
+  setvbuf(stderr, NULL, _IONBF, 0);
   install_fault_handler();
   sd_task *t = task_current();
   setup_altstack(t);
@@ -4839,7 +4843,7 @@ struct sd_S_ExprInfo { sd_int f_ty; sd_int f_inner; sd_int f_ifaceFrom; bool f_w
 struct sd_S_Impl { sd_int f_decl; sd_int f_iface; };
 struct sd_S_Diags { sd_list * f_paths; sd_list * f_sources; sd_list * f_list; bool f_overflow; };
 struct sd_S_Types { sd_list * f_list; sd_map * f_byMangle; sd_list * f_parts; };
-struct sd_S_Checker { sd_S_Ast f_ast; sd_S_Diags f_diags; sd_S_Types f_types; sd_map * f_globals; sd_list * f_globalList; sd_map * f_imported; sd_map * f_usedImports; sd_map * f_methods; sd_map * f_mutNames; sd_list * f_impls; sd_list * f_methodSigType; sd_list * f_declType; sd_list * f_teType; sd_list * f_fnRet; sd_list * f_fnRecv; sd_list * f_fnCName; sd_list * f_recvVar; sd_list * f_constType; sd_list * f_constState; sd_list * f_info; sd_list * f_targetVar; sd_list * f_targetType; sd_list * f_stmtVar; sd_list * f_stmtDiscard; sd_list * f_labelCase; sd_list * f_paramVar; sd_list * f_vars; sd_list * f_scope; sd_list * f_scopeMarks; sd_list * f_narrows; sd_list * f_narrowMarks; sd_list * f_guards; sd_list * f_breakGuards; sd_list * f_breakMarks; sd_list * f_contGuards; sd_list * f_contMarks; sd_list * f_loopScopes; sd_list * f_caseGuards; sd_int f_curFn; sd_int f_loopDepth; sd_int f_groupDepth; sd_int f_groupLoop; sd_int f_allowGroup; bool f_testMode; sd_str f_libDir; sd_str f_projectRoot; };
+struct sd_S_Checker { sd_S_Ast f_ast; sd_S_Diags f_diags; sd_S_Types f_types; sd_map * f_globals; sd_list * f_globalList; sd_map * f_imported; sd_map * f_usedImports; sd_map * f_methods; sd_map * f_mutNames; sd_map * f_builtinNamed; sd_list * f_impls; sd_list * f_methodSigType; sd_list * f_declType; sd_list * f_teType; sd_list * f_fnRet; sd_list * f_fnRecv; sd_list * f_fnCName; sd_list * f_recvVar; sd_list * f_constType; sd_list * f_constState; sd_list * f_info; sd_list * f_targetVar; sd_list * f_targetType; sd_list * f_stmtVar; sd_list * f_stmtDiscard; sd_list * f_labelCase; sd_list * f_paramVar; sd_list * f_vars; sd_list * f_scope; sd_list * f_scopeMarks; sd_list * f_narrows; sd_list * f_narrowMarks; sd_list * f_guards; sd_list * f_breakGuards; sd_list * f_breakMarks; sd_list * f_contGuards; sd_list * f_contMarks; sd_list * f_loopScopes; sd_list * f_caseGuards; sd_int f_curFn; sd_int f_loopDepth; sd_int f_groupDepth; sd_int f_groupLoop; sd_int f_allowGroup; bool f_testMode; sd_str f_libDir; sd_str f_projectRoot; };
 struct sd_S_Diag { sd_S_Pos f_pos; sd_str f_message; sd_str f_hint; };
 struct sd_S_Suggest { sd_str f_name; sd_str f_best; sd_int f_dist; };
 struct sd_S_FmtFrame { sd_box * f_kind; sd_int f_open; sd_int f_indent; sd_int f_closeIndent; sd_int f_itemIndent; bool f_broken; bool f_expectItem; bool f_empty; bool f_caseLabel; };
@@ -5131,7 +5135,7 @@ static const sd_field sd_F_ExprInfo[] = {SD_FIELD(sd_S_ExprInfo, f_ty, &sd_type_
 static const sd_type sd_D_ExprInfo = SD_STRUCT_TYPE("ExprInfo", sd_S_ExprInfo, sd_F_ExprInfo);
 static const sd_field sd_F_Impl[] = {SD_FIELD(sd_S_Impl, f_decl, &sd_type_int), SD_FIELD(sd_S_Impl, f_iface, &sd_type_int)};
 static const sd_type sd_D_Impl = SD_STRUCT_TYPE("Impl", sd_S_Impl, sd_F_Impl);
-static const sd_field sd_F_Checker[] = {SD_FIELD(sd_S_Checker, f_ast, &sd_D_Ast), SD_FIELD(sd_S_Checker, f_diags, &sd_D_Diags), SD_FIELD(sd_S_Checker, f_types, &sd_D_Types), SD_FIELD(sd_S_Checker, f_globals, &sd_type_map), SD_FIELD(sd_S_Checker, f_globalList, &sd_type_list), SD_FIELD(sd_S_Checker, f_imported, &sd_type_map), SD_FIELD(sd_S_Checker, f_usedImports, &sd_type_map), SD_FIELD(sd_S_Checker, f_methods, &sd_type_map), SD_FIELD(sd_S_Checker, f_mutNames, &sd_type_map), SD_FIELD(sd_S_Checker, f_impls, &sd_type_list), SD_FIELD(sd_S_Checker, f_methodSigType, &sd_type_list), SD_FIELD(sd_S_Checker, f_declType, &sd_type_list), SD_FIELD(sd_S_Checker, f_teType, &sd_type_list), SD_FIELD(sd_S_Checker, f_fnRet, &sd_type_list), SD_FIELD(sd_S_Checker, f_fnRecv, &sd_type_list), SD_FIELD(sd_S_Checker, f_fnCName, &sd_type_list), SD_FIELD(sd_S_Checker, f_recvVar, &sd_type_list), SD_FIELD(sd_S_Checker, f_constType, &sd_type_list), SD_FIELD(sd_S_Checker, f_constState, &sd_type_list), SD_FIELD(sd_S_Checker, f_info, &sd_type_list), SD_FIELD(sd_S_Checker, f_targetVar, &sd_type_list), SD_FIELD(sd_S_Checker, f_targetType, &sd_type_list), SD_FIELD(sd_S_Checker, f_stmtVar, &sd_type_list), SD_FIELD(sd_S_Checker, f_stmtDiscard, &sd_type_list), SD_FIELD(sd_S_Checker, f_labelCase, &sd_type_list), SD_FIELD(sd_S_Checker, f_paramVar, &sd_type_list), SD_FIELD(sd_S_Checker, f_vars, &sd_type_list), SD_FIELD(sd_S_Checker, f_scope, &sd_type_list), SD_FIELD(sd_S_Checker, f_scopeMarks, &sd_type_list), SD_FIELD(sd_S_Checker, f_narrows, &sd_type_list), SD_FIELD(sd_S_Checker, f_narrowMarks, &sd_type_list), SD_FIELD(sd_S_Checker, f_guards, &sd_type_list), SD_FIELD(sd_S_Checker, f_breakGuards, &sd_type_list), SD_FIELD(sd_S_Checker, f_breakMarks, &sd_type_list), SD_FIELD(sd_S_Checker, f_contGuards, &sd_type_list), SD_FIELD(sd_S_Checker, f_contMarks, &sd_type_list), SD_FIELD(sd_S_Checker, f_loopScopes, &sd_type_list), SD_FIELD(sd_S_Checker, f_caseGuards, &sd_type_list), SD_FIELD(sd_S_Checker, f_curFn, &sd_type_int), SD_FIELD(sd_S_Checker, f_loopDepth, &sd_type_int), SD_FIELD(sd_S_Checker, f_groupDepth, &sd_type_int), SD_FIELD(sd_S_Checker, f_groupLoop, &sd_type_int), SD_FIELD(sd_S_Checker, f_allowGroup, &sd_type_int), SD_FIELD(sd_S_Checker, f_testMode, &sd_type_bool), SD_FIELD(sd_S_Checker, f_libDir, &sd_type_str), SD_FIELD(sd_S_Checker, f_projectRoot, &sd_type_str)};
+static const sd_field sd_F_Checker[] = {SD_FIELD(sd_S_Checker, f_ast, &sd_D_Ast), SD_FIELD(sd_S_Checker, f_diags, &sd_D_Diags), SD_FIELD(sd_S_Checker, f_types, &sd_D_Types), SD_FIELD(sd_S_Checker, f_globals, &sd_type_map), SD_FIELD(sd_S_Checker, f_globalList, &sd_type_list), SD_FIELD(sd_S_Checker, f_imported, &sd_type_map), SD_FIELD(sd_S_Checker, f_usedImports, &sd_type_map), SD_FIELD(sd_S_Checker, f_methods, &sd_type_map), SD_FIELD(sd_S_Checker, f_mutNames, &sd_type_map), SD_FIELD(sd_S_Checker, f_builtinNamed, &sd_type_map), SD_FIELD(sd_S_Checker, f_impls, &sd_type_list), SD_FIELD(sd_S_Checker, f_methodSigType, &sd_type_list), SD_FIELD(sd_S_Checker, f_declType, &sd_type_list), SD_FIELD(sd_S_Checker, f_teType, &sd_type_list), SD_FIELD(sd_S_Checker, f_fnRet, &sd_type_list), SD_FIELD(sd_S_Checker, f_fnRecv, &sd_type_list), SD_FIELD(sd_S_Checker, f_fnCName, &sd_type_list), SD_FIELD(sd_S_Checker, f_recvVar, &sd_type_list), SD_FIELD(sd_S_Checker, f_constType, &sd_type_list), SD_FIELD(sd_S_Checker, f_constState, &sd_type_list), SD_FIELD(sd_S_Checker, f_info, &sd_type_list), SD_FIELD(sd_S_Checker, f_targetVar, &sd_type_list), SD_FIELD(sd_S_Checker, f_targetType, &sd_type_list), SD_FIELD(sd_S_Checker, f_stmtVar, &sd_type_list), SD_FIELD(sd_S_Checker, f_stmtDiscard, &sd_type_list), SD_FIELD(sd_S_Checker, f_labelCase, &sd_type_list), SD_FIELD(sd_S_Checker, f_paramVar, &sd_type_list), SD_FIELD(sd_S_Checker, f_vars, &sd_type_list), SD_FIELD(sd_S_Checker, f_scope, &sd_type_list), SD_FIELD(sd_S_Checker, f_scopeMarks, &sd_type_list), SD_FIELD(sd_S_Checker, f_narrows, &sd_type_list), SD_FIELD(sd_S_Checker, f_narrowMarks, &sd_type_list), SD_FIELD(sd_S_Checker, f_guards, &sd_type_list), SD_FIELD(sd_S_Checker, f_breakGuards, &sd_type_list), SD_FIELD(sd_S_Checker, f_breakMarks, &sd_type_list), SD_FIELD(sd_S_Checker, f_contGuards, &sd_type_list), SD_FIELD(sd_S_Checker, f_contMarks, &sd_type_list), SD_FIELD(sd_S_Checker, f_loopScopes, &sd_type_list), SD_FIELD(sd_S_Checker, f_caseGuards, &sd_type_list), SD_FIELD(sd_S_Checker, f_curFn, &sd_type_int), SD_FIELD(sd_S_Checker, f_loopDepth, &sd_type_int), SD_FIELD(sd_S_Checker, f_groupDepth, &sd_type_int), SD_FIELD(sd_S_Checker, f_groupLoop, &sd_type_int), SD_FIELD(sd_S_Checker, f_allowGroup, &sd_type_int), SD_FIELD(sd_S_Checker, f_testMode, &sd_type_bool), SD_FIELD(sd_S_Checker, f_libDir, &sd_type_str), SD_FIELD(sd_S_Checker, f_projectRoot, &sd_type_str)};
 static const sd_type sd_D_Checker = SD_STRUCT_TYPE("Checker", sd_S_Checker, sd_F_Checker);
 static const sd_field sd_F_Pos[] = {SD_FIELD(sd_S_Pos, f_file, &sd_type_int), SD_FIELD(sd_S_Pos, f_line, &sd_type_int), SD_FIELD(sd_S_Pos, f_col, &sd_type_int)};
 static const sd_type sd_D_Pos = SD_STRUCT_TYPE("Pos", sd_S_Pos, sd_F_Pos);
@@ -5550,6 +5554,7 @@ static sd_int sd_f_editDistance(sd_str l_a, sd_str l_b);
 static sd_S_Suggest sd_f_newSuggest(sd_str l_name);
 static void sd_m_Suggest__consider(sd_S_Suggest * l_s, sd_str l_cand);
 static sd_str sd_m_Suggest__hint(sd_S_Suggest l_s);
+static sd_str sd_f_withArticle(sd_str l_word);
 static sd_T_T2ie sd_f_fmtCommand(sd_list * l_args);
 static sd_S_Parser sd_f_fmtParse(sd_str l_path, sd_str l_src);
 static sd_str sd_f_formatFile(sd_str l_path, sd_str l_src);
@@ -5815,6 +5820,8 @@ static void sd_m_Parser__expect(sd_S_Parser * l_p, sd_box * l_k, sd_str l_contex
 static bool sd_m_Parser__expectTok(sd_S_Parser * l_p, sd_box * l_k, sd_str l_context);
 static sd_str sd_m_Parser__expectIdent(sd_S_Parser * l_p, sd_str l_context);
 static void sd_m_Parser__syncStatement(sd_S_Parser * l_p);
+static void sd_m_Parser__syncStatementFrom(sd_S_Parser * l_p, sd_int l_from);
+static sd_int sd_f_matchingOpener(sd_list * l_open, sd_box * l_k);
 static sd_int sd_m_Parser__scanType(sd_S_Parser l_p, sd_int l_i, bool l_named);
 static sd_int sd_m_Parser__scanBaseType(sd_S_Parser l_p, sd_int l_i, bool l_named);
 static bool sd_m_Parser__fnHasResult(sd_S_Parser l_p, sd_int l_j, bool l_named);
@@ -7224,6 +7231,7 @@ static inline __attribute__((unused)) sd_S_Checker sd_rt_S7Checker(sd_S_Checker 
   v.f_usedImports = sd_map_retain(v.f_usedImports);
   v.f_methods = sd_map_retain(v.f_methods);
   v.f_mutNames = sd_map_retain(v.f_mutNames);
+  v.f_builtinNamed = sd_map_retain(v.f_builtinNamed);
   v.f_impls = sd_list_retain(v.f_impls);
   v.f_methodSigType = sd_list_retain(v.f_methodSigType);
   v.f_declType = sd_list_retain(v.f_declType);
@@ -7360,6 +7368,7 @@ static inline __attribute__((unused)) void sd_rl_S7Checker(sd_S_Checker v) {
   sd_map_release(v.f_usedImports);
   sd_map_release(v.f_methods);
   sd_map_release(v.f_mutNames);
+  sd_map_release(v.f_builtinNamed);
   sd_list_release(v.f_impls);
   sd_list_release(v.f_methodSigType);
   sd_list_release(v.f_declType);
@@ -8034,48 +8043,49 @@ static sd_S_Checker sd_f_newChecker(sd_S_Ast l_ast, sd_S_Diags l_diags, bool l_t
   sd_map *_t5 = sd_map_new(&sd_type_str, &sd_type_bool);
   sd_map *_t6 = sd_map_new(&sd_type_str, &sd_type_int);
   sd_map *_t7 = sd_map_new(&sd_type_str, &sd_type_bool);
-  sd_list *_t8 = sd_list_new(&sd_D_Impl, 0);
-  sd_list *_t9 = sd_list_new(&sd_type_int, 0);
+  sd_map *_t8 = sd_map_new(&sd_type_str, &sd_type_bool);
+  sd_list *_t9 = sd_list_new(&sd_D_Impl, 0);
   sd_list *_t10 = sd_list_new(&sd_type_int, 0);
   sd_list *_t11 = sd_list_new(&sd_type_int, 0);
   sd_list *_t12 = sd_list_new(&sd_type_int, 0);
   sd_list *_t13 = sd_list_new(&sd_type_int, 0);
-  sd_list *_t14 = sd_list_new(&sd_type_str, 0);
-  sd_list *_t15 = sd_list_new(&sd_type_int, 0);
+  sd_list *_t14 = sd_list_new(&sd_type_int, 0);
+  sd_list *_t15 = sd_list_new(&sd_type_str, 0);
   sd_list *_t16 = sd_list_new(&sd_type_int, 0);
   sd_list *_t17 = sd_list_new(&sd_type_int, 0);
-  sd_list *_t18 = sd_list_new(&sd_D_ExprInfo, 0);
-  sd_list *_t19 = sd_list_new(&sd_type_int, 0);
+  sd_list *_t18 = sd_list_new(&sd_type_int, 0);
+  sd_list *_t19 = sd_list_new(&sd_D_ExprInfo, 0);
   sd_list *_t20 = sd_list_new(&sd_type_int, 0);
   sd_list *_t21 = sd_list_new(&sd_type_int, 0);
-  sd_list *_t22 = sd_list_new(&sd_type_bool, 0);
-  sd_list *_t23 = sd_list_new(&sd_type_int, 0);
+  sd_list *_t22 = sd_list_new(&sd_type_int, 0);
+  sd_list *_t23 = sd_list_new(&sd_type_bool, 0);
   sd_list *_t24 = sd_list_new(&sd_type_int, 0);
-  sd_list *_t25 = sd_list_new(&sd_D_Var, 0);
-  sd_list *_t26 = sd_list_new(&sd_type_int, 0);
+  sd_list *_t25 = sd_list_new(&sd_type_int, 0);
+  sd_list *_t26 = sd_list_new(&sd_D_Var, 0);
   sd_list *_t27 = sd_list_new(&sd_type_int, 0);
-  sd_list *_t28 = sd_list_new(&sd_D_Narrow, 0);
-  sd_list *_t29 = sd_list_new(&sd_type_int, 0);
-  sd_list *_t30 = sd_list_new(&sd_D_Guard, 0);
+  sd_list *_t28 = sd_list_new(&sd_type_int, 0);
+  sd_list *_t29 = sd_list_new(&sd_D_Narrow, 0);
+  sd_list *_t30 = sd_list_new(&sd_type_int, 0);
   sd_list *_t31 = sd_list_new(&sd_D_Guard, 0);
-  sd_list *_t32 = sd_list_new(&sd_type_int, 0);
-  sd_list *_t33 = sd_list_new(&sd_D_Guard, 0);
-  sd_list *_t34 = sd_list_new(&sd_type_int, 0);
+  sd_list *_t32 = sd_list_new(&sd_D_Guard, 0);
+  sd_list *_t33 = sd_list_new(&sd_type_int, 0);
+  sd_list *_t34 = sd_list_new(&sd_D_Guard, 0);
   sd_list *_t35 = sd_list_new(&sd_type_int, 0);
-  sd_list *_t36 = sd_list_new(&sd_D_Guard, 0);
-  sd_S_Checker _t37 = {.f_ast = sd_rt_S3Ast(l_ast), .f_diags = sd_rt_S5Diags(l_diags), .f_types = _t1, .f_globals = _t2, .f_globalList = _t3, .f_imported = _t4, .f_usedImports = _t5, .f_methods = _t6, .f_mutNames = _t7, .f_impls = _t8, .f_methodSigType = _t9, .f_declType = _t10, .f_teType = _t11, .f_fnRet = _t12, .f_fnRecv = _t13, .f_fnCName = _t14, .f_recvVar = _t15, .f_constType = _t16, .f_constState = _t17, .f_info = _t18, .f_targetVar = _t19, .f_targetType = _t20, .f_stmtVar = _t21, .f_stmtDiscard = _t22, .f_labelCase = _t23, .f_paramVar = _t24, .f_vars = _t25, .f_scope = _t26, .f_scopeMarks = _t27, .f_narrows = _t28, .f_narrowMarks = _t29, .f_guards = _t30, .f_breakGuards = _t31, .f_breakMarks = _t32, .f_contGuards = _t33, .f_contMarks = _t34, .f_loopScopes = _t35, .f_caseGuards = _t36, .f_curFn = SD_INT(-1), .f_loopDepth = SD_INT(0), .f_groupDepth = SD_INT(0), .f_groupLoop = SD_INT(-1), .f_allowGroup = SD_INT(-1), .f_testMode = l_testMode, .f_libDir = SD_STR_LIT(""), .f_projectRoot = SD_STR_LIT("")};
-  sd_S_Checker l_c = _t37;
+  sd_list *_t36 = sd_list_new(&sd_type_int, 0);
+  sd_list *_t37 = sd_list_new(&sd_D_Guard, 0);
+  sd_S_Checker _t38 = {.f_ast = sd_rt_S3Ast(l_ast), .f_diags = sd_rt_S5Diags(l_diags), .f_types = _t1, .f_globals = _t2, .f_globalList = _t3, .f_imported = _t4, .f_usedImports = _t5, .f_methods = _t6, .f_mutNames = _t7, .f_builtinNamed = _t8, .f_impls = _t9, .f_methodSigType = _t10, .f_declType = _t11, .f_teType = _t12, .f_fnRet = _t13, .f_fnRecv = _t14, .f_fnCName = _t15, .f_recvVar = _t16, .f_constType = _t17, .f_constState = _t18, .f_info = _t19, .f_targetVar = _t20, .f_targetType = _t21, .f_stmtVar = _t22, .f_stmtDiscard = _t23, .f_labelCase = _t24, .f_paramVar = _t25, .f_vars = _t26, .f_scope = _t27, .f_scopeMarks = _t28, .f_narrows = _t29, .f_narrowMarks = _t30, .f_guards = _t31, .f_breakGuards = _t32, .f_breakMarks = _t33, .f_contGuards = _t34, .f_contMarks = _t35, .f_loopScopes = _t36, .f_caseGuards = _t37, .f_curFn = SD_INT(-1), .f_loopDepth = SD_INT(0), .f_groupDepth = SD_INT(0), .f_groupLoop = SD_INT(-1), .f_allowGroup = SD_INT(-1), .f_testMode = l_testMode, .f_libDir = SD_STR_LIT(""), .f_projectRoot = SD_STR_LIT("")};
+  sd_S_Checker l_c = _t38;
   {
     sd_int l_i = SD_INT(0);
     for (;;) {
       if (!(sd_int_lt(l_i, sd_list_len((l_ast).f_exprs)))) break;
       {
-        sd_S_ExprInfo _t39 = sd_f_newInfo();
-        sd_list ** _t40 = (&((&l_c))->f_info);
-        SD_LIST_PUSH(_t40, sd_S_ExprInfo, _t39);
+        sd_S_ExprInfo _t40 = sd_f_newInfo();
+        sd_list ** _t41 = (&((&l_c))->f_info);
+        SD_LIST_PUSH(_t41, sd_S_ExprInfo, _t40);
       }
-      _c38:;
-      sd_int _t41 = sd_int_add(l_i, SD_INT(1)); sd_int_release(l_i); l_i = _t41;
+      _c39:;
+      sd_int _t42 = sd_int_add(l_i, SD_INT(1)); sd_int_release(l_i); l_i = _t42;
     }
     sd_int_release(l_i);
   }
@@ -8084,12 +8094,12 @@ static sd_S_Checker sd_f_newChecker(sd_S_Ast l_ast, sd_S_Diags l_diags, bool l_t
     for (;;) {
       if (!(sd_int_lt(l_j, sd_list_len((l_ast).f_typeExprs)))) break;
       {
-        sd_int _t43 = sd_int_retain(SD_INT(-1));
-        sd_list ** _t44 = (&((&l_c))->f_teType);
-        SD_LIST_PUSH(_t44, sd_int, _t43);
+        sd_int _t44 = sd_int_retain(SD_INT(-1));
+        sd_list ** _t45 = (&((&l_c))->f_teType);
+        SD_LIST_PUSH(_t45, sd_int, _t44);
       }
-      _c42:;
-      sd_int _t45 = sd_int_add(l_j, SD_INT(1)); sd_int_release(l_j); l_j = _t45;
+      _c43:;
+      sd_int _t46 = sd_int_add(l_j, SD_INT(1)); sd_int_release(l_j); l_j = _t46;
     }
     sd_int_release(l_j);
   }
@@ -8098,15 +8108,15 @@ static sd_S_Checker sd_f_newChecker(sd_S_Ast l_ast, sd_S_Diags l_diags, bool l_t
     for (;;) {
       if (!(sd_int_lt(l_k, sd_list_len((l_ast).f_targets)))) break;
       {
-        sd_int _t47 = sd_int_retain(SD_INT(-1));
-        sd_list ** _t48 = (&((&l_c))->f_targetVar);
-        SD_LIST_PUSH(_t48, sd_int, _t47);
-        sd_int _t49 = sd_int_retain(sd_c_tyInvalid());
-        sd_list ** _t50 = (&((&l_c))->f_targetType);
-        SD_LIST_PUSH(_t50, sd_int, _t49);
+        sd_int _t48 = sd_int_retain(SD_INT(-1));
+        sd_list ** _t49 = (&((&l_c))->f_targetVar);
+        SD_LIST_PUSH(_t49, sd_int, _t48);
+        sd_int _t50 = sd_int_retain(sd_c_tyInvalid());
+        sd_list ** _t51 = (&((&l_c))->f_targetType);
+        SD_LIST_PUSH(_t51, sd_int, _t50);
       }
-      _c46:;
-      sd_int _t51 = sd_int_add(l_k, SD_INT(1)); sd_int_release(l_k); l_k = _t51;
+      _c47:;
+      sd_int _t52 = sd_int_add(l_k, SD_INT(1)); sd_int_release(l_k); l_k = _t52;
     }
     sd_int_release(l_k);
   }
@@ -8115,15 +8125,15 @@ static sd_S_Checker sd_f_newChecker(sd_S_Ast l_ast, sd_S_Diags l_diags, bool l_t
     for (;;) {
       if (!(sd_int_lt(l_s, sd_list_len((l_ast).f_stmts)))) break;
       {
-        sd_int _t53 = sd_int_retain(SD_INT(-1));
-        sd_list ** _t54 = (&((&l_c))->f_stmtVar);
-        SD_LIST_PUSH(_t54, sd_int, _t53);
-        bool _t55 = false;
-        sd_list ** _t56 = (&((&l_c))->f_stmtDiscard);
-        SD_LIST_PUSH(_t56, bool, _t55);
+        sd_int _t54 = sd_int_retain(SD_INT(-1));
+        sd_list ** _t55 = (&((&l_c))->f_stmtVar);
+        SD_LIST_PUSH(_t55, sd_int, _t54);
+        bool _t56 = false;
+        sd_list ** _t57 = (&((&l_c))->f_stmtDiscard);
+        SD_LIST_PUSH(_t57, bool, _t56);
       }
-      _c52:;
-      sd_int _t57 = sd_int_add(l_s, SD_INT(1)); sd_int_release(l_s); l_s = _t57;
+      _c53:;
+      sd_int _t58 = sd_int_add(l_s, SD_INT(1)); sd_int_release(l_s); l_s = _t58;
     }
     sd_int_release(l_s);
   }
@@ -8132,12 +8142,12 @@ static sd_S_Checker sd_f_newChecker(sd_S_Ast l_ast, sd_S_Diags l_diags, bool l_t
     for (;;) {
       if (!(sd_int_lt(l_l, sd_list_len((l_ast).f_labels)))) break;
       {
-        sd_int _t59 = sd_int_retain(SD_INT(-1));
-        sd_list ** _t60 = (&((&l_c))->f_labelCase);
-        SD_LIST_PUSH(_t60, sd_int, _t59);
+        sd_int _t60 = sd_int_retain(SD_INT(-1));
+        sd_list ** _t61 = (&((&l_c))->f_labelCase);
+        SD_LIST_PUSH(_t61, sd_int, _t60);
       }
-      _c58:;
-      sd_int _t61 = sd_int_add(l_l, SD_INT(1)); sd_int_release(l_l); l_l = _t61;
+      _c59:;
+      sd_int _t62 = sd_int_add(l_l, SD_INT(1)); sd_int_release(l_l); l_l = _t62;
     }
     sd_int_release(l_l);
   }
@@ -8146,12 +8156,12 @@ static sd_S_Checker sd_f_newChecker(sd_S_Ast l_ast, sd_S_Diags l_diags, bool l_t
     for (;;) {
       if (!(sd_int_lt(l_p, sd_list_len((l_ast).f_params)))) break;
       {
-        sd_int _t63 = sd_int_retain(SD_INT(-1));
-        sd_list ** _t64 = (&((&l_c))->f_paramVar);
-        SD_LIST_PUSH(_t64, sd_int, _t63);
+        sd_int _t64 = sd_int_retain(SD_INT(-1));
+        sd_list ** _t65 = (&((&l_c))->f_paramVar);
+        SD_LIST_PUSH(_t65, sd_int, _t64);
       }
-      _c62:;
-      sd_int _t65 = sd_int_add(l_p, SD_INT(1)); sd_int_release(l_p); l_p = _t65;
+      _c63:;
+      sd_int _t66 = sd_int_add(l_p, SD_INT(1)); sd_int_release(l_p); l_p = _t66;
     }
     sd_int_release(l_p);
   }
@@ -8160,12 +8170,12 @@ static sd_S_Checker sd_f_newChecker(sd_S_Ast l_ast, sd_S_Diags l_diags, bool l_t
     for (;;) {
       if (!(sd_int_lt(l_m, sd_list_len((l_ast).f_methodSigs)))) break;
       {
-        sd_int _t67 = sd_int_retain(sd_c_tyInvalid());
-        sd_list ** _t68 = (&((&l_c))->f_methodSigType);
-        SD_LIST_PUSH(_t68, sd_int, _t67);
+        sd_int _t68 = sd_int_retain(sd_c_tyInvalid());
+        sd_list ** _t69 = (&((&l_c))->f_methodSigType);
+        SD_LIST_PUSH(_t69, sd_int, _t68);
       }
-      _c66:;
-      sd_int _t69 = sd_int_add(l_m, SD_INT(1)); sd_int_release(l_m); l_m = _t69;
+      _c67:;
+      sd_int _t70 = sd_int_add(l_m, SD_INT(1)); sd_int_release(l_m); l_m = _t70;
     }
     sd_int_release(l_m);
   }
@@ -8619,48 +8629,54 @@ static void sd_m_Checker__addGlobal(sd_S_Checker * l_c, sd_str l_name, sd_box * 
     sd_str_release(_t5);
     sd_str_release(_t4);
     sd_rl_S3Pos(_t3);
+    bool _t6 = true;
+    sd_str _t7 = sd_int_to_str(l_pkg);
+    sd_str _t8[] = {_t7, SD_STR_LIT(":"), l_name};
+    sd_str _t9 = sd_str_concat_n(_t8, 3);
+    sd_map_set((&(l_c)->f_builtinNamed), &_t9, &_t6);
+    sd_str_release(_t7);
     sd_int_release(l_pkg);
     return;
   }
-  sd_int _t6 = sd_m_Checker__global((*l_c), l_pkg, l_name);
-  sd_int l_old = _t6;
+  sd_int _t10 = sd_m_Checker__global((*l_c), l_pkg, l_name);
+  sd_int l_old = _t10;
   if ((!sd_int_is_null(l_old))) {
     sd_S_Pos l_op = sd_rt_S3Pos((SD_LIST_GET(((*l_c)).f_globalList, sd_S_Global, l_old)).f_pos);
-    sd_str _t7 = sd_int_to_str((l_op).f_line);
-    sd_str _t8 = sd_str_concat(SD_STR_LIT("at line "), _t7);
-    sd_str l_where = _t8;
-    sd_str_release(_t7);
+    sd_str _t11 = sd_int_to_str((l_op).f_line);
+    sd_str _t12 = sd_str_concat(SD_STR_LIT("at line "), _t11);
+    sd_str l_where = _t12;
+    sd_str_release(_t11);
     if ((!sd_int_eq((l_op).f_file, (l_pos).f_file))) {
-      sd_str _t9 = sd_int_to_str((l_op).f_line);
-      sd_str _t10[] = {SD_STR_LIT("in "), SD_LIST_GET((((*l_c)).f_diags).f_paths, sd_str, (l_op).f_file), SD_STR_LIT(":"), _t9};
-      sd_str _t11 = sd_str_concat_n(_t10, 4);
+      sd_str _t13 = sd_int_to_str((l_op).f_line);
+      sd_str _t14[] = {SD_STR_LIT("in "), SD_LIST_GET((((*l_c)).f_diags).f_paths, sd_str, (l_op).f_file), SD_STR_LIT(":"), _t13};
+      sd_str _t15 = sd_str_concat_n(_t14, 4);
       sd_str_release(l_where);
-      l_where = _t11;
-      sd_str_release(_t9);
+      l_where = _t15;
+      sd_str_release(_t13);
     }
-    sd_S_Pos _t12 = sd_rt_S3Pos(l_pos);
-    sd_str _t13[] = {l_name, SD_STR_LIT(" is already declared "), l_where};
-    sd_str _t14 = sd_str_concat_n(_t13, 3);
-    sd_str _t15 = sd_str_retain(SD_STR_LIT("rename one of them; a package has one declaration per name"));
-    sd_m_Checker__errorHint(l_c, _t12, _t14, _t15);
-    sd_str_release(_t15);
-    sd_str_release(_t14);
-    sd_rl_S3Pos(_t12);
+    sd_S_Pos _t16 = sd_rt_S3Pos(l_pos);
+    sd_str _t17[] = {l_name, SD_STR_LIT(" is already declared "), l_where};
+    sd_str _t18 = sd_str_concat_n(_t17, 3);
+    sd_str _t19 = sd_str_retain(SD_STR_LIT("rename one of them; a package has one declaration per name"));
+    sd_m_Checker__errorHint(l_c, _t16, _t18, _t19);
+    sd_str_release(_t19);
+    sd_str_release(_t18);
+    sd_rl_S3Pos(_t16);
     sd_str_release(l_where);
     sd_rl_S3Pos(l_op);
     sd_int_release(l_old);
     sd_int_release(l_pkg);
     return;
   }
-  sd_S_Global _t16 = {.f_kind = sd_box_retain(l_kind), .f_index = sd_int_retain(l_index), .f_pos = sd_rt_S3Pos(l_pos), .f_pkg = sd_int_retain(l_pkg), .f_name = sd_str_retain(l_name)};
-  sd_list ** _t17 = (&(l_c)->f_globalList);
-  SD_LIST_PUSH(_t17, sd_S_Global, _t16);
-  sd_int _t18 = sd_int_sub(sd_list_len(((*l_c)).f_globalList), SD_INT(1));
-  sd_str _t19 = sd_int_to_str(l_pkg);
-  sd_str _t20[] = {_t19, SD_STR_LIT(":"), l_name};
-  sd_str _t21 = sd_str_concat_n(_t20, 3);
-  sd_map_set((&(l_c)->f_globals), &_t21, &_t18);
-  sd_str_release(_t19);
+  sd_S_Global _t20 = {.f_kind = sd_box_retain(l_kind), .f_index = sd_int_retain(l_index), .f_pos = sd_rt_S3Pos(l_pos), .f_pkg = sd_int_retain(l_pkg), .f_name = sd_str_retain(l_name)};
+  sd_list ** _t21 = (&(l_c)->f_globalList);
+  SD_LIST_PUSH(_t21, sd_S_Global, _t20);
+  sd_int _t22 = sd_int_sub(sd_list_len(((*l_c)).f_globalList), SD_INT(1));
+  sd_str _t23 = sd_int_to_str(l_pkg);
+  sd_str _t24[] = {_t23, SD_STR_LIT(":"), l_name};
+  sd_str _t25 = sd_str_concat_n(_t24, 3);
+  sd_map_set((&(l_c)->f_globals), &_t25, &_t22);
+  sd_str_release(_t23);
   sd_int_release(l_old);
   sd_int_release(l_pkg);
 }
@@ -11472,35 +11488,57 @@ static void sd_m_Checker__checkNamedCall(sd_S_Checker * l_c, sd_int l_e, sd_str 
       sd_rl_S4Expr(l_x);
       return;
     }
-    sd_S_Pos _t5 = sd_rt_S3Pos(l_cpos);
-    sd_str _t6 = sd_m_Checker__typeName((*l_c), l_vt);
-    sd_str _t7[] = {l_n, SD_STR_LIT(" is a variable of type "), _t6, SD_STR_LIT(", not a function")};
-    sd_str _t8 = sd_str_concat_n(_t7, 4);
-    sd_m_Checker__error(l_c, _t5, _t8);
-    sd_str_release(_t8);
-    sd_str_release(_t6);
-    sd_rl_S3Pos(_t5);
-    sd_int _t9 = sd_int_retain(l_e);
-    sd_m_Checker__checkArgsLoosely(l_c, _t9);
-    sd_int_release(_t9);
+    bool _t5 = sd_f_isBuiltinTypeName(l_n);
+    if ((!_t5)) {
+      sd_S_Pos _t6 = sd_rt_S3Pos(l_cpos);
+      sd_str _t7 = sd_m_Checker__typeName((*l_c), l_vt);
+      sd_str _t8[] = {l_n, SD_STR_LIT(" is a variable of type "), _t7, SD_STR_LIT(", not a function")};
+      sd_str _t9 = sd_str_concat_n(_t8, 4);
+      sd_m_Checker__error(l_c, _t6, _t9);
+      sd_str_release(_t9);
+      sd_str_release(_t7);
+      sd_rl_S3Pos(_t6);
+    }
+    sd_int _t10 = sd_int_retain(l_e);
+    sd_m_Checker__checkArgsLoosely(l_c, _t10);
+    sd_int_release(_t10);
     sd_int_release(l_vt);
     sd_int_release(l_v);
     sd_rl_S3Pos(l_cpos);
     sd_rl_S4Expr(l_x);
     return;
   }
-  sd_int _t10 = sd_m_Checker__pkgOf((*l_c), l_cpos);
-  sd_int _t11 = sd_m_Checker__global((*l_c), _t10, l_n);
-  sd_int l_g = _t11;
-  sd_int_release(_t10);
+  sd_int _t11 = sd_m_Checker__pkgOf((*l_c), l_cpos);
+  sd_int _t12 = sd_m_Checker__global((*l_c), _t11, l_n);
+  sd_int l_g = _t12;
+  sd_int_release(_t11);
   if ((!sd_int_is_null(l_g))) {
-    sd_int _t12 = sd_int_retain(l_e);
-    sd_int _t13 = sd_int_retain(l_g);
-    sd_str _t14 = sd_str_retain(l_n);
-    sd_m_Checker__checkGlobalCall(l_c, _t12, _t13, _t14);
-    sd_str_release(_t14);
+    sd_int _t13 = sd_int_retain(l_e);
+    sd_int _t14 = sd_int_retain(l_g);
+    sd_str _t15 = sd_str_retain(l_n);
+    sd_m_Checker__checkGlobalCall(l_c, _t13, _t14, _t15);
+    sd_str_release(_t15);
+    sd_int_release(_t14);
     sd_int_release(_t13);
-    sd_int_release(_t12);
+    sd_int_release(l_g);
+    sd_int_release(l_v);
+    sd_rl_S3Pos(l_cpos);
+    sd_rl_S4Expr(l_x);
+    return;
+  }
+  sd_int _t16 = sd_m_Checker__pkgOf((*l_c), l_cpos);
+  sd_str _t17 = sd_int_to_str(_t16);
+  sd_str _t18[] = {_t17, SD_STR_LIT(":"), l_n};
+  sd_str _t19 = sd_str_concat_n(_t18, 3);
+  bool *_t20 = sd_map_get(((*l_c)).f_builtinNamed, &_t19);
+  bool _t21 = (!(!((_t20 ? (sd_opt_bool){true, *_t20} : (sd_opt_bool){false, 0})).has));
+  sd_str_release(_t19);
+  sd_str_release(_t17);
+  sd_int_release(_t16);
+  if (_t21) {
+    sd_int _t22 = sd_int_retain(l_e);
+    sd_m_Checker__checkArgsLoosely(l_c, _t22);
+    sd_int_release(_t22);
     sd_int_release(l_g);
     sd_int_release(l_v);
     sd_rl_S3Pos(l_cpos);
@@ -11508,86 +11546,86 @@ static void sd_m_Checker__checkNamedCall(sd_S_Checker * l_c, sd_int l_e, sd_str 
     return;
   }
   if (((((sd_str_eq(l_n, SD_STR_LIT("int")) || sd_str_eq(l_n, SD_STR_LIT("float"))) || sd_str_eq(l_n, SD_STR_LIT("byte"))) || sd_str_eq(l_n, SD_STR_LIT("string"))) || sd_str_eq(l_n, SD_STR_LIT("bool")))) {
-    sd_int _t15 = sd_int_retain(l_e);
-    sd_str _t16 = sd_str_retain(l_n);
-    sd_m_Checker__checkConversion(l_c, _t15, _t16);
-    sd_str_release(_t16);
-    sd_int_release(_t15);
+    sd_int _t23 = sd_int_retain(l_e);
+    sd_str _t24 = sd_str_retain(l_n);
+    sd_m_Checker__checkConversion(l_c, _t23, _t24);
+    sd_str_release(_t24);
+    sd_int_release(_t23);
     sd_int_release(l_g);
     sd_int_release(l_v);
     sd_rl_S3Pos(l_cpos);
     sd_rl_S4Expr(l_x);
     return;
   }
-  sd_S_Suggest _t17 = sd_f_newSuggest(l_n);
-  sd_S_Suggest l_s = _t17;
+  sd_S_Suggest _t25 = sd_f_newSuggest(l_n);
+  sd_S_Suggest l_s = _t25;
   {
     sd_int l_j = SD_INT(0);
     for (;;) {
       if (!(sd_int_lt(l_j, sd_list_len((((*l_c)).f_ast).f_fns)))) break;
       {
         sd_S_FnDecl l_cand = sd_rt_S6FnDecl(SD_LIST_GET((((*l_c)).f_ast).f_fns, sd_S_FnDecl, l_j));
-        bool _t21 = ((!(l_cand).f_isMethod) && (!(l_cand).f_isTest));
-        if (_t21) {
-          sd_int _t19 = sd_m_Checker__fnPkg((*l_c), l_j);
-          sd_int _t20 = sd_m_Checker__pkgOf((*l_c), l_cpos);
-          _t21 = sd_int_eq(_t19, _t20);
-          sd_int_release(_t20);
-          sd_int_release(_t19);
+        bool _t29 = ((!(l_cand).f_isMethod) && (!(l_cand).f_isTest));
+        if (_t29) {
+          sd_int _t27 = sd_m_Checker__fnPkg((*l_c), l_j);
+          sd_int _t28 = sd_m_Checker__pkgOf((*l_c), l_cpos);
+          _t29 = sd_int_eq(_t27, _t28);
+          sd_int_release(_t28);
+          sd_int_release(_t27);
         }
-        if (_t21) {
-          sd_str _t22 = sd_str_retain((l_cand).f_name);
-          sd_m_Suggest__consider((&l_s), _t22);
-          sd_str_release(_t22);
+        if (_t29) {
+          sd_str _t30 = sd_str_retain((l_cand).f_name);
+          sd_m_Suggest__consider((&l_s), _t30);
+          sd_str_release(_t30);
         }
         sd_rl_S6FnDecl(l_cand);
       }
-      _c18:;
-      sd_int _t23 = sd_int_add(l_j, SD_INT(1)); sd_int_release(l_j); l_j = _t23;
+      _c26:;
+      sd_int _t31 = sd_int_add(l_j, SD_INT(1)); sd_int_release(l_j); l_j = _t31;
     }
     sd_int_release(l_j);
   }
   {
-    sd_int _t24 = sd_int_sub(sd_list_len(((*l_c)).f_scope), SD_INT(1));
-    sd_int l_k = _t24;
+    sd_int _t32 = sd_int_sub(sd_list_len(((*l_c)).f_scope), SD_INT(1));
+    sd_int l_k = _t32;
     for (;;) {
       if (!(sd_int_ge(l_k, SD_INT(0)))) break;
       {
-        sd_str _t26 = sd_str_retain((SD_LIST_GET(((*l_c)).f_vars, sd_S_Var, SD_LIST_GET(((*l_c)).f_scope, sd_int, l_k))).f_name);
-        sd_m_Suggest__consider((&l_s), _t26);
-        sd_str_release(_t26);
+        sd_str _t34 = sd_str_retain((SD_LIST_GET(((*l_c)).f_vars, sd_S_Var, SD_LIST_GET(((*l_c)).f_scope, sd_int, l_k))).f_name);
+        sd_m_Suggest__consider((&l_s), _t34);
+        sd_str_release(_t34);
       }
-      _c25:;
-      sd_int _t27 = sd_int_sub(l_k, SD_INT(1)); sd_int_release(l_k); l_k = _t27;
+      _c33:;
+      sd_int _t35 = sd_int_sub(l_k, SD_INT(1)); sd_int_release(l_k); l_k = _t35;
     }
     sd_int_release(l_k);
   }
-  sd_S_Pos _t28 = sd_rt_S3Pos(l_cpos);
-  sd_str _t29 = sd_str_concat(SD_STR_LIT("undefined function "), l_n);
-  sd_str _t30 = sd_m_Suggest__hint(l_s);
-  sd_m_Checker__errorHint(l_c, _t28, _t29, _t30);
-  sd_str_release(_t30);
-  sd_str_release(_t29);
-  sd_rl_S3Pos(_t28);
+  sd_S_Pos _t36 = sd_rt_S3Pos(l_cpos);
+  sd_str _t37 = sd_str_concat(SD_STR_LIT("undefined function "), l_n);
+  sd_str _t38 = sd_m_Suggest__hint(l_s);
+  sd_m_Checker__errorHint(l_c, _t36, _t37, _t38);
+  sd_str_release(_t38);
+  sd_str_release(_t37);
+  sd_rl_S3Pos(_t36);
   {
     sd_int l_m = SD_INT(0);
     for (;;) {
       if (!(sd_int_lt(l_m, (l_x).f_count))) break;
       {
-        sd_int _t32 = sd_m_Ast__at(((*l_c)).f_ast, (l_x).f_list, l_m);
-        sd_m_Checker__checkExpr(l_c, _t32);
-        sd_int_release(_t32);
+        sd_int _t40 = sd_m_Ast__at(((*l_c)).f_ast, (l_x).f_list, l_m);
+        sd_m_Checker__checkExpr(l_c, _t40);
+        sd_int_release(_t40);
       }
-      _c31:;
-      sd_int _t33 = sd_int_add(l_m, SD_INT(1)); sd_int_release(l_m); l_m = _t33;
+      _c39:;
+      sd_int _t41 = sd_int_add(l_m, SD_INT(1)); sd_int_release(l_m); l_m = _t41;
     }
     sd_int_release(l_m);
   }
-  sd_int _t34 = sd_int_retain(l_e);
-  sd_int _t35 = sd_int_retain(sd_c_tyInvalid());
-  sd_m_Checker__setType(l_c, _t34, _t35);
-  sd_int_release(_t35);
-  sd_int_release(_t34);
+  sd_int _t42 = sd_int_retain(l_e);
+  sd_int _t43 = sd_int_retain(sd_c_tyInvalid());
+  sd_m_Checker__setType(l_c, _t42, _t43);
+  sd_int_release(_t43);
+  sd_int_release(_t42);
   sd_rl_S7Suggest(l_s);
   sd_int_release(l_g);
   sd_int_release(l_v);
@@ -14066,17 +14104,16 @@ static void sd_m_Checker__checkLvalue(sd_S_Checker * l_c, sd_int l_e) {
 
 static void sd_m_Checker__undefinedName(sd_S_Checker * l_c, sd_int l_e) {
   sd_S_Expr l_x = sd_rt_S4Expr(SD_LIST_GET((((*l_c)).f_ast).f_exprs, sd_S_Expr, l_e));
-  bool _t1 = sd_m_Checker__isPackageDir((*l_c), (l_x).f_text);
-  if (_t1) {
-    sd_S_Pos _t2 = sd_rt_S3Pos((l_x).f_pos);
-    sd_str _t3[] = {SD_STR_LIT("package "), (l_x).f_text, SD_STR_LIT(" is not imported")};
-    sd_str _t4 = sd_str_concat_n(_t3, 3);
-    sd_str _t5[] = {SD_STR_LIT("add import \""), (l_x).f_text, SD_STR_LIT("\" after the package line")};
-    sd_str _t6 = sd_str_concat_n(_t5, 3);
-    sd_m_Checker__errorHint(l_c, _t2, _t4, _t6);
-    sd_str_release(_t6);
-    sd_str_release(_t4);
-    sd_rl_S3Pos(_t2);
+  sd_int _t1 = sd_m_Checker__pkgOf((*l_c), (l_x).f_pos);
+  sd_str _t2 = sd_int_to_str(_t1);
+  sd_str _t3[] = {_t2, SD_STR_LIT(":"), (l_x).f_text};
+  sd_str _t4 = sd_str_concat_n(_t3, 3);
+  bool *_t5 = sd_map_get(((*l_c)).f_builtinNamed, &_t4);
+  bool _t6 = (!(!((_t5 ? (sd_opt_bool){true, *_t5} : (sd_opt_bool){false, 0})).has));
+  sd_str_release(_t4);
+  sd_str_release(_t2);
+  sd_int_release(_t1);
+  if (_t6) {
     sd_int _t7 = sd_int_retain(l_e);
     sd_int _t8 = sd_int_retain(sd_c_tyInvalid());
     sd_m_Checker__setType(l_c, _t7, _t8);
@@ -14085,20 +14122,39 @@ static void sd_m_Checker__undefinedName(sd_S_Checker * l_c, sd_int l_e) {
     sd_rl_S4Expr(l_x);
     return;
   }
-  sd_S_Suggest _t9 = sd_f_newSuggest((l_x).f_text);
-  sd_S_Suggest l_s = _t9;
+  bool _t9 = sd_m_Checker__isPackageDir((*l_c), (l_x).f_text);
+  if (_t9) {
+    sd_S_Pos _t10 = sd_rt_S3Pos((l_x).f_pos);
+    sd_str _t11[] = {SD_STR_LIT("package "), (l_x).f_text, SD_STR_LIT(" is not imported")};
+    sd_str _t12 = sd_str_concat_n(_t11, 3);
+    sd_str _t13[] = {SD_STR_LIT("add import \""), (l_x).f_text, SD_STR_LIT("\" after the package line")};
+    sd_str _t14 = sd_str_concat_n(_t13, 3);
+    sd_m_Checker__errorHint(l_c, _t10, _t12, _t14);
+    sd_str_release(_t14);
+    sd_str_release(_t12);
+    sd_rl_S3Pos(_t10);
+    sd_int _t15 = sd_int_retain(l_e);
+    sd_int _t16 = sd_int_retain(sd_c_tyInvalid());
+    sd_m_Checker__setType(l_c, _t15, _t16);
+    sd_int_release(_t16);
+    sd_int_release(_t15);
+    sd_rl_S4Expr(l_x);
+    return;
+  }
+  sd_S_Suggest _t17 = sd_f_newSuggest((l_x).f_text);
+  sd_S_Suggest l_s = _t17;
   {
-    sd_int _t10 = sd_int_sub(sd_list_len(((*l_c)).f_scope), SD_INT(1));
-    sd_int l_i = _t10;
+    sd_int _t18 = sd_int_sub(sd_list_len(((*l_c)).f_scope), SD_INT(1));
+    sd_int l_i = _t18;
     for (;;) {
       if (!(sd_int_ge(l_i, SD_INT(0)))) break;
       {
-        sd_str _t12 = sd_str_retain((SD_LIST_GET(((*l_c)).f_vars, sd_S_Var, SD_LIST_GET(((*l_c)).f_scope, sd_int, l_i))).f_name);
-        sd_m_Suggest__consider((&l_s), _t12);
-        sd_str_release(_t12);
+        sd_str _t20 = sd_str_retain((SD_LIST_GET(((*l_c)).f_vars, sd_S_Var, SD_LIST_GET(((*l_c)).f_scope, sd_int, l_i))).f_name);
+        sd_m_Suggest__consider((&l_s), _t20);
+        sd_str_release(_t20);
       }
-      _c11:;
-      sd_int _t13 = sd_int_sub(l_i, SD_INT(1)); sd_int_release(l_i); l_i = _t13;
+      _c19:;
+      sd_int _t21 = sd_int_sub(l_i, SD_INT(1)); sd_int_release(l_i); l_i = _t21;
     }
     sd_int_release(l_i);
   }
@@ -14107,34 +14163,34 @@ static void sd_m_Checker__undefinedName(sd_S_Checker * l_c, sd_int l_e) {
     for (;;) {
       if (!(sd_int_lt(l_j, sd_list_len((((*l_c)).f_ast).f_consts)))) break;
       {
-        sd_int _t15 = sd_int_retain((SD_LIST_GET((((*l_c)).f_ast).f_files, sd_S_SourceFile, (SD_LIST_GET((((*l_c)).f_ast).f_consts, sd_S_ConstDecl, l_j)).f_file)).f_pkgIndex);
-        sd_int _t16 = sd_m_Checker__pkgOf((*l_c), (l_x).f_pos);
-        bool _t17 = sd_int_eq(_t15, _t16);
-        sd_int_release(_t16);
-        sd_int_release(_t15);
-        if (_t17) {
-          sd_str _t18 = sd_str_retain((SD_LIST_GET((((*l_c)).f_ast).f_consts, sd_S_ConstDecl, l_j)).f_name);
-          sd_m_Suggest__consider((&l_s), _t18);
-          sd_str_release(_t18);
+        sd_int _t23 = sd_int_retain((SD_LIST_GET((((*l_c)).f_ast).f_files, sd_S_SourceFile, (SD_LIST_GET((((*l_c)).f_ast).f_consts, sd_S_ConstDecl, l_j)).f_file)).f_pkgIndex);
+        sd_int _t24 = sd_m_Checker__pkgOf((*l_c), (l_x).f_pos);
+        bool _t25 = sd_int_eq(_t23, _t24);
+        sd_int_release(_t24);
+        sd_int_release(_t23);
+        if (_t25) {
+          sd_str _t26 = sd_str_retain((SD_LIST_GET((((*l_c)).f_ast).f_consts, sd_S_ConstDecl, l_j)).f_name);
+          sd_m_Suggest__consider((&l_s), _t26);
+          sd_str_release(_t26);
         }
       }
-      _c14:;
-      sd_int _t19 = sd_int_add(l_j, SD_INT(1)); sd_int_release(l_j); l_j = _t19;
+      _c22:;
+      sd_int _t27 = sd_int_add(l_j, SD_INT(1)); sd_int_release(l_j); l_j = _t27;
     }
     sd_int_release(l_j);
   }
-  sd_S_Pos _t20 = sd_rt_S3Pos((l_x).f_pos);
-  sd_str _t21 = sd_str_concat(SD_STR_LIT("undefined: "), (l_x).f_text);
-  sd_str _t22 = sd_m_Suggest__hint(l_s);
-  sd_m_Checker__errorHint(l_c, _t20, _t21, _t22);
-  sd_str_release(_t22);
-  sd_str_release(_t21);
-  sd_rl_S3Pos(_t20);
-  sd_int _t23 = sd_int_retain(l_e);
-  sd_int _t24 = sd_int_retain(sd_c_tyInvalid());
-  sd_m_Checker__setType(l_c, _t23, _t24);
-  sd_int_release(_t24);
-  sd_int_release(_t23);
+  sd_S_Pos _t28 = sd_rt_S3Pos((l_x).f_pos);
+  sd_str _t29 = sd_str_concat(SD_STR_LIT("undefined: "), (l_x).f_text);
+  sd_str _t30 = sd_m_Suggest__hint(l_s);
+  sd_m_Checker__errorHint(l_c, _t28, _t29, _t30);
+  sd_str_release(_t30);
+  sd_str_release(_t29);
+  sd_rl_S3Pos(_t28);
+  sd_int _t31 = sd_int_retain(l_e);
+  sd_int _t32 = sd_int_retain(sd_c_tyInvalid());
+  sd_m_Checker__setType(l_c, _t31, _t32);
+  sd_int_release(_t32);
+  sd_int_release(_t31);
   sd_rl_S7Suggest(l_s);
   sd_rl_S4Expr(l_x);
 }
@@ -18251,10 +18307,12 @@ static void sd_m_Checker__checkReturn(sd_S_Checker * l_c, sd_S_Stmt l_st) {
             sd_str _t52[] = {(l_fd).f_name, SD_STR_LIT(" returns null as its "), _t50, SD_STR_LIT(" result beside an error that is null, so the caller would read a null "), _t51};
             sd_str _t53 = sd_str_concat_n(_t52, 5);
             sd_str _t54 = sd_m_Checker__typeName((*l_c), l_rt);
-            sd_str _t55[] = {SD_STR_LIT("return a "), _t54, SD_STR_LIT(" value, or return an error such as errors.new(...)")};
-            sd_str _t56 = sd_str_concat_n(_t55, 3);
-            sd_m_Checker__errorHint(l_c, _t49, _t53, _t56);
-            sd_str_release(_t56);
+            sd_str _t55 = sd_f_withArticle(_t54);
+            sd_str _t56[] = {SD_STR_LIT("return "), _t55, SD_STR_LIT(" value, or return an error such as errors.new(...)")};
+            sd_str _t57 = sd_str_concat_n(_t56, 3);
+            sd_m_Checker__errorHint(l_c, _t49, _t53, _t57);
+            sd_str_release(_t57);
+            sd_str_release(_t55);
             sd_str_release(_t54);
             sd_str_release(_t53);
             sd_str_release(_t51);
@@ -18267,27 +18325,27 @@ static void sd_m_Checker__checkReturn(sd_S_Checker * l_c, sd_S_Stmt l_st) {
         }
         sd_str l_context = SD_STR_LIT("as the return value");
         if (sd_int_gt(l_n, SD_INT(1))) {
-          sd_int _t57 = sd_int_add(l_k, SD_INT(1));
-          sd_str _t58 = sd_int_to_str(_t57);
-          sd_str _t59 = sd_str_concat(SD_STR_LIT("as return value "), _t58);
+          sd_int _t58 = sd_int_add(l_k, SD_INT(1));
+          sd_str _t59 = sd_int_to_str(_t58);
+          sd_str _t60 = sd_str_concat(SD_STR_LIT("as return value "), _t59);
           sd_str_release(l_context);
-          l_context = _t59;
-          sd_str_release(_t58);
-          sd_int_release(_t57);
+          l_context = _t60;
+          sd_str_release(_t59);
+          sd_int_release(_t58);
         }
-        sd_int _t60 = sd_int_retain(l_e);
-        sd_int _t61 = sd_int_retain(l_rt);
-        sd_str _t62 = sd_str_retain(l_context);
-        sd_m_Checker__coerce(l_c, _t60, _t61, _t62);
-        sd_str_release(_t62);
+        sd_int _t61 = sd_int_retain(l_e);
+        sd_int _t62 = sd_int_retain(l_rt);
+        sd_str _t63 = sd_str_retain(l_context);
+        sd_m_Checker__coerce(l_c, _t61, _t62, _t63);
+        sd_str_release(_t63);
+        sd_int_release(_t62);
         sd_int_release(_t61);
-        sd_int_release(_t60);
         sd_str_release(l_context);
         sd_int_release(l_rt);
         sd_int_release(l_e);
       }
       _c41:;
-      sd_int _t63 = sd_int_add(l_k, SD_INT(1)); sd_int_release(l_k); l_k = _t63;
+      sd_int _t64 = sd_int_add(l_k, SD_INT(1)); sd_int_release(l_k); l_k = _t64;
     }
     sd_int_release(l_k);
   }
@@ -21941,6 +21999,27 @@ static sd_str sd_m_Suggest__hint(sd_S_Suggest l_s) {
   sd_str _t1[] = {SD_STR_LIT("did you mean "), (l_s).f_best, SD_STR_LIT("\?")};
   sd_str _t2 = sd_str_concat_n(_t1, 3);
   return _t2;
+}
+
+static sd_str sd_f_withArticle(sd_str l_word) {
+  sd_str _t1 = sd_str_to_lower(l_word);
+  sd_str l_w = _t1;
+  if ((((sd_str_starts_with(l_w, SD_STR_LIT("a")) || sd_str_starts_with(l_w, SD_STR_LIT("e"))) || sd_str_starts_with(l_w, SD_STR_LIT("i"))) || sd_str_starts_with(l_w, SD_STR_LIT("o")))) {
+    sd_str _t2 = sd_str_concat(SD_STR_LIT("an "), l_word);
+    sd_str _t3 = _t2;
+    sd_str_release(l_w);
+    return _t3;
+  }
+  if ((((((sd_str_starts_with(l_w, SD_STR_LIT("u")) && (!sd_str_starts_with(l_w, SD_STR_LIT("uni")))) && (!sd_str_starts_with(l_w, SD_STR_LIT("us")))) && (!sd_str_starts_with(l_w, SD_STR_LIT("ut")))) && (!sd_str_starts_with(l_w, SD_STR_LIT("ur")))) && (!sd_str_starts_with(l_w, SD_STR_LIT("ue"))))) {
+    sd_str _t4 = sd_str_concat(SD_STR_LIT("an "), l_word);
+    sd_str _t5 = _t4;
+    sd_str_release(l_w);
+    return _t5;
+  }
+  sd_str _t6 = sd_str_concat(SD_STR_LIT("a "), l_word);
+  sd_str _t7 = _t6;
+  sd_str_release(l_w);
+  return _t7;
 }
 
 static sd_T_T2ie sd_f_fmtCommand(sd_list * l_args) {
@@ -38252,43 +38331,134 @@ static sd_str sd_m_Parser__expectIdent(sd_S_Parser * l_p, sd_str l_context) {
 }
 
 static void sd_m_Parser__syncStatement(sd_S_Parser * l_p) {
-  sd_int l_depth = SD_INT(0);
+  sd_int _t1 = sd_int_retain(((*l_p)).f_pos);
+  sd_m_Parser__syncStatementFrom(l_p, _t1);
+  sd_int_release(_t1);
+}
+
+static void sd_m_Parser__syncStatementFrom(sd_S_Parser * l_p, sd_int l_from) {
+  sd_list *_t1 = sd_list_new(&sd_type_box, 0);
+  sd_list * l_open = _t1;
+  {
+    sd_int l_i = sd_int_retain(l_from);
+    for (;;) {
+      if (!(sd_int_lt(l_i, ((*l_p)).f_pos))) break;
+      {
+        sd_box * l_k = sd_box_retain((SD_LIST_GET(((*l_p)).f_toks, sd_S_Token, l_i)).f_kind);
+        if (((sd_box_equal(l_k, SD_BOX_REF(sd_k_Tok__LBrace)) || sd_box_equal(l_k, SD_BOX_REF(sd_k_Tok__LParen))) || sd_box_equal(l_k, SD_BOX_REF(sd_k_Tok__LBrack)))) {
+          sd_box * _t3 = sd_box_retain(l_k);
+          SD_LIST_PUSH((&l_open), sd_box *, _t3);
+        } else {
+          if (((sd_box_equal(l_k, SD_BOX_REF(sd_k_Tok__RBrace)) || sd_box_equal(l_k, SD_BOX_REF(sd_k_Tok__RParen))) || sd_box_equal(l_k, SD_BOX_REF(sd_k_Tok__RBrack)))) {
+            {
+              sd_int _t4 = sd_f_matchingOpener(l_open, l_k);
+              sd_int l_n = _t4;
+              for (;;) {
+                if (!((sd_int_ge(l_n, SD_INT(0)) && sd_int_gt(sd_list_len(l_open), l_n)))) break;
+                {
+                  sd_box * _t5;
+                  bool _t6 = sd_list_pop((&l_open), &_t5);
+                  sd_box * _t7 = _t6 ? _t5 : NULL;
+                  sd_box_release(_t7);
+                }
+              }
+              sd_int_release(l_n);
+            }
+          }
+        }
+        sd_box_release(l_k);
+      }
+      _c2:;
+      sd_int _t8 = sd_int_add(l_i, SD_INT(1)); sd_int_release(l_i); l_i = _t8;
+    }
+    sd_int_release(l_i);
+  }
   {
     for (;;) {
       {
-        sd_box * _t1 = sd_m_Parser__kind((*l_p));
-        sd_box * l_k = _t1;
+        sd_box * _t9 = sd_m_Parser__kind((*l_p));
+        sd_box * l_k = _t9;
         if (sd_box_equal(l_k, SD_BOX_REF(sd_k_Tok__Eof))) {
           sd_box_release(l_k);
           break;
         }
-        if ((sd_int_eq(l_depth, SD_INT(0)) && sd_box_equal(l_k, SD_BOX_REF(sd_k_Tok__RBrace)))) {
-          sd_box_release(l_k);
-          break;
-        }
-        if ((sd_int_eq(l_depth, SD_INT(0)) && sd_box_equal(l_k, SD_BOX_REF(sd_k_Tok__Newline)))) {
-          sd_int *_t2 = (&(l_p)->f_pos);
-          sd_int _t3 = sd_int_add(*_t2, SD_INT(1)); sd_int_release(*_t2); *_t2 = _t3;
+        if ((sd_int_eq(sd_list_len(l_open), SD_INT(0)) && sd_box_equal(l_k, SD_BOX_REF(sd_k_Tok__Newline)))) {
+          sd_int *_t10 = (&(l_p)->f_pos);
+          sd_int _t11 = sd_int_add(*_t10, SD_INT(1)); sd_int_release(*_t10); *_t10 = _t11;
           sd_box_release(l_k);
           break;
         }
         if (((sd_box_equal(l_k, SD_BOX_REF(sd_k_Tok__LBrace)) || sd_box_equal(l_k, SD_BOX_REF(sd_k_Tok__LParen))) || sd_box_equal(l_k, SD_BOX_REF(sd_k_Tok__LBrack)))) {
-          sd_int _t4 = sd_int_add(l_depth, SD_INT(1)); sd_int_release(l_depth); l_depth = _t4;
+          sd_box * _t12 = sd_box_retain(l_k);
+          SD_LIST_PUSH((&l_open), sd_box *, _t12);
         } else {
           if (((sd_box_equal(l_k, SD_BOX_REF(sd_k_Tok__RBrace)) || sd_box_equal(l_k, SD_BOX_REF(sd_k_Tok__RParen))) || sd_box_equal(l_k, SD_BOX_REF(sd_k_Tok__RBrack)))) {
-            sd_int _t5 = sd_int_sub(l_depth, SD_INT(1)); sd_int_release(l_depth); l_depth = _t5;
+            sd_int _t13 = sd_f_matchingOpener(l_open, l_k);
+            sd_int l_n = _t13;
+            if ((sd_int_lt(l_n, SD_INT(0)) && sd_box_equal(l_k, SD_BOX_REF(sd_k_Tok__RBrace)))) {
+              sd_int_release(l_n);
+              sd_box_release(l_k);
+              break;
+            }
+            {
+              for (;;) {
+                if (!((sd_int_ge(l_n, SD_INT(0)) && sd_int_gt(sd_list_len(l_open), l_n)))) break;
+                {
+                  sd_box * _t14;
+                  bool _t15 = sd_list_pop((&l_open), &_t14);
+                  sd_box * _t16 = _t15 ? _t14 : NULL;
+                  sd_box_release(_t16);
+                }
+              }
+            }
+            sd_int_release(l_n);
           }
         }
-        sd_int *_t6 = (&(l_p)->f_pos);
-        sd_int _t7 = sd_int_add(*_t6, SD_INT(1)); sd_int_release(*_t6); *_t6 = _t7;
+        sd_int *_t17 = (&(l_p)->f_pos);
+        sd_int _t18 = sd_int_add(*_t17, SD_INT(1)); sd_int_release(*_t17); *_t17 = _t18;
         sd_box_release(l_k);
       }
     }
   }
-  bool _t8 = false;
-  bool *_t9 = (&(l_p)->f_failed);
-  *_t9 = _t8;
-  sd_int_release(l_depth);
+  bool _t19 = false;
+  bool *_t20 = (&(l_p)->f_failed);
+  *_t20 = _t19;
+  sd_list_release(l_open);
+}
+
+static sd_int sd_f_matchingOpener(sd_list * l_open, sd_box * l_k) {
+  sd_box * l_want = SD_BOX_REF(sd_k_Tok__LBrace);
+  if (sd_box_equal(l_k, SD_BOX_REF(sd_k_Tok__RParen))) {
+    sd_box * _t1 = sd_box_retain(SD_BOX_REF(sd_k_Tok__LParen));
+    sd_box_release(l_want);
+    l_want = _t1;
+  } else {
+    if (sd_box_equal(l_k, SD_BOX_REF(sd_k_Tok__RBrack))) {
+      sd_box * _t2 = sd_box_retain(SD_BOX_REF(sd_k_Tok__LBrack));
+      sd_box_release(l_want);
+      l_want = _t2;
+    }
+  }
+  {
+    sd_int _t3 = sd_int_sub(sd_list_len(l_open), SD_INT(1));
+    sd_int l_i = _t3;
+    for (;;) {
+      if (!(sd_int_ge(l_i, SD_INT(0)))) break;
+      {
+        if (sd_box_equal(SD_LIST_GET(l_open, sd_box *, l_i), l_want)) {
+          sd_int _t5 = l_i;
+          sd_box_release(l_want);
+          return _t5;
+        }
+      }
+      _c4:;
+      sd_int _t6 = sd_int_sub(l_i, SD_INT(1)); sd_int_release(l_i); l_i = _t6;
+    }
+    sd_int_release(l_i);
+  }
+  sd_int _t7 = SD_INT(-1);
+  sd_box_release(l_want);
+  return _t7;
 }
 
 static sd_int sd_m_Parser__scanType(sd_S_Parser l_p, sd_int l_i, bool l_named) {
@@ -38669,6 +38839,7 @@ static sd_int sd_m_Parser__parseBlockBody(sd_S_Parser * l_p, sd_str l_context, s
       sd_box_release(_t9);
       if (!(_t12)) break;
       {
+        sd_int l_from = sd_int_retain(((*l_p)).f_pos);
         sd_int _t13 = sd_m_Parser__parseStmt(l_p);
         SD_LIST_PUSH((&l_stmts), sd_int, _t13);
         bool _t15 = (!((*l_p)).f_failed);
@@ -38685,40 +38856,43 @@ static sd_int sd_m_Parser__parseBlockBody(sd_S_Parser * l_p, sd_str l_context, s
           sd_box_release(_t16);
         }
         if (((*l_p)).f_failed) {
-          sd_m_Parser__syncStatement(l_p);
+          sd_int _t18 = sd_int_retain(l_from);
+          sd_m_Parser__syncStatementFrom(l_p, _t18);
+          sd_int_release(_t18);
         }
         sd_m_Parser__skipNewlines(l_p);
+        sd_int_release(l_from);
       }
     }
   }
-  sd_S_Pos _t18 = sd_m_Parser__here((*l_p));
-  sd_S_Pos l_end = _t18;
-  sd_box * _t19 = sd_m_Parser__kind((*l_p));
-  bool _t20 = sd_box_equal(_t19, SD_BOX_REF(sd_k_Tok__Eof));
-  sd_box_release(_t19);
-  if (_t20) {
-    sd_S_Pos _t21 = sd_rt_S3Pos(l_end);
-    sd_str _t22 = sd_str_retain(SD_STR_LIT("unexpected end of file: missing '}'"));
-    sd_m_Parser__errorAt(l_p, _t21, _t22);
-    sd_str_release(_t22);
-    sd_rl_S3Pos(_t21);
+  sd_S_Pos _t19 = sd_m_Parser__here((*l_p));
+  sd_S_Pos l_end = _t19;
+  sd_box * _t20 = sd_m_Parser__kind((*l_p));
+  bool _t21 = sd_box_equal(_t20, SD_BOX_REF(sd_k_Tok__Eof));
+  sd_box_release(_t20);
+  if (_t21) {
+    sd_S_Pos _t22 = sd_rt_S3Pos(l_end);
+    sd_str _t23 = sd_str_retain(SD_STR_LIT("unexpected end of file: missing '}'"));
+    sd_m_Parser__errorAt(l_p, _t22, _t23);
+    sd_str_release(_t23);
+    sd_rl_S3Pos(_t22);
   } else {
-    sd_int *_t23 = (&(l_p)->f_pos);
-    sd_int _t24 = sd_int_add(*_t23, SD_INT(1)); sd_int_release(*_t23); *_t23 = _t24;
+    sd_int *_t24 = (&(l_p)->f_pos);
+    sd_int _t25 = sd_int_add(*_t24, SD_INT(1)); sd_int_release(*_t24); *_t24 = _t25;
   }
-  sd_S_Pos _t25 = sd_rt_S3Pos(l_start);
-  sd_S_Pos _t26 = sd_rt_S3Pos(l_end);
-  sd_list * _t27 = sd_list_retain(l_stmts);
-  sd_int _t28 = sd_m_Ast__addList((&(l_p)->f_ast), _t27);
-  sd_S_Block _t29 = {.f_pos = _t25, .f_end = _t26, .f_list = _t28, .f_count = sd_list_len(l_stmts)};
-  sd_list ** _t30 = (&((&(l_p)->f_ast))->f_blocks);
-  SD_LIST_PUSH(_t30, sd_S_Block, _t29);
-  sd_list_release(_t27);
-  sd_int _t31 = sd_int_sub(sd_list_len((((*l_p)).f_ast).f_blocks), SD_INT(1));
-  sd_int _t32 = _t31;
+  sd_S_Pos _t26 = sd_rt_S3Pos(l_start);
+  sd_S_Pos _t27 = sd_rt_S3Pos(l_end);
+  sd_list * _t28 = sd_list_retain(l_stmts);
+  sd_int _t29 = sd_m_Ast__addList((&(l_p)->f_ast), _t28);
+  sd_S_Block _t30 = {.f_pos = _t26, .f_end = _t27, .f_list = _t29, .f_count = sd_list_len(l_stmts)};
+  sd_list ** _t31 = (&((&(l_p)->f_ast))->f_blocks);
+  SD_LIST_PUSH(_t31, sd_S_Block, _t30);
+  sd_list_release(_t28);
+  sd_int _t32 = sd_int_sub(sd_list_len((((*l_p)).f_ast).f_blocks), SD_INT(1));
+  sd_int _t33 = _t32;
   sd_rl_S3Pos(l_end);
   sd_list_release(l_stmts);
-  return _t32;
+  return _t33;
 }
 
 static sd_int sd_m_Parser__parseStmt(sd_S_Parser * l_p) {
@@ -39467,6 +39641,7 @@ static sd_int sd_m_Parser__parseCaseBody(sd_S_Parser * l_p, sd_S_Pos l_start) {
       sd_box_release(_t2);
       if (!(_t9)) break;
       {
+        sd_int l_from = sd_int_retain(((*l_p)).f_pos);
         sd_int _t10 = sd_m_Parser__parseStmt(l_p);
         SD_LIST_PUSH((&l_stmts), sd_int, _t10);
         bool _t12 = (!((*l_p)).f_failed);
@@ -39483,24 +39658,27 @@ static sd_int sd_m_Parser__parseCaseBody(sd_S_Parser * l_p, sd_S_Pos l_start) {
           sd_box_release(_t13);
         }
         if (((*l_p)).f_failed) {
-          sd_m_Parser__syncStatement(l_p);
+          sd_int _t15 = sd_int_retain(l_from);
+          sd_m_Parser__syncStatementFrom(l_p, _t15);
+          sd_int_release(_t15);
         }
         sd_m_Parser__skipNewlines(l_p);
+        sd_int_release(l_from);
       }
     }
   }
-  sd_S_Pos _t15 = sd_rt_S3Pos(l_start);
-  sd_S_Pos _t16 = sd_m_Parser__here((*l_p));
-  sd_list * _t17 = sd_list_retain(l_stmts);
-  sd_int _t18 = sd_m_Ast__addList((&(l_p)->f_ast), _t17);
-  sd_S_Block _t19 = {.f_pos = _t15, .f_end = _t16, .f_list = _t18, .f_count = sd_list_len(l_stmts)};
-  sd_list ** _t20 = (&((&(l_p)->f_ast))->f_blocks);
-  SD_LIST_PUSH(_t20, sd_S_Block, _t19);
-  sd_list_release(_t17);
-  sd_int _t21 = sd_int_sub(sd_list_len((((*l_p)).f_ast).f_blocks), SD_INT(1));
-  sd_int _t22 = _t21;
+  sd_S_Pos _t16 = sd_rt_S3Pos(l_start);
+  sd_S_Pos _t17 = sd_m_Parser__here((*l_p));
+  sd_list * _t18 = sd_list_retain(l_stmts);
+  sd_int _t19 = sd_m_Ast__addList((&(l_p)->f_ast), _t18);
+  sd_S_Block _t20 = {.f_pos = _t16, .f_end = _t17, .f_list = _t19, .f_count = sd_list_len(l_stmts)};
+  sd_list ** _t21 = (&((&(l_p)->f_ast))->f_blocks);
+  SD_LIST_PUSH(_t21, sd_S_Block, _t20);
+  sd_list_release(_t18);
+  sd_int _t22 = sd_int_sub(sd_list_len((((*l_p)).f_ast).f_blocks), SD_INT(1));
+  sd_int _t23 = _t22;
   sd_list_release(l_stmts);
-  return _t22;
+  return _t23;
 }
 
 static sd_str sd_m_Parser__sourceText(sd_S_Parser l_p, sd_int l_from, sd_int l_to) {

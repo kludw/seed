@@ -67,7 +67,7 @@ You asked not to be woken up, so these are the language and toolchain decisions 
 - **A group block cannot be left early** (`return`, `try`, `break`/`continue` out of it), because the group must wait for its goroutines first.
 - **`spawn` can appear anywhere inside a `group` block,** including loops. It takes the same calls as `defer` (no `mut` method), returning `error` or nothing; the receiver and arguments are deep-copied.
 - **When a group fails, only its goroutines are stopped,** not the code of the block itself; the block should spawn and leave waiting to goroutines or to the code after the group.
-- **Stop points** are channel operations, `select`, `time.sleep` and the blocking standard-library calls (stdin, network, `os.run`), so a stopped server doesn't hang in `accept`. File I/O and `ch.close()` are not stop points.
+- **Stop points** are channel operations, `select`, `time.sleep` and the blocking standard-library calls (stdin, network, `os.run`, `os.output`), so a stopped server doesn't hang in `accept`. File I/O and `ch.close()` are not stop points.
 - **Channels are the one reference type.** Copying a channel gives another handle to the same channel (reply channels inside messages).
 - **Channel elements cannot be nullable** (`chan (int?)`), because `receive()` uses null for "closed"; `chan int?` is a nullable channel. A `chan error` receives `error`.
 - **Select cases** are `ch.send(v)`, `ch.receive()`, `_ = ch.receive()` and `T? v = ch.receive()` (a new variable only). All channels and values are evaluated, in order, before select waits. `select` with `default` is an error with a hint to use a timeout channel.

@@ -1,0 +1,13 @@
+// expect-error: chain_compare_args.sd:9:24: error: comparison operators do not chain
+// expect-errors: 1
+// A chained comparison in an argument list that spans lines.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    fmt.println((1 < 2 < 3).string(),
+        "x",
+    )
+    return null
+}

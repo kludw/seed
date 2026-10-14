@@ -65,13 +65,23 @@ fn (Checker c) mut checkNamedCall(int e, string n) {
             c.checkValueCall(e)
             return
         }
-        c.error(cpos, n + " is a variable of type " + c.typeName(vt) + ", not a function")
+        // A variable named like a built-in type was reported where it
+        // was declared.
+        if (!isBuiltinTypeName(n)) {
+            c.error(cpos, n + " is a variable of type " + c.typeName(vt) + ", not a function")
+        }
         c.checkArgsLoosely(e)
         return
     }
     int? g = c.global(c.pkgOf(cpos), n)
     if (g != null) {
         c.checkGlobalCall(e, g, n)
+        return
+    }
+    // A package-level declaration named like a built-in type was reported
+    // where it was declared (addGlobal); its calls are not conversions.
+    if (c.builtinNamed[c.pkgOf(cpos).string() + ":" + n] != null) {
+        c.checkArgsLoosely(e)
         return
     }
     if (n == "int" || n == "float" || n == "byte" || n == "string" || n == "bool") {

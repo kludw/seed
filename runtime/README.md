@@ -591,8 +591,9 @@ static sd_err sd_f_main(sd_list *l_args) { ... }       /* fn main([]string args)
 int main(int argc, char **argv) { return sd_main(argc, argv, sd_f_main); }
 ```
 
-`sd_main` sets up stdout buffering (64 KB, fully buffered), the crash
-handlers and the main goroutine, then calls the Seed `main`:
+`sd_main` sets up stdout buffering (a 64 KB buffer, line-buffered when
+stdout is a terminal and fully buffered otherwise; stderr unbuffered), the
+crash handlers and the main goroutine, then calls the Seed `main`:
 
 | Outcome | Effect |
 |---|---|
@@ -710,7 +711,7 @@ cap)`, `SD_LIST_PUSH(&l, sd_str, value)`, `SD_LIST_GET(l, T, i)`.
 
 **Blocking calls.** Each goroutine is an OS thread, so a native that
 blocks blocks only its own goroutine. To be a **stop point** (SPEC.md,
-DECISIONS.md 23: a goroutine whose group fails must stop there too), a
+DECISIONS.md, "Concurrency": a goroutine whose group fails must stop there too), a
 native never blocks in the OS directly; it waits through the runtime:
 
 ```c

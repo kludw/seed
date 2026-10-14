@@ -280,7 +280,7 @@ test "equality" {
     assert(err == null && err2 == null && a == b)
     Value c, error err3 = parse("{\"b\":[true],\"a\":1}")
     // docs/stdlib.md says key order counts in ==, "as it does for maps",
-    // but map == ignores order (DECISIONS.md 30), and Value's == is the
+    // but map == ignores order (DECISIONS.md, "Types and values"), and Value's == is the
     // built-in enum ==. See lib/README.md.
     assert(err == null && err3 == null && a == c)
 }

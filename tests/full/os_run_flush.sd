@@ -1,0 +1,18 @@
+// What the program printed before os.run starts a child comes before what
+// the child prints, although stdout is not a terminal here (so it is fully
+// buffered): stdout is flushed before a child starts. os.output captures
+// the child's stdout, and the text printed around it stays in order.
+package main
+
+import "fmt"
+import "os"
+
+fn main([]string args) error {
+    fmt.println("before run")
+    int code = try os.run([]string{"echo", "child of run"})
+    fmt.println("after run, exit " + code.string())
+    fmt.print("before output, ")
+    string out, int status = try os.output([]string{"echo", "child of output"})
+    fmt.println("after output: " + out.trim() + ", exit " + status.string())
+    return null
+}

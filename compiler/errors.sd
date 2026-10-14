@@ -253,3 +253,18 @@ fn (Suggest s) hint() string {
     }
     return "did you mean " + s.best + "?"
 }
+
+// The word with "a" or "an" before it, for messages: "an int", "an error",
+// "a string", "a []int". A word that starts with a, e, i or o takes "an";
+// one that starts with u takes "an" unless it sounds like "you" (User,
+// Unit, Url).
+fn withArticle(string word) string {
+    string w = word.toLower()
+    if (w.startsWith("a") || w.startsWith("e") || w.startsWith("i") || w.startsWith("o")) {
+        return "an " + word
+    }
+    if (w.startsWith("u") && !w.startsWith("uni") && !w.startsWith("us") && !w.startsWith("ut") && !w.startsWith("ur") && !w.startsWith("ue")) {
+        return "an " + word
+    }
+    return "a " + word
+}
