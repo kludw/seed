@@ -1,0 +1,10 @@
+// expect-error: op_not_int.sd:7:
+// SPEC "Operators": unary ! works on bool only.
+package main
+
+fn main([]string args) error {
+    int n = 1
+    int x = !n
+    _ = x
+    return null
+}

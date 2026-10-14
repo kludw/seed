@@ -1,0 +1,8 @@
+// expect-error: goto_label.sd:6:
+// SPEC "Control flow": there are no labels and no goto.
+package main
+
+fn main([]string args) error {
+    goto done
+    return null
+}

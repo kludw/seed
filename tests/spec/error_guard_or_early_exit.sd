@@ -1,0 +1,30 @@
+// SPEC "Errors": a plain T beside an error can be read after any if whose
+// block always leaves when the error is not null, such as
+// if (err != null || n < 0) { return ... }.
+package main
+
+import "fmt"
+
+fn parse(string s) int {
+    int n, error err = s.toInt()
+    if (err != null || n < 0) {
+        return 0
+    }
+    return n
+}
+
+fn parse2(string s) int {
+    int n, error err = s.toInt()
+    if (err == null) {
+        fmt.println("ok " + s)
+    } else {
+        return -1
+    }
+    return n
+}
+
+fn main([]string args) error {
+    fmt.println(parse("12").string() + " " + parse("x").string() + " " + parse("-3").string())
+    fmt.println(parse2("7").string() + " " + parse2("y").string())
+    return null
+}

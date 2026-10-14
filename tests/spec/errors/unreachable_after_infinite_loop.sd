@@ -1,0 +1,14 @@
+// expect-error: unreachable_after_infinite_loop.sd:12:
+// SPEC "Compiler": unreachable code is rejected, including code after a for (;;) without break.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    for (;;) {
+        fmt.println("forever")
+        return null
+    }
+    fmt.println("after")
+    return null
+}

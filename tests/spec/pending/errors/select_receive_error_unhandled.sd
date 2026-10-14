@@ -1,0 +1,15 @@
+// expect-error: select_receive_error_unhandled.sd:12:
+// SPEC "Errors": every error must be handled. For a chan error, receive()
+// returns error, so a select case `case errs.receive():` ignores an error,
+// like the statement errs.receive() does (which is rejected, see
+// spec/errors/chan_receive_error_is_error.sd); `_ = errs.receive()` discards it.
+package main
+
+fn main([]string args) error {
+    chan error errs = chan error(1)
+    errs.send(null)
+    select {
+    case errs.receive():
+        return null
+    }
+}

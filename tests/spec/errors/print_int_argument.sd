@@ -1,0 +1,10 @@
+// expect-error: print_int_argument.sd:8:
+// SPEC "Printing": fmt.println takes exactly one string, no hidden conversion.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    fmt.println(42)
+    return null
+}

@@ -1,0 +1,10 @@
+// expect-error: op_compound_minus.sd:7:
+// SPEC "Operators": there is no compound assignment (-= included).
+package main
+
+fn main([]string args) error {
+    int x = 3
+    x -= 1
+    _ = x
+    return null
+}

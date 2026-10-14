@@ -1,0 +1,10 @@
+// expect-error: fmt_crlf_line_endings.sd:3:1: error:
+// docs/formatting.md: the output uses \n line endings, not \r\n (the two comment lines end in \n, so line 3 is the first to differ).
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    fmt.println("hi")
+    return null
+}

@@ -1,0 +1,8 @@
+// expect-error: literal_binary.sd:6:
+// SPEC "Literals": no binary integer literals.
+package main
+
+fn main([]string args) error {
+    int x = 0b101
+    return null
+}

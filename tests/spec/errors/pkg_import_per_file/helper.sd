@@ -1,0 +1,5 @@
+package main
+
+fn greeting() string {
+    return strings.toUpper("hi")
+}

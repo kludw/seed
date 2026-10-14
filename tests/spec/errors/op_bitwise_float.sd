@@ -1,0 +1,9 @@
+// expect-error: op_bitwise_float.sd:6:
+// SPEC "Operators": bitwise operators work on int and byte only.
+package main
+
+fn main([]string args) error {
+    float x = 1.0 << 2.0
+    _ = x
+    return null
+}

@@ -1,0 +1,9 @@
+// expect-error: expr_statement_not_call.sd:7:
+// grammar "Statements": ExprStmt must be a call or try.
+package main
+
+fn main([]string args) error {
+    int x = 1
+    x + 1
+    return null
+}

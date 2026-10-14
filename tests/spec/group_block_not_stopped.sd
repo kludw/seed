@@ -1,0 +1,27 @@
+// SPEC "Groups": the block runs in the goroutine that reaches it; when the
+// group fails, only the goroutines it started are stopped, not the code of
+// the block itself (even at a stop point such as time.sleep or a send).
+package main
+
+import "errors"
+import "fmt"
+import "time"
+
+fn fail() error {
+    return errors.new("worker failed")
+}
+
+fn main([]string args) error {
+    chan int ch = chan int(1)
+    error err = group {
+        spawn fail()
+        time.sleep(50 * time.millisecond)
+        ch.send(1)
+        fmt.println("block finished")
+    }
+    int? v = ch.receive()
+    if (err != null && v != null) {
+        fmt.println(err.message() + " " + v.string())
+    }
+    return null
+}

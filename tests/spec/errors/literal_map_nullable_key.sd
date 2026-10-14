@@ -1,0 +1,9 @@
+// expect-error: literal_map_nullable_key.sd:6:
+// SPEC "Literals": map keys may be int, byte, bool or string (not string?).
+package main
+
+fn main([]string args) error {
+    map[(string?)]int m = map[(string?)]int{}
+    _ = m
+    return null
+}

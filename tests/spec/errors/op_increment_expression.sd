@@ -1,0 +1,11 @@
+// expect-error: op_increment_expression.sd:8:
+// SPEC "Control flow": i++ is a statement, not an expression, so x = i++ does not compile.
+package main
+
+fn main([]string args) error {
+    int i = 0
+    int x = 0
+    x = i++
+    _ = x
+    return null
+}

@@ -1,0 +1,8 @@
+// expect-error: literal_raw_string.sd:6:
+// SPEC "Literals": no raw strings.
+package main
+
+fn main([]string args) error {
+    string s = `raw`
+    return null
+}

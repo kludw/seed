@@ -1,0 +1,9 @@
+// expect-error: append
+// SPEC "Lists": push is the only way to add to the end of a list; there is no append.
+package main
+
+fn main([]string args) error {
+    []int xs = []int{1, 2}
+    xs.append(3)
+    return null
+}

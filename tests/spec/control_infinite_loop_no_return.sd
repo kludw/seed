@@ -1,0 +1,33 @@
+// SPEC "Compiler": a missing return is an error, but a function that ends in
+// for (;;) without a break never reaches its end, so it needs no return.
+package main
+
+import "fmt"
+
+fn firstSquareAbove(int n) int {
+    for (int i = 0; ; i++) {
+        if (i * i > n) {
+            return i
+        }
+    }
+}
+
+fn spin(chan int ch) int {
+    for (;;) {
+        int? v = ch.receive()
+        if (v == null) {
+            return -1
+        }
+        if (v > 2) {
+            return v
+        }
+    }
+}
+
+fn main([]string args) error {
+    chan int ch = chan int(5)
+    ch.send(1)
+    ch.send(3)
+    fmt.println(firstSquareAbove(10).string() + " " + spin(ch).string())
+    return null
+}

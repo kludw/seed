@@ -1,0 +1,8 @@
+// expect-error: package_line_missing.sd:
+// grammar "Files": a file starts with its package line.
+import "fmt"
+
+fn main([]string args) error {
+    fmt.println("x")
+    return null
+}

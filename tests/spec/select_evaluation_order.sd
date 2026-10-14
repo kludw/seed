@@ -1,0 +1,34 @@
+// SPEC "Select": the channels and the values to send of every case are
+// evaluated first, in order, before select waits (also for the cases that
+// are not chosen).
+package main
+
+import "fmt"
+
+fn pick(string name, chan int ch) chan int {
+    fmt.println("channel " + name)
+    return ch
+}
+
+fn value(int v) int {
+    fmt.println("value " + v.string())
+    return v
+}
+
+fn main([]string args) error {
+    chan int full = chan int(1)
+    full.send(0)
+    chan int ready = chan int(1)
+    ready.send(7)
+    select {
+    case pick("first", full).send(value(1)):
+        fmt.println("sent")
+    case int? v = pick("second", ready).receive():
+        if (v != null) {
+            fmt.println("received " + v.string())
+        }
+    case pick("third", full).send(value(3)):
+        fmt.println("sent")
+    }
+    return null
+}

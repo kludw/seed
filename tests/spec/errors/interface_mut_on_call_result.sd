@@ -1,0 +1,26 @@
+// expect-error: interface_mut_on_call_result.sd:24:
+// SPEC "Structs, enums, interfaces": a mut interface method can only be called on a variable or a part of one.
+package main
+
+type Counter interface {
+    mut bump()
+}
+
+type C struct implements Counter {
+    int n
+}
+
+fn (C c) mut bump() {
+    c.n = c.n + 1
+}
+
+fn make() Counter {
+    return C{n: 0}
+}
+
+fn main([]string args) error {
+    Counter c = make()
+    c.bump()
+    make().bump()
+    return null
+}

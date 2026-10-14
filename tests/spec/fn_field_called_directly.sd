@@ -1,0 +1,27 @@
+// SPEC "Function values": a struct field of function type is called directly:
+// op.apply(1, 2).
+package main
+
+import "fmt"
+
+fn plus(int a, int b) int {
+    return a + b
+}
+
+fn times(int a, int b) int {
+    return a * b
+}
+
+type Op struct {
+    string name
+    fn(int, int) int apply
+}
+
+fn main([]string args) error {
+    []Op ops = []Op{Op{name: "plus", apply: plus}, Op{name: "times", apply: times}}
+    for (int i = 0; i < ops.len(); i++) {
+        Op op = ops[i]
+        fmt.println(op.name + " " + op.apply(3, 4).string() + " " + ops[i].apply(1, 2).string())
+    }
+    return null
+}

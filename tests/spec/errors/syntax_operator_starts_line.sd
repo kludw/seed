@@ -1,0 +1,10 @@
+// expect-error: syntax_operator_starts_line.sd:8:
+// SPEC "Syntax basics" / grammar "Newlines": a line that continues must end
+// with an operator; a line ending with an identifier ends the statement.
+package main
+
+fn main([]string args) error {
+    int total = 1
+        + 2
+    return null
+}

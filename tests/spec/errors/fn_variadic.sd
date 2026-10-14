@@ -1,0 +1,12 @@
+// expect-error: fn_variadic.sd:5:
+// SPEC "Functions and methods": there are no variadic functions.
+package main
+
+fn sum(int... xs) int {
+    return 0
+}
+
+fn main([]string args) error {
+    _ = sum(1, 2)
+    return null
+}

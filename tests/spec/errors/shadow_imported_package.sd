@@ -1,0 +1,11 @@
+// expect-error: shadow_imported_package.sd:8:
+// SPEC "Variables and constants": a local cannot take an imported package's name.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    string fmt = "x"
+    _ = fmt
+    return null
+}

@@ -1,0 +1,9 @@
+// expect-error: chan_nullable_elem_list.sd:6:
+// SPEC "Channels": channel elements cannot be nullable (chan (int?) is rejected).
+package main
+
+fn main([]string args) error {
+    chan (int?) ch = chan (int?)(1)
+    _ = ch
+    return null
+}

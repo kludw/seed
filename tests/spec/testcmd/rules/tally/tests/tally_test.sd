@@ -1,0 +1,52 @@
+// SPEC "Tests": test files belong to the package (private names), may declare
+// helper functions and types and import packages; the body works like a
+// function returning error; a failed assert shows both sides for bytes and
+// bools; a crash fails only its own test; after assert(cond) the compiler
+// narrows on cond, and error guards are lifted by assert(err == null).
+package tally
+
+import "strings"
+
+type Case struct {
+    string word
+    int want
+}
+
+fn cases() []Case {
+    return []Case{Case{word: "a", want: 2}, Case{word: "b", want: 1}}
+}
+
+test "private function and helper type" {
+    []string words = strings.fields("a b a")
+    []Case cs = cases()
+    for (int i = 0; i < cs.len(); i++) {
+        assert(count(words, cs[i].word) == cs[i].want)
+    }
+}
+
+test "error guard lifted by assert" {
+    byte b, error err = first("xyz")
+    assert(err == null)
+    assert(b == 'x')
+}
+
+test "byte comparison" {
+    byte b = try first("abc")
+    assert(b == 'b')
+}
+
+test "bool comparison" {
+    bool empty = "x".len() == 0
+    assert(empty == true)
+}
+
+test "crash fails only this test" {
+    []int xs = []int{}
+    assert(xs[1] == 0)
+}
+
+test "after a crash the next test runs" {
+    int? n = "x".index("x")
+    assert(n != null)
+    assert(n == 0)
+}

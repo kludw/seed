@@ -1,0 +1,9 @@
+// expect-error: main.sd:5:
+// SPEC "Packages": import paths are lowercase names separated by /.
+package main
+
+import "Tools"
+
+fn main([]string args) error {
+    return Tools.check()
+}

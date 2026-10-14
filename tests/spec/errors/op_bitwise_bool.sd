@@ -1,0 +1,9 @@
+// expect-error: op_bitwise_bool.sd:6:
+// SPEC "Operators": bitwise operators work on int and byte only.
+package main
+
+fn main([]string args) error {
+    bool x = true & false
+    _ = x
+    return null
+}

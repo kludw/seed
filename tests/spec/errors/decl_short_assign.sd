@@ -1,0 +1,9 @@
+// expect-error: decl_short_assign.sd:6:
+// SPEC "Variables and constants": there is no := and no type inference.
+package main
+
+fn main([]string args) error {
+    x := 1
+    _ = x
+    return null
+}

@@ -1,0 +1,2 @@
+FAIL testcmd/test_return/sums: the package or its tests do not compile
+0 passed, 1 failed

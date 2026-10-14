@@ -1,0 +1,38 @@
+// SPEC "Concurrency": reading stdin (io.readLine) is a stop point. One
+// goroutine waits for a line while another fails; the group must stop the
+// reader and return at once. Under tests/run.sh stdin is /dev/null, so the
+// read returns null immediately; tests/test_cmd.sh runs this program with a
+// stdin that stays open for 10 seconds without data, where only stopping the
+// reader makes it finish in time.
+package main
+
+import "errors"
+import "fmt"
+import "io"
+import "time"
+
+fn reader() error {
+    string? line = try io.readLine()
+    if (line != null) {
+        fmt.println("unexpected line " + line)
+    }
+    return null
+}
+
+fn failLater() error {
+    time.sleep(50 * time.millisecond)
+    return errors.new("enough")
+}
+
+fn main([]string args) error {
+    int start = time.monotonic()
+    error err = group {
+        spawn reader()
+        spawn failLater()
+    }
+    if (err != null) {
+        fmt.println(err.message())
+    }
+    fmt.println((time.monotonic() - start < 5 * time.second).string())
+    return null
+}

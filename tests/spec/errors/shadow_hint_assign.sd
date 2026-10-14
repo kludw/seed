@@ -1,0 +1,14 @@
+// expect-error: =
+// SPEC "Variables and constants": the shadowing error suggests assigning with = instead.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    int count = 1
+    if (count > 0) {
+        int count = 2
+        fmt.println(count.string())
+    }
+    return null
+}

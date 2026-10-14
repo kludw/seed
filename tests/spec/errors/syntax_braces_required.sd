@@ -1,0 +1,11 @@
+// expect-error: syntax_braces_required.sd:9:
+// SPEC "Syntax basics": braces are always required.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    int x = 1
+    if (x > 0) fmt.println("yes")
+    return null
+}

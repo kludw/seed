@@ -1,0 +1,9 @@
+// expect-error: types_error_nullable.sd:6:
+// SPEC "Errors": error is the one type that is nullable without ?, so error? is not a type (like T??).
+package main
+
+fn main([]string args) error {
+    error? e = null
+    _ = e
+    return null
+}

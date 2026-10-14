@@ -1,0 +1,17 @@
+// expect-error: fmt_blank_line_after_case.sd:11:1: error:
+// docs/formatting.md "Blank lines": no blank line right after case ...:.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    int x = 1
+    switch (x) {
+    case 1:
+
+        fmt.println("one")
+    default:
+        fmt.println("other")
+    }
+    return null
+}

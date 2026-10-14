@@ -1,0 +1,8 @@
+// expect-error: literal_underscore.sd:6:
+// SPEC "Literals": no _ separators in integer literals.
+package main
+
+fn main([]string args) error {
+    int x = 1_000
+    return null
+}

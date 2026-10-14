@@ -1,0 +1,16 @@
+// expect-error: null_narrowing_not_else.sd:9:
+// SPEC "Null": through !, x != null is known only where !(x == null) is true; not in the else.
+package main
+
+fn size(string? s) int {
+    if (!(s == null)) {
+        return s.len()
+    } else {
+        return s.len()
+    }
+}
+
+fn main([]string args) error {
+    _ = size("ab")
+    return null
+}

@@ -1,0 +1,12 @@
+// expect-error: error_return_value_ignored.sd:10:
+// SPEC "Errors": ignoring any other result is a compile error too (a value discarded without _).
+package main
+
+fn count() int {
+    return 1
+}
+
+fn main([]string args) error {
+    count()
+    return null
+}

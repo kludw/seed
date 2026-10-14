@@ -1,0 +1,12 @@
+// expect-error: null_plain_param.sd:10:
+// SPEC "Null": a plain T never is null; null cannot be passed for a plain parameter.
+package main
+
+fn size(string s) int {
+    return s.len()
+}
+
+fn main([]string args) error {
+    _ = size(null)
+    return null
+}

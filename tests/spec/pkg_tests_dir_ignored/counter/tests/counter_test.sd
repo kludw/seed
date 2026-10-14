@@ -1,0 +1,7 @@
+package counter
+
+test "add" {
+    Counter c = make()
+    c.add(2)
+    assert(c.total() == 2)
+}

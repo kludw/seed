@@ -16,6 +16,9 @@ exact stdout (and exit code, where it isn't 0) is checked.
 | `testcmd/` | Projects for `seed test` (`test_cmd.sh`): `NAME.out` is the exact stdout of `seed test testcmd/NAME` (run in `tests/`), `NAME.exit` its exit code. | `make test-full` |
 | `core/` | More programs in the same subset as `lang/` (written for the retired bootstrap compiler seed0): crashes, exit codes, equality, narrowing, value copies, an interpreter; `core/errors/` has more programs that must be rejected. | `make test` |
 | `fmt/` | Golden tests for `seed fmt`: `NAME.sd` must format to `NAME.expected` (`tests/fmt/run.sh <seed>`, or `make test-fmt`). | `make test-fmt` |
+| `spec/` | Spec conformance tests, one or a few rules each, named after the section of `SPEC.md`, `docs/grammar.md`, `docs/builtins.md` or `docs/formatting.md` they pin (`null_narrowing_not`, `select_evaluation_order`, ...); `spec/errors/` has the programs that must be rejected (`fmt_*` are unformatted programs that must fail at the first line that differs), and `spec/NAME/` directories are programs made of packages. `spec/AUDIT.md` maps every spec section to the tests that cover it. | `make test-full` |
+| `spec/testcmd/` | `seed test` projects for the rules about tests (run by `test_cmd.sh` in `spec/`, like `testcmd/`); `NAME.err`, if present, is text that must appear in stderr. | `make test-full` |
+| `spec/pending/` | Spec tests that fail because of an implementation bug (listed in `spec/AUDIT.md`). They are not run by any target; move a test to `spec/` (or `spec/errors/`) once its bug is fixed: `tests/run.sh "build/seed2 c" tests/spec/pending`. | none |
 
 The `lang/` and `core/` programs are written to pass the compiler's pedantic checks: they
 are formatted (4-space indentation, gofmt-style layout), have no unused names
@@ -56,7 +59,7 @@ function), the test expects that name instead.
 
 ```
 tests/run.sh "build/seed2 c" tests/lang tests/core
-tests/run.sh "build/seed2 c" tests/full
+tests/run.sh "build/seed2 c" tests/full tests/spec
 ```
 
 The first argument is a command that takes a `.sd` path and writes C to
@@ -101,6 +104,11 @@ goroutines at many kinds of points for this check.
   `$TMPDIR` fallback when the root is read-only), stdout on a terminal
   (`testcmd/tty_flush.sd` under `script`: line-buffered, and flushed before
   reading stdin; macOS only), and `make install` / `make uninstall` into a
-  temporary `PREFIX`.
+  temporary `PREFIX`. For `spec/` it also runs the `spec/testcmd/`
+  projects, `seed test` without a directory, `seed run` with `--`, `seed fmt
+  --check` (its output and exit codes) and `seed fmt` on a file with syntax
+  errors, `seed build` of a single file (with and without `-o`), `seed ast`,
+  and `spec/io_stdin_stop_point.sd` with a stdin that stays open (reading
+  stdin is a stop point).
 - The standard library's own tests are run by `make test-lib`
   (`seed test lib`).

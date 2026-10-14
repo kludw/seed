@@ -1,0 +1,17 @@
+package counter
+
+pub type Counter struct {
+    int n
+}
+
+pub fn make() Counter {
+    return Counter{n: 0}
+}
+
+pub fn (Counter c) mut add(int k) {
+    c.n = c.n + k
+}
+
+pub fn (Counter c) total() int {
+    return c.n
+}

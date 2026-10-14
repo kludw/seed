@@ -1,0 +1,12 @@
+// expect-error: null_narrowing_or_wrong_side.sd:6:
+// SPEC "Null": x != null || x.len() > 0 does not narrow the right side (x is null there).
+package main
+
+fn nonEmpty(string? s) bool {
+    return s != null || s.len() > 0
+}
+
+fn main([]string args) error {
+    _ = nonEmpty("ab")
+    return null
+}

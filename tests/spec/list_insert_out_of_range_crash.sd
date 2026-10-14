@@ -1,0 +1,14 @@
+// builtins "Lists": insert(i, x) needs 0 <= i <= len; i = len appends, a
+// larger i is a caller's mistake and crashes.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    []int xs = []int{1, 2}
+    xs.insert(2, 3)
+    fmt.println(xs.len().string())
+    xs.insert(5, 9)
+    fmt.println("not reached")
+    return null
+}

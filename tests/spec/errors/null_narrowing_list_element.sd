@@ -1,0 +1,13 @@
+// expect-error: null_narrowing_list_element.sd:9:
+// SPEC "Null": narrowing does not apply to list elements; store them in a variable first.
+package main
+
+fn main([]string args) error {
+    [](int?) xs = [](int?){1, null}
+    int total = 0
+    if (xs[0] != null) {
+        total = xs[0] + 1
+    }
+    _ = total
+    return null
+}

@@ -1,0 +1,22 @@
+// expect-error: enum_pattern_wrong_type.sd:12:
+// SPEC "Structs, enums, interfaces": the pattern binds every field with its type.
+package main
+
+type Shape enum {
+    Circle(float r)
+    Dot
+}
+
+fn area(Shape s) float {
+    switch (s) {
+    case Shape.Circle(int r):
+        return float(r)
+    case Shape.Dot:
+        return 0.0
+    }
+}
+
+fn main([]string args) error {
+    _ = area(Shape.Dot)
+    return null
+}

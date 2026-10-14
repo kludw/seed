@@ -1,0 +1,10 @@
+// expect-error: unused_builtin_result.sd:7:
+// SPEC "Errors": ignoring any result is a compile error, also a built-in method's (xs.pop() returns T?).
+package main
+
+fn main([]string args) error {
+    []int xs = []int{1, 2}
+    xs.pop()
+    _ = xs
+    return null
+}

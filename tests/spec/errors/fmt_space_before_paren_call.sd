@@ -1,0 +1,10 @@
+// expect-error: fmt_space_before_paren_call.sd:8:1: error:
+// docs/formatting.md "Spaces": no space before the ( of a call.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    fmt.println ("hi")
+    return null
+}

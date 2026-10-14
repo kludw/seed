@@ -1,0 +1,16 @@
+// expect-error: shadowing is not allowed
+// SPEC "Variables and constants": a parameter cannot take the name of a package-level function.
+package main
+
+fn total(int a) int {
+    return a
+}
+
+fn twice(int total) int {
+    return total * 2
+}
+
+fn main([]string args) error {
+    _ = twice(total(1))
+    return null
+}

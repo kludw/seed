@@ -1,0 +1,11 @@
+// expect-error: Big_Circle
+// SPEC "Syntax basics": enum cases use PascalCase (no underscores).
+package main
+
+type Shape enum {
+    Big_Circle
+}
+
+fn main([]string args) error {
+    return null
+}

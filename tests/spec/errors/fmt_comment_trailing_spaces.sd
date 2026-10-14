@@ -1,0 +1,10 @@
+// expect-error: fmt_comment_trailing_spaces.sd:8:1: error:
+// docs/formatting.md "Comments": trailing spaces and tabs of a comment are removed.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    fmt.println("hi") // greet 	
+    return null
+}

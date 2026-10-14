@@ -1,0 +1,8 @@
+// expect-error: literal_string_bad_escape.sd:6:
+// SPEC "Literals": any escape other than \n \t \r \0 \\ \" \' \xHH is an error.
+package main
+
+fn main([]string args) error {
+    string s = "a\qb"
+    return null
+}

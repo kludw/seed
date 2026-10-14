@@ -1,0 +1,8 @@
+// expect-error: literal_float_exponent_only.sd:6:
+// SPEC "Literals": a float must contain a "."; 1e9 alone is not a float.
+package main
+
+fn main([]string args) error {
+    float x = 1e9
+    return null
+}

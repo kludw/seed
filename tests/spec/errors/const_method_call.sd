@@ -1,0 +1,19 @@
+// expect-error: const_method_call.sd:15:
+// SPEC "Variables and constants": a constant's value has no calls of methods.
+package main
+
+type P struct {
+    int x
+}
+
+fn (P p) double() int {
+    return p.x * 2
+}
+
+const P base = P{x: 2}
+
+const int twice = base.double()
+
+fn main([]string args) error {
+    return null
+}

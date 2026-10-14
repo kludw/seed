@@ -1,0 +1,27 @@
+// SPEC "Errors": a T? beside an error is not guarded, so a nullable field can
+// receive a value beside an error (it is null when the error is not null).
+package main
+
+import "errors"
+import "fmt"
+
+fn parse(bool ok) (int, error) {
+    if (!ok) {
+        return null, errors.new("bad")
+    }
+    return 1, null
+}
+
+type Slot struct {
+    int? value
+}
+
+fn main([]string args) error {
+    Slot s = Slot{value: 5}
+    error err = null
+    s.value, err = parse(false)
+    fmt.println((s.value == null).string() + " " + (err != null).string())
+    s.value, err = parse(true)
+    fmt.println((s.value != null && s.value == 1).string() + " " + (err == null).string())
+    return null
+}

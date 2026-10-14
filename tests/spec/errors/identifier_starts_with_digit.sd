@@ -1,0 +1,8 @@
+// expect-error: identifier_starts_with_digit.sd:6:
+// grammar "Lexical structure": an identifier starts with a letter or _.
+package main
+
+fn main([]string args) error {
+    int 2x = 1
+    return null
+}

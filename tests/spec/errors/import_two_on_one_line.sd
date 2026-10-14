@@ -1,0 +1,11 @@
+// expect-error: import_two_on_one_line.sd:5:
+// SPEC "Packages": imports are one per line.
+package main
+
+import "fmt" "os"
+
+fn main([]string args) error {
+    fmt.println("x")
+    os.exit(0)
+    return null
+}

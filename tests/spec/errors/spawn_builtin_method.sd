@@ -1,0 +1,11 @@
+// expect-error: spawn_builtin_method.sd:8:
+// SPEC "Spawn": spawn takes a call of a function, method, function value, interface method or package function (not a built-in method).
+package main
+
+fn main([]string args) error {
+    chan int ch = chan int(1)
+    error err = group {
+        spawn ch.send(1)
+    }
+    return err
+}

@@ -1,0 +1,13 @@
+// expect-error: error_return_null_beside_null.sd:6:
+// SPEC "Errors": returning a literal null for a plain T beside a null error is a compile error.
+package main
+
+fn name() (string, error) {
+    return null, null
+}
+
+fn main([]string args) error {
+    string s = try name()
+    _ = s
+    return null
+}

@@ -1,0 +1,11 @@
+// expect-error: for_while_form.sd:7:
+// SPEC "Control flow": for has exactly one form, C-style (no while form).
+package main
+
+fn main([]string args) error {
+    int i = 0
+    for (i < 3) {
+        i++
+    }
+    return null
+}

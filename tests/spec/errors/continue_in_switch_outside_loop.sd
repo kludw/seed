@@ -1,0 +1,14 @@
+// expect-error: continue_in_switch_outside_loop.sd:9:
+// SPEC "Control flow": continue inside a switch applies to the enclosing loop; without one it is an error.
+package main
+
+fn main([]string args) error {
+    int x = 1
+    switch (x) {
+    case 1:
+        continue
+    default:
+        x = 2
+    }
+    return null
+}

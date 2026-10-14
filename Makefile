@@ -75,7 +75,7 @@ test: build/seed2
 # The rest of the language, packages (tests/full/NAME/ directories) and the
 # seed command (tests/test_cmd.sh).
 test-full: build/seed2
-	tests/run.sh "build/seed2 c" tests/full
+	tests/run.sh "build/seed2 c" tests/full tests/spec
 	tests/test_cmd.sh build/seed2
 
 # Every test program under macOS `leaks --atExit` (slow: about 3 minutes).

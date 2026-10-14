@@ -1,0 +1,13 @@
+// expect-error: has the same name as strings
+// SPEC "Packages": a package-level name can't be the same as an imported package's name.
+package main
+
+import "fmt"
+import "strings"
+
+const string strings = "x"
+
+fn main([]string args) error {
+    fmt.println(strings.repeat("a", 2))
+    return null
+}

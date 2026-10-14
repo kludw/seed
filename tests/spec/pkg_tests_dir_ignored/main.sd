@@ -1,0 +1,15 @@
+// SPEC "Packages" / "Tests": a package's tests/ directory is compiled only by
+// seed test, so a program that imports the package ignores it (the test file
+// here would not compile as program code: it has a test block and assert).
+// The package's two files share the package line; each imports what it uses.
+package main
+
+import "counter"
+import "fmt"
+
+fn main([]string args) error {
+    counter.Counter c = counter.make()
+    c.add(3)
+    fmt.println(c.total().string() + " " + counter.describe(c))
+    return null
+}

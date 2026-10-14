@@ -1,0 +1,9 @@
+// expect-error: syntax_semicolon.sd:7:
+// SPEC "Syntax basics": no semicolons; ; only separates the parts of a for header.
+package main
+
+fn main([]string args) error {
+    int x = 1
+    x = 2; x = 3
+    return null
+}

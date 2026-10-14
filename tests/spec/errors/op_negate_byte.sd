@@ -1,0 +1,10 @@
+// expect-error: op_negate_byte.sd:7:
+// SPEC "Operators": unary - is for numbers; bytes have no arithmetic.
+package main
+
+fn main([]string args) error {
+    byte a = 'a'
+    byte b = -a
+    _ = b
+    return null
+}

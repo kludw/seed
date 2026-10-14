@@ -1,0 +1,13 @@
+// expect-error: literal_struct_positional.sd:11:
+// SPEC "Literals": a struct literal sets every field by name.
+package main
+
+type Point struct {
+    int x
+    int y
+}
+
+fn main([]string args) error {
+    Point p = Point{1, 2}
+    return null
+}

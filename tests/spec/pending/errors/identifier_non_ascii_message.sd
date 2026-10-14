@@ -1,0 +1,12 @@
+// expect-error: unexpected character 'é'
+// expect-errors: 2
+// SPEC "Compiler": every error shows the code it's about and explains it. A
+// non-ASCII character is reported once, as itself (not once per UTF-8 byte
+// as '\xc3' and '\xa9', which print as replacement characters).
+package main
+
+fn main([]string args) error {
+    int café = 1
+    _ = café
+    return null
+}

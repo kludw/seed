@@ -1,0 +1,13 @@
+// expect-error: shadowing is not allowed
+// SPEC "Variables and constants": declaring a name that exists at package level fails.
+package main
+
+import "fmt"
+
+const int limit = 10
+
+fn main([]string args) error {
+    int limit = 3
+    fmt.println(limit.string())
+    return null
+}

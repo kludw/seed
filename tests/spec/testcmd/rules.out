@@ -1,0 +1,4 @@
+FAIL "byte comparison": testcmd/rules/tally/tests/tally_test.sd:35: assert failed: b == 'b' (97 == 98)
+FAIL "bool comparison": testcmd/rules/tally/tests/tally_test.sd:40: assert failed: empty == true (false == true)
+FAIL "crash fails only this test": testcmd/rules/tally/tests/tally_test.sd:43: crash: index out of range: 1 with length 0
+3 passed, 3 failed

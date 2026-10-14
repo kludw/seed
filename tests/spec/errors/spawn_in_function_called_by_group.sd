@@ -1,0 +1,18 @@
+// expect-error: spawn_in_function_called_by_group.sd:10:
+// SPEC "Concurrency": spawn is only allowed inside a group block (lexically, not in a function called from one).
+package main
+
+fn work() error {
+    return null
+}
+
+fn helper() {
+    spawn work()
+}
+
+fn main([]string args) error {
+    error err = group {
+        helper()
+    }
+    return err
+}

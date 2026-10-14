@@ -1,0 +1,9 @@
+// expect-error: chan_receive_error_is_error.sd:7:
+// SPEC "Channels": for a chan error, receive() returns error (which must be handled like any error result).
+package main
+
+fn main([]string args) error {
+    chan error ch = chan error(1)
+    ch.receive()
+    return null
+}

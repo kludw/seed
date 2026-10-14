@@ -1,0 +1,8 @@
+// expect-error: literal_map_float_key.sd:6:
+// SPEC "Literals": map keys may be int, byte, bool or string.
+package main
+
+fn main([]string args) error {
+    map[float]int m = map[float]int{1.5: 1}
+    return null
+}

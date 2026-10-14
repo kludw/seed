@@ -1,0 +1,12 @@
+// expect-error: fn_naked_return.sd:6:
+// SPEC "Functions and methods": there is no naked return.
+package main
+
+fn answer() int {
+    return
+}
+
+fn main([]string args) error {
+    _ = answer()
+    return null
+}

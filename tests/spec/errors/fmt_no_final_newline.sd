@@ -1,0 +1,10 @@
+// expect-error: fmt_no_final_newline.sd:10:1: error:
+// docs/formatting.md: the output ends with exactly one newline.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    fmt.println("hi")
+    return null
+}

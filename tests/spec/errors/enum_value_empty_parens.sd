@@ -1,0 +1,14 @@
+// expect-error: enum_value_empty_parens.sd:11:
+// SPEC "Structs, enums, interfaces": a case without data has no parentheses: Token.Eof.
+package main
+
+type Token enum {
+    Eof
+    Num(int n)
+}
+
+fn main([]string args) error {
+    Token t = Token.Eof()
+    _ = t
+    return null
+}

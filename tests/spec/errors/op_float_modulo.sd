@@ -1,0 +1,9 @@
+// expect-error: op_float_modulo.sd:6:
+// SPEC "Operators": % works on int only.
+package main
+
+fn main([]string args) error {
+    float x = 5.0 % 2.0
+    _ = x
+    return null
+}

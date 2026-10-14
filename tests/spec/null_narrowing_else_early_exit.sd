@@ -1,0 +1,20 @@
+// SPEC "Null": x == null narrows x in the else; after an if/else in which only
+// the null branch leaves, x is narrowed for the rest of the block.
+package main
+
+import "fmt"
+
+fn describe(int? n) string {
+    string out = ""
+    if (n == null) {
+        return "none"
+    } else {
+        out = "some "
+    }
+    return out + (n + 1).string()
+}
+
+fn main([]string args) error {
+    fmt.println(describe(null) + ", " + describe(1))
+    return null
+}

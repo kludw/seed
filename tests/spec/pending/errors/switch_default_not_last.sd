@@ -1,0 +1,19 @@
+// expect-error: switch_default_not_last.sd:11:
+// SPEC "Control flow": a switch over an int must END with default.
+package main
+
+fn name(int x) string {
+    switch (x) {
+    case 1:
+        return "one"
+    default:
+        return "many"
+    case 2:
+        return "two"
+    }
+}
+
+fn main([]string args) error {
+    _ = name(1)
+    return null
+}

@@ -1,0 +1,16 @@
+// SPEC "Channels": sending on a closed channel crashes the goroutine, also
+// when the send is a select case.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    chan int ch = chan int(1)
+    ch.close()
+    fmt.println("closed")
+    select {
+    case ch.send(1):
+        fmt.println("not reached")
+    }
+    return null
+}

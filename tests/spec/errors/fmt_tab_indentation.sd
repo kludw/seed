@@ -1,0 +1,10 @@
+// expect-error: fmt_tab_indentation.sd:8:1: error:
+// docs/formatting.md: each level is 4 spaces; no tabs outside strings and comments.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+	fmt.println("hi")
+    return null
+}

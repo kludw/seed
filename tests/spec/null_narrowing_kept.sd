@@ -1,0 +1,44 @@
+// SPEC "Null": narrowing ends only when the narrowed path or a part of it
+// (u for u.email) is assigned a value that may be null or has a mut method
+// called on it. Assigning or mutating a sibling path (u.name, u.tags) keeps
+// u.email narrowed. A mut method called on the narrowed value itself cannot
+// make it null (inside the method the receiver is a plain T), and the
+// compiler keeps it narrowed (see AUDIT.md: the spec's wording says
+// otherwise).
+package main
+
+import "fmt"
+
+type User struct {
+    string name
+    string? email
+    []string tags
+}
+
+type Counter struct {
+    int n
+}
+
+fn (Counter c) mut bump() {
+    c.n = c.n + 1
+}
+
+fn main([]string args) error {
+    User u = User{name: "a", email: "e@x", tags: []string{}}
+    if (u.email != null) {
+        u.name = "b"
+        u.tags.push("t")
+        fmt.println(u.email.len().string())
+    }
+    []int? xs = []int{}
+    if (xs != null) {
+        xs.push(1)
+        fmt.println(xs.len().string())
+    }
+    Counter? c = Counter{n: 1}
+    if (c != null) {
+        c.bump()
+        fmt.println(c.n.string())
+    }
+    return null
+}

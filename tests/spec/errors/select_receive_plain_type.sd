@@ -1,0 +1,12 @@
+// expect-error: select_receive_plain_type.sd:8:
+// SPEC "Select": a receive case declares T? v (receive() returns T?).
+package main
+
+fn main([]string args) error {
+    chan int ch = chan int(1)
+    select {
+    case int v = ch.receive():
+        _ = v
+    }
+    return null
+}

@@ -1,0 +1,8 @@
+// expect-error: literal_octal.sd:6:
+// SPEC "Literals": no octal integer literals.
+package main
+
+fn main([]string args) error {
+    int x = 0o17
+    return null
+}

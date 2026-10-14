@@ -1,0 +1,11 @@
+// expect-error: limit is not pub in package conf
+// SPEC "Packages": a constant must be marked pub to be usable from other packages.
+package main
+
+import "conf"
+import "fmt"
+
+fn main([]string args) error {
+    fmt.println(conf.limit.string())
+    return null
+}

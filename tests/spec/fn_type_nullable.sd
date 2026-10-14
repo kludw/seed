@@ -1,0 +1,29 @@
+// SPEC "Function values": fn(int) int? is a function that returns int?, and a
+// nullable function type needs parentheses: (fn(int) int)?.
+package main
+
+import "fmt"
+
+fn half(int n) int? {
+    if (n % 2 != 0) {
+        return null
+    }
+    return n / 2
+}
+
+fn twice(int n) int {
+    return n * 2
+}
+
+fn main([]string args) error {
+    fn(int) int? f = half
+    int? h = f(3)
+    int? g = f(4)
+    (fn(int) int)? maybe = null
+    fmt.println((h == null).string() + " " + (g != null && g == 2).string() + " " + (maybe == null).string())
+    maybe = twice
+    if (maybe != null) {
+        fmt.println(maybe(5).string())
+    }
+    return null
+}

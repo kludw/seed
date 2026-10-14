@@ -1,0 +1,13 @@
+// builtins "Channels": closing a channel twice crashes (close of closed channel).
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    chan int ch = chan int(1)
+    ch.close()
+    fmt.println("closed once")
+    ch.close()
+    fmt.println("not reached")
+    return null
+}

@@ -1,0 +1,12 @@
+// expect-error: fn_named_results.sd:5:
+// SPEC "Functions and methods": there are no named returns.
+package main
+
+fn answer() (int n) {
+    return 1
+}
+
+fn main([]string args) error {
+    _ = answer()
+    return null
+}

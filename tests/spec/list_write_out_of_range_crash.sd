@@ -1,0 +1,14 @@
+// builtins "Lists": xs[i] = v crashes when i is out of range (a write does
+// not grow the list; push does).
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    []int xs = []int{1, 2}
+    xs[1] = 5
+    fmt.println(xs[1].string())
+    xs[2] = 3
+    fmt.println("not reached")
+    return null
+}

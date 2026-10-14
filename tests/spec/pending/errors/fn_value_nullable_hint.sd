@@ -1,0 +1,16 @@
+// expect-error: (fn(int) int?)?
+// SPEC "Function values" / "Compiler": a nullable function type needs
+// parentheses, and the error's hint must suggest a valid type: (fn(int) int?)?,
+// not fn(int) int?? (T?? is not a type).
+package main
+
+fn inc(int x) int? {
+    return x + 1
+}
+
+fn main([]string args) error {
+    fn(int) int? f = null
+    _ = f
+    _ = inc(1)
+    return null
+}

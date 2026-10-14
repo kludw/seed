@@ -1,0 +1,13 @@
+// builtins "float": int(f) crashes on nan.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    float zero = 0.0
+    float nan = zero / zero
+    fmt.println(nan.string())
+    int n = int(nan)
+    fmt.println("not reached " + n.string())
+    return null
+}

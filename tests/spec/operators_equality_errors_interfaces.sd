@@ -1,0 +1,53 @@
+// SPEC "Operators": == compares errors by their messages, and interface values
+// by their dynamic type and value.
+package main
+
+import "errors"
+import "fmt"
+
+type Shape interface {
+    area() int
+}
+
+type Sq struct implements Shape {
+    int side
+}
+
+type Box struct implements Shape {
+    int side
+}
+
+fn (Sq s) area() int {
+    return s.side * s.side
+}
+
+fn (Box b) area() int {
+    return b.side * b.side
+}
+
+type ParseError struct implements error {
+    string text
+}
+
+fn (ParseError p) message() string {
+    return p.text
+}
+
+fn str(bool v) string {
+    return v.string()
+}
+
+fn main([]string args) error {
+    error e1 = errors.new("disk full")
+    error e2 = errors.new("disk full")
+    error e3 = errors.new("disk empty")
+    error custom = ParseError{text: "disk full"}
+    error none = null
+    fmt.println(str(e1 == e2) + " " + str(e1 == e3) + " " + str(e1 == custom) + " " + str(none == null) + " " + str(e1 != null))
+    Shape a = Sq{side: 2}
+    Shape same = Sq{side: 2}
+    Shape other = Sq{side: 3}
+    Shape box = Box{side: 2}
+    fmt.println(str(a == same) + " " + str(a == other) + " " + str(a == box) + " " + str(a.area() == box.area()))
+    return null
+}

@@ -1,0 +1,15 @@
+// expect-error: method_on_interface.sd:9:
+// SPEC "Structs, enums, interfaces": methods cannot be declared on an interface type.
+package main
+
+type Named interface {
+    name() string
+}
+
+fn (Named n) shout() string {
+    return n.name()
+}
+
+fn main([]string args) error {
+    return null
+}

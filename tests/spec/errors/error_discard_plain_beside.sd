@@ -1,0 +1,9 @@
+// expect-error: error_discard_plain_beside.sd:6:
+// SPEC "Errors": a value beside a discarded error must be declared T?.
+package main
+
+fn main([]string args) error {
+    int n, _ = "1".toInt()
+    _ = n
+    return null
+}

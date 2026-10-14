@@ -1,0 +1,9 @@
+// expect-error: identifier_non_ascii_letter.sd:6:
+// grammar "Lexical structure": identifiers are made of (ASCII) letters, digits and _.
+package main
+
+fn main([]string args) error {
+    int café = 1
+    _ = café
+    return null
+}

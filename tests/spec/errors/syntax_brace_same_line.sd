@@ -1,0 +1,14 @@
+// expect-error: syntax_brace_same_line.sd:9:
+// SPEC "Syntax basics": the opening brace goes on the same line.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    int x = 1
+    if (x > 0)
+    {
+        fmt.println("yes")
+    }
+    return null
+}

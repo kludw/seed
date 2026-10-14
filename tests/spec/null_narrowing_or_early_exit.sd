@@ -1,0 +1,28 @@
+// SPEC "Null": after an if whose block always leaves, the rest of the block
+// knows the opposite of its condition, also for || (x == null || ... leaves,
+// so x != null afterwards) and when the else block is the one that leaves.
+package main
+
+import "fmt"
+
+fn firstByte(string? s) int {
+    if (s == null || s.len() == 0) {
+        return -1
+    }
+    return int(s[0])
+}
+
+fn size(string? s) int {
+    if (s != null) {
+        fmt.println("got " + s)
+    } else {
+        return -1
+    }
+    return s.len()
+}
+
+fn main([]string args) error {
+    fmt.println(firstByte(null).string() + " " + firstByte("").string() + " " + firstByte("a").string())
+    fmt.println(size(null).string() + " " + size("abc").string())
+    return null
+}

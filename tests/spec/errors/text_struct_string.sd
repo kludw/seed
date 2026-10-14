@@ -1,0 +1,15 @@
+// expect-error: text_struct_string.sd:13:
+// SPEC "Converting to text": user types have no automatic text form.
+package main
+
+import "fmt"
+
+type Point struct {
+    int x
+}
+
+fn main([]string args) error {
+    Point p = Point{x: 1}
+    fmt.println(p.string())
+    return null
+}

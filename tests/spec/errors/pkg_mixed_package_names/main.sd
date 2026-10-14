@@ -1,0 +1,10 @@
+// expect-error: other.sd:1:
+// SPEC "Packages": every .sd file directly in a package's directory starts with the same package line.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    fmt.println("x")
+    return null
+}

@@ -1,0 +1,16 @@
+// SPEC "Operators": a negative shift count is a runtime fault, like integer
+// division by zero: it crashes.
+package main
+
+import "fmt"
+
+fn count() int {
+    return -1
+}
+
+fn main([]string args) error {
+    fmt.println("shifting")
+    int n = 1 << count()
+    fmt.println("not reached " + n.string())
+    return null
+}

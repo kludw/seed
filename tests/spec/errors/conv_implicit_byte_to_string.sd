@@ -1,0 +1,9 @@
+// expect-error: conv_implicit_byte_to_string.sd:6:
+// SPEC "Types": no implicit conversions; a byte is not a string.
+package main
+
+fn main([]string args) error {
+    string s = 'a'
+    _ = s
+    return null
+}

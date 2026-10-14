@@ -1,0 +1,13 @@
+// expect-error: select_default.sd:10:
+// SPEC "Select": there is no default case, so select always waits.
+package main
+
+fn main([]string args) error {
+    chan int ch = chan int(1)
+    select {
+    case _ = ch.receive():
+        return null
+    default:
+        return null
+    }
+}
