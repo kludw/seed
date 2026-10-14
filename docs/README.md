@@ -36,6 +36,8 @@ Start with the guide if you want to learn Seed; use the reference when you need 
 - [seed0.md](seed0.md) and [seed0/README.md](../seed0/README.md): the bootstrap compiler in C and the language subset it accepts (being retired in favour of a C snapshot of the compiler).
 - [tests/README.md](../tests/README.md): the conformance tests: layout, file format, how to run them.
 - [compiler/BUGS_FIXED.md](../compiler/BUGS_FIXED.md) and [lib/COMPILER_BUGS.md](../lib/COMPILER_BUGS.md): compiler bugs found during QA and while writing the library, with their status.
+- [lib/BUGS_FIXED.md](../lib/BUGS_FIXED.md): library bugs found by the QA pass, and how the library was tested.
+- [performance.md](performance.md): benchmarks against Go ([bench/](../bench/)), where the time goes, what the runtime optimises, and proposals for the compiler.
 
 ## Tools
 

@@ -176,7 +176,7 @@ The running process and its environment. A program's arguments are not here: `ma
 - `argv[0]` is looked up on `PATH` unless it contains a `/`. Crashes if `argv` is empty.
 - The child inherits the environment, the current directory, stdin and stderr. With `os.run` it also inherits stdout.
 - The exit code is the child's exit code. A child killed by a signal reports `128 + signal`, as shells do.
-- The error is set only when the child could not be started: `os.run: frobnicate: no such file or directory`. A child that runs and fails is not an error; check the exit code.
+- The error is set only when the child could not be started: `os.run: frobnicate: no such file or directory`, or when an argument contains a NUL byte, which the OS cannot pass: `os.run: echo: argument 1 contains a NUL byte`. A child that runs and fails is not an error; check the exit code.
 - They are stop points: if the calling goroutine's group is stopped while a child runs, the child is killed (`SIGKILL`) and waited for. **(not implemented yet** for `os.output`, which blocks its goroutine until the child ends; `os.run` is a stop point.)
 
 There is deliberately no `os.setEnv` and no `os.chdir`. The environment and the current directory are shared by every goroutine, so changing them would be shared mutable state. Pass values as arguments instead.
@@ -246,7 +246,7 @@ pub type File struct {
 - Reading a file opened with `fs.create` gives `fs.File.read: notes.txt: file is open for writing only` (or `fs.File.readLine: ...`).
 - Every operation after `close()` returns an error ending in `file is closed`: `fs.File.readLine: notes.txt: file is closed`.
 - `f.read(0)` crashes with `fs.File.read: max (0) must be at least 1`.
-- Paths are passed to the OS unchanged. Relative paths are relative to the current directory.
+- Paths are passed to the OS unchanged. Relative paths are relative to the current directory. A path that contains a NUL byte is an error, since the OS would only see the part before it: `fs.write: a.txt\x00.png: path contains a NUL byte` (each NUL is shown as `\x00`); `fs.exists` and `fs.isDir` return `false` for it.
 - File operations are not stop points: reading and writing regular files does not block for long, so a goroutine whose group is stopped stops at its next channel operation or blocking call instead.
 
 ```

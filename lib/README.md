@@ -27,6 +27,7 @@ lib/
   http/wire.sd                http's message reader and writer (no I/O)
   http/server.sd, client.sd   http.serve, serveListener, get, send (on net)
   COMPILER_BUGS.md            compiler issues found, with reproductions
+  BUGS_FIXED.md               library bugs found by the QA pass, and how it tested
 ```
 
 ## Running the tests
@@ -119,9 +120,18 @@ and 100`.
   <reason>` when it cannot start (or reading or waiting fails); crash
   `os.output: argv is empty`.
 - `hostname` is `gethostname`; error `os.hostname: <reason>`.
+- `run` and `output` reject an `argv` with a NUL byte in any argument
+  before starting anything (a C string would end there and run a
+  different command): `os.run: sh\x00-c: program name contains a NUL
+  byte`, `os.output: echo: argument 1 contains a NUL byte`.
 
 ### fs
 
+- A path with a NUL byte is an error in every function (`exists` and
+  `isDir` return false): `fs.read: a.txt\x00.png: path contains a NUL
+  byte`, with each NUL shown as `\x00`. The OS takes C strings, so such a
+  path would otherwise name the file before the NUL (`removeAll("d/\x00")`
+  would remove `d`); Go fails the same way (`invalid argument`).
 - `write`, `append`, `create` use mode `0644` and `mkdir` `0755` (before
   the umask), as docs/stdlib.md says; `write` and `mkdir` are therefore in
   fs.c rather than calling the runtime's versions, with the same messages
@@ -237,7 +247,9 @@ much faster; it can replace the Seed one without changing any output.
 The package functions `rand.range`, `rand.fraction` and `rand.permutation`
 draw from a per-goroutine generator: the native `nextOs()` (rand.c) is a
 thread-local SplitMix64 state (each goroutine is a thread), seeded with
-`getentropy` (or `/dev/urandom`) on the goroutine's first use. `Source` has
+`getentropy` (or `/dev/urandom`) on the goroutine's first use (an
+`sd_goroutine_atexit` function forgets the seed when the goroutine ends,
+since threads are reused by later goroutines). `Source` has
 a private `bool fromOs` (false from `seeded`); when it is set, `next`
 returns `nextOs()`, and each package function is
 `Source{state: 0, fromOs: true}` followed by the method call, so the
@@ -318,6 +330,11 @@ it reads depends on the test runner's stdin, so it is tested by
 - Address mistakes are errors, not crashes (`missing port`, `invalid
   port`, `missing ']' in address`, `IPv6 addresses need brackets:
   [::1]:80`), because addresses usually come from outside the program.
+- `listen` asks for an accept queue of 65535, which the OS clamps to its
+  limit (`kern.ipc.somaxconn`, 128 by default on macOS; `net.core.somaxconn`
+  on Linux), as Go does. On macOS a burst of more than about 150
+  simultaneous connections can get `connection reset by peer`; Go's
+  `net/http` does the same there (lib/BUGS_FIXED.md).
   `read(max < 1)`, `setTimeout(d < 0)` and `dial(timeout < 0)` crash.
 - Sockets are non-blocking, close-on-exec, `TCP_NODELAY`, and never raise
   `SIGPIPE` (`SO_NOSIGPIPE` on macOS, `MSG_NOSIGNAL` elsewhere); writing to
@@ -391,7 +408,9 @@ The server and the client (server.sd, client.sd):
 - HTTP/1.0 requests close the connection unless they say `connection:
   keep-alive`; `connection: close` closes after the response. A request
   with `expect: 100-continue` gets `HTTP/1.1 100 Continue` before the server
-  reads its body (curl waits a second for it otherwise). Rejected requests
+  reads its body (curl waits a second for it otherwise), unless the body
+  came with the head; the reader forgets the expectation once the request
+  is complete, so no stray 100 reaches the next request. Rejected requests
   (`400`, `413`, `431`, `501`, `505`) get the status and its reason as a
   plain-text body, then the connection is closed.
 - `serve`'s listen error and the client's network errors are rewritten to
