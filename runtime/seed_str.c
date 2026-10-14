@@ -26,10 +26,11 @@ sd_str sd_str_empty(void) { return (sd_str)(void *)&sd_empty_; }
 
 sd_str sd_str_alloc_(int64_t len) {
   if (len == 0) return sd_str_empty();
-  sd_str s = sd_obj_alloc(sizeof(sd_string) + (size_t)len + 1);
+  size_t n = sizeof(sd_string) + (size_t)len + 1;
+  sd_str s = sd_obj_alloc(n);
   s->rc = 1;
   s->len = len;
-  s->cap = len;
+  s->cap = (int64_t)(sd_mem_usable(s, n) - sizeof(sd_string) - 1); /* the rest of the block: room to append */
   s->data[len] = 0;
   return s;
 }
@@ -131,8 +132,9 @@ sd_str sd_str_append(sd_str a, sd_str b) {
       int64_t cap = a->cap * 2;
       if (cap < need) cap = need;
       if (cap < 16) cap = 16;
-      a = sd_realloc(a, sizeof(sd_string) + (size_t)cap + 1);
-      a->cap = cap;
+      size_t n = sizeof(sd_string) + (size_t)cap + 1;
+      a = sd_obj_realloc(a, n);
+      a->cap = (int64_t)(sd_mem_usable(a, n) - sizeof(sd_string) - 1);
     }
     memcpy(a->data + a->len, b->data, (size_t)b->len);
     a->len = need;

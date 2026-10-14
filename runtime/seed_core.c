@@ -33,6 +33,306 @@ void *sd_realloc(void *p, size_t n) {
 
 void sd_free(void *p) { free(p); }
 
+/* ------------------------------------------------ small-object allocator
+ *
+ * Counted objects come from here (sd_obj_alloc); everything else uses
+ * malloc. runtime/README.md, section 15, has the design; in short:
+ *
+ * - Every block has an 8-byte header word just before the payload: its size
+ *   class, or 0 for a large block (malloc'ed, payload 16 bytes into it).
+ *   Small blocks are slots of 16..2048 bytes (header included) carved from
+ *   1 MB chunks; a free slot keeps its header and links to the next free
+ *   slot through its first payload word.
+ * - Each thread has a cache: a free list per class. alloc pops, free pushes,
+ *   onto the lists of the thread that calls them, whichever thread allocated
+ *   the block. A list that grows past 2 * batch moves a batch to the
+ *   central pool; an empty list takes a batch from it (or carves a new one).
+ *   The central pool is a stack of batches per class under a mutex, so
+ *   blocks freed on one thread are reused by every other.
+ * - A thread's cache goes back to the central pool when the thread ends.
+ * - Chunks are never returned to the system; their slots are reused, so
+ *   memory stays at the program's peak of live small objects plus caches.
+ *
+ * The thread-local cache pointer is read only inside sd_mem_alloc and
+ * sd_mem_free, which are never inlined and never park, so no caller can
+ * hold a thread-local address across a park (and a goroutine that moves
+ * between two calls simply uses the other thread's cache). */
+
+#if !defined(SD_PLAIN_MALLOC)
+#include <pthread.h>
+
+enum { SD_NCLASS = 25, SD_SMALL_MAX = 2048 - 8, SD_CHUNK = 1 << 20 };
+
+/* Slot size (header included) of each class; class 0 is "large". */
+static const uint16_t sd_class_slot[SD_NCLASS] = {0,   16,  32,  48,  64,  80,  96,   112,  128,  160,  192,  224, 256,
+                                                  320, 384, 448, 512, 640, 768, 896, 1024, 1280, 1536, 1792, 2048};
+/* Blocks moved between a thread cache and the central pool at a time. */
+static const uint8_t sd_class_batch[SD_NCLASS] = {0,  64, 64, 64, 64, 64, 64, 64, 64, 51, 42, 36, 32,
+                                                  25, 21, 18, 16, 12, 10, 9,  8,  6,  5,  4,  4};
+/* Class of a block of n bytes (header included), by (n + 15) / 16. */
+static const uint8_t sd_size_class[129] = {
+    0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  9,  10, 10, 11, 11, 12, 12, 13, 13, 13, 13, 14, 14, 14, 14, 15, 15,
+    15, 15, 16, 16, 16, 16, 17, 17, 17, 17, 17, 17, 17, 17, 18, 18, 18, 18, 18, 18, 18, 18, 19, 19, 19, 19, 19,
+    19, 19, 19, 20, 20, 20, 20, 20, 20, 20, 20, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21,
+    22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23,
+    23, 23, 23, 23, 23, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24};
+
+#define SD_HDR(p) (((uint64_t *)(p))[-1])
+#define SD_NEXT(p) (*(void **)(p))
+
+typedef struct {
+  void *head;
+  int64_t room; /* 2 * batch - the number of blocks on the list */
+} sd_flist;
+
+typedef struct sd_tcache {
+  sd_flist l[SD_NCLASS];
+  struct sd_tcache *next_free; /* in sd_tcaches_free while no thread uses it */
+} sd_tcache;
+
+/* The calling thread's cache, NULL until its first allocation or free. */
+static _Thread_local sd_tcache *sd_tc_;
+
+typedef struct {
+  pthread_mutex_t mu;
+  void *batches; /* full batches, linked through their first block's header */
+  void *loose;   /* single blocks (from caches of threads that ended) */
+  int64_t nloose;
+} sd_central;
+
+static sd_central sd_central_[SD_NCLASS];
+static pthread_mutex_t sd_chunk_mu = PTHREAD_MUTEX_INITIALIZER;
+static char *sd_chunk_cur, *sd_chunk_end;
+static sd_tcache *sd_tcaches_free; /* under sd_chunk_mu */
+static pthread_once_t sd_mem_once = PTHREAD_ONCE_INIT;
+static pthread_key_t sd_tc_key;
+
+static void sd_tcache_exit(void *arg);
+
+static void sd_mem_init(void) {
+  for (int c = 1; c < SD_NCLASS; c++) pthread_mutex_init(&sd_central_[c].mu, NULL);
+  if (pthread_key_create(&sd_tc_key, sd_tcache_exit) != 0) sd_fatal("cannot create the allocator's thread key");
+}
+
+/* The calling thread's cache. Only for sd_mem_alloc, sd_mem_free and their
+ * slow paths: the asm hides the address from the optimiser, so it is read
+ * from the thread pointer at each call. */
+static inline sd_tcache *sd_tcache_peek(void) {
+  sd_tcache **pp = &sd_tc_;
+  __asm__ volatile("" : "+r"(pp));
+  return *pp;
+}
+
+static sd_tcache *sd_tcache_new(void) {
+  pthread_once(&sd_mem_once, sd_mem_init);
+  pthread_mutex_lock(&sd_chunk_mu);
+  sd_tcache *tc = sd_tcaches_free;
+  if (tc) sd_tcaches_free = tc->next_free;
+  pthread_mutex_unlock(&sd_chunk_mu);
+  if (!tc) {
+    tc = calloc(1, sizeof *tc);
+    if (!tc) sd_fatal("out of memory");
+    for (int c = 1; c < SD_NCLASS; c++) tc->l[c].room = 2 * sd_class_batch[c];
+  }
+  tc->next_free = NULL;
+  sd_tcache **pp = &sd_tc_;
+  __asm__ volatile("" : "+r"(pp));
+  *pp = tc;
+  /* The key's destructor returns the cache when the thread ends. */
+  pthread_setspecific(sd_tc_key, tc);
+  return tc;
+}
+
+/* n blocks of class c, linked, carved from the current chunk. */
+static void *sd_carve(int c, int n) {
+  size_t slot = sd_class_slot[c], need = slot * (size_t)n;
+  pthread_mutex_lock(&sd_chunk_mu);
+  if ((size_t)(sd_chunk_end - sd_chunk_cur) < need) {
+    /* The rest of the old chunk (less than one batch) is not used. */
+    char *ch = malloc(SD_CHUNK);
+    if (!ch) sd_fatal("out of memory");
+    /* malloc's 16-byte alignment: slots start 8 bytes past a multiple of
+     * 16, so that payloads are 16-byte aligned. */
+    sd_chunk_cur = ch + 8;
+    sd_chunk_end = ch + SD_CHUNK - 8;
+  }
+  char *base = sd_chunk_cur;
+  sd_chunk_cur += need;
+  pthread_mutex_unlock(&sd_chunk_mu);
+  for (int i = 0; i < n; i++) {
+    char *p = base + (size_t)i * slot + 8;
+    SD_HDR(p) = (uint64_t)c;
+    SD_NEXT(p) = i + 1 < n ? p + slot : NULL;
+  }
+  return base + 8;
+}
+
+/* Moves the first n blocks of l (which has more than n) to the central
+ * pool as one batch. */
+static __attribute__((noinline)) void sd_flush_batch(sd_flist *l, int c, int n) {
+  void *first = l->head, *last = first;
+  for (int i = 1; i < n; i++) last = SD_NEXT(last);
+  l->head = SD_NEXT(last);
+  l->room += n;
+  SD_NEXT(last) = NULL;
+  sd_central *z = &sd_central_[c];
+  pthread_mutex_lock(&z->mu);
+  SD_HDR(first) = (uint64_t)(uintptr_t)z->batches;
+  z->batches = first;
+  pthread_mutex_unlock(&z->mu);
+}
+
+/* Fills the empty list l of class c with a batch from the central pool, or
+ * a new one. */
+static void sd_refill(sd_flist *l, int c) {
+  int n = sd_class_batch[c];
+  sd_central *z = &sd_central_[c];
+  void *b = NULL;
+  int got = 0;
+  pthread_mutex_lock(&z->mu);
+  if (z->batches) {
+    b = z->batches;
+    z->batches = (void *)(uintptr_t)SD_HDR(b);
+    got = n;
+  } else if (z->loose) {
+    void *last = b = z->loose;
+    got = 1;
+    while (got < n && SD_NEXT(last)) {
+      last = SD_NEXT(last);
+      got++;
+    }
+    z->loose = SD_NEXT(last);
+    z->nloose -= got;
+    SD_NEXT(last) = NULL;
+  }
+  pthread_mutex_unlock(&z->mu);
+  if (!b) {
+    b = sd_carve(c, n);
+    got = n;
+  }
+  SD_HDR(b) = (uint64_t)c; /* the batch link of a central batch */
+  l->head = b;
+  l->room -= got;
+}
+
+/* The thread's cache when the thread ends: its blocks go to the central
+ * pool (full batches, the rest loose) and the cache to sd_tcaches_free. */
+static void sd_tcache_exit(void *arg) {
+  sd_tcache *tc = arg;
+  for (int c = 1; c < SD_NCLASS; c++) {
+    sd_flist *l = &tc->l[c];
+    int n = sd_class_batch[c];
+    while (2 * n - l->room > n) sd_flush_batch(l, c, n);
+    if (l->head) {
+      void *last = l->head;
+      while (SD_NEXT(last)) last = SD_NEXT(last);
+      sd_central *z = &sd_central_[c];
+      pthread_mutex_lock(&z->mu);
+      SD_NEXT(last) = z->loose;
+      z->loose = l->head;
+      z->nloose += 2 * n - l->room;
+      pthread_mutex_unlock(&z->mu);
+    }
+    l->head = NULL;
+    l->room = 2 * n;
+  }
+  /* A later allocation on this thread (from another key's destructor)
+   * starts a new cache, which this destructor then runs for again. */
+  sd_tcache **pp = &sd_tc_;
+  __asm__ volatile("" : "+r"(pp));
+  if (*pp == tc) *pp = NULL;
+  pthread_mutex_lock(&sd_chunk_mu);
+  tc->next_free = sd_tcaches_free;
+  sd_tcaches_free = tc;
+  pthread_mutex_unlock(&sd_chunk_mu);
+}
+
+static __attribute__((noinline)) void *sd_mem_alloc_large(size_t n) {
+  if (n > SIZE_MAX - 16) sd_fatal("out of memory");
+  char *b = malloc(n + 16);
+  if (SD_UNLIKELY(!b)) sd_fatal("out of memory");
+  SD_HDR(b + 16) = 0;
+  return b + 16;
+}
+
+static __attribute__((noinline)) void *sd_mem_alloc_slow(int c) {
+  sd_tcache *tc = sd_tcache_peek();
+  if (!tc) tc = sd_tcache_new();
+  sd_flist *l = &tc->l[c];
+  if (!l->head) sd_refill(l, c);
+  void *p = l->head;
+  l->head = SD_NEXT(p);
+  l->room++;
+  return p;
+}
+
+void *sd_mem_alloc(size_t n) {
+  if (SD_UNLIKELY(n > SD_SMALL_MAX)) return sd_mem_alloc_large(n);
+  int c = sd_size_class[(n + 8 + 15) >> 4];
+  sd_tcache *tc = sd_tcache_peek();
+  void *p;
+  if (SD_LIKELY(tc && (p = tc->l[c].head))) {
+    tc->l[c].head = SD_NEXT(p);
+    tc->l[c].room++;
+  } else {
+    p = sd_mem_alloc_slow(c);
+  }
+  SD_HDR(p) = (uint64_t)c;
+  return p;
+}
+
+static __attribute__((noinline)) void sd_mem_free_slow(void *p, uint64_t c) {
+  if (c == 0) {
+    free((char *)p - 16);
+    return;
+  }
+  if (c >= SD_NCLASS) sd_fatal("corrupt heap: bad block header (double free?)");
+  sd_tcache *tc = sd_tcache_peek();
+  if (!tc) tc = sd_tcache_new();
+  sd_flist *l = &tc->l[c];
+  SD_NEXT(p) = l->head;
+  l->head = p;
+  if (--l->room < 0) sd_flush_batch(l, (int)c, sd_class_batch[c]);
+}
+
+void sd_mem_free(void *p) {
+  if (!p) return;
+  uint64_t c = SD_HDR(p);
+  sd_tcache *tc = sd_tcache_peek();
+  /* c - 1 < SD_NCLASS - 1: a small block (c == 0 wraps around). */
+  if (SD_LIKELY(tc && c - 1 < SD_NCLASS - 1)) {
+    sd_flist *l = &tc->l[c];
+    SD_NEXT(p) = l->head;
+    l->head = p;
+    if (SD_UNLIKELY(--l->room < 0)) sd_flush_batch(l, (int)c, sd_class_batch[c]);
+    return;
+  }
+  sd_mem_free_slow(p, c);
+}
+
+size_t sd_mem_usable(const void *p, size_t n) {
+  uint64_t c = SD_HDR(p);
+  return c ? (size_t)sd_class_slot[c] - 8 : n;
+}
+
+void *sd_mem_realloc(void *p, size_t n) {
+  if (!p) return sd_mem_alloc(n);
+  uint64_t c = SD_HDR(p);
+  if (SD_UNLIKELY(c >= SD_NCLASS)) sd_fatal("corrupt heap: bad block header");
+  if (c == 0 && n > SD_SMALL_MAX) {
+    char *b = realloc((char *)p - 16, n + 16);
+    if (SD_UNLIKELY(!b)) sd_fatal("out of memory");
+    return b + 16;
+  }
+  size_t have = c ? (size_t)sd_class_slot[c] - 8 : SD_SMALL_MAX + 1; /* large: at least */
+  if (c && n <= have && n + 8 > (size_t)sd_class_slot[c - 1]) return p; /* same class */
+  void *q = sd_mem_alloc(n);
+  memcpy(q, p, n < have ? n : have);
+  sd_mem_free(p);
+  return q;
+}
+#endif
+
 char *sd_vfmt(const char *fmt, va_list ap) {
   va_list ap2;
   va_copy(ap2, ap);
@@ -308,7 +608,33 @@ static void sd_box_destroy(sd_box *b) {
   sd_obj_free(b);
 }
 
+/* Never inlined: the queue is thread-local, and a caller must not keep its
+ * address across a park (runtime/README.md, "Thread-local storage"). Releasing never parks, so the
+ * loop below runs on one thread. */
 SD_NOINLINE void sd_free_queued_(void *obj, int kind) {
+  /* An object that holds nothing counted frees nothing else: freed at once,
+   * without the queue. */
+  switch (kind) {
+  case SD_DEAD_BOX:
+    if (((sd_box *)obj)->t->trivial) {
+      sd_obj_free(obj);
+      return;
+    }
+    break;
+  case SD_DEAD_LIST:
+    if (((sd_list *)obj)->et->trivial) {
+      sd_obj_free(obj);
+      return;
+    }
+    break;
+  default: {
+    sd_map *m = obj;
+    if (m->kt->trivial && m->vt->trivial) {
+      sd_map_destroy_(m);
+      return;
+    }
+  }
+  }
   *(int64_t *)obj = sd_dead_head;
   sd_dead_head = (int64_t)((uintptr_t)obj | (uintptr_t)kind);
   if (sd_dead_busy) return;
