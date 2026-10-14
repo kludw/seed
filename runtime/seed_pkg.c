@@ -18,7 +18,9 @@ extern char **environ;
 #include <mach-o/dyld.h>
 #endif
 
-const char *sd_strerror(int e) {
+/* The text is in a per-thread buffer, read by the caller before it can park
+ * (noinline: the buffer's address is computed on every call). */
+SD_NOINLINE const char *sd_strerror(int e) {
   static _Thread_local char buf[256];
   snprintf(buf, sizeof buf, "%s", strerror(e));
   if (buf[0] >= 'A' && buf[0] <= 'Z' && !(buf[1] >= 'A' && buf[1] <= 'Z')) buf[0] = (char)(buf[0] - 'A' + 'a');

@@ -461,7 +461,7 @@ static sd_err frame_inner_catch(void *arg) {
   L.s = sd_str_from_cstr("outer");
   int depth = 2;
   sd_err e = sd_catch(frame_crash, &depth); /* releases the 3 inner frames only */
-  CHECK(!sd_err_is_null(e) && frame_releases == 3 && sd_lf_top == &L.h);
+  CHECK(!sd_err_is_null(e) && frame_releases == 3 && *sd_lf_top_() == &L.h);
   sd_err_release(e);
   SD_LF_LEAVE(L);
   sd_str_release(L.s);
@@ -482,11 +482,11 @@ static void test_frames(void) {
   int depth = 4;
   frame_releases = 0;
   sd_err e = sd_catch(frame_crash, &depth);
-  CHECK(!sd_err_is_null(e) && frame_releases == 5 && sd_lf_top == NULL);
+  CHECK(!sd_err_is_null(e) && frame_releases == 5 && *sd_lf_top_() == NULL);
   sd_err_release(e);
   frame_releases = 0;
   e = sd_catch(frame_inner_catch, NULL);
-  CHECK(sd_err_is_null(e) && frame_releases == 3 && sd_lf_top == NULL);
+  CHECK(sd_err_is_null(e) && frame_releases == 3 && *sd_lf_top_() == NULL);
   CHECK(sd_live_objects() == live0);
   /* sortBy: a crash in less leaves the list as it was */
   sort_list = sd_list_new(&sd_type_str, 0);

@@ -58,6 +58,7 @@ sd_list *sd_list_new_len_(const sd_type *et, int64_t len); /* len elements, unin
  * sd_map_free_ queue the object; the outermost call frees the queue. */
 enum { SD_DEAD_BOX = 1, SD_DEAD_LIST = 2, SD_DEAD_MAP = 3 };
 void sd_free_queued_(void *obj, int kind);
+void sd_free_queue_reset_(void);
 void sd_list_destroy_(sd_list *l);
 void sd_map_destroy_(sd_map *m);
 

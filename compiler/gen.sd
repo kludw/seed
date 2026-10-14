@@ -1172,19 +1172,26 @@ fn (Gen g) mut genConsts() {
             g.consts.push(g.out.join(""))
             continue
         }
-        // A counted value is released when a goroutine that computed it
-        // ends (the main goroutine keeps its values until the program exits).
+        // The value and its state (0 not computed, 1 being computed, 2
+        // done) are kept per goroutine, in goroutine-local storage (a
+        // goroutine may move between threads: runtime/README.md,
+        // "Thread-local storage"). A counted value is released when a
+        // goroutine that computed it ends (the main goroutine keeps its
+        // values until the program exits).
         string base = cn.slice(5, cn.len())
-        string v = "sd_cv_" + base
-        string st = "sd_cs_" + base
-        g.emit("static _Thread_local " + ct + " " + v + ";")
-        g.emit("static _Thread_local int " + st + ";")
+        string ty = "sd_ct_" + base
+        string get = ty + " *sd_cc_ = sd_goroutine_local(&sd_ck_" + base + ", sizeof(" + ty + "));"
+        string v = "sd_cc_->v"
+        string st = "sd_cc_->s"
+        g.emit("typedef struct { " + ct + " v; int s; } " + ty + ";")
+        g.emit("static int sd_ck_" + base + ";")
         string rel = g.releaseCall(t, v)
         if (rel != "") {
-            g.emit("static void sd_cf_" + base + "(void) { " + rel + "; " + st + " = 0; }")
+            g.emit("static void sd_cf_" + base + "(void) { " + get + " " + rel + "; " + st + " = 0; }")
         }
         g.emit(head + " {")
         g.indent++
+        g.emit(get)
         g.emit("if (" + st + " == 2) return " + v + ";")
         g.emit("if (" + st + " == 1) sd_crash(\"constant " + cd.name + " depends on itself\");")
         g.emit(st + " = 1;")

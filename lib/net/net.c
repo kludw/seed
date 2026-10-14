@@ -78,7 +78,9 @@ static const char *net_split(sd_str addr, char **host, char **port) {
   return NULL;
 }
 
-static const char *net_gai_reason(int rc) {
+/* A per-thread buffer, read by the caller before it can park (noinline: its
+ * address is computed on every call). */
+SD_NOINLINE static const char *net_gai_reason(int rc) {
   static _Thread_local char buf[256];
   snprintf(buf, sizeof buf, "%s", rc == EAI_SYSTEM ? sd_strerror(errno) : gai_strerror(rc));
   if (buf[0] >= 'A' && buf[0] <= 'Z' && !(buf[1] >= 'A' && buf[1] <= 'Z')) buf[0] = (char)(buf[0] - 'A' + 'a');

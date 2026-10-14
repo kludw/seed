@@ -289,15 +289,26 @@ sd_box *sd_box_new(const sd_type *t, const void *val) {
  * frees the queue iteratively. The queue is threaded through the dead
  * objects' count fields (every counted object starts with int64_t rc), with
  * the kind in the low bits of the (8-byte aligned) pointer. */
+/* The queue is per thread, and only used within one call (freeing never
+ * parks), so it is only touched inside these noinline functions: a
+ * goroutine moves between threads (runtime/README.md, "Thread-local
+ * storage"). */
 static _Thread_local int64_t sd_dead_head;
 static _Thread_local bool sd_dead_busy;
+
+/* After a crash unwound the thread's goroutine (possibly in the middle of a
+ * free): forget the queue (what is still in it is leaked). */
+SD_NOINLINE void sd_free_queue_reset_(void) {
+  sd_dead_head = 0;
+  sd_dead_busy = false;
+}
 
 static void sd_box_destroy(sd_box *b) {
   sd_release(b->t, sd_box_data(b));
   sd_obj_free(b);
 }
 
-void sd_free_queued_(void *obj, int kind) {
+SD_NOINLINE void sd_free_queued_(void *obj, int kind) {
   *(int64_t *)obj = sd_dead_head;
   sd_dead_head = (int64_t)((uintptr_t)obj | (uintptr_t)kind);
   if (sd_dead_busy) return;
