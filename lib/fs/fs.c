@@ -317,8 +317,7 @@ sd_err sd_lib_fs_File_read(sd_S_fs_File f, sd_int max, sd_str *out) {
   int64_t m;
   if (!sd_int_to_i64(max, &m)) m = sd_int_lt(max, SD_INT(0)) ? -1 : INT64_MAX;
   if (m < 1) {
-    sd_str s = sd_int_to_str(max);
-    sd_crash("fs.File.read: max (%s) must be at least 1", s->data);
+    sd_crash_int("fs.File.read: max (%s) must be at least 1", max);
   }
   sd_err err = SD_ERR_NULL;
   sd_handle *h = fs_handle_use(f, "read", false, &err);

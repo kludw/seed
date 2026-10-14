@@ -422,8 +422,89 @@ static void test_long_chains(void) {
   CHECK(sd_live_objects() == live0);
 }
 
+/* Cleanup frames (README section 9): a crash releases what the frames
+ * above the protected frame hold, before unwinding; a frame left normally
+ * is not released; a contained crash leaves the outer frames alone. */
+typedef struct { sd_lframe h; sd_str s; sd_list *xs; } frame_A;
+static int frame_releases;
+static void frame_A_release(sd_lframe *p) {
+  frame_A *L = (frame_A *)p;
+  frame_releases++;
+  sd_str_release(L->s);
+  sd_list_release(L->xs);
+}
+static void frame_leaf(int depth) {
+  frame_A L = {{0}};
+  SD_LF_ENTER(L, frame_A_release);
+  L.s = sd_str_from_cstr("held by a frame");
+  L.xs = sd_list_new(&sd_type_str, 0);
+  SD_LIST_PUSH(&L.xs, sd_str, sd_str_retain(L.s));
+  if (depth == 0) {
+    sd_int i = SD_INT(9);
+    (void)SD_LIST_GET(L.xs, sd_str, i); /* crashes */
+  } else {
+    frame_leaf(depth - 1);
+  }
+  SD_LF_LEAVE(L);
+  sd_str_release(L.s);
+  sd_list_release(L.xs);
+}
+static sd_err frame_crash(void *arg) {
+  frame_leaf(*(int *)arg);
+  return SD_ERR_NULL;
+}
+static sd_err frame_inner_catch(void *arg) {
+  (void)arg;
+  frame_A L = {{0}};
+  SD_LF_ENTER(L, frame_A_release);
+  L.s = sd_str_from_cstr("outer");
+  int depth = 2;
+  sd_err e = sd_catch(frame_crash, &depth); /* releases the 3 inner frames only */
+  CHECK(!sd_err_is_null(e) && frame_releases == 3 && sd_lf_top == &L.h);
+  sd_err_release(e);
+  SD_LF_LEAVE(L);
+  sd_str_release(L.s);
+  return SD_ERR_NULL;
+}
+static bool less_crashing(void *ctx, const void *a, const void *b) {
+  int *calls = ctx;
+  if (++*calls == 20) sd_crash("less failed");
+  return sd_str_cmp(*(sd_str const *)a, *(sd_str const *)b) < 0;
+}
+static sd_list *sort_list;
+static sd_err sort_crash(void *arg) {
+  sd_list_sort_by(&sort_list, less_crashing, arg);
+  return SD_ERR_NULL;
+}
+static void test_frames(void) {
+  int64_t live0 = sd_live_objects();
+  int depth = 4;
+  frame_releases = 0;
+  sd_err e = sd_catch(frame_crash, &depth);
+  CHECK(!sd_err_is_null(e) && frame_releases == 5 && sd_lf_top == NULL);
+  sd_err_release(e);
+  frame_releases = 0;
+  e = sd_catch(frame_inner_catch, NULL);
+  CHECK(sd_err_is_null(e) && frame_releases == 3 && sd_lf_top == NULL);
+  CHECK(sd_live_objects() == live0);
+  /* sortBy: a crash in less leaves the list as it was */
+  sort_list = sd_list_new(&sd_type_str, 0);
+  for (int i = 0; i < 50; i++) SD_LIST_PUSH(&sort_list, sd_str, sd_int_to_str(SD_INT((i * 37) % 50)));
+  sd_list *before = sd_list_retain(sort_list);
+  sd_list_release(sort_list);
+  sort_list = sd_list_slice(before, SD_INT(0), SD_INT(50));
+  int calls = 0;
+  e = sd_catch(sort_crash, &calls);
+  CHECK(!sd_err_is_null(e) && sd_list_equal(sort_list, before));
+  sd_err_release(e);
+  sd_list_release(sort_list);
+  sd_list_release(before);
+  CHECK(sd_live_objects() == live0);
+}
+
 int main(int argc, char **argv) {
   int64_t live0 = sd_live_objects();
+  test_frames();
   test_lists();
   test_structs();
   test_maps();

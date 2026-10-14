@@ -1,0 +1,681 @@
+// The C generator, continued: ints that are known to be small.
+//
+// An int is a tagged word that grows into a big integer, so every
+// operation tests tags and overflow, and every temporary is released. Many
+// ints are provably small, though: loop counters bounded by a length or a
+// constant, lengths, bytes converted to int, and arithmetic on such values
+// whose result interval stays inside SD_INT's small range. For those the
+// generator emits plain C arithmetic on int64_t (no tag tests, no overflow
+// checks: the interval proves there is no overflow), and a small value owns
+// nothing, so it is never retained or released.
+//
+// Before a function is generated, analyzeInts computes an interval for each
+// int local declared in it, from every assignment to it (flow-insensitive:
+// the interval holds at every point of the function). A local whose
+// interval is known and small is *unboxed*: it is an int64_t C variable,
+// read as SD_INT_S(l_x) where an sd_int is needed. Everything else keeps
+// the general representation; values only meet through SD_INT_S (int64_t
+// to sd_int) and SD_SMALL (an sd_int known to be small to int64_t).
+package main
+
+// An interval of int values: state 0 is "no value yet" (the analysis has
+// not seen one), 1 known (lo..hi), 2 unknown (any int).
+type IntRange struct {
+    int state
+    int lo
+    int hi
+}
+
+// An assignment to a candidate local (see analyzeInts): var gets the value
+// of expr, or, for a bounded increment or decrement (the post statement of
+// a loop whose condition bounds var), a value next to bound; top marks an
+// assignment of something unknown.
+type IntEvent struct {
+    int var
+    int expr
+    bool top
+    int bound
+    bool inc
+    bool incl
+}
+
+fn noRange() IntRange {
+    return IntRange{state: 0, lo: 0, hi: 0}
+}
+
+fn topRange() IntRange {
+    return IntRange{state: 2, lo: 0, hi: 0}
+}
+
+fn knownRange(int lo, int hi) IntRange {
+    if (lo > hi) {
+        return noRange()
+    }
+    return IntRange{state: 1, lo: lo, hi: hi}
+}
+
+// The union of two intervals.
+fn joinRange(IntRange a, IntRange b) IntRange {
+    if (a.state == 2 || b.state == 2) {
+        return topRange()
+    }
+    if (a.state == 0) {
+        return b
+    }
+    if (b.state == 0) {
+        return a
+    }
+    return knownRange(minOf(a.lo, b.lo), maxOf(a.hi, b.hi))
+}
+
+fn minOf(int a, int b) int {
+    if (a < b) {
+        return a
+    }
+    return b
+}
+
+fn maxOf(int a, int b) int {
+    if (a > b) {
+        return a
+    }
+    return b
+}
+
+fn absOf(int a) int {
+    if (a < 0) {
+        return -a
+    }
+    return a
+}
+
+// Whether r is known and inside SD_INT's small range.
+fn isSmallRange(IntRange r) bool {
+    return r.state == 1 && r.lo >= smallIntMin && r.hi <= smallIntMax
+}
+
+// ---- the analysis ----
+
+// Computes g.varRange: the interval of every int local of the function
+// whose body is b that is provably small (the unboxed locals).
+//
+// The candidates are the int locals declared in the function by a
+// one-target declaration or a local const; one assigned in a way the
+// analysis does not follow (a multiple assignment, ++ outside a bounded
+// loop post statement) is not a candidate. Starting from "no value", each
+// round recomputes each candidate's interval as the union of the intervals
+// of the values assigned to it, using the intervals of the previous round.
+// An interval that keeps growing (x = x + 1) is widened to unknown after a
+// few rounds, so the loop ends.
+fn (Gen g) mut analyzeInts(int b) {
+    g.varRange = map[int]IntRange{}
+    g.intEvents = []IntEvent{}
+    g.intDeclared = map[int]bool{}
+    g.intWalkBlock(b)
+    map[int]IntRange cur = map[int]IntRange{}
+    map[int]int grown = map[int]int{}
+    for (int i = 0; i < g.intEvents.len(); i++) {
+        int v = g.intEvents[i].var
+        bool? d = g.intDeclared[v]
+        if (d == null || g.intEvents[i].top) {
+            cur[v] = topRange()
+        } else if (cur[v] == null) {
+            cur[v] = noRange()
+        }
+    }
+    bool changed = true
+    for (int round = 0; changed && round < 1000; round++) {
+        changed = false
+        map[int]IntRange next = map[int]IntRange{}
+        for (int j = 0; j < g.intEvents.len(); j++) {
+            IntEvent ev = g.intEvents[j]
+            IntRange? old = cur[ev.var]
+            if (old == null || old.state == 2) {
+                continue
+            }
+            IntRange r = g.eventRange(ev, cur)
+            IntRange? acc = next[ev.var]
+            if (acc != null) {
+                r = joinRange(acc, r)
+            }
+            next[ev.var] = r
+        }
+        []int vars = next.keys()
+        for (int k = 0; k < vars.len(); k++) {
+            int v2 = vars[k]
+            IntRange? nr = next[v2]
+            IntRange? or = cur[v2]
+            if (nr == null || or == null) {
+                continue
+            }
+            IntRange r2 = nr
+            if (r2.state == 1 && !isSmallRange(r2)) {
+                r2 = topRange()
+            }
+            if (r2.state != or.state || r2.lo != or.lo || r2.hi != or.hi) {
+                int? gn = grown[v2]
+                int times = 1
+                if (gn != null) {
+                    times = gn + 1
+                }
+                grown[v2] = times
+                if (times > 4) {
+                    r2 = topRange()
+                }
+                cur[v2] = r2
+                changed = true
+            }
+        }
+    }
+    []int all = cur.keys()
+    for (int m = 0; m < all.len(); m++) {
+        IntRange? fr = cur[all[m]]
+        if (!changed && fr != null && isSmallRange(fr)) {
+            g.varRange[all[m]] = fr
+        }
+    }
+}
+
+// The interval of the value an event assigns, given the intervals in cur.
+fn (Gen g) eventRange(IntEvent ev, map[int]IntRange cur) IntRange {
+    if (ev.top) {
+        return topRange()
+    }
+    if (ev.bound < 0) {
+        return g.rangeIn(ev.expr, cur)
+    }
+    // var < bound before var++ (the condition held, and the body does not
+    // assign var), so afterwards var <= bound.hi; and var only grows.
+    IntRange self = topRange()
+    IntRange? s = cur[ev.var]
+    if (s != null) {
+        self = s
+    }
+    IntRange bd = g.rangeIn(ev.bound, cur)
+    if (self.state != 1 || bd.state != 1) {
+        if (self.state == 0 || bd.state == 0) {
+            return noRange()
+        }
+        return topRange()
+    }
+    if (ev.inc) {
+        int hi = bd.hi
+        if (ev.incl) {
+            hi = bd.hi + 1
+        }
+        return knownRange(self.lo + 1, hi)
+    }
+    int lo = bd.lo
+    if (ev.incl) {
+        lo = bd.lo - 1
+    }
+    return knownRange(lo, self.hi - 1)
+}
+
+// The interval of the int expression e, from the intervals of the locals
+// in vars (a local not in vars may hold any int).
+fn (Gen g) rangeIn(int e, map[int]IntRange vars) IntRange {
+    if (e < 0) {
+        return topRange()
+    }
+    Expr x = g.c.ast.exprs[e]
+    ExprInfo i = g.c.info[e]
+    if (i.ty != tyInt || i.wrap || i.narrowed || i.ifaceFrom >= 0) {
+        return topRange()
+    }
+    switch (x.kind) {
+    case ExprKind.IntLit:
+        if (x.intValue != minInt && x.intValue >= smallIntMin && x.intValue <= smallIntMax) {
+            return knownRange(x.intValue, x.intValue)
+        }
+        return topRange()
+    case ExprKind.Ident:
+        if (i.res == Res.Local) {
+            IntRange? r = vars[i.ref]
+            if (r != null) {
+                return r
+            }
+            return topRange()
+        }
+        if (i.res == Res.Const) {
+            Expr ce = g.c.ast.exprs[g.c.ast.consts[i.ref].expr]
+            if (ce.kind == ExprKind.IntLit && ce.intValue != minInt && ce.intValue >= smallIntMin && ce.intValue <= smallIntMax) {
+                return knownRange(ce.intValue, ce.intValue)
+            }
+        }
+        return topRange()
+    case ExprKind.Unary:
+        IntRange u = g.rangeIn(x.a, vars)
+        if (x.op != Tok.Minus || u.state != 1) {
+            return u
+        }
+        return knownRange(-u.hi, -u.lo)
+    case ExprKind.Binary:
+        if (g.typeOf(x.a) != tyInt) {
+            return topRange()
+        }
+        return binRange(x.op, g.rangeIn(x.a, vars), g.rangeIn(x.b, vars))
+    case ExprKind.Call:
+        if (i.res == Res.Builtin && i.builtin == Builtin.Len) {
+            return knownRange(0, smallIntMax)
+        }
+        if (i.res == Res.Conv) {
+            int arg = g.arg(e, 0)
+            if (g.typeOf(arg) == tyByte) {
+                return knownRange(0, 255)
+            }
+            if (g.typeOf(arg) == tyInt) {
+                return g.rangeIn(arg, vars)
+            }
+        }
+        return topRange()
+    case ExprKind.Bad, ExprKind.FloatLit, ExprKind.ByteLit, ExprKind.StringLit, ExprKind.BoolLit, ExprKind.NullLit, ExprKind.Field:
+        return topRange()
+    case ExprKind.Index, ExprKind.Try, ExprKind.ListLit, ExprKind.MapLit, ExprKind.Entry, ExprKind.StructLit, ExprKind.FieldInit:
+        return topRange()
+    case ExprKind.ChanMake, ExprKind.Group:
+        return topRange()
+    }
+}
+
+// The interval of a op b (Seed's ints never overflow; / and % truncate
+// toward zero). Only + - * / % & are followed; / and % only when the
+// divisor cannot be zero.
+fn binRange(Tok op, IntRange a, IntRange b) IntRange {
+    if (a.state == 2 || b.state == 2) {
+        return topRange()
+    }
+    if (a.state == 0 || b.state == 0) {
+        return noRange()
+    }
+    if (op == Tok.Plus) {
+        return knownRange(a.lo + b.lo, a.hi + b.hi)
+    }
+    if (op == Tok.Minus) {
+        return knownRange(a.lo - b.hi, a.hi - b.lo)
+    }
+    if (op == Tok.Star) {
+        int p1 = a.lo * b.lo
+        int p2 = a.lo * b.hi
+        int p3 = a.hi * b.lo
+        int p4 = a.hi * b.hi
+        return knownRange(minOf(minOf(p1, p2), minOf(p3, p4)), maxOf(maxOf(p1, p2), maxOf(p3, p4)))
+    }
+    bool nonZero = b.lo > 0 || b.hi < 0
+    int amax = maxOf(absOf(a.lo), absOf(a.hi))
+    if (op == Tok.Slash && nonZero) {
+        // |a / b| <= |a|, with the sign of a * b.
+        if (a.lo >= 0 && b.lo > 0) {
+            return knownRange(0, a.hi)
+        }
+        return knownRange(-amax, amax)
+    }
+    if (op == Tok.Percent && nonZero) {
+        // |a % b| < |b| and |a % b| <= |a|, with the sign of a.
+        int m = minOf(maxOf(absOf(b.lo), absOf(b.hi)) - 1, amax)
+        if (a.lo >= 0) {
+            return knownRange(0, m)
+        }
+        if (a.hi <= 0) {
+            return knownRange(-m, 0)
+        }
+        return knownRange(-m, m)
+    }
+    if (op == Tok.Amp) {
+        // With a non-negative operand, 0 <= a & b <= that operand.
+        if (a.lo >= 0 && b.lo >= 0) {
+            return knownRange(0, minOf(a.hi, b.hi))
+        }
+        if (a.lo >= 0) {
+            return knownRange(0, a.hi)
+        }
+        if (b.lo >= 0) {
+            return knownRange(0, b.hi)
+        }
+    }
+    return topRange()
+}
+
+// ---- collecting the assignments ----
+
+fn (Gen g) mut intEvent(int v, int expr, bool top) {
+    g.intEvents.push(IntEvent{var: v, expr: expr, top: top, bound: -1, inc: false, incl: false})
+}
+
+// The local variable an int place is, or -1.
+fn (Gen g) intLocal(int e) int {
+    Expr x = g.c.ast.exprs[e]
+    ExprInfo i = g.c.info[e]
+    if (x.kind != ExprKind.Ident || i.res != Res.Local || i.ty != tyInt || i.narrowed) {
+        return -1
+    }
+    VarKind k = g.c.vars[i.ref].kind
+    if (k != VarKind.Local && k != VarKind.LocalConst) {
+        return -1
+    }
+    return i.ref
+}
+
+fn (Gen g) mut intWalkBlock(int b) {
+    if (b < 0) {
+        return
+    }
+    Block bl = g.c.ast.blocks[b]
+    for (int i = 0; i < bl.count; i++) {
+        g.intWalkStmt(g.c.ast.at(bl.list, i))
+    }
+}
+
+// Group blocks are expressions, so their statements are found through the
+// expressions.
+fn (Gen g) mut intWalkExpr(int e) {
+    if (e < 0) {
+        return
+    }
+    Expr x = g.c.ast.exprs[e]
+    if (x.kind == ExprKind.Group) {
+        g.intWalkBlock(x.block)
+        return
+    }
+    g.intWalkExpr(x.a)
+    g.intWalkExpr(x.b)
+    for (int i = 0; i < x.count; i++) {
+        g.intWalkExpr(g.c.ast.at(x.list, i))
+    }
+}
+
+fn (Gen g) mut intWalkStmt(int s) {
+    if (s < 0) {
+        return
+    }
+    Stmt st = g.c.ast.stmts[s]
+    switch (st.kind) {
+    case StmtKind.Assign:
+        g.intWalkExpr(st.expr)
+        for (int i = 0; i < st.count; i++) {
+            int ti = g.c.ast.at(st.list, i)
+            Target tg = g.c.ast.targets[ti]
+            int v = -1
+            if (tg.kind == TargetKind.Decl) {
+                v = g.c.targetVar[ti]
+                if (v >= 0 && (g.c.targetType[ti] != tyInt || g.c.vars[v].ty != tyInt)) {
+                    v = -1
+                }
+                if (v >= 0 && st.count == 1) {
+                    g.intDeclared[v] = true
+                }
+            } else if (tg.kind == TargetKind.Place) {
+                v = g.intLocal(tg.expr)
+                g.intWalkExpr(tg.expr)
+            }
+            if (v >= 0) {
+                g.intEvent(v, st.expr, st.count != 1)
+            }
+        }
+    case StmtKind.Const:
+        int cv = g.c.stmtVar[s]
+        g.intWalkExpr(st.expr)
+        if (cv >= 0 && g.c.vars[cv].ty == tyInt) {
+            g.intDeclared[cv] = true
+            g.intEvent(cv, st.expr, false)
+        }
+    case StmtKind.IncDec:
+        int iv = g.intLocal(st.expr)
+        if (iv >= 0) {
+            g.intEvent(iv, -1, true)
+        }
+    case StmtKind.If:
+        g.intWalkExpr(st.expr)
+        g.intWalkBlock(st.body)
+        g.intWalkStmt(st.elseIf)
+        g.intWalkBlock(st.els)
+    case StmtKind.For:
+        g.intWalkStmt(st.init)
+        int first = g.intEvents.len()
+        g.intWalkExpr(st.expr)
+        g.intWalkBlock(st.body)
+        int end = g.intEvents.len()
+        g.intWalkPost(st, first, end)
+    case StmtKind.Switch:
+        g.intWalkExpr(st.expr)
+        for (int j = 0; j < st.count; j++) {
+            g.intWalkBlock(g.c.ast.cases[g.c.ast.at(st.list, j)].body)
+        }
+    case StmtKind.Select:
+        for (int k = 0; k < st.count; k++) {
+            Case cs = g.c.ast.cases[g.c.ast.at(st.list, k)]
+            g.intWalkStmt(cs.comm)
+            g.intWalkBlock(cs.body)
+        }
+    case StmtKind.Return:
+        for (int r = 0; r < st.count; r++) {
+            g.intWalkExpr(g.c.ast.at(st.list, r))
+        }
+    case StmtKind.ExprStmt, StmtKind.Defer, StmtKind.Spawn, StmtKind.Assert:
+        g.intWalkExpr(st.expr)
+    case StmtKind.Break, StmtKind.Continue, StmtKind.Bad:
+        return
+    }
+}
+
+// The post statement of a for loop. `v++` (or `v--`) is a bounded
+// increment when the condition has a conjunct v < B or v <= B (v > B or
+// v >= B), and neither the condition nor the body assigns v (the events
+// first..end): then v passed that test just before the increment.
+fn (Gen g) mut intWalkPost(Stmt loop, int first, int end) {
+    if (loop.post < 0) {
+        return
+    }
+    Stmt post = g.c.ast.stmts[loop.post]
+    int v = -1
+    if (post.kind == StmtKind.IncDec) {
+        v = g.intLocal(post.expr)
+    }
+    if (v < 0) {
+        g.intWalkStmt(loop.post)
+        return
+    }
+    for (int i = first; i < end; i++) {
+        if (g.intEvents[i].var == v) {
+            g.intEvent(v, -1, true)
+            return
+        }
+    }
+    []int conj = g.conjuncts(loop.expr, []int{})
+    for (int j = 0; j < conj.len(); j++) {
+        Expr c = g.c.ast.exprs[conj[j]]
+        if (c.kind != ExprKind.Binary || g.typeOf(c.a) != tyInt || g.typeOf(c.b) != tyInt) {
+            continue
+        }
+        Tok op = c.op
+        int bound = -1
+        if (g.intLocal(c.a) == v) {
+            bound = c.b
+        } else if (g.intLocal(c.b) == v) {
+            bound = c.a
+            op = flipComparison(op)
+        }
+        if (bound < 0) {
+            continue
+        }
+        bool up = op == Tok.Lt || op == Tok.Le
+        bool down = op == Tok.Gt || op == Tok.Ge
+        if ((post.inc && up) || (!post.inc && down)) {
+            g.intEvents.push(IntEvent{var: v, expr: -1, top: false, bound: bound, inc: post.inc, incl: op == Tok.Le || op == Tok.Ge})
+            return
+        }
+    }
+    g.intEvent(v, -1, true)
+}
+
+// The conjuncts of a condition (a && b && c).
+fn (Gen g) conjuncts(int e, []int acc) []int {
+    []int out = acc
+    if (e < 0) {
+        return out
+    }
+    Expr x = g.c.ast.exprs[e]
+    if (x.kind == ExprKind.Binary && x.op == Tok.AndAnd) {
+        out = g.conjuncts(x.a, out)
+        return g.conjuncts(x.b, out)
+    }
+    out.push(e)
+    return out
+}
+
+// a op b is b flip(op) a.
+fn flipComparison(Tok op) Tok {
+    if (op == Tok.Lt) {
+        return Tok.Gt
+    }
+    if (op == Tok.Le) {
+        return Tok.Ge
+    }
+    if (op == Tok.Gt) {
+        return Tok.Lt
+    }
+    if (op == Tok.Ge) {
+        return Tok.Le
+    }
+    return op
+}
+
+// ---- generating ----
+
+// The interval of e during generation: the unboxed locals have theirs.
+fn (Gen g) smallRange(int e) IntRange {
+    return g.rangeIn(e, g.varRange)
+}
+
+// Whether e is an int whose value is known to be small.
+fn (Gen g) isSmallInt(int e) bool {
+    return isSmallRange(g.smallRange(e))
+}
+
+// Whether local v is unboxed (an int64_t C variable).
+fn (Gen g) isUnboxed(int v) bool {
+    return g.varRange[v] != null
+}
+
+// The int64_t value of the C sd_int v, which is known to be small.
+fn smallOf(string v) string {
+    string inner = macroArg(v, "SD_INT_S(")
+    if (inner != "") {
+        return inner
+    }
+    inner = macroArg(v, "SD_INT(")
+    if (inner != "") {
+        return "((int64_t)" + inner + ")"
+    }
+    return "SD_SMALL(" + v + ")"
+}
+
+// x when v is exactly name x) (the parentheses balanced), or "".
+fn macroArg(string v, string name) string {
+    if (!v.startsWith(name) || !v.endsWith(")")) {
+        return ""
+    }
+    int depth = 0
+    for (int i = name.len() - 1; i < v.len(); i++) {
+        byte b = v[i]
+        if (b == '(') {
+            depth++
+        } else if (b == ')') {
+            depth--
+            if (depth == 0 && i != v.len() - 1) {
+                return ""
+            }
+        }
+    }
+    return v.slice(name.len(), v.len() - 1)
+}
+
+// a op b on ints known to be small (vals are their C sd_int values), as
+// plain C on int64_t, or "" when the operation is not one of those: a
+// comparison when both operands are small, an arithmetic operation when its
+// result is small too (so it cannot overflow, nor divide by zero).
+fn (Gen g) smallBinary(int e, []string vals) string {
+    Expr x = g.c.ast.exprs[e]
+    if (g.typeOf(x.a) != tyInt || !g.isSmallInt(x.a) || !g.isSmallInt(x.b)) {
+        return ""
+    }
+    string a = smallOf(vals[0])
+    string b = smallOf(vals[1])
+    Tok op = x.op
+    if (op == Tok.Eq || op == Tok.Ne || op == Tok.Lt || op == Tok.Le || op == Tok.Gt || op == Tok.Ge) {
+        return "(" + a + " " + op.text() + " " + b + ")"
+    }
+    if (op == Tok.Plus || op == Tok.Minus || op == Tok.Star || op == Tok.Slash || op == Tok.Percent || op == Tok.Amp) {
+        if (g.isSmallInt(e)) {
+            return "SD_INT_S((" + a + " " + op.text() + " " + b + "))"
+        }
+    }
+    return ""
+}
+
+// Whether e is small and simple: made of int literals, constants and
+// unboxed locals with arithmetic that cannot crash, so that its value is
+// the same whenever it is evaluated (a call cannot change a local).
+fn (Gen g) isSimpleSmall(int e) bool {
+    if (!g.isSmallInt(e)) {
+        return false
+    }
+    Expr x = g.c.ast.exprs[e]
+    ExprInfo i = g.c.info[e]
+    if (x.kind == ExprKind.IntLit) {
+        return true
+    }
+    if (x.kind == ExprKind.Ident) {
+        return i.res == Res.Const || (i.res == Res.Local && g.isUnboxed(i.ref))
+    }
+    if (x.kind == ExprKind.Unary) {
+        return g.isSimpleSmall(x.a)
+    }
+    return x.kind == ExprKind.Binary && g.isSimpleSmall(x.a) && g.isSimpleSmall(x.b)
+}
+
+// The operands of a chain of int + (a + b + c is ((a + b) + c)).
+fn (Gen g) plusLeaves(int e, []int acc) []int {
+    []int out = acc
+    Expr x = g.c.ast.exprs[e]
+    ExprInfo i = g.c.info[e]
+    if (x.kind == ExprKind.Binary && x.op == Tok.Plus && i.ty == tyInt && !i.wrap && !i.narrowed) {
+        out = g.plusLeaves(x.a, out)
+        return g.plusLeaves(x.b, out)
+    }
+    out.push(e)
+    return out
+}
+
+// sum + (i * i) % 7 + (i & 3): ints never overflow, so + is associative
+// and commutative, and the simple small operands (see isSimpleSmall) can be
+// added up in C first and then added to the others with one general
+// addition. The other operands are evaluated in their order. "" when the
+// chain has fewer than two simple small operands, or no other one.
+fn (Gen g) mut gsumSmall(int e) string {
+    []int leaves = g.plusLeaves(e, []int{})
+    []int rest = []int{}
+    []int simple = []int{}
+    IntRange total = knownRange(0, 0)
+    for (int i = 0; i < leaves.len(); i++) {
+        if (g.isSimpleSmall(leaves[i])) {
+            simple.push(leaves[i])
+            total = binRange(Tok.Plus, total, g.smallRange(leaves[i]))
+        } else {
+            rest.push(leaves[i])
+        }
+    }
+    if (simple.len() < 2 || rest.len() == 0 || !isSmallRange(total)) {
+        return ""
+    }
+    []string vals = g.operands(rest)
+    string acc = vals[0]
+    for (int j = 1; j < vals.len(); j++) {
+        acc = g.temp(tyInt, "sd_int_add(" + acc + ", " + vals[j] + ")")
+    }
+    []string terms = []string{}
+    for (int k = 0; k < simple.len(); k++) {
+        terms.push(smallOf(g.gexpr(simple[k])))
+    }
+    return g.temp(tyInt, "sd_int_add(" + acc + ", SD_INT_S((" + terms.join(" + ") + ")))")
+}

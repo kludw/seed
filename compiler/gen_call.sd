@@ -128,7 +128,7 @@ fn (Gen g) mut gplace(int e) string {
         if (v.kind == VarKind.MutRecv) {
             p = "l_" + v.name
         } else {
-            p = "(&l_" + v.name + ")"
+            p = "(&" + g.lname(i.ref) + ")"
         }
     } else if (x.kind == ExprKind.Field) {
         p = "(&(" + g.gplace(x.a) + ")->f_" + x.text + ")"
@@ -152,7 +152,7 @@ fn (Gen g) mut gplace(int e) string {
 // A place as a plain pointer variable when it is more than a local's
 // address (macros evaluate it twice).
 fn (Gen g) mut placeVar(string ptrType, string p) string {
-    if (p.startsWith("(&l_") && isIdent(p.slice(2, p.len() - 1))) {
+    if ((p.startsWith("(&l_") && isIdent(p.slice(2, p.len() - 1))) || (p.startsWith("(&\x01") && isFrameName(p.slice(2, p.len() - 1)))) {
         return p
     }
     if (isIdent(p)) {
@@ -177,7 +177,7 @@ fn (Gen g) mut genumNew(int e) string {
     string n = g.c.declCName(d)
     EnumCase ec = g.c.enumCase(d, i.sub)
     []int args = g.argList(e)
-    []string vals = g.operands(args)
+    []string vals = g.ownedOperands(args)
     []string owned = []string{}
     for (int k = 0; k < vals.len(); k++) {
         owned.push(g.ownVal(vals[k], g.typeOf(args[k])))

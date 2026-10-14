@@ -1,0 +1,20 @@
+// expect-error: discard_typed_error.sd:17:
+// A typed `error _` discards the error like `_`, so the value beside it
+// must be declared T?.
+package main
+
+import "errors"
+import "fmt"
+
+fn parse(string s) (int, error) {
+    if (s == "") {
+        return null, errors.new("empty")
+    }
+    return 1, null
+}
+
+fn main([]string args) error {
+    int n, error _ = parse("")
+    fmt.println(n.string())
+    return null
+}

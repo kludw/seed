@@ -38,7 +38,7 @@ You asked not to be woken up, so these are the language and toolchain decisions 
 - **Narrowing on assignment:** after `x = <non-null value>`, `x` is a `T` until it may become null again (`if (x == null) { x = "default" }` leaves `x` non-null).
 - **Narrowing ends** when the path (or a prefix of it) is assigned or has a `mut` method called on it, and before a loop that changes it.
 - **Error guards:** a plain `T` returned beside an error can be read only once the error is known to be null (`if (err == null)`, after `if (err != null) { return ... }`, right of `err == null &&`), or after it is assigned again. A `T?` beside an error is not guarded.
-- **Every result must be used,** not only errors: discard with `_ = f()`. A value beside a discarded error must be declared `T?`.
+- **Every result must be used,** not only errors: discard with `_ = f()`. A value beside a discarded error must be declared `T?`. A typed `_` (`string _, int _, error err = f()`) discards like `_`, any number of times, and `error _` discards the error like `_` does.
 - **`return null, null` for a plain `T` result is an error;** `return null, err` with an `err` that turns out to be null crashes (`f returned null as result 1 without an error`).
 - **`try` works anywhere in an expression** in a function whose last result is `error`, including `try group {...}`.
 - **Crash vs error exit codes:** an error returned from `main` exits with 1 (`error: ...`), a crash with 2 (`crash: ...`).

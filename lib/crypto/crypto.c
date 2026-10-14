@@ -175,9 +175,8 @@ static int crypto_os_random(uint8_t *buf, size_t n) {
 sd_str sd_lib_crypto_randomBytes(sd_int n) {
   int64_t len;
   if (!sd_int_to_i64(n, &len) || len < 0) {
-    sd_str s = sd_int_to_str(n);
-    if (s->data[0] == '-') sd_crash("crypto.randomBytes: n (%s) must not be negative", s->data);
-    sd_crash("crypto.randomBytes: n (%s) is too large", s->data);
+    if (sd_int_lt(n, SD_INT(0))) sd_crash_int("crypto.randomBytes: n (%s) must not be negative", n);
+    sd_crash_int("crypto.randomBytes: n (%s) is too large", n);
   }
   if (len == 0) return sd_str_from_cstr("");
   uint8_t *buf = sd_alloc((size_t)len);

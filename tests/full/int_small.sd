@@ -1,0 +1,85 @@
+// Ints the compiler proves small (compiler/gen_int.sd) are plain C
+// integers: loop counters bounded by constants and lengths, lengths, bytes
+// converted to int, and arithmetic whose interval stays small. This checks
+// that they compute what the general ints compute, at the edges of the
+// small range (2^62) too, and that the others still grow.
+package main
+
+import "fmt"
+
+const int limit = 4611686018427387903
+
+fn sumTo(int n) int {
+    int s = 0
+    for (int i = 0; i < n; i++) {
+        s = s + i
+    }
+    return s
+}
+
+fn count() int {
+    fmt.println("count called")
+    return 3
+}
+
+fn main([]string args) error {
+    // A counter bounded by a constant, with arithmetic that stays small.
+    int sum = 0
+    for (int i = 0; i < 1000; i++) {
+        sum = sum + (i * i) % 7 + (i & 3)
+    }
+    fmt.println("sum: " + sum.string())
+    // Truncating division and remainder with negative operands.
+    for (int j = -7; j <= 7; j = j + 7) {
+        fmt.println(j.string() + " / 2 = " + (j / 2).string() + ", % 2 = " + (j % 2).string() + ", % -3 = " + (j % -3).string() + ", -j = " + (-j).string())
+    }
+    // Counting down to and past zero.
+    []string xs = []string{"a", "b", "c"}
+    string back = ""
+    for (int k = xs.len() - 1; k >= 0; k--) {
+        back = back + xs[k] + k.string()
+    }
+    fmt.println("back: " + back)
+    // At the top of the small range: the last value is still small, the
+    // next one is a big integer.
+    int top = limit - 2
+    for (int m = limit - 2; m <= limit; m++) {
+        top = m
+    }
+    fmt.println("top: " + top.string() + ", top + 1 = " + (top + 1).string() + ", top * top = " + (top * top).string())
+    int bottom = -limit - 1
+    fmt.println("bottom: " + bottom.string() + ", bottom - 1 = " + (bottom - 1).string() + ", -bottom = " + (-bottom).string())
+    // A local assigned only small values stays small; one that grows is a
+    // general int.
+    int width = 10
+    if (args.len() > 5) {
+        width = 20
+    }
+    int grow = 1
+    for (int n = 0; n < 70; n++) {
+        grow = grow * 2
+    }
+    fmt.println("width: " + width.string() + ", grow: " + grow.string())
+    // Lengths and bytes.
+    string word = "seed"
+    int codes = 0
+    for (int p = 0; p < word.len(); p++) {
+        codes = codes + int(word[p]) * (p + 1)
+    }
+    fmt.println("codes: " + codes.string())
+    // The order of evaluation is kept when small operands are added first.
+    int total = count() + 1 + 2 + count()
+    fmt.println("total: " + total.string())
+    fmt.println("sumTo: " + sumTo(100000).string())
+    // Concatenation with ints written in place: negative, zero, big.
+    int big = limit * 1000
+    string line = "a" + (-5).string() + "b" + 0.string() + "c" + big.string() + "d" + sum.string()
+    fmt.println(line)
+    string acc = "x"
+    for (int q = -2; q < 3; q++) {
+        acc = acc + q.string() + ","
+    }
+    acc = acc + big.string()
+    fmt.println(acc)
+    return null
+}

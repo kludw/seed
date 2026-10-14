@@ -1,0 +1,230 @@
+// Crashes and stops in goroutines release what the unwound frames held
+// (the cleanup frames of compiler/README.md): strings, lists, maps,
+// structs, enums, interfaces and errors in locals and temporaries, at many
+// kinds of crash points. Each goroutine crashes (or is stopped) inside a
+// group and the program goes on; tests/leaks.sh checks that nothing leaks,
+// and the address sanitizer that nothing is released twice.
+package main
+
+import "errors"
+import "fmt"
+
+type Item struct {
+    string name
+    []int counts
+}
+
+type Shape enum {
+    Circle(float radius)
+    Named(string name, []string tags)
+    Empty
+}
+
+type Named interface {
+    label() string
+}
+
+type Box struct implements Named {
+    string text
+}
+
+fn (Box b) label() string {
+    return "box " + b.text
+}
+
+fn deeper(int n, []string xs) string {
+    string mine = "level " + n.string()
+    if (n == 0) {
+        return xs[n + 10]
+    }
+    return mine + deeper(n - 1, xs)
+}
+
+fn indexCrash() error {
+    int n = 7
+    string s = "a" + n.string()
+    []string xs = []string{s, s + "b"}
+    map[string]int m = map[string]int{s: 1}
+    Item it = Item{name: s, counts: []int{1, 2, 3}}
+    Shape sh = Shape.Named(s, xs)
+    Named nm = Box{text: s}
+    error e = errors.new("held " + s)
+    fmt.println(deeper(3, xs) + it.name + nm.label() + e.message() + m.len().string())
+    if (sh == Shape.Empty) {
+        return null
+    }
+    return null
+}
+
+fn divide(int a, int b) int {
+    return a / b
+}
+
+fn divCrash() error {
+    []string parts = []string{"x", "y"}
+    string joined = parts.join("+") + divide(1, 0).string()
+    fmt.println(joined)
+    return null
+}
+
+fn less(Item a, Item b) bool {
+    if (a.name == "c") {
+        return a.counts[5] > 0
+    }
+    return a.name < b.name
+}
+
+fn sortCrash() error {
+    []Item items = []Item{}
+    for (int i = 0; i < 20; i++) {
+        items.push(Item{name: "abcdefghijklmnopqrst".slice(i, i + 1), counts: []int{i}})
+    }
+    items.sortBy(less)
+    fmt.println(items.len().string())
+    return null
+}
+
+fn two(string s) (string, []string) {
+    return s + "!", []string{s, s}
+}
+
+fn multiCrash() error {
+    []string xs = []string{"p"}
+    [][]string ys = [][]string{[]string{}}
+    xs[0], ys[3] = two("q")
+    fmt.println(xs[0] + ys.len().string())
+    return null
+}
+
+fn mapLoop() error {
+    map[string][]string m = map[string][]string{}
+    for (int i = 0; i < 10; i++) {
+        string key = "k" + i.string()
+        m[key] = []string{key, key + key}
+        if (i == 7) {
+            []string? none = m["zz"]
+            if (none == null) {
+                []string empty = []string{key}
+                fmt.println(empty[1])
+            }
+        }
+    }
+    return null
+}
+
+fn convCrash() error {
+    string big = "x" + 300.string()
+    []byte bs = []byte{byte(1), byte(int(big.len()) * 100)}
+    fmt.println(bs.len().string())
+    return null
+}
+
+fn deferredCrash() error {
+    string held = "held"
+    defer fmt.println("deferred " + held)
+    []string xs = []string{held}
+    fmt.println(xs[2])
+    return null
+}
+
+fn pair([]string xs) (string, string) {
+    return xs[0], xs[4]
+}
+
+fn literalCrash() error {
+    []string xs = []string{"one", "two"}
+    []int ns = []int{1}
+    Item it = Item{name: xs[0], counts: []int{ns[0], ns[0]}}
+    map[string]string m = map[string]string{xs[1]: xs[0], it.name: xs[1]}
+    Shape sh = Shape.Named(xs[1], xs)
+    if (m.len() > 1 && sh != Shape.Empty) {
+        Item other = Item{name: xs[1], counts: []int{ns[3]}}
+        fmt.println(other.name)
+    }
+    return null
+}
+
+fn entryCrash() error {
+    []string xs = []string{"one", "two"}
+    map[string]string m = map[string]string{xs[0]: xs[1], xs[1]: xs[2]}
+    fmt.println(m.len().string())
+    return null
+}
+
+fn caseCrash() error {
+    []string xs = []string{"one", "two"}
+    Shape sh = Shape.Named(xs[0] + xs[1], []string{xs[1], xs[7]})
+    fmt.println((sh == Shape.Empty).string())
+    return null
+}
+
+fn tupleCrash() error {
+    string a, string b = pair([]string{"a", "b", "c"})
+    fmt.println(a + b)
+    return null
+}
+
+fn show(string a, string b) {
+    fmt.println(a + b)
+}
+
+fn deferArgsCrash() error {
+    []string xs = []string{"one", "two"}
+    defer show(xs[0], xs[1])
+    defer show(xs[1] + "!", xs[9])
+    return null
+}
+
+fn receiver(chan string ch) error {
+    string held = "waiting with " + "a string"
+    []Item items = []Item{Item{name: held, counts: []int{1}}}
+    string? got = ch.receive()
+    if (got != null) {
+        fmt.println(got + items[0].name)
+    }
+    return null
+}
+
+fn sender(chan string ch) error {
+    map[string]string m = map[string]string{"a": "b"}
+    for (int i = 0; ; i++) {
+        ch.send("message " + i.string() + m.len().string())
+    }
+}
+
+fn failer() error {
+    return errors.new("failer failed")
+}
+
+fn run(string name, fn() error f) {
+    error err = group {
+        spawn f()
+    }
+    if (err != null) {
+        fmt.println(name + ": " + err.message())
+    }
+}
+
+fn main([]string args) error {
+    run("index", indexCrash)
+    run("divide", divCrash)
+    run("sortBy", sortCrash)
+    run("multi", multiCrash)
+    run("mapLoop", mapLoop)
+    run("conv", convCrash)
+    run("deferred", deferredCrash)
+    run("literal", literalCrash)
+    run("entry", entryCrash)
+    run("case", caseCrash)
+    run("tuple", tupleCrash)
+    run("deferArgs", deferArgsCrash)
+    chan string blocked = chan string(0)
+    chan string busy = chan string(0)
+    error err = group {
+        spawn receiver(blocked)
+        spawn sender(busy)
+        spawn failer()
+    }
+    fmt.println("stopped: " + err.message())
+    return null
+}

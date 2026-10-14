@@ -40,11 +40,16 @@ fn (Gen g) mut genBody(int b) {
     g.popScope(!g.c.blockExits(b))
 }
 
-// Declares a local variable that owns value.
-fn (Gen g) mut declareLocal(string name, int t, string value) {
-    g.emit(g.ctype(t) + " l_" + name + " = " + value + ";")
-    if (g.counted(t)) {
-        g.slots.push(Slot{name: "l_" + name, ty: t, live: true, temp: false})
+// Declares local variable v (of type t) that owns value.
+fn (Gen g) mut declareLocal(int v, int t, string value) {
+    g.emit(g.localDecl(v, t) + " = " + g.localInit(v, value) + ";")
+    g.pushLocal(v, t)
+}
+
+// Registers local variable v (just declared) as a slot when it is counted.
+fn (Gen g) mut pushLocal(int v, int t) {
+    if (g.counted(t) && !g.isUnboxed(v)) {
+        g.pushSlot(g.lname(v), t, false)
     }
 }
 
@@ -66,7 +71,7 @@ fn (Gen g) mut genStmt(int s) {
     switch (st.kind) {
     case StmtKind.ExprStmt:
         string v = g.gexpr(st.expr)
-        if (v != "" && g.findTemp(v) < 0 && !isIdent(v)) {
+        if (v != "" && g.findTemp(v) < 0 && !isIdent(v) && !isFrameName(v)) {
             g.emit("(void)(" + v + ");")
         }
         g.releaseTo(mark)
@@ -80,11 +85,9 @@ fn (Gen g) mut genStmt(int s) {
         if (cv >= 0) {
             int ct = g.c.vars[cv].ty
             string val = g.ownVal(g.gexpr(st.expr), ct)
-            g.emit(g.ctype(ct) + " l_" + st.name + " = " + val + ";")
+            g.emit(g.localDecl(cv, ct) + " = " + g.localInit(cv, val) + ";")
             g.releaseTo(mark)
-            if (g.counted(ct)) {
-                g.slots.push(Slot{name: "l_" + st.name, ty: ct, live: true, temp: false})
-            }
+            g.pushLocal(cv, ct)
         }
     case StmtKind.If:
         g.genIf(st)
@@ -240,7 +243,7 @@ fn (Gen g) mut genAssign(int s) {
         int v = g.c.targetVar[ti]
         if (v < 0) {
             string ignored = g.gexpr(st.expr)
-            if (ignored != "" && g.findTemp(ignored) < 0 && !isIdent(ignored)) {
+            if (ignored != "" && g.findTemp(ignored) < 0 && !isIdent(ignored) && !isFrameName(ignored)) {
                 g.emit("(void)(" + ignored + ");")
             }
             g.releaseTo(mark)
@@ -248,19 +251,20 @@ fn (Gen g) mut genAssign(int s) {
         }
         int t = g.c.targetType[ti]
         string val = g.ownVal(g.gexpr(st.expr), t)
-        g.emit(g.ctype(t) + " l_" + tg.name + " = " + val + ";")
+        g.emit(g.localDecl(v, t) + " = " + g.localInit(v, val) + ";")
         g.releaseTo(mark)
-        if (g.counted(t)) {
-            g.slots.push(Slot{name: "l_" + tg.name, ty: t, live: true, temp: false})
-        }
+        g.pushLocal(v, t)
     case TargetKind.Discard:
         string d = g.gexpr(st.expr)
-        if (d != "" && g.findTemp(d) < 0 && !isIdent(d)) {
+        if (d != "" && g.findTemp(d) < 0 && !isIdent(d) && !isFrameName(d)) {
             g.emit("(void)(" + d + ");")
         }
         g.releaseTo(mark)
     case TargetKind.Place:
-        if (!g.genAppend(st, tg)) {
+        int uv = g.intLocal(tg.expr)
+        if (uv >= 0 && g.isUnboxed(uv)) {
+            g.emit("l_" + g.c.vars[uv].name + " = " + smallOf(g.gexpr(st.expr)) + ";")
+        } else if (!g.genAppend(st, tg)) {
             g.gstore(tg.expr, g.ownedTemp(st.expr))
         }
         g.releaseTo(mark)
@@ -288,24 +292,30 @@ fn (Gen g) mut gstore(int lv, string v) {
         g.emit("sd_list_set(" + pl + ", " + idx + ", &" + v + ");")
         return
     }
-    if (x.kind == ExprKind.Ident && g.c.vars[i.ref].kind != VarKind.MutRecv) {
-        string name = "l_" + g.c.vars[i.ref].name
+    // v is consumed by the last line (see emit).
+    if (x.kind == ExprKind.Ident && g.isUnboxed(i.ref)) {
         g.consume(v)
+        g.emit("l_" + g.c.vars[i.ref].name + " = " + smallOf(v) + ";")
+        return
+    }
+    if (x.kind == ExprKind.Ident && g.c.vars[i.ref].kind != VarKind.MutRecv) {
+        string name = g.lname(i.ref)
         string r = g.releaseCall(t, name)
         if (r != "") {
             g.emit(r + ";")
         }
+        g.consume(v)
         g.emit(name + " = " + v + ";")
         return
     }
     string p = g.gplace(lv)
-    g.consume(v)
     string pt = g.newTmp()
     g.emit(g.ctype(t) + " *" + pt + " = " + p + ";")
     string rel = g.releaseCall(t, "*" + pt)
     if (rel != "") {
         g.emit(rel + ";")
     }
+    g.consume(v)
     g.emit("*" + pt + " = " + v + ";")
 }
 
@@ -358,8 +368,8 @@ fn (Gen g) mut genAppend(Stmt st, Target tg) bool {
             return false
         }
     }
-    string tail = g.concatVals(g.operands(rest))
-    string name = "l_" + g.c.vars[v].name
+    string tail = g.concatOf(rest)
+    string name = g.lname(v)
     g.emit(name + " = sd_str_append(" + name + ", " + tail + ");")
     return true
 }
@@ -374,31 +384,44 @@ fn (Gen g) mut genMultiAssign(int s) {
     string v = g.gexpr(st.expr)
     string err = v + ".r" + (n - 1).string()
     bool errLast = g.c.types.part(rt, n - 1) == tyError
+    // When the tuple is a field of the frame, each part is set to null as
+    // soon as it is moved out or released (a later target's place may
+    // crash).
+    bool inFr = isFrameName(v)
     // T? x, error err = f() (or T? x, _ = f()): when f fails, x is null,
     // whatever f returned beside the error.
     []string rels = []string{}
     for (int i = 0; i < n - 1; i++) {
         if (errLast && g.nullOnError(st, i)) {
-            string r = g.releaseCall(g.c.types.part(rt, i), v + ".r" + i.string())
+            int it = g.c.types.part(rt, i)
+            string r = g.releaseCall(it, v + ".r" + i.string())
             if (r != "") {
                 rels.push(r + ";")
+                if (inFr) {
+                    rels.push(v + ".r" + i.string() + " = " + g.zeroOf(it) + ";")
+                }
             }
         }
     }
     if (rels.len() > 0) {
         g.emit("if (!sd_err_is_null(" + err + ")) { " + rels.join(" ") + " }")
     }
-    []string declared = []string{}
+    []int declared = []int{}
     []int declaredTypes = []int{}
+    []int declaredSeqs = []int{}
     for (int j = 0; j < n; j++) {
         int ti = g.c.ast.at(st.list, j)
         Target tg = g.c.ast.targets[ti]
         int pt = g.c.types.part(rt, j)
         string part = v + ".r" + j.string()
+        string nullPart = ""
+        if (inFr && g.counted(pt)) {
+            nullPart = part + " = " + g.zeroOf(pt) + ";"
+        }
         if (!g.takesPart(st, j)) {
             string rel = g.releaseCall(pt, part)
             if (rel != "") {
-                g.emit(rel + ";")
+                g.emit(rel + "; " + nullPart)
             }
             continue
         }
@@ -411,19 +434,31 @@ fn (Gen g) mut genMultiAssign(int s) {
             val = "(sd_err_is_null(" + err + ") ? " + val + " : " + g.nullOf(tt) + ")"
         }
         if (tg.kind == TargetKind.Decl) {
-            g.emit(g.ctype(tt) + " l_" + tg.name + " = " + val + ";")
-            declared.push("l_" + tg.name)
+            int dv = g.c.targetVar[ti]
+            g.emit(g.localDecl(dv, tt) + " = " + val + ";")
+            declared.push(dv)
             declaredTypes.push(tt)
+            declaredSeqs.push(g.crashSeq)
         } else {
             g.gstore(tg.expr, g.alias(tt, val))
         }
+        if (nullPart != "") {
+            g.emit(nullPart)
+        }
     }
-    g.consume(v)
+    int s0 = g.findTemp(v)
+    if (s0 >= 0) {
+        // Every part was moved or released (and, in the frame, nulled).
+        g.slots[s0].live = false
+        g.slotEnd(g.slots[s0])
+    }
     g.releaseTo(mark)
     for (int k = 0; k < declared.len(); k++) {
-        if (g.counted(declaredTypes[k])) {
-            g.slots.push(Slot{name: declared[k], ty: declaredTypes[k], live: true, temp: false})
-        }
+        // Each local owns its value from its declaration on.
+        int now = g.crashSeq
+        g.crashSeq = declaredSeqs[k]
+        g.pushLocal(declared[k], declaredTypes[k])
+        g.crashSeq = now
     }
 }
 
@@ -463,8 +498,17 @@ fn (Gen g) mut genIncDec(Stmt st) {
     ExprInfo i = g.c.info[lv]
     Expr x = g.c.ast.exprs[lv]
     string target = ""
+    if (x.kind == ExprKind.Ident && g.isUnboxed(i.ref)) {
+        // The analysis proved that the result is small (gen_int.sd).
+        string op = "--"
+        if (st.inc) {
+            op = "++"
+        }
+        g.emit("l_" + g.c.vars[i.ref].name + op + ";")
+        return
+    }
     if (x.kind == ExprKind.Ident && g.c.vars[i.ref].kind != VarKind.MutRecv) {
-        target = "l_" + g.c.vars[i.ref].name
+        target = g.lname(i.ref)
     } else {
         string pt = g.newTmp()
         g.emit(g.ctype(i.ty) + " *" + pt + " = " + g.gplace(lv) + ";")
@@ -578,7 +622,7 @@ fn (Gen g) mut genSwitch(Stmt st) {
     } else {
         sv = g.gexpr(st.expr)
     }
-    if (!isIdent(sv)) {
+    if (!isIdent(sv) && !isFrameName(sv)) {
         sv = g.alias(t, sv)
     }
     string tag = ""
@@ -707,7 +751,7 @@ fn (Gen g) mut genBindings(int t, string payload, int li) {
         }
         int pt = g.c.vars[g.c.paramVar[pi]].ty
         string v = payload + ".u.c_" + ec.name + ".f" + k.string()
-        g.declareLocal(g.c.ast.params[pi].name, pt, g.retainExpr(pt, v))
+        g.declareLocal(g.c.paramVar[pi], pt, g.retainExpr(pt, v))
     }
 }
 
@@ -716,13 +760,31 @@ fn (Gen g) mut genBindings(int t, string payload, int li) {
 // Returns value (a C expression for an owned result, or "" in a function
 // without results): the result is computed first, then every slot except
 // the ones in keep is released, then the defers run.
+//
+// With a cleanup frame, the frame is left right after the result is
+// computed (nothing can crash from there on), so the temporaries moved into
+// the result and the slots released need no nulling.
 fn (Gen g) mut emitReturn(string value, []string keep) {
     int r = tyVoid
     if (g.curFn >= 0) {
         r = g.c.fnRet[g.curFn]
     }
+    // Nothing from here on can crash: the temporaries moved into the result,
+    // and the slots kept for it, end here.
+    for (int m = 0; m < g.moved.len(); m++) {
+        g.slotEnd(g.moved[m])
+    }
+    g.moved = []Slot{}
+    for (int k = 0; k < g.slots.len(); k++) {
+        if (g.slots[k].live && keep.contains(g.slots[k].name)) {
+            g.slotEnd(g.slots[k])
+        }
+    }
     bool rel = g.needsRelease(0, keep)
     if (!rel && !g.defers) {
+        if (g.frameOn) {
+            g.emit(leaveFrame)
+        }
         if (value == "") {
             g.emit("return;")
         } else {
@@ -735,7 +797,13 @@ fn (Gen g) mut emitReturn(string value, []string keep) {
         rv = g.newTmp()
         g.emit(g.ctype(r) + " " + rv + " = " + value + ";")
     }
+    if (g.frameOn) {
+        g.emit(leaveFrame)
+    }
+    bool wasPopped = g.popped
+    g.popped = true
     g.releaseAbove(0, keep)
+    g.popped = wasPopped
     if (g.defers) {
         g.emit("sd_defer_run(_dm);")
     }
@@ -754,7 +822,7 @@ fn (Gen g) isPlainMove(int e) bool {
         return false
     }
     VarKind k = g.c.vars[i.ref].kind
-    if (k != VarKind.Local && k != VarKind.LocalConst) {
+    if ((k != VarKind.Local && k != VarKind.LocalConst) || g.isUnboxed(i.ref)) {
         return false
     }
     return !i.wrap || g.wrapIsIdentity(i.ty)
@@ -769,7 +837,7 @@ fn (Gen g) mut genReturn(Stmt st) {
     if (st.count == 1) {
         int e = g.c.ast.at(st.list, 0)
         if (g.isPlainMove(e)) {
-            string name = "l_" + g.c.vars[g.c.info[e].ref].name
+            string name = g.lname(g.c.info[e].ref)
             g.emitReturn(name, []string{name})
             return
         }
@@ -780,7 +848,7 @@ fn (Gen g) mut genReturn(Stmt st) {
     for (int i = 0; i < st.count; i++) {
         es.push(g.c.ast.at(st.list, i))
     }
-    []string vals = g.operands(es)
+    []string vals = g.ownedOperands(es)
     // return null, err for a plain result: err must not be null, or the
     // caller would read the null (the checker rejects a literal null).
     int rtype = g.c.fnRet[g.curFn]
@@ -796,7 +864,7 @@ fn (Gen g) mut genReturn(Stmt st) {
     []string fields = []string{}
     for (int k = 0; k < es.len(); k++) {
         string v = vals[k]
-        if (g.isPlainMove(es[k]) && v == "l_" + g.c.vars[g.c.info[es[k]].ref].name && !keep.contains(v)) {
+        if (g.isPlainMove(es[k]) && v == g.lname(g.c.info[es[k]].ref) && !keep.contains(v)) {
             keep.push(v)
             fields.push(v)
         } else {
@@ -859,7 +927,7 @@ fn (Gen g) mut genDefer(Stmt st) {
     int mark = g.slots.len()
     int e = st.expr
     []int ops = g.callOperands(e)
-    []string vals = g.operands(ops)
+    []string vals = g.ownedOperands(ops)
     g.ndefer++
     string name = "sd_d" + g.ndefer.string()
     []string fields = []string{}
@@ -1069,7 +1137,7 @@ fn (Gen g) mut genReceived(int comm, string ok, string d) {
         v = g.c.targetVar[g.c.ast.at(st.list, 0)]
     }
     if (v >= 0) {
-        g.declareLocal(g.c.vars[v].name, opt, g.okOpt(opt, ok, d))
+        g.declareLocal(v, opt, g.okOpt(opt, ok, d))
         return
     }
     string rel = g.releaseCall(g.elemOf(g.typeOf(g.recvOf(e))), d)

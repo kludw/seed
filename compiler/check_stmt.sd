@@ -656,7 +656,9 @@ fn (Checker c) mut checkAssign(int s) {
         return
     }
     Target last = c.ast.targets[c.ast.at(st.list, n - 1)]
-    bool errSlot = c.ast.exprs[st.expr].kind == ExprKind.Call && c.types.part(rt, n - 1) == tyError && last.kind == TargetKind.Discard
+    // `_` and a typed `error _` both discard the error.
+    bool lastDiscarded = last.kind == TargetKind.Discard || (last.kind == TargetKind.Decl && last.name == "_")
+    bool errSlot = c.ast.exprs[st.expr].kind == ExprKind.Call && c.types.part(rt, n - 1) == tyError && lastDiscarded
     c.stmtDiscard[s] = errSlot
     for (int i = 0; i < n; i++) {
         int ti2 = c.ast.at(st.list, i)
@@ -682,7 +684,8 @@ fn (Checker c) mut checkAssign(int s) {
             c.error(tg2.pos, "value " + (i + 1).string() + " has type " + c.typeName(slot) + ", which cannot be assigned to " + what + " (type " + c.typeName(tt) + ")")
             continue
         }
-        if (errSlot && i < n - 1 && !c.types.isOpt(tt) && tt != tyError) {
+        bool discarded = tg2.kind == TargetKind.Decl && tg2.name == "_"
+        if (errSlot && i < n - 1 && !discarded && !c.types.isOpt(tt) && tt != tyError) {
             c.errorHint(tg2.pos, "the error is discarded with _, so " + what + " may be null and must be declared as " + c.typeName(tt) + "?", "declare it as " + c.typeName(tt) + "? and check it against null before using it")
         }
     }
@@ -692,7 +695,7 @@ fn (Checker c) mut checkAssign(int s) {
         if (tg3.kind == TargetKind.Decl) {
             for (int k = 0; k < j; k++) {
                 Target prev = c.ast.targets[c.ast.at(st.list, k)]
-                if (prev.kind == TargetKind.Decl && prev.name == tg3.name) {
+                if (prev.kind == TargetKind.Decl && prev.name == tg3.name && tg3.name != "_") {
                     c.error(tg3.pos, tg3.name + " is declared twice")
                 }
             }

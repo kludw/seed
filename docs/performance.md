@@ -1,7 +1,7 @@
 # Performance
 
 How fast Seed programs are compared with Go, where their time goes, what
-the runtime does about it, and what would need the compiler. The numbers
+the runtime and the compiler do about it. The numbers
 are from an Apple M-series laptop (10 cores, macOS, Apple clang `-O2`, Go
 1.27); the benchmarks are in [bench/](../bench/).
 
@@ -31,23 +31,26 @@ appends in place to a string it alone holds.
 
 ## Results
 
-Best of 5, in seconds. "Before" is the runtime at the start of this work,
-"after" the current one.
+Best of 5, in seconds. "Start" is the runtime at the start of the runtime
+work, "runtime" after it (section "What was optimised"), "compiler" after
+the compiler work of the last section (small ints, numbers written straight
+into concatenations, and the cleanup frames, which cost nothing measurable
+here).
 
-| Benchmark | Seed before | Seed after | Go | Seed / Go |
-|---|---|---|---|---|
-| `fib` | 0.39 | 0.39 | 0.33 | 1.2 |
-| `intloop` | 0.75 | 0.75 | 0.31 | 2.4 |
-| `json` | 0.48 | 0.48 | 0.41 | 1.2 |
-| `maps` | 0.49 | 0.50 | 0.54 | 0.9 |
-| `pingpong` | 0.35 | **0.10** | 0.05 | 2.0 (was 7.0) |
-| `sort` | 0.24 | 0.24 | 0.36 | 0.7 |
-| `spawn` | 1.24 | **0.15** | 0.04 | 3.8 (was 31) |
-| `strings` | 0.57 | 0.57 | 0.58 | 1.0 |
+| Benchmark | Seed start | Seed runtime | Seed compiler | Go | Seed / Go |
+|---|---|---|---|---|---|
+| `fib` | 0.39 | 0.39 | 0.39 | 0.33 | 1.2 |
+| `intloop` | 0.75 | 0.75 | **0.26** | 0.31 | 0.8 (was 2.4) |
+| `json` | 0.48 | 0.48 | 0.49 | 0.42 | 1.2 |
+| `maps` | 0.49 | 0.50 | **0.41** | 0.54 | 0.8 |
+| `pingpong` | 0.35 | **0.10** | 0.10 | 0.05 | 2.0 (was 7.0) |
+| `sort` | 0.24 | 0.24 | 0.23 | 0.36 | 0.6 |
+| `spawn` | 1.24 | **0.15** | 0.15 | 0.04 | 3.8 (was 31) |
+| `strings` | 0.57 | 0.57 | **0.45** | 0.55 | 0.8 |
 
-Sequential code is within 1.2x of Go, except tight integer arithmetic
-(2.4x). Maps and sorting are faster than Go's generic versions. The two
-concurrency benchmarks were the outliers and are where the runtime changed.
+Sequential code is within 1.2x of Go; tight integer loops and string
+building are now faster than Go's versions, as are maps and sorting. The
+two concurrency benchmarks are where goroutines being threads shows.
 
 Runtime micro-benchmarks (`runtime/tests/run.sh bench`):
 
@@ -61,13 +64,14 @@ Runtime micro-benchmarks (`runtime/tests/run.sh bench`):
 ## Where the time goes
 
 **`intloop`, `fib`: tagged integers.** An `int` is a tagged word that
-becomes a big integer instead of overflowing. The generated C is tight (no
-calls in the loop: the small-int fast paths of `sd_int_add`, `sd_int_mul`,
-`sd_int_mod` are inline, `% 7` becomes a multiplication by a reciprocal),
-but each operation tests both tags and checks for overflow
-(`__builtin_mul_overflow`, `smulh` on arm64), and each temporary is
-released with a tag test. Go does one instruction per operation. `fib` is
-dominated by calls, so it is only 1.2x.
+becomes a big integer instead of overflowing, so each general operation
+tests both tags and checks for overflow, and each temporary is released
+with a tag test. In `intloop` the counter is bounded by a constant, so the
+compiler proves `i`, `i * i`, `% 7` and `& 3` small and emits plain C on
+`int64_t`; only `sum`, which grows without bound, stays general (one
+inline addition per iteration). `fib`'s argument is a parameter, which the
+analysis cannot bound, so `fib` still pays the tag tests; it is dominated
+by calls (1.2x).
 
 **`json`, `strings`, `maps`: allocation.** A profile of `json` (`sample`,
 top of stack) puts over a third of the time in `malloc`/`free` and the
@@ -121,36 +125,39 @@ suites, the soak and the sanitizers pass; see lib/BUGS_FIXED.md):
 Together: `spawn` 1.24 s to 0.15 s, `pingpong` 0.35 s to 0.10 s.
 
 What was tried and not kept: a per-goroutine registry of owned objects, to
-free what a crash leaks (runtime/README.md, section 17): it cost 18-80% on
-allocation-heavy goroutines.
+free what a crash leaked (runtime/README.md, section 17): it cost 18-80% on
+allocation-heavy goroutines. The compiler's cleanup frames replaced it.
 
-## What would need the compiler
+## What the compiler does
 
-Proposals for the compiler team, in order of expected gain:
+Three proposals of the runtime work were implemented in the compiler
+(compiler/README.md, "Memory management"):
 
-1. **Unboxed integer locals where the range is known.** For a loop
-   `for (int i = A; i < B; i++)` whose body does not assign `i`, where `A`
-   and `B` are small (constants, `.len()`, or ints the checker knows are
-   small), keep `i` as an `int64_t` and emit `SD_INT(i)` only where it is
-   used as an `int` value: the comparison and increment then cost one
-   instruction each, and `xs[i]` can index with `i` directly (no tag test in
-   `sd_int_index`). The same applies to results the generator knows are
-   small: `x % c` and `x & c` for a small constant `c`, `.len()`,
-   `int(byte)`. Releases of such values can be omitted entirely (today every
-   temporary is released with a tag test). This is what separates
-   `intloop` (2.4x) from Go.
-2. **Cleanup frames for counted locals**, to free what a crash or a stopped
-   goroutine leaks: the full design is in runtime/README.md, section 17.
-   Not a speed-up, but the cost is small (a push and a pop per call of a
-   function with string, list or map locals; nothing for scalar-only
-   functions) and it removes the main known limitation.
-3. **Fewer temporaries in string building.** `"user" + i.string() +
-   "@example.com"` already becomes one `sd_str_concat_n` of three parts,
-   but `i.string()` first makes a string of its own. A runtime entry point
-   `sd_str_concat_n` that also takes ints (or a small "part" union: string,
-   int, float) would let the generator write the digits straight into the
-   result, saving an allocation and a copy per number in `strings` and
-   `json`.
+1. **Unboxed small ints** (compiler/gen_int.sd). An interval analysis of
+   every int local of a function finds the ones that are always small:
+   loop counters bounded by constants or lengths, lengths, `int(byte)`, and
+   locals assigned only such values. Those are `int64_t` C locals, never
+   retained or released; comparisons and `+ - * / % &` whose operands and
+   result are small are plain C. In an int `+` chain the small operands are
+   summed in C first. `intloop` went from 0.75 s to 0.26 s; `maps` and
+   `strings` gained from their loop counters.
+2. **Numbers written into concatenations.** `"item-" + i.string()` is one
+   `sd_str_concat_parts`, which writes the digits of `i` into the result:
+   one allocation and one copy fewer per number (`strings`: 0.57 s to
+   0.45 s, with the unboxed counters).
+3. **Cleanup frames**, so that a crash or a stopped goroutine releases what
+   the unwound frames held (runtime/README.md, sections 9 and 17). Only
+   values that live across a call that may crash are kept in a frame, and
+   ints and data-less enums never are; no benchmark changed measurably. The
+   compiler compiling itself, which copies many structs with strings into
+   locals across calls, is about 7% slower (112 ms to 120 ms): a thread-local
+   access per call of a function with a frame (about 1%), its values kept in
+   memory across calls (about 3.5%), and zeroing and nulling its fields.
+
+Not done: floats in concatenations (`f.string()` costs its formatting, not
+its allocation), tighter bounds for lengths (`i + 1` with `i < xs.len()` is
+not proven small, because a length is only known to be below 2^62), and
+intervals for fields and parameters (`fib`).
 
 What would need more than the compiler: goroutines in user space (an M:N
 scheduler with growable stacks) to get `spawn` and `pingpong` to Go's

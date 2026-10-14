@@ -151,7 +151,7 @@ The documentation:
 
 **Known limitations:**
 
-- A crash, or a goroutine stopped by its group, leaks the memory held by the locals of the unwound frames. Normal execution leaks nothing.
+- A crash, or a goroutine stopped by its group, releases what the unwound frames held, except big integers held by `int` locals.
 - Each goroutine is an OS thread, so tens of thousands of simultaneous goroutines hit OS limits.
 - Deadlock detection is global: it fires only when every goroutine is blocked. A goroutine stuck while others keep running waits forever, and defers do not run on a deadlock.
 - When a group fails, the code of the group block itself is not stopped, only the goroutines it started.

@@ -181,6 +181,7 @@ never return (`isNoReturn`).
 | `gen_expr.sd` | gen | temporaries and slots, evaluation order, expressions, operators, `try`, `group` |
 | `gen_call.sd` | gen | calls, places, built-in methods, conversions |
 | `gen_stmt.sd` | gen | statements, scopes, return, `defer`, `spawn`, `select`, `assert` |
+| `gen_int.sd` | gen | ints known to be small: the interval analysis of int locals, unboxed locals, plain C arithmetic |
 
 ## Data structures
 
@@ -498,7 +499,10 @@ generated.
   then the place, releases the old value and stores. A mut call evaluates
   (and keeps) its arguments before the receiver's place (`bag.addAll(bag)`).
 - `x = x + a + b` on a local string appends in place (`sd_str_append`);
-  other string `+` chains are one `sd_str_concat_n`.
+  other string `+` chains are one `sd_str_concat_n`. When a part of the
+  chain is `n.string()` on an int, the chain is one `sd_str_concat_parts`
+  instead, which writes the digits straight into the result (no string is
+  made for the number).
 - Constants are functions returning a borrowed value cached in a
   `_Thread_local` static `sd_cv_<name>` (literals are returned directly).
   A counted value registers `sd_cf_<name>` with `sd_goroutine_atexit`, so a
@@ -512,6 +516,56 @@ generated.
   reach the loop); `for` becomes `for (;;) { if (!cond) break; { body }
   _cN:; post }` so that the condition and post statement can have
   temporaries and `continue` reaches the post statement.
+
+*Cleanup frames* (runtime/README.md, section 9): a crash or a stop unwinds
+with `siglongjmp`, so the generated releases do not run; what the locals
+and temporaries own is released through the function's frame instead
+(`genFn`):
+
+- A slot whose type lives in frames (`frameCounted`: counted types except
+  `int`, and except enums whose cases have no data, whose values are all
+  immortal) is a field of the function's struct `L` (`frameField`):
+  `L.l_name`, `L._t3`. Locals of one name and type in sibling blocks share a
+  field.
+- The fields hold null or an owned value at every point where the goroutine
+  may crash: `L` starts zeroed, `releaseSlot` sets a field to null after
+  releasing it, and a temporary moved out (`ownVal`, `consume`) is set to
+  null by `emit` right after the line that consumed it. A multiple
+  assignment nulls each part of the tuple as it moves it. Operands that may
+  crash (an index, a conversion) of a statement that takes several values
+  over at once (a struct literal, a map entry, a tuple returned, a defer's
+  environment) are evaluated into temporaries first (`ownedOperands`), so
+  that they cannot crash after another value was retained in the same
+  statement.
+- A return computes its result, leaves the frame (`SD_LF_LEAVE`), and then
+  releases without nulling.
+- Only the fields that need it are kept: while the body is generated, frame
+  slots have placeholder names, `emit` counts the lines that may crash
+  (`lineMayCrash`: any call other than the retains, releases, constructors
+  and other runtime calls of `safeCallSet` that cannot crash), and
+  `slotEnd` marks the field of a slot that owned its value while such a
+  line was emitted. The other placeholders become plain C locals
+  (`expandFrame`), and a function without needed fields has no frame (most
+  temporaries live from one call to the next statement).
+
+*Small ints* (gen_int.sd): `analyzeInts` computes, before a function is
+generated, an interval for every `int` local declared in it (by a
+one-target declaration or a local `const`) from all its assignments, by
+iterating from "no value" until nothing changes (intervals that keep
+growing are widened to "any int"). Literals, constants, `len()`,
+`int(byte)`, and `+ - * / % &` on known intervals (`/` and `%` only when
+the divisor cannot be zero) have known intervals; anything else is any
+int. The post statement `i++` of a `for` whose condition has a conjunct
+`i < B` (or `<=`, or `i--` with `>`/`>=`) and whose body and condition do
+not assign `i` ends at most at B's upper bound. A local whose interval is
+inside the small range (`|x| < 2^62`) is *unboxed*: an `int64_t` C local
+(`l_i`), read as `SD_INT_S(l_i)`, stored with `SD_SMALL(v)`, incremented
+with `l_i++`, never retained or released. A comparison of two small values,
+and `+ - * / % &` whose result is small too, is plain C on `int64_t` with
+no temporary (`smallBinary`). In an int `+` chain, the simple small operands
+(literals, constants, unboxed locals and arithmetic on them) are added in C
+first and then added to the others with one general addition (`gsumSmall`;
+ints never overflow, so `+` is associative).
 
 *Concurrency* (runtime/README.md sections 10 and 11):
 
@@ -784,10 +838,18 @@ forward one release at a time.
 - **Goroutines release the constants they computed** (`sd_goroutine_atexit`,
   added to the runtime); before, every goroutine that used a list constant
   leaked it.
-- **`tests/full/NAME.leaks`** marks a test that is expected to leak because
-  a goroutine crashes inside a group and the program goes on (the crash
-  leaks the locals of the unwound frames); `tests/leaks.sh` reports it with
-  the crashing programs.
+- **`tests/full/NAME.leaks`** marks a test that is expected to leak, with
+  the reason; there are none since the cleanup frames (`tests/leaks.sh`
+  checks the crashing programs like the others).
+- **Cleanup frames hold only what lives across a crash point** (see
+  "Memory management"). Putting every counted slot into the frame cost the
+  compiler compiling itself 13%; keeping only the fields that need it, and
+  leaving out enums without data, brought that to 7%. The bench programs
+  did not change measurably either way.
+- **Small ints are found by a flow-insensitive interval analysis** over the
+  whole function: simple, and enough for loop counters, lengths and
+  constants. Lengths are bounded only by the small range (the runtime's own
+  limit), so `i + 1` with `i < xs.len()` is not small, while `i < 1000` is.
 - **`seed fmt` prints tokens, not the tree** (see "The formatter"). Style
   decisions not fixed by the task are listed in docs/formatting.md: no line
   length limit, `{}` for empty blocks, trailing comments not aligned,
@@ -816,11 +878,10 @@ forward one release at a time.
 
 ## Known limitations
 
-- A crash leaks the counted values held by the locals of the unwound C
-  frames (runtime/README.md section 16); normal execution leaks nothing.
-  This includes a goroutine that crashes inside a group, and a goroutine
-  stopped while it holds counted locals (the program goes on, so the
-  memory is lost for good).
+- A crash or a stopped goroutine still leaks a big integer held by an `int`
+  local (ints are not in cleanup frames), and what a native function holds
+  in its C locals when it crashes; everything else the unwound frames held
+  is released.
 - When a group fails, only its goroutines are stopped, not the code of the
   group block (it is not a goroutine of the group). A block that waits on a
   channel only the stopped goroutines would have served ends in the

@@ -36,6 +36,10 @@ SD_NORETURN void sd_fatal(const char *msg); /* out of memory and other unrecover
 /* Formats into a malloc'ed C string. */
 char *sd_vfmt(const char *fmt, va_list ap);
 char *sd_fmt(const char *fmt, ...) SD_PRINTF(1, 2);
+/* sd_crash with a message already formatted (malloc'ed; taken over), so
+ * that the text of a number in it can be freed first: a crash must not leak
+ * (the cleanup frames release everything else). */
+SD_NORETURN void sd_crash_owned(char *msg);
 
 /* Internal string helpers. */
 sd_str sd_str_alloc_(int64_t len); /* uninitialised data of len bytes, NUL written */

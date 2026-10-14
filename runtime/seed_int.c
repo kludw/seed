@@ -509,8 +509,7 @@ double sd_int_to_float(sd_int a) {
 
 sd_int sd_float_to_int(double f) {
   if (isnan(f) || isinf(f)) {
-    sd_str s = sd_float_to_str(f);
-    sd_crash("cannot convert float %s to int", sd_str_cstr(s));
+    sd_crash("cannot convert float %s to int", isnan(f) ? "nan" : f > 0 ? "inf" : "-inf");
   }
   if (fabs(f) < 4611686018427387904.0) return SD_INT((int64_t)f); /* 2^62 */
   int e;
@@ -528,7 +527,9 @@ sd_int sd_float_to_int(double f) {
 uint8_t sd_int_to_byte(sd_int a) {
   if ((a.w & 1) == 0 && a.w >= 0 && a.w <= 2 * 255) return (uint8_t)(a.w >> 1);
   char *s = sd_int_to_cstr(a);
-  sd_crash("cannot convert %s to byte", s);
+  char *m = sd_fmt("cannot convert %s to byte", s);
+  free(s);
+  sd_crash_owned(m);
 }
 
 /* ----------------------------------------------------------- text */

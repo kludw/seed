@@ -43,7 +43,8 @@ typedef struct sd_sel sd_sel;
 typedef struct sd_frame {
   sigjmp_buf jb;
   struct sd_frame *prev;
-  size_t mark; /* cleanup-stack depth when the frame was entered */
+  size_t mark;       /* cleanup-stack depth when the frame was entered */
+  sd_lframe *lmark;  /* top of the cleanup-frame chain when it was entered */
 } sd_frame;
 
 /* One entry of a goroutine's cleanup stack: a deferred call (fn != NULL), an
@@ -131,6 +132,7 @@ struct sd_chan {
 };
 
 static _Thread_local sd_task *sd_cur;
+_Thread_local sd_lframe *sd_lf_top; /* the generated functions' cleanup frames (seed.h) */
 static atomic_long sd_running; /* goroutines not parked, plus pending timers */
 static atomic_ulong sd_seed_counter;
 static bool sd_fault_installed;
@@ -322,6 +324,17 @@ static void reset_wake(sd_task *t) {
 
 /* --------------------------------------------------- raising and frames */
 
+/* Releases what the cleanup frames above mark hold (newest first), while
+ * their C frames are still on the stack: called just before a siglongjmp
+ * unwinds them. Each frame is unlinked before its release runs. */
+static void lframes_release(sd_lframe *mark) {
+  sd_lframe *f;
+  while ((f = sd_lf_top) != NULL && f != mark) {
+    sd_lf_top = f->prev;
+    f->release(f);
+  }
+}
+
 static SD_NORETURN void raise_in(sd_task *t, int kind, char *msg) {
   if (t->raise == SD_RAISE_NONE) {
     t->raise = kind;
@@ -335,6 +348,7 @@ static SD_NORETURN void raise_in(sd_task *t, int kind, char *msg) {
     fprintf(stderr, "crash: %s\n", t->msg ? t->msg : "goroutine stopped");
     sd_exit_process(2);
   }
+  lframes_release(t->frame->lmark);
   siglongjmp(t->frame->jb, 1);
 }
 
@@ -346,12 +360,23 @@ void sd_crash(const char *fmt, ...) {
   raise_in(task_current(), SD_RAISE_CRASH, m);
 }
 
+void sd_crash_owned(char *msg) { raise_in(task_current(), SD_RAISE_CRASH, msg); }
+
 void sd_crash_index(sd_int i, int64_t len) {
   char *s = sd_int_to_cstr(i);
-  sd_crash("index out of range: %s with length %lld", s, (long long)len);
+  char *m = sd_fmt("index out of range: %s with length %lld", s, (long long)len);
+  free(s);
+  sd_crash_owned(m);
 }
 
 void sd_crash_null(void) { sd_crash("null value used"); }
+
+void sd_crash_int(const char *fmt, sd_int v) {
+  char *s = sd_int_to_cstr(v);
+  char *m = sd_fmt(fmt, s);
+  free(s);
+  sd_crash_owned(m);
+}
 
 static SD_NORETURN void stop_task(sd_task *t) { raise_in(t, SD_RAISE_STOP, NULL); }
 
@@ -368,6 +393,7 @@ static int protect(sd_task *t, void (*fn)(void *), void *arg) {
   sd_frame f;
   f.prev = t->frame;
   f.mark = t->ncl;
+  f.lmark = sd_lf_top;
   t->frame = &f;
   if (sigsetjmp(f.jb, 1) == 0) {
     fn(arg);
@@ -824,7 +850,9 @@ sd_chan *sd_chan_new(const sd_type *et, sd_int cap) {
   int64_t n;
   if (!sd_int_to_i64(cap, &n) || n < 0 || n > ((int64_t)1 << 40)) {
     char *s = sd_int_to_cstr(cap);
-    sd_crash("invalid channel buffer size: %s", s);
+    char *m = sd_fmt("invalid channel buffer size: %s", s);
+    free(s);
+    sd_crash_owned(m);
   }
   sd_chan *c = sd_obj_alloc(sizeof *c);
   memset(c, 0, sizeof *c);
@@ -1750,6 +1778,7 @@ static void fault_handler(int sig) {
       t->msg = (char *)"stack overflow or invalid memory access";
       t->msg_static = true;
     }
+    lframes_release(t->frame->lmark);
     siglongjmp(t->frame->jb, 1);
   }
   static const char m[] = "crash: stack overflow or invalid memory access\n";

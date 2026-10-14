@@ -1,1 +1,0 @@
-Goroutines are stopped while they wait for a child process (or its output), which leaks the argv lists held by their unwound frames (runtime/README.md section 16).

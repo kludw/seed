@@ -168,6 +168,9 @@ bool sd_type_is_trivial(const sd_type *t);
 SD_NORETURN void sd_crash(const char *fmt, ...) SD_PRINTF(1, 2);
 SD_NORETURN void sd_crash_index(sd_int i, int64_t len);
 SD_NORETURN void sd_crash_null(void); /* a T? that the compiler proved non-null was null */
+/* Crashes with fmt, whose one %s is the decimal text of v (for natives:
+ * nothing is leaked by the crash). */
+SD_NORETURN void sd_crash_int(const char *fmt, sd_int v);
 
 void *sd_alloc(size_t n);             /* malloc; out of memory ends the program */
 void *sd_realloc(void *p, size_t n);
@@ -193,6 +196,13 @@ struct sd_bigint {
 #define SD_INT_SMALL_MAX ((INT64_C(1) << 62) - 1)
 /* A constant that fits in 62 bits plus sign (the code generator checks). */
 #define SD_INT(c) ((sd_int){(int64_t)((uint64_t)(int64_t)(c) << 1)})
+/* For generated code, on values the compiler proved to be in the small
+ * range: an int64_t as an sd_int, and the int64_t of a small sd_int. The
+ * signed multiplication (it cannot overflow) lets the C compiler fold
+ * SD_SMALL(SD_INT_S(x)) to x and drop the tag tests of the inline
+ * operations. */
+#define SD_INT_S(c) ((sd_int){(int64_t)(c) * 2})
+#define SD_SMALL(a) ((a).w >> 1)
 #define SD_INT_NULL ((sd_int){1})
 
 SD_INLINE bool sd_int_is_small(sd_int a) { return (a.w & 1) == 0; }
@@ -383,6 +393,10 @@ SD_INLINE sd_int sd_str_len(sd_str s) { return SD_INT(s->len); }
 SD_INLINE uint8_t sd_str_at(sd_str s, sd_int i) { return (uint8_t)s->data[sd_int_index(i, s->len)]; }
 sd_str sd_str_concat(sd_str a, sd_str b);
 sd_str sd_str_concat_n(const sd_str *parts, int n); /* a + b + c + ... in one allocation */
+/* A part of a concatenation: the string s, or (s == NULL) the decimal text
+ * of the int i, which is written straight into the result. */
+typedef struct { sd_str s; sd_int i; } sd_str_part;
+sd_str sd_str_concat_parts(const sd_str_part *parts, int n); /* "id " + i.string() + ...: one allocation */
 sd_str sd_str_append(sd_str a, sd_str b);        /* CONSUMES a; in place when a is unshared */
 bool sd_str_eq(sd_str a, sd_str b);               /* null-safe */
 int sd_str_cmp(sd_str a, sd_str b);               /* bytewise, -1/0/1 */
@@ -562,6 +576,36 @@ extern const sd_error_vtable sd_errors_vtable;   /* the vtable of errors.new val
 size_t sd_defer_mark(void);
 void sd_defer_push(void (*thunk)(void *env), const void *env, size_t size);
 void sd_defer_run(size_t mark);
+
+/* ---- cleanup frames ----
+ * A generated function whose locals or temporaries hold counted values keeps
+ * them in one struct that starts with an sd_lframe, linked into the calling
+ * thread's chain on entry and unlinked before every return:
+ *
+ *   typedef struct { sd_lframe h; sd_str l_name; sd_list *_t3; } sd_L_f;
+ *   static void sd_lr_f(sd_lframe *p) { sd_L_f *L = (sd_L_f *)p; release each field }
+ *   ... sd_L_f L = {{0}}; SD_LF_ENTER(L, sd_lr_f); ... SD_LF_LEAVE(L); return r;
+ *
+ * Every field holds null or a value it owns at every point where a crash or
+ * a stop can happen. When the goroutine crashes or is stopped, the runtime
+ * calls the release function of every frame above the protected frame it
+ * unwinds to, before it unwinds (while the frames are still on the stack),
+ * so what the unwound locals held is not leaked. */
+typedef struct sd_lframe {
+  struct sd_lframe *prev;
+  void (*release)(struct sd_lframe *f);
+} sd_lframe;
+extern _Thread_local sd_lframe *sd_lf_top;
+/* The compiler barrier makes the frame complete before it is published (a
+ * stack overflow can fault anywhere). */
+#define SD_LF_ENTER(L, fn) \
+  do { \
+    (L).h.prev = sd_lf_top; \
+    (L).h.release = (fn); \
+    __asm__ __volatile__("" ::: "memory"); \
+    sd_lf_top = &(L).h; \
+  } while (0)
+#define SD_LF_LEAVE(L) (sd_lf_top = (L).h.prev)
 
 /* ---- groups and spawn ----
  *   sd_group *g = sd_group_begin();

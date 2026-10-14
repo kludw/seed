@@ -31,9 +31,9 @@ The format is defined in the header of `run.sh`. For every `NAME.sd`:
 - `NAME.err` is text that must appear somewhere in stderr, such as
   `error: disk full` or `crash:`.
 - `NAME.leaks` (only for `tests/leaks.sh`) says why the program is expected
-  to leak although it exits normally: a goroutine crashes inside a group,
-  or is stopped while it waits, which leaks the locals of its unwound
-  frames.
+  to leak. There are none: programs that crash, and those whose goroutines
+  crash or are stopped, must not leak either (the cleanup frames release
+  what the unwound frames held).
 
 For every `errors/NAME.sd`, compiling must fail, and stderr must contain the
 text after `// expect-error: ` on the file's first line. When the second
@@ -65,9 +65,10 @@ with stdin from `/dev/null`, compares the results and prints a pass/fail
 summary. It exits non-zero if anything failed.
 
 `tests/leaks.sh` takes the same arguments and runs every program under
-macOS `leaks --atExit` (`make test-leaks`); programs that crash (and those
-with a `NAME.leaks` file) are expected to leak the locals of the frames the
-crash unwinds.
+macOS `leaks --atExit` (`make test-leaks`); every program must be free of
+leaks, also the ones that crash (only one with a `NAME.leaks` file would be
+reported as expected to leak). `full/crash_frames.sd` crashes and stops
+goroutines at many kinds of points for this check.
 
 ## Notes
 

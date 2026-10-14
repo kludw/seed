@@ -45,12 +45,31 @@ fn (Gen g) argList(int e) []int {
 // Declares a temporary with the value of cexpr. When t is counted the
 // temporary owns the value and is released at the end of the statement.
 fn (Gen g) mut temp(int t, string cexpr) string {
-    string n = g.newTmp()
-    g.emit(g.ctype(t) + " " + n + " = " + cexpr + ";")
+    string n = g.newSlotName(t)
+    g.emit(declText(g.ctype(t), n) + " = " + cexpr + ";")
     if (g.counted(t)) {
-        g.slots.push(Slot{name: n, ty: t, live: true, temp: true})
+        g.pushSlot(n, t, true)
     }
     return n
+}
+
+// A new temporary's C name: a field of the frame when its type lives
+// there (a placeholder, see frameField), a C local (_tN) otherwise.
+fn (Gen g) mut newSlotName(int t) string {
+    string n = g.newTmp()
+    if (g.inFrame(t)) {
+        return g.frameField(n, t)
+    }
+    return n
+}
+
+// The left side of the declaration of the slot or local named n: the C
+// type and the name, or only the name for a field of the frame.
+fn declText(string ctype, string n) string {
+    if (isFrameName(n)) {
+        return "\x01D" + n.slice(1, n.len())
+    }
+    return ctype + " " + n
 }
 
 // Declares a temporary that is never released (a borrowed copy, or an
@@ -63,7 +82,7 @@ fn (Gen g) mut alias(int t, string cexpr) string {
 
 // The live temporary slot named v, or -1.
 fn (Gen g) findTemp(string v) int {
-    if (!v.startsWith("_t")) {
+    if (!v.startsWith("_t") && !v.startsWith("\x01_t")) {
         return -1
     }
     for (int i = g.slots.len() - 1; i >= 0; i--) {
@@ -85,7 +104,7 @@ fn (Gen g) mut ownVal(string v, int t) string {
     }
     int s = g.findTemp(v)
     if (s >= 0) {
-        g.slots[s].live = false
+        g.moveOut(s)
         return v
     }
     if (isImmortal(v)) {
@@ -101,14 +120,28 @@ fn isImmortal(string v) bool {
     if (v == "NULL" || v == "SD_INT_NULL" || v == "SD_IFACE_NULL") {
         return true
     }
-    return v.startsWith("SD_INT(") || v.startsWith("SD_STR_LIT(") || v.startsWith("SD_INT_BIGLIT(") || v.startsWith("SD_BOX_REF(") || v.startsWith("sd_str_len(") || v.startsWith("sd_list_len(") || v.startsWith("sd_map_len(")
+    return v.startsWith("SD_INT(") || v.startsWith("SD_INT_S(") || v.startsWith("SD_STR_LIT(") || v.startsWith("SD_INT_BIGLIT(") || v.startsWith("SD_BOX_REF(") || v.startsWith("sd_str_len(") || v.startsWith("sd_list_len(") || v.startsWith("sd_map_len(")
 }
 
 // Marks the temporary v as moved (consumed by a store).
 fn (Gen g) mut consume(string v) {
     int s = g.findTemp(v)
     if (s >= 0) {
-        g.slots[s].live = false
+        g.moveOut(s)
+    }
+}
+
+// Slot s is moved out: it is no longer released, and its field in the
+// frame (if it has one) is set to null after the next line, the one that
+// consumes it.
+fn (Gen g) mut moveOut(int s) {
+    g.slots[s].live = false
+    if (isFrameName(g.slots[s].name)) {
+        if (g.popped) {
+            g.slotEnd(g.slots[s])
+        } else {
+            g.moved.push(g.slots[s])
+        }
     }
 }
 
@@ -130,7 +163,13 @@ fn (Gen g) mut releaseSlot(int i) {
         return
     }
     string r = g.releaseCall(s.ty, s.name)
-    if (r != "") {
+    if (r == "") {
+        return
+    }
+    g.slotEnd(s)
+    if (isFrameName(s.name) && !g.popped) {
+        g.emit(r + "; " + nullMark(s.name))
+    } else {
         g.emit(r + ";")
     }
 }
@@ -187,7 +226,7 @@ fn isIdent(string v) bool {
 fn (Gen g) mut addr(int t, string v) string {
     // Only variables and temporaries have an address: true, false, NULL
     // and SD_IFACE_NULL look like identifiers but are not lvalues.
-    if (isIdent(v) && (v.startsWith("l_") || v.startsWith("_t")) && g.kindOf(t) != Kind.Func) {
+    if (((isIdent(v) && (v.startsWith("l_") || v.startsWith("_t"))) || isFrameName(v)) && g.kindOf(t) != Kind.Func) {
         return "&" + v
     }
     return "&" + g.alias(t, v)
@@ -342,6 +381,26 @@ fn (Gen g) mut operands([]int es) []string {
     return vals
 }
 
+// The operands of a C statement that takes several of them over at once (a
+// struct literal, a map entry, an enum case, a tuple returned, a defer's
+// environment): a borrowed operand that may crash when it is read (an index,
+// a conversion) is evaluated into a temporary first, so that it cannot
+// crash after another operand was retained in the same statement (which
+// would leak that value).
+fn (Gen g) mut ownedOperands([]int es) []string {
+    []string vals = g.operands(es)
+    if (es.len() < 2) {
+        return vals
+    }
+    for (int k = 0; k < es.len(); k++) {
+        if (g.mayCrash(es[k]) && !g.isStable(es[k]) && g.findTemp(vals[k]) < 0) {
+            int t = g.typeOf(es[k])
+            vals[k] = g.temp(t, g.retainExpr(t, vals[k]))
+        }
+    }
+    return vals
+}
+
 // ---- expressions ----
 
 // The C expression for e, including the conversion to an interface and to
@@ -380,7 +439,44 @@ fn (Gen g) varValue(int e) string {
     if (v.kind == VarKind.MutRecv) {
         return "(*l_" + v.name + ")"
     }
-    return "l_" + v.name
+    if (g.isUnboxed(i.ref)) {
+        return "SD_INT_S(l_" + v.name + ")"
+    }
+    return g.lname(i.ref)
+}
+
+// The C name of local variable v: a field of the frame (see genFn), or
+// l_<name>.
+fn (Gen g) lname(int v) string {
+    string? n = g.varC[v]
+    if (n != null) {
+        return n
+    }
+    return "l_" + g.c.vars[v].name
+}
+
+// The left side of the declaration of local variable v of type t, which
+// from now on is a field of the frame when its type lives there.
+fn (Gen g) mut localDecl(int v, int t) string {
+    string n = "l_" + g.c.vars[v].name
+    if (g.isUnboxed(v)) {
+        return "int64_t " + n
+    }
+    if (g.inFrame(t)) {
+        string f = g.frameField(n, t)
+        g.varC[v] = f
+        return declText(g.ctype(t), f)
+    }
+    return g.ctype(t) + " " + n
+}
+
+// The initial value of local variable v from the owned value val: its
+// int64_t value for an unboxed local.
+fn (Gen g) localInit(int v, string val) string {
+    if (g.isUnboxed(v)) {
+        return smallOf(val)
+    }
+    return val
 }
 
 // The smallest and largest ints that SD_INT can hold.
@@ -451,6 +547,9 @@ fn (Gen g) mut gcore(int e) string {
             return "(!" + u + ")"
         }
         if (g.coreType(e) == tyInt) {
+            if (g.isSmallInt(e) && g.isSmallInt(x.a)) {
+                return "SD_INT_S((-" + smallOf(u) + "))"
+            }
             return g.temp(tyInt, "sd_int_neg(" + u + ")")
         }
         return "(-(" + u + "))"
@@ -478,12 +577,13 @@ fn (Gen g) mut glist(int e) string {
     int el = g.elemOf(g.coreType(e))
     string ct = g.ctype(el)
     []string vals = g.operands(g.argList(e))
-    string l = g.newTmp()
-    g.emit("sd_list *" + l + " = sd_list_new(" + g.desc(el) + ", " + vals.len().string() + ");")
+    string l = g.newSlotName(g.coreType(e))
+    g.emit(declText("sd_list *", l) + " = sd_list_new(" + g.desc(el) + ", " + vals.len().string() + ");")
+    // The list owns its elements from here on (an element may still crash).
+    g.pushSlot(l, g.coreType(e), true)
     for (int i = 0; i < vals.len(); i++) {
         g.emit("SD_LIST_PUSH(&" + l + ", " + ct + ", " + g.ownVal(vals[i], el) + ");")
     }
-    g.slots.push(Slot{name: l, ty: g.coreType(e), live: true, temp: true})
     return l
 }
 
@@ -498,15 +598,15 @@ fn (Gen g) mut gmap(int e) string {
         es.push(en.a)
         es.push(en.b)
     }
-    []string vals = g.operands(es)
-    string m = g.newTmp()
-    g.emit("sd_map *" + m + " = sd_map_new(" + g.desc(kt) + ", " + g.desc(vt) + ");")
+    []string vals = g.ownedOperands(es)
+    string m = g.newSlotName(mt)
+    g.emit(declText("sd_map *", m) + " = sd_map_new(" + g.desc(kt) + ", " + g.desc(vt) + ");")
+    g.pushSlot(m, mt, true)
     for (int j = 0; j < x.count; j++) {
         string k = g.ownVal(vals[2 * j], kt)
         string v = g.ownVal(vals[2 * j + 1], vt)
         g.emit("{ " + g.ctype(kt) + " k = " + k + "; " + g.ctype(vt) + " v = " + v + "; sd_map_set(&" + m + ", &k, &v); }")
     }
-    g.slots.push(Slot{name: m, ty: mt, live: true, temp: true})
     return m
 }
 
@@ -521,13 +621,13 @@ fn (Gen g) mut gstruct(int e) string {
     for (int i = 0; i < x.count; i++) {
         es.push(g.c.ast.exprs[g.arg(e, i)].a)
     }
-    []string vals = g.operands(es)
+    []string vals = g.ownedOperands(es)
     []string fields = []string{}
     for (int j = 0; j < x.count; j++) {
         Expr fi = g.c.ast.exprs[g.arg(e, j)]
         fields.push(".f_" + fi.text + " = " + g.ownVal(vals[j], g.typeOf(fi.a)))
     }
-    return g.temp(st, "{" + fields.join(", ") + "}")
+    return g.temp(st, "(" + sct + "){" + fields.join(", ") + "}")
 }
 
 fn (Gen g) mut gindex(int e) string {
@@ -595,7 +695,19 @@ fn (Gen g) mut gbinary(int e) string {
     if (op == Tok.Plus && t == tyString) {
         return g.gconcat(e)
     }
+    if (op == Tok.Plus && t == tyInt) {
+        string sum = g.gsumSmall(e)
+        if (sum != "") {
+            return sum
+        }
+    }
     []string vals = g.operands([]int{x.a, x.b})
+    if (t == tyInt) {
+        string small = g.smallBinary(e, vals)
+        if (small != "") {
+            return small
+        }
+    }
     return g.binaryOp(op, t, vals[0], vals[1])
 }
 
@@ -730,8 +842,49 @@ fn (Gen g) mut gconcat(int e) string {
     Expr x = g.c.ast.exprs[e]
     []int leaves = g.concatLeaves(x.a, []int{})
     leaves = g.concatLeaves(x.b, leaves)
-    []string vals = g.operands(leaves)
-    return g.concatVals(vals)
+    return g.concatOf(leaves)
+}
+
+// Whether e is n.string() on an int.
+fn (Gen g) isIntString(int e) bool {
+    Expr x = g.c.ast.exprs[e]
+    ExprInfo i = g.c.info[e]
+    return x.kind == ExprKind.Call && i.res == Res.Builtin && i.builtin == Builtin.String && !i.wrap && !i.narrowed && i.ifaceFrom < 0 && g.typeOf(g.recvOf(e)) == tyInt
+}
+
+// The concatenation of the string expressions leaves (in order). When some
+// are n.string() on an int, the int itself is a part, whose text the
+// runtime writes straight into the result (sd_str_concat_parts): no string
+// of its own is made.
+fn (Gen g) mut concatOf([]int leaves) string {
+    []int ops = []int{}
+    []bool ints = []bool{}
+    bool anyInt = false
+    for (int i = 0; i < leaves.len(); i++) {
+        if (g.isIntString(leaves[i])) {
+            ops.push(g.recvOf(leaves[i]))
+            ints.push(true)
+            anyInt = true
+        } else {
+            ops.push(leaves[i])
+            ints.push(false)
+        }
+    }
+    []string vals = g.operands(ops)
+    if (!anyInt) {
+        return g.concatVals(vals)
+    }
+    []string parts = []string{}
+    for (int j = 0; j < vals.len(); j++) {
+        if (ints[j]) {
+            parts.push("{NULL, " + vals[j] + "}")
+        } else {
+            parts.push("{" + vals[j] + "}")
+        }
+    }
+    string arr = g.newTmp()
+    g.emit("sd_str_part " + arr + "[] = {" + parts.join(", ") + "};")
+    return g.temp(tyString, "sd_str_concat_parts(" + arr + ", " + vals.len().string() + ")")
 }
 
 fn (Gen g) mut concatVals([]string vals) string {
@@ -807,9 +960,9 @@ fn (Gen g) mut gtry(int e) string {
 // stops and waits for the group. spawn uses the innermost group.
 fn (Gen g) mut ggroup(int e) string {
     Expr x = g.c.ast.exprs[e]
-    string r = g.newTmp()
+    string r = g.newSlotName(tyError)
     string gv = g.newTmp()
-    g.emit("sd_err " + r + " = SD_ERR_NULL;")
+    g.emit(declText("sd_err", r) + " = SD_ERR_NULL;")
     g.emit("{")
     g.indent++
     g.emit("sd_group *" + gv + " = sd_group_begin();")
@@ -819,6 +972,6 @@ fn (Gen g) mut ggroup(int e) string {
     g.emit(r + " = sd_group_wait(" + gv + ");")
     g.indent--
     g.emit("}")
-    g.slots.push(Slot{name: r, ty: tyError, live: true, temp: true})
+    g.pushSlot(r, tyError, true)
     return r
 }

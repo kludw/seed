@@ -1,0 +1,38 @@
+// Several typed discards in one declaration (lib/COMPILER_BUGS.md): `_`
+// is never declared, so `string _, int _, error err = f()` is not "declared
+// twice", and the discarded values are released.
+package main
+
+import "errors"
+import "fmt"
+
+fn three(bool fail) (string, int, error) {
+    if (fail) {
+        return "", 0, errors.new("three failed")
+    }
+    return "a" + "b", 12345678901234567890123, null
+}
+
+fn four() ([]string, string, int, error) {
+    return []string{"x", "y"}, "z", 4, null
+}
+
+fn main([]string args) error {
+    string _, int _, error err = three(false)
+    fmt.println("err is null: " + (err == null).string())
+    string _, int _, error err2 = three(true)
+    if (err2 != null) {
+        fmt.println(err2.message())
+    }
+    []string _, string _, int n, error err3 = four()
+    if (err3 != null) {
+        return err3
+    }
+    fmt.println("n: " + n.string())
+    []string? xs, string _, int _, error _ = four()
+    if (xs != null) {
+        fmt.println("xs: " + xs.join(","))
+    }
+    string _, int _, _ = three(false)
+    return null
+}

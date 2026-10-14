@@ -67,6 +67,62 @@ sd_str sd_str_concat_n(const sd_str *parts, int n) {
   return r;
 }
 
+/* The number of characters of the decimal text of v. */
+static int dec_len(int64_t v) {
+  uint64_t m = v < 0 ? (uint64_t)0 - (uint64_t)v : (uint64_t)v;
+  int n = v < 0 ? 2 : 1;
+  while (m >= 10) {
+    m /= 10;
+    n++;
+  }
+  return n;
+}
+
+/* Writes the n characters of the decimal text of v at p. */
+static void dec_write(char *p, int n, int64_t v) {
+  uint64_t m = v < 0 ? (uint64_t)0 - (uint64_t)v : (uint64_t)v;
+  char *q = p + n;
+  do {
+    *--q = (char)('0' + (int)(m % 10));
+    m /= 10;
+  } while (m);
+  if (v < 0) *--q = '-';
+}
+
+sd_str sd_str_concat_parts(const sd_str_part *parts, int n) {
+  sd_str local[8];
+  sd_str *big = n <= 8 ? local : sd_alloc((size_t)n * sizeof *big); /* text of big ints */
+  int64_t len = 0;
+  for (int i = 0; i < n; i++) {
+    big[i] = NULL;
+    if (parts[i].s) {
+      len += parts[i].s->len;
+    } else if (sd_int_is_small(parts[i].i)) {
+      len += dec_len(sd_int_small_value(parts[i].i));
+    } else {
+      big[i] = sd_int_to_str(parts[i].i);
+      len += big[i]->len;
+    }
+  }
+  sd_str r = sd_str_alloc_(len);
+  char *p = r->data;
+  for (int i = 0; i < n; i++) {
+    sd_str s = parts[i].s ? parts[i].s : big[i];
+    if (s) {
+      memcpy(p, s->data, (size_t)s->len);
+      p += s->len;
+      if (big[i]) sd_str_release(big[i]);
+    } else {
+      int64_t v = sd_int_small_value(parts[i].i);
+      int k = dec_len(v);
+      dec_write(p, k, v);
+      p += k;
+    }
+  }
+  if (big != local) free(big);
+  return r;
+}
+
 sd_str sd_str_append(sd_str a, sd_str b) {
   if (b->len == 0) return a;
   if (a->rc == 1) {
@@ -109,7 +165,10 @@ uint64_t sd_str_hash(sd_str s) {
 
 static SD_NORETURN void sd_crash_slice(sd_int a, sd_int b, int64_t len) {
   char *x = sd_int_to_cstr(a), *y = sd_int_to_cstr(b);
-  sd_crash("slice bounds out of range: [%s:%s] with length %lld", x, y, (long long)len);
+  char *m = sd_fmt("slice bounds out of range: [%s:%s] with length %lld", x, y, (long long)len);
+  free(x);
+  free(y);
+  sd_crash_owned(m);
 }
 
 /* Checks 0 <= a <= b <= len. */

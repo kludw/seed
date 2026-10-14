@@ -19,8 +19,7 @@ void sd_lib_fmt_eprintln(sd_str s) { sd_fmt_eprintln(s); }
 sd_str sd_lib_fmt_fixed(double f, sd_int places) {
   int64_t p;
   if (!sd_int_to_i64(places, &p) || p < 0 || p > 100) {
-    sd_str s = sd_int_to_str(places);
-    sd_crash("fmt.fixed: places (%s) must be between 0 and 100", s->data);
+    sd_crash_int("fmt.fixed: places (%s) must be between 0 and 100", places);
   }
   if (isnan(f)) return sd_str_from_cstr("nan");
   if (isinf(f)) return sd_str_from_cstr(f > 0 ? "inf" : "-inf");

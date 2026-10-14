@@ -119,7 +119,9 @@ void sd_list_insert(sd_list **pl, sd_int i, const void *val) {
   int64_t k, len = (*pl)->len;
   if (!sd_int_to_i64(i, &k) || k < 0 || k > len) {
     char *s = sd_int_to_cstr(i);
-    sd_crash("insert index out of range: %s with length %lld", s, (long long)len);
+    char *m = sd_fmt("insert index out of range: %s with length %lld", s, (long long)len);
+    free(s);
+    sd_crash_owned(m);
   }
   size_t sz = (*pl)->et->size;
   elem_tmp t;
@@ -161,7 +163,10 @@ sd_list *sd_list_slice(const sd_list *l, sd_int a, sd_int b) {
   int64_t x, y;
   if (!sd_int_to_i64(a, &x) || !sd_int_to_i64(b, &y) || x < 0 || x > y || y > l->len) {
     char *s = sd_int_to_cstr(a), *t = sd_int_to_cstr(b);
-    sd_crash("slice bounds out of range: [%s:%s] with length %lld", s, t, (long long)l->len);
+    char *m = sd_fmt("slice bounds out of range: [%s:%s] with length %lld", s, t, (long long)l->len);
+    free(s);
+    free(t);
+    sd_crash_owned(m);
   }
   const sd_type *et = l->et;
   sd_list *r = sd_list_new_len_(et, y - x);
@@ -257,8 +262,24 @@ void sd_list_sort(sd_list **pl) {
   }
 }
 
+static void free_buffer(void *env) { free(*(void **)env); }
+
+/* sortBy calls Seed code, which may crash or be stopped halfway through a
+ * merge, when the elements are partly duplicated and partly missing. So it
+ * sorts a bitwise copy and writes it back only when the sort is complete: a
+ * crash leaves the list as it was (its locals' cleanup frames then release it
+ * normally), and a deferred free releases the buffer. */
 void sd_list_sort_by(sd_list **pl, bool (*less)(void *ctx, const void *a, const void *b), void *ctx) {
-  list_sort(pl, less, ctx);
+  if ((*pl)->len < 2) return;
+  sd_list *l = list_unique(pl, 0);
+  size_t sz = l->et->size, n = (size_t)l->len;
+  char *buf = sd_alloc(2 * n * sz);
+  size_t mark = sd_defer_mark();
+  sd_defer_push(free_buffer, &buf, sizeof buf);
+  memcpy(buf, sd_list_data(l), n * sz);
+  msort(buf, buf + n * sz, l->len, sz, less, ctx);
+  memcpy(sd_list_data(l), buf, n * sz);
+  sd_defer_run(mark);
 }
 
 sd_str sd_list_join(const sd_list *l, sd_str sep) {

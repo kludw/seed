@@ -5,15 +5,16 @@
 #   tests/leaks.sh "<compile command>" <dir>...
 #
 # For example: tests/leaks.sh "build/seed2 c" tests/lang tests/full
-# Programs that crash are expected to leak (the locals of the unwound frames,
-# see runtime/README.md section 15); they are reported separately. So are
-# programs with a NAME.leaks file, which says why they leak (a goroutine
-# crashes inside a group, and the program goes on).
+# Programs that crash, or whose goroutines crash or are stopped, must not
+# leak either: the cleanup frames release what the unwound frames held
+# (runtime/README.md, section 9). A program with a NAME.leaks file is
+# expected to leak, for the reason the file gives; it is reported
+# separately (there are none at the moment).
 CC=${CC:-cc}
 compile=$1; shift
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/seedleaks.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
-clean=0; leaky=0; crashed=0
+clean=0; leaky=0; expected=0
 for dir in "$@"; do
   for src in "$dir"/*.sd "$dir"/*/; do
     [ -e "$src" ] || continue
@@ -29,13 +30,13 @@ for dir in "$@"; do
     case "$summary" in
       *" 0 leaks for"*) clean=$((clean+1)) ;;
       *)
-        if [ -f "$name.leaks" ] || { [ -f "$name.exit" ] && [ "$(cat "$name.exit")" = 2 ]; }; then
-          crashed=$((crashed+1)); echo "crash (expected to leak) $src: $summary"
+        if [ -f "$name.leaks" ]; then
+          expected=$((expected+1)); echo "expected to leak ($(cat "$name.leaks")) $src: $summary"
         else
           leaky=$((leaky+1)); echo "LEAK $src: $summary"
         fi ;;
     esac
   done
 done
-echo "$clean without leaks, $leaky leaking, $crashed crashing"
+echo "$clean without leaks, $leaky leaking, $expected expected to leak"
 [ "$leaky" = 0 ]

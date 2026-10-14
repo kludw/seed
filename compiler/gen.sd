@@ -38,12 +38,16 @@ type HelperReq struct {
 }
 
 // A counted value owned by the function being generated: a local variable
-// or a temporary (temp). A slot that was moved out is not live.
+// or a temporary (temp). A slot that was moved out is not live. seq is the
+// number of possible crash points emitted before it began to own its value
+// (see genFn), id identifies it.
 type Slot struct {
     string name
     int ty
     bool live
     bool temp
+    int seq
+    int id
 }
 
 // The innermost loop: break and continue release the slots above mark.
@@ -74,6 +78,29 @@ type Gen struct {
     int nspawn
     int curFn
     bool defers
+    // Cleanup frames (see genFn): whether counted locals and temporaries of
+    // the current function live in its frame struct L, the fields of L, the
+    // C names of the locals that live there, the temporaries moved out of
+    // L whose fields are to be set to null after the line that consumed
+    // them, and whether the frame was left (a return is being emitted).
+    bool frameOn
+    []Slot frame
+    map[string]int frameIdx
+    map[int]string varC
+    []Slot moved
+    bool popped
+    map[int]bool fcCache
+    int crashSeq
+    int nslot
+    map[string]bool fieldNeeded
+    map[int]bool slotDone
+    []Slot frameSlots
+    map[string]bool safeCalls
+    // Small ints (gen_int.sd): the intervals of the unboxed locals of the
+    // current function, and the analysis's state.
+    map[int]IntRange varRange
+    []IntEvent intEvents
+    map[int]bool intDeclared
 }
 
 fn newGen(Checker c) Gen {
@@ -97,6 +124,22 @@ fn newGen(Checker c) Gen {
         nspawn: 0,
         curFn: -1,
         defers: false,
+        frameOn: false,
+        frame: []Slot{},
+        frameIdx: map[string]int{},
+        varC: map[int]string{},
+        moved: []Slot{},
+        popped: false,
+        fcCache: map[int]bool{},
+        crashSeq: 0,
+        nslot: 0,
+        fieldNeeded: map[string]bool{},
+        slotDone: map[int]bool{},
+        frameSlots: []Slot{},
+        safeCalls: safeCallSet(),
+        varRange: map[int]IntRange{},
+        intEvents: []IntEvent{},
+        intDeclared: map[int]bool{},
     }
 }
 
@@ -157,12 +200,74 @@ fn (Gen g) testMain() string {
 
 // ---- output ----
 
+// Emits a line, and counts it when it may crash (see genFn). The fields of
+// the temporaries that the line moved out of the frame (ownVal, consume)
+// are set to null right after it, so that a crash later on does not
+// release them a second time.
 fn (Gen g) mut emit(string line) {
-    if (g.indent == 0) {
-        g.out.push(line + "\n")
-        return
+    string pad = ""
+    if (g.indent > 0) {
+        pad = spaces(g.indent * 2)
     }
-    g.out.push(spaces(g.indent * 2) + line + "\n")
+    g.out.push(pad + line + "\n")
+    if (g.frameOn && g.lineMayCrash(line)) {
+        g.crashSeq++
+    }
+    if (g.moved.len() > 0) {
+        for (int i = 0; i < g.moved.len(); i++) {
+            g.out.push(pad + nullMark(g.moved[i].name) + "\n")
+            g.slotEnd(g.moved[i])
+        }
+        g.moved = []Slot{}
+    }
+}
+
+// The C functions and macros that never crash nor stop the goroutine (nor
+// run Seed code): a value held only by a C local across them cannot be
+// leaked by a crash. Everything else that is called may crash.
+fn safeCallSet() map[string]bool {
+    map[string]bool m = map[string]bool{}
+    []string names = []string{"sd_int_retain", "sd_int_release", "sd_str_retain", "sd_str_release", "sd_list_retain", "sd_list_release", "sd_map_retain", "sd_map_release", "sd_box_retain", "sd_box_release", "sd_iface_retain", "sd_iface_release", "sd_chan_retain", "sd_chan_release", "sd_list_new", "sd_map_new", "sd_box_new", "sd_iface_new", "SD_LIST_PUSH", "sd_str_concat", "sd_str_concat_n", "sd_str_concat_parts", "sd_str_append", "sd_int_to_str", "sd_float_to_str", "sd_bool_to_str", "sd_byte_to_str", "sd_str_from_bytes", "SD_INT", "SD_INT_S", "SD_SMALL", "SD_STR_LIT", "SD_BOX_REF", "SD_BOX_GET", "sd_err_is_null", "sd_iface_is_null", "sd_int_is_null", "sd_str_len", "sd_list_len", "sd_map_len", "sd_str_eq", "sd_str_cmp", "sd_int_eq", "sd_int_lt", "sd_int_le", "sd_int_gt", "sd_int_ge", "sd_int_add", "sd_int_sub", "sd_int_mul", "sd_int_neg", "sd_int_and", "sd_int_or", "sd_int_xor", "sd_byte_to_int", "sd_int_to_float", "sd_iface_self", "sd_str_contains", "sd_str_starts_with", "sd_str_ends_with", "sd_defer_mark", "sd_group_begin"}
+    for (int i = 0; i < names.len(); i++) {
+        m[names[i]] = true
+    }
+    return m
+}
+
+fn isIdentByte(byte b) bool {
+    return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') || b == '_'
+}
+
+// Whether the C line may crash or stop the goroutine: it calls something
+// other than the safe calls (safeCallSet, and the retain and release
+// helpers sd_rt_ and sd_rl_), or calls through an expression (a function
+// value). Lines with string literals are judged by their calls too; a false
+// "may crash" only costs a field in the frame.
+fn (Gen g) lineMayCrash(string line) bool {
+    for (int i = 0; i < line.len(); i++) {
+        if (line[i] != '(') {
+            continue
+        }
+        int j = i
+        for (; j > 0 && isIdentByte(line[j - 1]); ) {
+            j--
+        }
+        if (j == i) {
+            if (i > 0 && line[i - 1] == ')') {
+                return true
+            }
+            continue
+        }
+        string id = line.slice(j, i)
+        if (id.startsWith("sd_rt_") || id.startsWith("sd_rl_")) {
+            continue
+        }
+        bool? safe = g.safeCalls[id]
+        if (safe == null) {
+            return true
+        }
+    }
+    return false
 }
 
 fn (Gen g) mut newTmp() string {
@@ -298,6 +403,112 @@ fn (Gen g) mut counted(int t) bool {
             g.c.types.list[t].rt = 0
         }
         return r
+    }
+}
+
+// Whether values of type t live in the cleanup frame of a function (see
+// genFn): counted types, except int (and int?, and structs and tuples whose
+// only counted parts are ints) and enums whose cases have no data (every
+// value is an immortal static box). A crash therefore still leaks a big
+// integer held by a local; small ints, the common case, own nothing.
+fn (Gen g) mut frameCounted(int t) bool {
+    switch (g.kindOf(t)) {
+    case Kind.Enum:
+        int d = g.c.types.decl(t)
+        for (int i = 0; i < g.c.ast.typeDecls[d].caseCount; i++) {
+            if (g.c.enumCase(d, i).paramCount > 0) {
+                return true
+            }
+        }
+        return false
+    case Kind.String, Kind.Error, Kind.List, Kind.Map, Kind.Chan, Kind.Interface:
+        return true
+    case Kind.Int, Kind.Void, Kind.Float, Kind.Bool, Kind.Byte, Kind.Null, Kind.Invalid, Kind.Func:
+        return false
+    case Kind.Opt:
+        if (g.isBoxOpt(t)) {
+            return true
+        }
+        return g.frameCounted(g.elemOf(t))
+    case Kind.Struct, Kind.Tuple:
+        bool? cached = g.fcCache[t]
+        if (cached != null) {
+            return cached
+        }
+        bool r = false
+        []int parts = g.partTypes(t)
+        for (int i = 0; i < parts.len(); i++) {
+            if (g.frameCounted(parts[i])) {
+                r = true
+            }
+        }
+        g.fcCache[t] = r
+        return r
+    }
+}
+
+// Whether a slot of type t in the current function lives in its frame.
+fn (Gen g) mut inFrame(int t) bool {
+    return g.frameOn && g.frameCounted(t)
+}
+
+// The field of the frame for a slot named base of type t. Locals of the
+// same name and type (in sibling blocks: there is no shadowing) share a
+// field; one of another type gets base_2, ... The name is a placeholder
+// (\x01base\x01) until genFn decides whether the field is needed: it
+// becomes L.base, or a C local base when no slot of the field owns a value
+// across a possible crash point.
+fn (Gen g) mut frameField(string base, int t) string {
+    string name = base
+    int n = 1
+    for (;;) {
+        int? at = g.frameIdx[name]
+        if (at == null) {
+            g.frameIdx[name] = g.frame.len()
+            g.frame.push(Slot{name: name, ty: t, live: true, temp: false, seq: 0, id: -1})
+            return "\x01" + name + "\x01"
+        }
+        if (g.frame[at].ty == t) {
+            return "\x01" + name + "\x01"
+        }
+        n++
+        name = base + "_" + n.string()
+    }
+}
+
+// Whether the C name v is a field of the frame (a placeholder).
+fn isFrameName(string v) bool {
+    return v.len() > 2 && v.startsWith("\x01") && v.endsWith("\x01") && isIdent(v.slice(1, v.len() - 1))
+}
+
+// The statement that sets the frame field v (a placeholder) to null;
+// nothing when the field is a C local.
+fn nullMark(string v) string {
+    return "\x01N" + v.slice(1, v.len())
+}
+
+// Registers a slot that owns its value from now on.
+fn (Gen g) mut pushSlot(string name, int t, bool temp) {
+    g.nslot++
+    Slot s = Slot{name: name, ty: t, live: true, temp: temp, seq: g.crashSeq, id: g.nslot}
+    g.slots.push(s)
+    if (isFrameName(name)) {
+        g.frameSlots.push(s)
+    }
+}
+
+// Slot s stops owning its value here (it is released, or moved by the
+// line just emitted): its field is needed in the frame when a possible
+// crash point was emitted since the slot began to own its value. (Lines are
+// emitted in source order, so every crash point on any path between the
+// two was counted.)
+fn (Gen g) mut slotEnd(Slot s) {
+    if (!isFrameName(s.name)) {
+        return
+    }
+    g.slotDone[s.id] = true
+    if (s.seq != g.crashSeq) {
+        g.fieldNeeded[s.name.slice(1, s.name.len() - 1)] = true
     }
 }
 
@@ -954,6 +1165,8 @@ fn (Gen g) mut genConsts() {
         g.out = []string{}
         g.slots = []Slot{}
         g.ntmp = 0
+        g.frameOn = false
+        g.varRange = map[int]IntRange{}
         if (isLiteralKind(g.c.ast.exprs[cd.expr].kind)) {
             g.emit(head + " { return " + g.gexpr(cd.expr) + "; }")
             g.consts.push(g.out.join(""))
@@ -1079,6 +1292,27 @@ fn (Gen g) mut genNative(int f) {
     g.fnText.push(body.join(""))
 }
 
+// The text of the statement that leaves the cleanup frame; genFn removes
+// it when the function has no frame.
+const string leaveFrame = "SD_LF_LEAVE(L);"
+
+// A function's counted locals and temporaries (except ints, see
+// frameCounted) that own a value across a point where the goroutine may
+// crash or be stopped live in the fields of one struct L, its *cleanup
+// frame*, which is linked into the thread's chain on entry and unlinked
+// before every return (runtime/README.md, section 9). When the goroutine
+// crashes or is stopped, the runtime releases what the frames hold. The
+// generator keeps every field null or owning: L starts zeroed, a released
+// slot's field is set to null (releaseSlot), and so is a moved temporary's
+// after the line that consumed it (emit). A return leaves the frame first
+// and then releases without nulling.
+//
+// Which fields are needed is known only at the end: while the body is
+// generated, frame slots have placeholder names (frameField), emit counts
+// the lines that may crash (crashSeq), and slotEnd records the fields of
+// slots that owned a value while such a line was emitted. The others become
+// plain C locals (expandFrame), as all slots were before cleanup frames, and
+// a function without needed fields has no frame.
 fn (Gen g) mut genFn(int f) {
     FnDecl fd = g.c.ast.fns[f]
     g.curFn = f
@@ -1088,6 +1322,17 @@ fn (Gen g) mut genFn(int f) {
     g.loops = []LoopCtx{}
     g.groups = []string{}
     g.ntmp = 0
+    g.frameOn = true
+    g.frame = []Slot{}
+    g.frameIdx = map[string]int{}
+    g.varC = map[int]string{}
+    g.moved = []Slot{}
+    g.popped = false
+    g.crashSeq = 0
+    g.fieldNeeded = map[string]bool{}
+    g.slotDone = map[int]bool{}
+    g.frameSlots = []Slot{}
+    g.analyzeInts(fd.body)
     g.defers = g.blockHasDefer(fd.body)
     string sig = g.fnSig(f)
     g.protos.push(sig + ";\n")
@@ -1097,8 +1342,11 @@ fn (Gen g) mut genFn(int f) {
         g.emit("size_t _dm = sd_defer_mark();")
     }
     g.genBody(fd.body)
-    if (fd.resultCount == 0 && g.defers && !g.c.blockExits(fd.body)) {
-        g.emit("sd_defer_run(_dm);")
+    if (fd.resultCount == 0 && !g.c.blockExits(fd.body)) {
+        g.emit(leaveFrame)
+        if (g.defers) {
+            g.emit("sd_defer_run(_dm);")
+        }
     }
     // The checker proved that every path returns (perhaps through an
     // exhaustive switch); tell the C compiler too.
@@ -1115,7 +1363,89 @@ fn (Gen g) mut genFn(int f) {
     g.indent--
     g.emit("}")
     g.emit("")
-    g.fnText.push(g.out.join(""))
+    g.frameOn = false
+    // A slot that never ended (none should) keeps its field, to be safe.
+    for (int s = 0; s < g.frameSlots.len(); s++) {
+        Slot frs = g.frameSlots[s]
+        if (g.slotDone[frs.id] == null) {
+            g.fieldNeeded[frs.name.slice(1, frs.name.len() - 1)] = true
+        }
+    }
+    []string fields = []string{}
+    []string rels = []string{}
+    for (int j = 0; j < g.frame.len(); j++) {
+        Slot fld = g.frame[j]
+        if (g.fieldNeeded[fld.name] != null) {
+            fields.push(" " + g.ctype(fld.ty) + " " + fld.name + ";")
+            rels.push("  " + g.releaseCall(fld.ty, "L->" + fld.name) + ";\n")
+        }
+    }
+    []string text = []string{}
+    bool hasFrame = fields.len() > 0
+    if (hasFrame) {
+        string cn = g.c.fnCName[f]
+        text.push("typedef struct { sd_lframe h;" + fields.join("") + " } sd_L_" + cn + ";\n")
+        text.push("static void sd_lr_" + cn + "(sd_lframe *p) {\n  sd_L_" + cn + " *L = (sd_L_" + cn + " *)p;\n" + rels.join("") + "}\n")
+        text.push(g.out[0])
+        text.push("  sd_L_" + cn + " L = {{0}};\n")
+        text.push("  SD_LF_ENTER(L, sd_lr_" + cn + ");\n")
+    } else {
+        text.push(g.out[0])
+    }
+    for (int k = 1; k < g.out.len(); k++) {
+        string line = g.out[k]
+        if (!hasFrame && line.endsWith(leaveFrame + "\n")) {
+            continue
+        }
+        if (line.contains("\x01")) {
+            line = g.expandFrame(line)
+            if (line.trim() == "") {
+                continue
+            }
+        }
+        text.push(line)
+    }
+    g.fnText.push(text.join(""))
+}
+
+// A line with the placeholders of frameField (\x01name\x01, \x01Dname\x01
+// for a declaration, \x01Nname\x01 for setting it to null) replaced: L.name
+// for a needed field, the C local name (declared with its type, never set
+// to null) otherwise.
+fn (Gen g) expandFrame(string line) string {
+    []string segs = line.split("\x01")
+    []string out = []string{}
+    for (int i = 0; i < segs.len(); i++) {
+        string seg = segs[i]
+        if (i % 2 == 0) {
+            out.push(seg)
+            continue
+        }
+        string kind = ""
+        string name = seg
+        if (seg.startsWith("D") || seg.startsWith("N")) {
+            kind = seg.slice(0, 1)
+            name = seg.slice(1, seg.len())
+        }
+        bool needed = g.fieldNeeded[name] != null
+        int? at = g.frameIdx[name]
+        int t = tyInvalid
+        if (at != null) {
+            t = g.frame[at].ty
+        }
+        if (kind == "N") {
+            if (needed) {
+                out.push("L." + name + " = " + g.zeroOf(t) + ";")
+            }
+        } else if (needed) {
+            out.push("L." + name)
+        } else if (kind == "D") {
+            out.push(g.ctype(t) + " " + name)
+        } else {
+            out.push(name)
+        }
+    }
+    return out.join("")
 }
 
 // The C files of the standard library packages in the program

@@ -287,8 +287,7 @@ sd_err sd_lib_net_dial(sd_str addr, sd_int timeout, sd_S_net_Conn *out) {
   int64_t t = 0;
   if (!sd_int_to_i64(timeout, &t)) t = sd_int_lt(timeout, SD_INT(0)) ? -1 : INT64_MAX / 4;
   if (t < 0) {
-    sd_str s = sd_int_to_str(timeout);
-    sd_crash("net.dial: timeout (%s) must not be negative", s->data);
+    sd_crash_int("net.dial: timeout (%s) must not be negative", timeout);
   }
   if (t > INT64_MAX / 4) t = INT64_MAX / 4;
   int64_t deadline = t > 0 ? net_mono_ns() + t : 0;
@@ -374,8 +373,7 @@ sd_err sd_lib_net_Conn_read(sd_S_net_Conn c, sd_int max, sd_str *out) {
   int64_t m = 0;
   if (!sd_int_to_i64(max, &m)) m = sd_int_lt(max, SD_INT(0)) ? 0 : INT64_MAX;
   if (m < 1) {
-    sd_str s = sd_int_to_str(max);
-    sd_crash("net.Conn.read: max (%s) must be at least 1", s->data);
+    sd_crash_int("net.Conn.read: max (%s) must be at least 1", max);
   }
   sd_handle *h = sd_handle_acquire(net_id(c.f_id), SD_HANDLE_CONN);
   if (!h) return sd_handle_error("net.Conn.read", NULL, SD_HANDLE_CONN, SD_IO_CLOSED, 0);
@@ -402,8 +400,7 @@ void sd_lib_net_Conn_setTimeout(sd_S_net_Conn c, sd_int d) {
   int64_t ns = 0;
   if (!sd_int_to_i64(d, &ns)) ns = sd_int_lt(d, SD_INT(0)) ? -1 : INT64_MAX / 4;
   if (ns < 0) {
-    sd_str s = sd_int_to_str(d);
-    sd_crash("net.Conn.setTimeout: d (%s) must not be negative", s->data);
+    sd_crash_int("net.Conn.setTimeout: d (%s) must not be negative", d);
   }
   if (ns > INT64_MAX / 4) ns = INT64_MAX / 4;
   sd_handle_set_timeout(net_id(c.f_id), ns);

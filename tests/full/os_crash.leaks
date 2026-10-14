@@ -1,1 +1,0 @@
-a goroutine crashes inside a group (os.crash), and the program goes on

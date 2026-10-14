@@ -264,7 +264,12 @@ sd_int_release(c);
   `index out of range: <i> with length <len>`.
 - `for (int i = 0; i < n; i++)` lowers naturally: `i` is an `sd_int`;
   `i++` is `t = sd_int_add(i, SD_INT(1)); sd_int_release(i); i = t;` (both
-  calls are a few instructions for small values; see section 15).
+  calls are a few instructions for small values; see section 15). When the
+  compiler can prove that a value is small (a counter bounded by a length
+  or a constant, say), it keeps it as an `int64_t` and converts with
+  `SD_INT_S(x)` (to `sd_int`) and `SD_SMALL(a)` (back); the signed
+  arithmetic in these macros lets the C compiler fold the tag tests of the
+  inline operations away.
 - byte: arithmetic is not defined on bytes; comparisons and `& | ^` are
   plain C; shifts use `sd_byte_shl`/`sd_byte_shr` (8 or more gives 0).
 
@@ -412,10 +417,51 @@ happens next:
    `crash: <message>` to stderr after flushing stdout and exits with code 2.
 
 Crash unwinding is a `siglongjmp` to the goroutine's top frame, so generated
-code needs no checks after calls. The cost is that **the counted values held
-by the unwound C frames' locals are not released** (they leak). Defer thunks
-own their environments, so those are released normally. This is the main
-known limitation; see section 16.
+code needs no checks after calls. What the unwound C frames' locals hold is
+released through **cleanup frames** (below); defer thunks own their
+environments, so those are released normally.
+
+**Cleanup frames.** A generated function keeps the counted values that its
+locals and temporaries own across a point where it may crash or be stopped
+in one struct that starts with an `sd_lframe`, and links it into the
+thread's chain (`sd_lf_top`) on entry:
+
+```c
+/* fn work(string path) error { string text = ...; []string lines = ... } */
+typedef struct { sd_lframe h; sd_str l_text; sd_list *l_lines; } sd_L_work;
+static void sd_lr_work(sd_lframe *p) {          /* releases every field */
+  sd_L_work *L = (sd_L_work *)p;
+  sd_str_release(L->l_text);
+  sd_list_release(L->l_lines);
+}
+static sd_err sd_f_work(sd_str l_path) {
+  sd_L_work L = {{0}};                          /* every field null */
+  SD_LF_ENTER(L, sd_lr_work);
+  L.l_text = ...;                               /* owned from here on */
+  ...
+  sd_str_release(L.l_text); L.l_text = NULL;    /* released early: set to null */
+  ...
+  SD_LF_LEAVE(L);                               /* before every return (and before sd_defer_run) */
+  sd_list_release(L.l_lines);
+  return r;
+}
+```
+
+The rule for the generated code: **at every point where the goroutine may
+crash or be stopped, each field holds null or a value it owns** (a value
+moved out of a field, into a container or a result, is followed by setting
+the field to null). When a goroutine crashes or is stopped, `raise_in` (and
+the fault handler) calls the release function of every frame above the
+protected frame it unwinds to, newest first, *before* the `siglongjmp`,
+while those C frames are still on the stack; each frame is unlinked before
+its release runs. Then the defers run as before. A protected frame
+(`sd_frame`) records the chain's top when it is entered, so a crash that a
+deferred call or `sd_catch` contains releases only the frames above it.
+Values that are not in a frame are not released by a crash: big integers
+held by `int` locals (the compiler leaves ints out; small ints own nothing)
+and the C locals of native functions (which release what they hold before
+`sd_stop`, see section 13). The compiler's side is in compiler/README.md
+("Memory management").
 
 **Defer API.** A function containing `defer` records the stack depth on entry
 and unwinds to it before every return:
@@ -743,8 +789,8 @@ freed). Cancelling a goroutine sets its flag and, if it is waiting, writes
 a byte to the pipe, so the wait returns `SD_WAIT_STOP` at once. The native
 then releases what it holds (closes a half-made socket, frees memory) and
 calls `sd_stop()`, which unwinds the goroutine exactly like a cancelled
-channel operation (defers run; C locals of the unwound frames leak, as for
-any crash). A wait in an already cancelled goroutine returns `SD_WAIT_STOP`
+channel operation (the cleanup frames of the generated callers are
+released and defers run, as for any crash). A wait in an already cancelled goroutine returns `SD_WAIT_STOP`
 without waiting, so a deferred call of a stopped goroutine that blocks is
 stopped too (as a channel operation would be). `sd_wait_child` waits for a
 child process (a helper thread does the blocking `waitpid` and signals a
@@ -848,6 +894,8 @@ Arguments are borrowed and results owned unless marked **consumes** or
 | `void sd_crash(const char *fmt, ...)` | noreturn |
 | `void sd_crash_index(sd_int i, int64_t len)` | noreturn; `index out of range: i with length len` |
 | `void sd_crash_null(void)` | noreturn; for a null that the compiler believed impossible |
+| `void sd_crash_int(const char *fmt, sd_int v)` | noreturn; `fmt` has one `%s`, the text of `v` (for natives: the crash frees it) |
+| `sd_lframe`, `sd_lf_top`, `SD_LF_ENTER(L, release)`, `SD_LF_LEAVE(L)` | cleanup frames (section 9) |
 | `void *sd_alloc(size_t)`, `sd_realloc`, `sd_free` | out of memory ends the program |
 | `int64_t sd_live_objects(void)` | with `-DSD_COUNT_OBJECTS`, else -1 |
 
@@ -856,6 +904,7 @@ Arguments are borrowed and results owned unless marked **consumes** or
 | Function | Notes |
 |---|---|
 | `SD_INT(c)`, `SD_INT_NULL`, `SD_INT_BIGLIT("digits")` | constants (BIGLIT: immortal, cached) |
+| `SD_INT_S(int64_t)`, `int64_t SD_SMALL(sd_int)` | to and from an `sd_int` that is known to be small (the compiler's unboxed ints) |
 | `sd_int sd_int_from_lit(const char *)` | decimal or `0x` hex, optional `-` |
 | `sd_int sd_int_from_i64(int64_t)`, `sd_int_from_u64(uint64_t)` | |
 | `bool sd_int_to_i64(sd_int, int64_t *)` | false if it doesn't fit |
@@ -880,6 +929,7 @@ Arguments are borrowed and results owned unless marked **consumes** or
 | `sd_int sd_str_len(s)`, `int64_t sd_str_len_raw(s)` | `s.len()` |
 | `uint8_t sd_str_at(s, sd_int i)` | `s[i]` |
 | `sd_str sd_str_concat(a, b)`, `sd_str_concat_n(parts, n)` | `a + b` |
+| `sd_str sd_str_concat_parts(const sd_str_part *parts, int n)` | `a + n.string() + b`: a part is a string `{s}` or an int `{NULL, i}` whose text is written into the result |
 | `sd_str sd_str_append(a, b)` | `a = a + b`; **consumes** `a` |
 | `bool sd_str_eq(a, b)`, `int sd_str_cmp(a, b)`, `bool sd_str_lt(a, b)` | `==`, ordering; `eq` is NULL-safe |
 | `uint64_t sd_str_hash(s)` | |
@@ -911,7 +961,7 @@ Arguments are borrowed and results owned unless marked **consumes** or
 | `void sd_list_remove(pl, sd_int i)` | `xs.remove(i)` |
 | `bool sd_list_contains(l, const void *x)`, `sd_int sd_list_index(l, const void *x)` | |
 | `sd_list *sd_list_slice(l, sd_int a, sd_int b)` | |
-| `void sd_list_reverse(pl)`, `sd_list_sort(pl)`, `sd_list_sort_by(pl, less, ctx)` | |
+| `void sd_list_reverse(pl)`, `sd_list_sort(pl)`, `sd_list_sort_by(pl, less, ctx)` | `sort_by` sorts a copy and writes it back, so a `less` that crashes leaves the list as it was |
 | `sd_str sd_list_join(l, sep)` | `[]string` only |
 | `bool sd_list_equal(a, b)`, `sd_list *sd_list_clone_deep(l)` | |
 
@@ -1034,7 +1084,7 @@ runtime/tests/run.sh asan     # or tsan, plain, bench
 |---|---|
 | `test_int.c` | factorial 30, 2^100, tests/full/bigint_arith values, ~400 Python-generated vectors (`int_vectors.h`: + - * / % & \| ^ << >> and float conversion with negatives and every boundary around 2^31, 2^32, 2^62, 2^63, 2^64), 200,000 random differential checks against `__int128`, algebraic identities on random 400-bit values, crash messages |
 | `test_str.c` | every string method, `chars` on UTF-8 and invalid UTF-8, float formatting (20,000 random doubles compared with seed0's formatter, kept in `ref_float.c`) |
-| `test_mem.c` | lists, maps, boxes, enums, struct descriptors, copy-on-write through nested places, stable `sortBy`, interfaces and user error types, deep copies share nothing, no leaks (live object count), and a stress test: 2M rounds / 54M allocations freed with flat resident memory |
+| `test_mem.c` | lists, maps, boxes, enums, struct descriptors, copy-on-write through nested places, stable `sortBy`, interfaces and user error types, deep copies share nothing, cleanup frames released by a crash (nested, and a crash contained by an inner `sd_catch`), a `sortBy` whose `less` crashes leaving the list unchanged, no leaks (live object count), and a stress test: 2M rounds / 54M allocations freed with flat resident memory |
 | `test_pkg.c` | `os.env`, `os.run` (exit codes, program not found), `fs.*` |
 | `test_block.c` | blocking calls as stop points: cancelling goroutines blocked in `time.sleep`, in `sd_wait_fd` on a pipe, in a handle read on a non-blocking and on a blocking descriptor, in accept, in `os.run` (a `sleep 30` child is killed), and one waiting for another goroutine's operation lock; close waking a reader; read timeouts; line reading (CRLF, empty lines, a last line without newline, a 200 KB line); 3 MB over a socket pair; 20,000 goroutines spawned one after another in one group (freed while it runs) |
 | `test_conc.c` | buffered/unbuffered channels, copy semantics, ping-pong, 1000 goroutines in a group with deep-copied arguments, group error and crash with cancellation and defers (order checked), nested group cancellation, crash inside defers, select fairness (100,000 selects within 45-55%), select send/receive/closed/timeout, cancelling goroutines blocked in select, a 50-stage pipeline, the parallel word count |
@@ -1147,14 +1197,20 @@ Decisions made while writing the runtime (nobody was available to ask):
 20. **Spinning before sleeping** (section 15), bounded to half the CPUs
     and to times when CPUs are idle, for parked goroutines (20 us) and idle
     workers (20 us). An unbuffered round trip went from 3.3 us to 0.7 us.
+21. **Cleanup frames are released before the `siglongjmp`** (section 9), on
+    the stack that is being abandoned (or the fault handler's alternate
+    stack), because the unwound frames' memory is reused by the defers that
+    run afterwards. Their order relative to the defers does not matter:
+    defer environments own their values, and goroutines of an aborted group
+    have their own copies.
 
 Limitations and things left for later:
 
-- **A crash or cancellation leaks the counted values held in the locals of the
-  unwound C frames** (defer environments are released). A long-running program
-  that crashes many goroutines loses that memory. Fixing it needs generated
-  code to register its locals; section 17 has the design, and why a
-  runtime-only fix was measured and not kept.
+- A crash or cancellation releases what the generated frames held (cleanup
+  frames, section 9), except big integers held by `int` locals and what a
+  native function holds in its own C locals when it crashes (natives free
+  what they hold before `sd_stop`, but an `sd_crash` from inside a native
+  leaks its locals). Section 17 has the history of the design.
 - Big integers use quadratic algorithms; `int.string()` of a number with
   millions of digits is slow.
 - Each running goroutine is a thread: tens of thousands of simultaneous goroutines
@@ -1165,8 +1221,6 @@ Limitations and things left for later:
   memory (section 12).
 - Two goroutines using one handle at once take turns on its operation lock;
   the one waiting checks for a stop every 20 ms rather than being woken.
-- A goroutine stopped in a blocking call leaks its C frames' locals, like
-  any crash or cancellation.
 - Tested on macOS (arm64, Apple clang). The code uses only C11 and POSIX
   (`pthread`, `posix_spawnp`, `sigaltstack`, `clock_gettime`); Linux was not
   available for testing. On glibc, `posix_spawnp` may report a missing program
@@ -1174,88 +1228,48 @@ Limitations and things left for later:
 
 ## 17. Future work
 
-### Freeing what an unwound frame held
+### Freeing what an unwound frame held (done: cleanup frames)
 
 A crash, or a goroutine stopped at a stop point, unwinds with
 `siglongjmp`, which skips the releases the generated code would have done
-on the way out of each frame. The defers run and their environments are
-released, the goroutine's arguments are released, but every counted value
-that only a C local of an unwound frame (or an owned temporary) held is
-leaked. A server whose handlers crash on bad input loses memory with each
-crash; one that stops connection goroutines at shutdown loses what they
-held. Normal execution leaks nothing.
-
-Three ways to fix it were considered; the measurements are from this
-machine (Apple M-series, `-O2`).
+on the way out of each frame. Until the cleanup frames of section 9, every
+counted value that only a C local of an unwound frame held was leaked: a
+server whose handlers crashed on bad input lost memory with each crash.
+Three ways to fix it were considered (measured on an Apple M-series
+laptop, `-O2`):
 
 **1. A registry of the objects each goroutine owns (runtime only; built,
 measured and not kept).** Goroutines share nothing, so when a goroutine
-crashes or is stopped, every object it still owns once its defers have run
-is garbage. A prototype kept, per spawned goroutine, an open-addressing
-hash set of the objects allocated while it ran (`sd_obj_alloc` adds,
-`sd_obj_free` removes, `realloc` moves); copies made for another goroutine
-(channel transfers, spawn arguments) were made outside it and adopted by
-the receiver; channels and immortal objects were never tracked. At the end
-of a crashed goroutine the remaining objects were made immortal (so that
-releases between them do nothing), the references they held to untracked
-objects were released, and then they were freed. It worked: the runtime
-tests freed everything except channels held only by unwound locals,
-`make test-leaks` reported the crashing goroutines of `group_crash`,
-`os_stop_points` and `fs_file_stop` clean, and the soak found no problem.
-It also needed `sortBy` to sort a copy (a `less` that crashes halfway
-otherwise leaves an element duplicated in the list, which the sweep would
-release twice). But it cost every allocation and every free in any program
-that has spawned a goroutine: on an allocation-heavy goroutine (the json,
-strings and maps benchmarks run inside one `spawn`) **+18% for the
-thread-local lookup alone** (`_Thread_local` is a call to `tlv_get_addr`
-on macOS) **and +80% in total** with the set (1.13 s to 2.05 s; with a
-million live objects the set is 16 MB and nearly every insert and delete
-misses the cache). An intrusive list or a per-object index in a hidden
-header would avoid the set's misses but adds 8 to 16 bytes to every
-object, and the thread-local lookup remains. Too expensive to make the
-price of a feature that only matters after a crash.
+crashes, every object it still owns once its defers have run is garbage. A
+prototype kept, per spawned goroutine, a hash set of the objects allocated
+while it ran and freed what remained after a crash. It worked, but it cost
+every allocation and every free in any program that had spawned a
+goroutine: +18% for the thread-local lookup alone and +80% in total on
+allocation-heavy goroutines (a million live objects make a 16 MB set whose
+inserts and deletes miss the cache).
 
 **2. Unwinding by returning (compiler).** Generated code would test a
 per-goroutine "unwinding" flag after every call that can crash and leave
-through the function's normal exit path, which already releases the
-locals (as `try` does). Precise, with no memory overhead and a well
-predicted branch after each call (a few percent), but every runtime
-function that crashes would have to return instead, and every expression
-would need an exit path: a large change to the code generator and the
-runtime API.
+through the function's normal exit path. Every runtime function that
+crashes would have to return instead, and every expression would need an
+exit path: a large change to the code generator and the runtime API.
 
-**3. Cleanup frames on the defer stack (compiler; recommended).** The
-runtime already keeps a per-goroutine cleanup stack that the unwinder
-walks (defers and groups, `sd_cleanup` in `seed_task.c`). A third kind of
-entry, a frame of counted locals, makes unwinding release them:
+**3. Cleanup frames (compiler and runtime; implemented).** Section 9 and
+compiler/README.md describe them. Two details differ from the first
+design, which put the frames on the defer stack and released them while
+unwinding: the frames are released *before* the `siglongjmp` (afterwards,
+the defers that run reuse the unwound stack), and they form a chain of
+their own through a thread-local pointer. The compiler keeps a value in
+the frame only when it owns it across a call that may crash or stop
+(other slots stay plain C locals), and leaves out ints and enums whose
+cases have no data (their values never own memory, except big integers).
+`sortBy` sorts a copy and writes it back, so a `less` that crashes halfway
+cannot leave the list with an element duplicated.
 
-- Runtime (small, can be added at any time): `size_t
-  sd_frame_push(void *locals, const sd_type *desc)` pushes an entry
-  `{locals, desc}` and returns the mark; `void sd_frame_pop(size_t mark)`
-  drops it without running anything (normal exit). When `unwind_to` meets
-  such an entry it calls `sd_release(desc, locals)`, which releases every
-  counted field. Entries need no arena space.
-- Compiler: in a function that has counted locals or owned temporaries
-  (strings, lists, maps, boxes, interfaces, errors; `int` can be left out,
-  see below), declare them as fields of one local struct
-  `struct { sd_str l_name; sd_list *l_xs; sd_str _t3; } L = {0};` with a
-  generated `SD_STRUCT_TYPE` descriptor listing those fields, call
-  `size_t fm = sd_frame_push(&L, &D_fn_locals)` on entry, and
-  `sd_frame_pop(fm)` before every `return` (before `sd_defer_run`, whose
-  mark is below it). The one invariant: **at every point where a crash or
-  a stop can happen, each field holds either null or a value it owns.**
-  That means three local rules on top of today's code: a field is set to
-  null right after it is released or moved out (`return x`, a store that
-  consumes it, passing it to a consuming runtime function), temporaries
-  live in fields too, and a field is only assigned after its old value has
-  been released (already the order the generator uses).
-- Cost: a frame push and pop (a few stores, no allocation) per call of
-  such a function, and its locals live in memory rather than registers
-  across calls. Functions with only scalars (and `int`s, if left out) pay
-  nothing, so `fib` and the integer loop are unaffected; functions that
-  handle strings or lists already pay for allocation, which dwarfs this.
-  Leaving `int` out means a crash still leaks the big integers held by
-  locals, which are rare.
-- With this in place the leak tests can drop their `.leaks` files, and
-  `sortBy` needs the copy-then-write-back sort described in 1 (the
-  prototype's change to `list_sort` in `seed_list.c`).
+The cost: a function with such values pays the frame link and unlink (a
+thread-local access) and keeps those values in memory rather than
+registers across calls. The benchmarks (bench/, docs/performance.md) did
+not change measurably; the compiler compiling itself, which copies many
+structs with strings into locals, is about 7% slower (112 ms to 120 ms).
+All test programs, including the ones that crash and those whose
+goroutines crash or are stopped, run without leaks (`make test-leaks`).
