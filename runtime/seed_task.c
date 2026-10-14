@@ -89,7 +89,14 @@ struct sd_task {
   void *altstack;
   void (**atexit_fns)(void); /* sd_goroutine_atexit, run when the goroutine ends */
   size_t natexit, capatexit;
+  /* For the deadlock report: the goroutine's name (the spawn expression,
+   * a test's description, or NULL) and what it is parked on. */
+  const char *name;
+  int blocked_kind; /* SD_BLOCK_* */
+  int blocked_n;    /* number of cases of a select */
 };
+
+enum { SD_BLOCK_NONE = 0, SD_BLOCK_RECV, SD_BLOCK_SEND, SD_BLOCK_SELECT, SD_BLOCK_GROUP };
 
 struct sd_group {
   pthread_mutex_t mu;
@@ -132,6 +139,7 @@ struct sd_chan {
 };
 
 static _Thread_local sd_task *sd_cur;
+static sd_task *sd_main_task; /* the task of sd_main: the root of the deadlock report */
 _Thread_local sd_lframe *sd_lf_top; /* the generated functions' cleanup frames (seed.h) */
 static atomic_long sd_running; /* goroutines not parked, plus pending timers */
 static atomic_ulong sd_seed_counter;
@@ -200,12 +208,82 @@ static sd_task *task_current(void) {
   return t;
 }
 
+void sd_task_set_name_(const char *name) { task_current()->name = name; }
+
 /* ------------------------------------------------- parking and deadlocks */
+
+/* The deadlock report: one line per blocked goroutine, the goroutines of a
+ * group indented under the goroutine that waits for it (or runs its block),
+ * starting from main. Called when every goroutine is parked, so nothing
+ * changes the tasks while it reads them. */
+#define SD_DEADLOCK_LINES 20
+
+typedef struct {
+  char buf[4096];
+  size_t len;
+  int count, shown;
+} deadlock_report;
+
+static void report_put(deadlock_report *r, const char *fmt, ...) SD_PRINTF(2, 3);
+static void report_put(deadlock_report *r, const char *fmt, ...) {
+  if (r->len >= sizeof r->buf) return;
+  va_list ap;
+  va_start(ap, fmt);
+  int n = vsnprintf(r->buf + r->len, sizeof r->buf - r->len, fmt, ap);
+  va_end(ap);
+  if (n > 0) r->len += (size_t)n;
+  if (r->len > sizeof r->buf) r->len = sizeof r->buf;
+}
+
+static void report_task(deadlock_report *r, sd_task *t, int depth);
+
+static void report_group(deadlock_report *r, sd_group *g, int depth) {
+  for (sd_task *m = g->members; m; m = m->next) report_task(r, m, depth);
+}
+
+static void report_task(deadlock_report *r, sd_task *t, int depth) {
+  r->count++;
+  if (r->shown < SD_DEADLOCK_LINES) {
+    r->shown++;
+    const char *what = "blocked";
+    switch (t->blocked_kind) {
+    case SD_BLOCK_RECV: what = "receiving from a channel"; break;
+    case SD_BLOCK_SEND: what = "sending on a channel"; break;
+    case SD_BLOCK_SELECT: what = "in a select"; break;
+    case SD_BLOCK_GROUP: what = "waiting for its group's goroutines"; break;
+    default: break;
+    }
+    report_put(r, "%*s", 2 + 2 * (depth < 10 ? depth : 10), "");
+    if (t->name) report_put(r, "%.80s", t->name);
+    else if (t == sd_main_task) report_put(r, "main()");
+    else report_put(r, "a goroutine");
+    if (t->blocked_kind == SD_BLOCK_SELECT) report_put(r, ": %s (%d cases)\n", what, t->blocked_n);
+    else report_put(r, ": %s\n", what);
+  }
+  for (size_t i = 0; i < t->ncl; i++)
+    if (t->cl[i].group) report_group(r, t->cl[i].group, depth + 1);
+  sd_group *w = t->waiting_group;
+  if (w) {
+    bool seen = false;
+    for (size_t i = 0; i < t->ncl; i++) seen = seen || t->cl[i].group == w;
+    if (!seen) report_group(r, w, depth + 1);
+  }
+}
 
 static SD_NORETURN void sd_deadlock(void) {
   fflush(stdout);
   static const char m[] = "crash: deadlock: all goroutines are blocked\n";
   if (write(2, m, sizeof m - 1) < 0) _exit(2);
+  if (sd_main_task) {
+    deadlock_report *r = calloc(1, sizeof *r);
+    deadlock_report *head = calloc(1, sizeof *head);
+    if (r && head) {
+      report_task(r, sd_main_task, 0);
+      report_put(head, "%d goroutine%s blocked:\n", r->count, r->count == 1 ? " is" : "s are");
+      if (r->count > r->shown) report_put(r, "  ... and %d more\n", r->count - r->shown);
+      if (write(2, head->buf, head->len) < 0 || write(2, r->buf, r->len) < 0) _exit(2);
+    }
+  }
   _exit(2);
 }
 
@@ -759,6 +837,9 @@ void sd_spawn(sd_group *g, sd_task_fn body, const sd_type *args_type, const void
   c->body = body;
   c->group = g;
   c->args_type = args_type;
+  /* Generated code names the descriptor of a spawn's arguments after the
+   * spawn ("spawn worker(i, jobs)"): the goroutine's name in reports. */
+  if (args_type && args_type->name && strncmp(args_type->name, "spawn ", 6) == 0) c->name = args_type->name + 6;
   if (args_type) {
     c->args = sd_alloc(args_type->size);
     sd_clone_deep(args_type, c->args, args);
@@ -794,6 +875,7 @@ void sd_spawn(sd_group *g, sd_task_fn body, const sd_type *args_type, const void
 static void group_join(sd_task *t, sd_group *g) {
   pthread_mutex_lock(&t->mu);
   t->waiting_group = g;
+  t->blocked_kind = SD_BLOCK_GROUP;
   pthread_mutex_unlock(&t->mu);
   if (atomic_load(&t->cancelled)) group_cancel(g);
   reset_wake(t);
@@ -804,6 +886,7 @@ static void group_join(sd_task *t, sd_group *g) {
   if (wait) park(t);
   pthread_mutex_lock(&t->mu);
   t->waiting_group = NULL;
+  t->blocked_kind = SD_BLOCK_NONE;
   pthread_mutex_unlock(&t->mu);
   /* Every member has finished, so all are on the dead list now. */
   pthread_mutex_lock(&g->mu);
@@ -1053,6 +1136,8 @@ int sd_select(sd_select_case *cases, int n) {
     }
     pthread_mutex_lock(&t->mu);
     t->sel = &sel;
+    t->blocked_kind = n > 1 ? SD_BLOCK_SELECT : cases[0].dir == SD_RECV ? SD_BLOCK_RECV : SD_BLOCK_SEND;
+    t->blocked_n = n;
     atomic_store_explicit(&t->wake, NULL, memory_order_relaxed);
     pthread_mutex_unlock(&t->mu);
     unlock_all(chans, nc);
@@ -1065,6 +1150,7 @@ int sd_select(sd_select_case *cases, int n) {
     if (!self_cancelled) park(t);
     pthread_mutex_lock(&t->mu);
     t->sel = NULL;
+    t->blocked_kind = SD_BLOCK_NONE;
     pthread_mutex_unlock(&t->mu);
 
     lock_all(chans, nc);
@@ -1848,6 +1934,7 @@ int sd_main(int argc, char **argv, sd_err (*main_fn)(sd_list *args)) {
   setvbuf(stderr, NULL, _IONBF, 0);
   install_fault_handler();
   sd_task *t = task_current();
+  sd_main_task = t;
   setup_altstack(t);
   sd_list *args = sd_list_new(&sd_type_str, argc);
   for (int i = 0; i < argc; i++) SD_LIST_PUSH(&args, sd_str, sd_str_from_cstr(argv[i]));

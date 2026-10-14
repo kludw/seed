@@ -848,6 +848,10 @@ char *sd_fmt(const char *fmt, ...) SD_PRINTF(1, 2);
  * (the cleanup frames release everything else). */
 SD_NORETURN void sd_crash_owned(char *msg);
 
+/* Names the current goroutine in the deadlock report (name: a static
+ * string, or one that lives as long as the goroutine). */
+void sd_task_set_name_(const char *name);
+
 /* Internal string helpers. */
 sd_str sd_str_alloc_(int64_t len); /* uninitialised data of len bytes, NUL written */
 sd_str sd_str_byte_(uint8_t c);    /* immortal one-byte string */
@@ -2994,7 +2998,14 @@ struct sd_task {
   void *altstack;
   void (**atexit_fns)(void); /* sd_goroutine_atexit, run when the goroutine ends */
   size_t natexit, capatexit;
+  /* For the deadlock report: the goroutine's name (the spawn expression,
+   * a test's description, or NULL) and what it is parked on. */
+  const char *name;
+  int blocked_kind; /* SD_BLOCK_* */
+  int blocked_n;    /* number of cases of a select */
 };
+
+enum { SD_BLOCK_NONE = 0, SD_BLOCK_RECV, SD_BLOCK_SEND, SD_BLOCK_SELECT, SD_BLOCK_GROUP };
 
 struct sd_group {
   pthread_mutex_t mu;
@@ -3037,6 +3048,7 @@ struct sd_chan {
 };
 
 static _Thread_local sd_task *sd_cur;
+static sd_task *sd_main_task; /* the task of sd_main: the root of the deadlock report */
 _Thread_local sd_lframe *sd_lf_top; /* the generated functions' cleanup frames (seed.h) */
 static atomic_long sd_running; /* goroutines not parked, plus pending timers */
 static atomic_ulong sd_seed_counter;
@@ -3105,12 +3117,82 @@ static sd_task *task_current(void) {
   return t;
 }
 
+void sd_task_set_name_(const char *name) { task_current()->name = name; }
+
 /* ------------------------------------------------- parking and deadlocks */
+
+/* The deadlock report: one line per blocked goroutine, the goroutines of a
+ * group indented under the goroutine that waits for it (or runs its block),
+ * starting from main. Called when every goroutine is parked, so nothing
+ * changes the tasks while it reads them. */
+#define SD_DEADLOCK_LINES 20
+
+typedef struct {
+  char buf[4096];
+  size_t len;
+  int count, shown;
+} deadlock_report;
+
+static void report_put(deadlock_report *r, const char *fmt, ...) SD_PRINTF(2, 3);
+static void report_put(deadlock_report *r, const char *fmt, ...) {
+  if (r->len >= sizeof r->buf) return;
+  va_list ap;
+  va_start(ap, fmt);
+  int n = vsnprintf(r->buf + r->len, sizeof r->buf - r->len, fmt, ap);
+  va_end(ap);
+  if (n > 0) r->len += (size_t)n;
+  if (r->len > sizeof r->buf) r->len = sizeof r->buf;
+}
+
+static void report_task(deadlock_report *r, sd_task *t, int depth);
+
+static void report_group(deadlock_report *r, sd_group *g, int depth) {
+  for (sd_task *m = g->members; m; m = m->next) report_task(r, m, depth);
+}
+
+static void report_task(deadlock_report *r, sd_task *t, int depth) {
+  r->count++;
+  if (r->shown < SD_DEADLOCK_LINES) {
+    r->shown++;
+    const char *what = "blocked";
+    switch (t->blocked_kind) {
+    case SD_BLOCK_RECV: what = "receiving from a channel"; break;
+    case SD_BLOCK_SEND: what = "sending on a channel"; break;
+    case SD_BLOCK_SELECT: what = "in a select"; break;
+    case SD_BLOCK_GROUP: what = "waiting for its group's goroutines"; break;
+    default: break;
+    }
+    report_put(r, "%*s", 2 + 2 * (depth < 10 ? depth : 10), "");
+    if (t->name) report_put(r, "%.80s", t->name);
+    else if (t == sd_main_task) report_put(r, "main()");
+    else report_put(r, "a goroutine");
+    if (t->blocked_kind == SD_BLOCK_SELECT) report_put(r, ": %s (%d cases)\n", what, t->blocked_n);
+    else report_put(r, ": %s\n", what);
+  }
+  for (size_t i = 0; i < t->ncl; i++)
+    if (t->cl[i].group) report_group(r, t->cl[i].group, depth + 1);
+  sd_group *w = t->waiting_group;
+  if (w) {
+    bool seen = false;
+    for (size_t i = 0; i < t->ncl; i++) seen = seen || t->cl[i].group == w;
+    if (!seen) report_group(r, w, depth + 1);
+  }
+}
 
 static SD_NORETURN void sd_deadlock(void) {
   fflush(stdout);
   static const char m[] = "crash: deadlock: all goroutines are blocked\n";
   if (write(2, m, sizeof m - 1) < 0) _exit(2);
+  if (sd_main_task) {
+    deadlock_report *r = calloc(1, sizeof *r);
+    deadlock_report *head = calloc(1, sizeof *head);
+    if (r && head) {
+      report_task(r, sd_main_task, 0);
+      report_put(head, "%d goroutine%s blocked:\n", r->count, r->count == 1 ? " is" : "s are");
+      if (r->count > r->shown) report_put(r, "  ... and %d more\n", r->count - r->shown);
+      if (write(2, head->buf, head->len) < 0 || write(2, r->buf, r->len) < 0) _exit(2);
+    }
+  }
   _exit(2);
 }
 
@@ -3664,6 +3746,9 @@ void sd_spawn(sd_group *g, sd_task_fn body, const sd_type *args_type, const void
   c->body = body;
   c->group = g;
   c->args_type = args_type;
+  /* Generated code names the descriptor of a spawn's arguments after the
+   * spawn ("spawn worker(i, jobs)"): the goroutine's name in reports. */
+  if (args_type && args_type->name && strncmp(args_type->name, "spawn ", 6) == 0) c->name = args_type->name + 6;
   if (args_type) {
     c->args = sd_alloc(args_type->size);
     sd_clone_deep(args_type, c->args, args);
@@ -3699,6 +3784,7 @@ void sd_spawn(sd_group *g, sd_task_fn body, const sd_type *args_type, const void
 static void group_join(sd_task *t, sd_group *g) {
   pthread_mutex_lock(&t->mu);
   t->waiting_group = g;
+  t->blocked_kind = SD_BLOCK_GROUP;
   pthread_mutex_unlock(&t->mu);
   if (atomic_load(&t->cancelled)) group_cancel(g);
   reset_wake(t);
@@ -3709,6 +3795,7 @@ static void group_join(sd_task *t, sd_group *g) {
   if (wait) park(t);
   pthread_mutex_lock(&t->mu);
   t->waiting_group = NULL;
+  t->blocked_kind = SD_BLOCK_NONE;
   pthread_mutex_unlock(&t->mu);
   /* Every member has finished, so all are on the dead list now. */
   pthread_mutex_lock(&g->mu);
@@ -3958,6 +4045,8 @@ int sd_select(sd_select_case *cases, int n) {
     }
     pthread_mutex_lock(&t->mu);
     t->sel = &sel;
+    t->blocked_kind = n > 1 ? SD_BLOCK_SELECT : cases[0].dir == SD_RECV ? SD_BLOCK_RECV : SD_BLOCK_SEND;
+    t->blocked_n = n;
     atomic_store_explicit(&t->wake, NULL, memory_order_relaxed);
     pthread_mutex_unlock(&t->mu);
     unlock_all(chans, nc);
@@ -3970,6 +4059,7 @@ int sd_select(sd_select_case *cases, int n) {
     if (!self_cancelled) park(t);
     pthread_mutex_lock(&t->mu);
     t->sel = NULL;
+    t->blocked_kind = SD_BLOCK_NONE;
     pthread_mutex_unlock(&t->mu);
 
     lock_all(chans, nc);
@@ -4753,6 +4843,7 @@ int sd_main(int argc, char **argv, sd_err (*main_fn)(sd_list *args)) {
   setvbuf(stderr, NULL, _IONBF, 0);
   install_fault_handler();
   sd_task *t = task_current();
+  sd_main_task = t;
   setup_altstack(t);
   sd_list *args = sd_list_new(&sd_type_str, argc);
   for (int i = 0; i < argc; i++) SD_LIST_PUSH(&args, sd_str, sd_str_from_cstr(argv[i]));
@@ -5069,20 +5160,43 @@ static sd_err test_trampoline(void *p) {
 
 /* Runs every test in a goroutine of its own group, so that an error or a
  * crash fails only that test. Prints one line per failed test; writes
- * "<passed> <failed>\n" to the file named by args[1], if any. */
+ * "<passed> <failed>\n" to the file named by args[1], if any. The
+ * arguments after it are options: "-v" prints a line for every test that
+ * passes too, and "--run TEXT" runs only the tests whose description
+ * contains TEXT. */
 static sd_err test_run_all(sd_list *args) {
   int passed = 0, failed = 0;
+  bool verbose = false;
+  const char *filter = NULL;
+  sd_task_set_name_("the test runner");
+  for (int64_t a = 2; a < args->len; a++) {
+    const char *opt = sd_str_cstr(SD_LIST_GET(args, sd_str, SD_INT(a)));
+    if (strcmp(opt, "-v") == 0) verbose = true;
+    else if (strcmp(opt, "--run") == 0 && a + 1 < args->len) filter = sd_str_cstr(SD_LIST_GET(args, sd_str, SD_INT(++a)));
+  }
   for (int i = 0; i < test_count; i++) {
+    const sd_test *t = &test_list[i];
+    if (filter && !strstr(t->name, filter)) continue;
     sd_group *g = sd_group_begin();
     sd_int idx = SD_INT(i);
-    sd_spawn(g, test_trampoline, &sd_type_int, &idx);
+    /* A copy of int's descriptor named like a spawn's arguments, so that a
+     * deadlock report names the test's goroutine (sd_spawn). */
+    char *label = sd_fmt("spawn test \"%s\"", t->name);
+    sd_type ty = sd_type_int;
+    ty.name = label;
+    sd_spawn(g, test_trampoline, &ty, &idx);
     sd_err e = sd_group_wait(g);
+    free(label);
     if (sd_err_is_null(e)) {
       passed++;
+      if (verbose) {
+        fflush(stdout);
+        printf("PASS \"%s\"\n", t->name);
+        fflush(stdout);
+      }
       continue;
     }
     failed++;
-    const sd_test *t = &test_list[i];
     sd_str m = sd_err_message(e);
     fflush(stdout);
     if (sd_err_is_assert(e)) {
@@ -5238,7 +5352,7 @@ struct sd_S_Token { sd_box * f_kind; sd_S_Pos f_pos; sd_str f_text; sd_str f_raw
 struct sd_S_Comment { sd_S_Pos f_pos; sd_str f_text; bool f_ownLine; };
 struct sd_S_Lexer { sd_int f_file; sd_str f_src; sd_int f_i; sd_int f_line; sd_int f_col; sd_box * f_last; bool f_lineHasToken; sd_list * f_tokens; sd_list * f_comments; sd_list * f_errors; };
 struct sd_S_Parser { sd_S_Ast f_ast; sd_S_Diags f_diags; sd_list * f_toks; sd_int f_pos; sd_int f_file; bool f_failed; sd_int f_nesting; sd_list * f_depths; };
-struct sd_S_Loader { sd_S_Parser f_p; sd_str f_seedRoot; sd_str f_projectRoot; sd_str f_libDir; sd_map * f_byDir; };
+struct sd_S_Loader { sd_S_Parser f_p; sd_str f_seedRoot; sd_str f_projectRoot; sd_str f_libDir; sd_map * f_byDir; sd_list * f_unformatted; };
 struct sd_S_Build { sd_list * f_files; sd_str f_dir; sd_str f_projectRoot; sd_str f_name; };
 struct sd_S_Type { sd_box * f_kind; sd_int f_elem; sd_int f_key; sd_int f_decl; sd_int f_parts; sd_int f_count; sd_str f_name; sd_str f_mangle; sd_int f_rt; sd_int f_helpers; };
 struct sd_S_fs_Info { sd_int f_size; bool f_isDir; sd_int f_modified; };
@@ -5653,7 +5767,7 @@ static const sd_field sd_F_Comment[] = {SD_FIELD(sd_S_Comment, f_pos, &sd_D_Pos)
 static const sd_type sd_D_Comment = SD_STRUCT_TYPE("Comment", sd_S_Comment, sd_F_Comment);
 static const sd_field sd_F_Lexer[] = {SD_FIELD(sd_S_Lexer, f_file, &sd_type_int), SD_FIELD(sd_S_Lexer, f_src, &sd_type_str), SD_FIELD(sd_S_Lexer, f_i, &sd_type_int), SD_FIELD(sd_S_Lexer, f_line, &sd_type_int), SD_FIELD(sd_S_Lexer, f_col, &sd_type_int), SD_FIELD(sd_S_Lexer, f_last, &sd_type_box), SD_FIELD(sd_S_Lexer, f_lineHasToken, &sd_type_bool), SD_FIELD(sd_S_Lexer, f_tokens, &sd_type_list), SD_FIELD(sd_S_Lexer, f_comments, &sd_type_list), SD_FIELD(sd_S_Lexer, f_errors, &sd_type_list)};
 static const sd_type sd_D_Lexer = SD_STRUCT_TYPE("Lexer", sd_S_Lexer, sd_F_Lexer);
-static const sd_field sd_F_Loader[] = {SD_FIELD(sd_S_Loader, f_p, &sd_D_Parser), SD_FIELD(sd_S_Loader, f_seedRoot, &sd_type_str), SD_FIELD(sd_S_Loader, f_projectRoot, &sd_type_str), SD_FIELD(sd_S_Loader, f_libDir, &sd_type_str), SD_FIELD(sd_S_Loader, f_byDir, &sd_type_map)};
+static const sd_field sd_F_Loader[] = {SD_FIELD(sd_S_Loader, f_p, &sd_D_Parser), SD_FIELD(sd_S_Loader, f_seedRoot, &sd_type_str), SD_FIELD(sd_S_Loader, f_projectRoot, &sd_type_str), SD_FIELD(sd_S_Loader, f_libDir, &sd_type_str), SD_FIELD(sd_S_Loader, f_byDir, &sd_type_map), SD_FIELD(sd_S_Loader, f_unformatted, &sd_type_list)};
 static const sd_type sd_D_Loader = SD_STRUCT_TYPE("Loader", sd_S_Loader, sd_F_Loader);
 static const sd_field sd_F_Build[] = {SD_FIELD(sd_S_Build, f_files, &sd_type_list), SD_FIELD(sd_S_Build, f_dir, &sd_type_str), SD_FIELD(sd_S_Build, f_projectRoot, &sd_type_str), SD_FIELD(sd_S_Build, f_name, &sd_type_str)};
 static const sd_type sd_D_Build = SD_STRUCT_TYPE("Build", sd_S_Build, sd_F_Build);
@@ -6216,6 +6330,7 @@ static sd_str sd_f_dirName(sd_str l_path);
 static sd_str sd_f_baseName(sd_str l_path);
 static sd_T_T2S5Builde sd_f_targetOf(sd_list * l_args);
 static sd_T_T2Ose sd_f_compileProgram(sd_str l_root, sd_S_Build l_t, bool l_testMode);
+static void sd_f_printUnformatted(sd_S_Diags l_d, sd_list * l_list);
 static sd_T_T2S6Parsere sd_f_parseFiles(sd_list * l_files);
 static sd_str sd_f_tempDir(void);
 static sd_err sd_f_compileC(sd_str l_cfile, sd_str l_obj, sd_str l_out);
@@ -6226,7 +6341,7 @@ static sd_T_T2be sd_f_build(sd_str l_root, sd_S_Build l_t, sd_str l_out);
 static sd_T_T2ie sd_f_run(sd_str l_root, sd_S_Build l_t, sd_list * l_args);
 static sd_T_T2ie sd_f_testCommand(sd_str l_root, sd_list * l_args);
 static sd_T_T2Lse sd_f_testPackages(sd_str l_dir, sd_list * l_found);
-static sd_T_T2Lie sd_f_testPackage(sd_str l_root, sd_str l_base, sd_str l_dir, sd_str l_work);
+static sd_T_T2Lie sd_f_testPackage(sd_str l_root, sd_str l_base, sd_str l_dir, sd_str l_work, sd_list * l_opts);
 static void sd_m_Parser__parseFile(sd_S_Parser * l_p, sd_int l_file);
 static void sd_m_Parser__syncTop(sd_S_Parser * l_p);
 static void sd_m_Parser__parseTopDecl(sd_S_Parser * l_p);
@@ -8027,6 +8142,7 @@ static inline __attribute__((unused)) void sd_rl_S6Loader(sd_S_Loader v) {
   sd_str_release(v.f_projectRoot);
   sd_str_release(v.f_libDir);
   sd_map_release(v.f_byDir);
+  sd_list_release(v.f_unformatted);
 }
 static inline __attribute__((unused)) void sd_rl_T2Lie(sd_T_T2Lie v) {
   sd_list_release(v.r0);
@@ -8235,7 +8351,7 @@ static sd_list * sd_c_cLibs(void) {
   sd_goroutine_atexit(sd_cf_cLibs);
   return sd_cv_cLibs;
 }
-static sd_str sd_c_usage(void) { return SD_STR_LIT("usage:\012  seed build [-o out] <dir | file.sd>\012  seed run <dir | file.sd> [args...]\012  seed test [dir...]\012  seed fmt [--check] <file.sd>...\012  seed c <dir | file.sd...>\012  seed ast <file.sd>...\012"); }
+static sd_str sd_c_usage(void) { return SD_STR_LIT("usage:\012  seed build [-o out] <dir | file.sd>\012  seed run <dir | file.sd> [args...]\012  seed test [-v] [--run text] [dir...]\012  seed fmt [--check] <file.sd>...\012  seed c <dir | file.sd...>\012  seed ast <file.sd>...\012"); }
 static sd_int sd_c_maxNesting(void) { return SD_INT(256); }
 static sd_int sd_c_minInt(void) { return SD_INT_BIGLIT("-9223372036854775808"); }
 static sd_int sd_c_tyVoid(void) { return SD_INT(0); }
@@ -42640,12 +42756,13 @@ static sd_S_Loader sd_f_newLoader(sd_str l_seedRoot, sd_str l_projectRoot) {
   L._t3 = sd_f_newDiags();
   sd_S_Parser _t4 = sd_f_newParser(L._t3);
   sd_map * _t5 = sd_map_new(&sd_type_str, &sd_type_int);
-  sd_S_Loader _t6 = (sd_S_Loader){.f_p = _t4, .f_seedRoot = sd_str_retain(l_seedRoot), .f_projectRoot = sd_str_retain(l_projectRoot), .f_libDir = sd_str_retain(L.l_lib), .f_byDir = _t5};
-  sd_S_Loader _t7 = _t6;
+  sd_list * _t6 = sd_list_new(&sd_D_Diag, 0);
+  sd_S_Loader _t7 = (sd_S_Loader){.f_p = _t4, .f_seedRoot = sd_str_retain(l_seedRoot), .f_projectRoot = sd_str_retain(l_projectRoot), .f_libDir = sd_str_retain(L.l_lib), .f_byDir = _t5, .f_unformatted = _t6};
+  sd_S_Loader _t8 = _t7;
   SD_LF_LEAVE(L);
   sd_rl_S5Diags(L._t3);
   sd_str_release(L.l_lib);
-  return _t7;
+  return _t8;
 }
 
 typedef struct { sd_lframe h; sd_str _t4; } sd_L_sd_m_Loader__addPackage;
@@ -42668,7 +42785,7 @@ static sd_int sd_m_Loader__addPackage(sd_S_Loader * l_l, sd_str l_path, sd_str l
   return SD_INT_S(l_n);
 }
 
-typedef struct { sd_lframe h; sd_T_T2se _t2; sd_str l_src; sd_str _t4; sd_str _t5; sd_str l_formatted; sd_str _t21; sd_str _t22; } sd_L_sd_m_Loader__addFiles;
+typedef struct { sd_lframe h; sd_T_T2se _t2; sd_str l_src; sd_str _t4; sd_str _t5; sd_str l_formatted; sd_str _t20; } sd_L_sd_m_Loader__addFiles;
 static void sd_lr_sd_m_Loader__addFiles(sd_lframe *p) {
   sd_L_sd_m_Loader__addFiles *L = (sd_L_sd_m_Loader__addFiles *)p;
   sd_rl_T2se(L->_t2);
@@ -42676,8 +42793,7 @@ static void sd_lr_sd_m_Loader__addFiles(sd_lframe *p) {
   sd_str_release(L->_t4);
   sd_str_release(L->_t5);
   sd_str_release(L->l_formatted);
-  sd_str_release(L->_t21);
-  sd_str_release(L->_t22);
+  sd_str_release(L->_t20);
 }
 static sd_err sd_m_Loader__addFiles(sd_S_Loader * l_l, sd_int l_pkg, sd_list * l_files, bool l_isTest) {
   sd_L_sd_m_Loader__addFiles L = {{0}};
@@ -42728,13 +42844,12 @@ static sd_err sd_m_Loader__addFiles(sd_S_Loader * l_l, sd_int l_pkg, sd_list * l
             sd_int _t18 = sd_f_firstDiffLine(L.l_src, L.l_formatted);
             sd_S_Pos _t19 = (sd_S_Pos){.f_file = sd_int_retain(l_file), .f_line = _t18, .f_col = SD_INT(1)};
             sd_S_Pos l_pos = _t19;
-            sd_S_Pos _t20 = sd_rt_S3Pos(l_pos);
-            L._t21 = sd_str_concat(SD_LIST_GET(l_files, sd_str, SD_INT_S(l_i)), SD_STR_LIT(" is not formatted"));
-            L._t22 = sd_str_concat(SD_STR_LIT("run: seed fmt "), SD_LIST_GET(l_files, sd_str, SD_INT_S(l_i)));
-            sd_m_Diags__errorHint((&((&(l_l)->f_p))->f_diags), _t20, L._t21, L._t22);
-            sd_str_release(L._t22); L._t22 = NULL;
-            sd_str_release(L._t21); L._t21 = NULL;
-            sd_rl_S3Pos(_t20);
+            L._t20 = sd_str_concat(SD_LIST_GET(l_files, sd_str, SD_INT_S(l_i)), SD_STR_LIT(" is not formatted"));
+            sd_str _t21 = sd_str_concat(SD_STR_LIT("run: seed fmt "), SD_LIST_GET(l_files, sd_str, SD_INT_S(l_i)));
+            sd_S_Diag _t22 = (sd_S_Diag){.f_pos = sd_rt_S3Pos(l_pos), .f_message = L._t20, .f_hint = _t21};
+            L._t20 = NULL;
+            sd_list ** _t23 = (&(l_l)->f_unformatted);
+            SD_LIST_PUSH(_t23, sd_S_Diag, _t22);
             sd_rl_S3Pos(l_pos);
           }
           sd_str_release(L.l_formatted); L.l_formatted = NULL;
@@ -44272,6 +44387,7 @@ static sd_T_T2Ose sd_f_compileProgram(sd_str l_root, sd_S_Build l_t, bool l_test
   sd_int_release(_t25);
   if (_t26) {
     sd_m_Diags__print(((L.l_l).f_p).f_diags);
+    sd_f_printUnformatted(((L.l_l).f_p).f_diags, (L.l_l).f_unformatted);
     sd_T_T2Ose _t27 = (sd_T_T2Ose){NULL, SD_IFACE_NULL};
     SD_LF_LEAVE(L);
     sd_int_release(l_pkg);
@@ -44291,10 +44407,11 @@ static sd_T_T2Ose sd_f_compileProgram(sd_str l_root, sd_S_Build l_t, bool l_test
   *_t32 = _t31;
   sd_m_Checker__checkProgram((&L.l_c));
   sd_int _t33 = sd_m_Diags__count((L.l_c).f_diags);
-  bool _t34 = sd_int_gt(_t33, SD_INT(0));
+  bool _t34 = (sd_int_gt(_t33, SD_INT(0)) || (SD_SMALL(sd_list_len((L.l_l).f_unformatted)) > ((int64_t)0)));
   sd_int_release(_t33);
   if (_t34) {
     sd_m_Diags__print((L.l_c).f_diags);
+    sd_f_printUnformatted((L.l_c).f_diags, (L.l_l).f_unformatted);
     sd_T_T2Ose _t35 = (sd_T_T2Ose){NULL, SD_IFACE_NULL};
     SD_LF_LEAVE(L);
     sd_rl_S7Checker(L.l_c);
@@ -44331,6 +44448,30 @@ static sd_T_T2Ose sd_f_compileProgram(sd_str l_root, sd_S_Build l_t, bool l_test
   sd_str_release(L.l_path);
   sd_rl_S6Loader(L.l_l);
   return _t42;
+}
+
+typedef struct { sd_lframe h; sd_str _t2; } sd_L_sd_f_printUnformatted;
+static void sd_lr_sd_f_printUnformatted(sd_lframe *p) {
+  sd_L_sd_f_printUnformatted *L = (sd_L_sd_f_printUnformatted *)p;
+  sd_str_release(L->_t2);
+}
+static void sd_f_printUnformatted(sd_S_Diags l_d, sd_list * l_list) {
+  sd_L_sd_f_printUnformatted L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_printUnformatted);
+  {
+    int64_t l_i = ((int64_t)0);
+    for (;;) {
+      if (!((l_i < SD_SMALL(sd_list_len(l_list))))) break;
+      {
+        L._t2 = sd_m_Diags__render(l_d, SD_LIST_GET(l_list, sd_S_Diag, SD_INT_S(l_i)));
+        sd_f_fmt_eprint(L._t2);
+        sd_str_release(L._t2); L._t2 = NULL;
+      }
+      _c1:;
+      l_i++;
+    }
+  }
+  SD_LF_LEAVE(L);
 }
 
 typedef struct { sd_lframe h; sd_S_Diags _t1; sd_S_Parser l_p; sd_T_T2se _t4; sd_str l_src; sd_str _t7; sd_str _t8; } sd_L_sd_f_parseFiles;
@@ -44968,52 +45109,140 @@ static sd_T_T2ie sd_f_run(sd_str l_root, sd_S_Build l_t, sd_list * l_args) {
   return _t17;
 }
 
-typedef struct { sd_lframe h; sd_list * l_dirs; sd_T_T2se _t2; sd_str l_tmp; sd_str l_base; sd_str _t10; sd_list * _t13; sd_T_T2Lse _t14; sd_list * l_pkgs; sd_str _t19; sd_str _t21; sd_str l_work; sd_err _t28; sd_T_T2Lie _t30; sd_list * l_counts; sd_str _t36; } sd_L_sd_f_testCommand;
+typedef struct { sd_lframe h; sd_list * l_dirs; sd_list * l_opts; sd_str l_filter; sd_str l_arg; sd_str _t8; sd_str l_hint; sd_str _t16; sd_T_T2se _t21; sd_str l_tmp; sd_str l_base; sd_str _t29; sd_list * _t32; sd_T_T2Lse _t33; sd_list * l_pkgs; sd_str _t38; sd_str _t40; sd_str l_work; sd_err _t47; sd_str _t49; sd_T_T2Lie _t50; sd_list * l_counts; sd_str _t56; sd_str _t59; } sd_L_sd_f_testCommand;
 static void sd_lr_sd_f_testCommand(sd_lframe *p) {
   sd_L_sd_f_testCommand *L = (sd_L_sd_f_testCommand *)p;
   sd_list_release(L->l_dirs);
-  sd_rl_T2se(L->_t2);
+  sd_list_release(L->l_opts);
+  sd_str_release(L->l_filter);
+  sd_str_release(L->l_arg);
+  sd_str_release(L->_t8);
+  sd_str_release(L->l_hint);
+  sd_str_release(L->_t16);
+  sd_rl_T2se(L->_t21);
   sd_str_release(L->l_tmp);
   sd_str_release(L->l_base);
-  sd_str_release(L->_t10);
-  sd_list_release(L->_t13);
-  sd_rl_T2Lse(L->_t14);
+  sd_str_release(L->_t29);
+  sd_list_release(L->_t32);
+  sd_rl_T2Lse(L->_t33);
   sd_list_release(L->l_pkgs);
-  sd_str_release(L->_t19);
-  sd_str_release(L->_t21);
+  sd_str_release(L->_t38);
+  sd_str_release(L->_t40);
   sd_str_release(L->l_work);
-  sd_iface_release(L->_t28);
-  sd_rl_T2Lie(L->_t30);
+  sd_iface_release(L->_t47);
+  sd_str_release(L->_t49);
+  sd_rl_T2Lie(L->_t50);
   sd_list_release(L->l_counts);
-  sd_str_release(L->_t36);
+  sd_str_release(L->_t56);
+  sd_str_release(L->_t59);
 }
 static sd_T_T2ie sd_f_testCommand(sd_str l_root, sd_list * l_args) {
   sd_L_sd_f_testCommand L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_f_testCommand);
   size_t _dm = sd_defer_mark();
-  L.l_dirs = sd_list_retain(l_args);
+  sd_list * _t1 = sd_list_new(&sd_type_str, 0);
+  L.l_dirs = _t1;
+  sd_list * _t2 = sd_list_new(&sd_type_str, 0);
+  L.l_opts = _t2;
+  bool l_verbose = false;
+  L.l_filter = NULL;
+  {
+    sd_int l_a = SD_INT(0);
+    for (;;) {
+      if (!(sd_int_lt(l_a, sd_list_len(l_args)))) break;
+      {
+        L.l_arg = sd_str_retain(SD_LIST_GET(l_args, sd_str, l_a));
+        if (sd_str_eq(L.l_arg, SD_STR_LIT("-v"))) {
+          bool _t4 = true;
+          l_verbose = _t4;
+          sd_str _t5 = sd_str_retain(L.l_arg);
+          SD_LIST_PUSH((&L.l_opts), sd_str, _t5);
+        } else {
+          if (sd_str_eq(L.l_arg, SD_STR_LIT("--run"))) {
+            sd_int _t6 = sd_int_add(l_a, SD_INT(1));
+            bool _t7 = sd_int_ge(_t6, sd_list_len(l_args));
+            sd_int_release(_t6);
+            if (_t7) {
+              L._t8 = sd_str_concat(SD_STR_LIT("seed test: --run needs the text to look for in test descriptions\012"), sd_c_usage());
+              sd_f_fmt_eprint(L._t8);
+              sd_str_release(L._t8); L._t8 = NULL;
+              sd_T_T2ie _t9 = (sd_T_T2ie){SD_INT(2), SD_IFACE_NULL};
+              SD_LF_LEAVE(L);
+              sd_str_release(L.l_arg);
+              sd_int_release(l_a);
+              sd_str_release(L.l_filter);
+              sd_list_release(L.l_opts);
+              sd_list_release(L.l_dirs);
+              sd_defer_run(_dm);
+              return _t9;
+            }
+            sd_int _t10 = sd_int_add(l_a, SD_INT(1)); sd_int_release(l_a); l_a = _t10;
+            sd_str _t11 = sd_str_retain(SD_LIST_GET(l_args, sd_str, l_a));
+            sd_str_release(L.l_filter);
+            L.l_filter = _t11;
+            sd_str _t12 = sd_str_retain(L.l_arg);
+            SD_LIST_PUSH((&L.l_opts), sd_str, _t12);
+            sd_str _t13 = sd_str_retain(SD_LIST_GET(l_args, sd_str, l_a));
+            SD_LIST_PUSH((&L.l_opts), sd_str, _t13);
+          } else {
+            if (sd_str_starts_with(L.l_arg, SD_STR_LIT("-"))) {
+              L.l_hint = SD_STR_LIT("");
+              if (((sd_str_eq(L.l_arg, SD_STR_LIT("-run")) || sd_str_starts_with(L.l_arg, SD_STR_LIT("--run="))) || sd_str_starts_with(L.l_arg, SD_STR_LIT("-run=")))) {
+                sd_str _t14 = sd_str_retain(SD_STR_LIT("; write --run <text>"));
+                sd_str_release(L.l_hint);
+                L.l_hint = _t14;
+              }
+              sd_str _t15[] = {SD_STR_LIT("seed test: unknown option "), L.l_arg, L.l_hint, SD_STR_LIT("\012"), sd_c_usage()};
+              L._t16 = sd_str_concat_n(_t15, 5);
+              sd_f_fmt_eprint(L._t16);
+              sd_str_release(L._t16); L._t16 = NULL;
+              sd_T_T2ie _t17 = (sd_T_T2ie){SD_INT(2), SD_IFACE_NULL};
+              SD_LF_LEAVE(L);
+              sd_str_release(L.l_hint);
+              sd_str_release(L.l_arg);
+              sd_int_release(l_a);
+              sd_str_release(L.l_filter);
+              sd_list_release(L.l_opts);
+              sd_list_release(L.l_dirs);
+              sd_defer_run(_dm);
+              return _t17;
+            } else {
+              sd_str _t18 = sd_str_retain(L.l_arg);
+              SD_LIST_PUSH((&L.l_dirs), sd_str, _t18);
+            }
+          }
+        }
+        sd_str_release(L.l_arg); L.l_arg = NULL;
+      }
+      _c3:;
+      sd_int _t19 = sd_int_add(l_a, SD_INT(1)); sd_int_release(l_a); l_a = _t19;
+    }
+    sd_int_release(l_a);
+  }
   if ((SD_SMALL(sd_list_len(L.l_dirs)) == ((int64_t)0))) {
-    sd_list * _t1 = sd_list_new(&sd_type_str, 1);
-    SD_LIST_PUSH(&_t1, sd_str, SD_STR_LIT("."));
+    sd_list * _t20 = sd_list_new(&sd_type_str, 1);
+    SD_LIST_PUSH(&_t20, sd_str, SD_STR_LIT("."));
     sd_list_release(L.l_dirs);
-    L.l_dirs = _t1;
+    L.l_dirs = _t20;
   }
   sd_int l_passed = SD_INT(0);
   sd_int l_failed = SD_INT(0);
-  L._t2 = sd_f_fs_makeTemp(SD_STR_LIT("seed-test-"));
-  if (!sd_err_is_null(L._t2.r1)) {
-    sd_str_release(L._t2.r0);
-    sd_T_T2ie _t3 = (sd_T_T2ie){.r1 = L._t2.r1};
+  L._t21 = sd_f_fs_makeTemp(SD_STR_LIT("seed-test-"));
+  if (!sd_err_is_null(L._t21.r1)) {
+    sd_str_release(L._t21.r0);
+    sd_T_T2ie _t22 = (sd_T_T2ie){.r1 = L._t21.r1};
     SD_LF_LEAVE(L);
     sd_int_release(l_failed);
     sd_int_release(l_passed);
+    sd_str_release(L.l_filter);
+    sd_list_release(L.l_opts);
     sd_list_release(L.l_dirs);
     sd_defer_run(_dm);
-    return _t3;
+    return _t22;
   }
-  sd_str _t4 = L._t2.r0;
-  L._t2 = ((sd_T_T2se){0});
-  L.l_tmp = _t4;
+  sd_str _t23 = L._t21.r0;
+  L._t21 = ((sd_T_T2se){0});
+  L.l_tmp = _t23;
   { sd_d4_env env_ = {sd_str_retain(L.l_tmp)}; sd_defer_push(sd_d4, &env_, sizeof env_); }
   sd_int l_built = SD_INT(0);
   {
@@ -45023,89 +45252,95 @@ static sd_T_T2ie sd_f_testCommand(sd_str l_root, sd_list * l_args) {
       {
         L.l_base = sd_str_retain(SD_LIST_GET(L.l_dirs, sd_str, SD_INT_S(l_i)));
         if (sd_str_ends_with(L.l_base, SD_STR_LIT("/..."))) {
-          sd_str _t6 = sd_str_slice(L.l_base, SD_INT(0), SD_INT_S((SD_SMALL(sd_str_len(L.l_base)) - ((int64_t)4))));
+          sd_str _t25 = sd_str_slice(L.l_base, SD_INT(0), SD_INT_S((SD_SMALL(sd_str_len(L.l_base)) - ((int64_t)4))));
           sd_str_release(L.l_base);
-          L.l_base = _t6;
+          L.l_base = _t25;
         }
         if ((sd_str_ends_with(L.l_base, SD_STR_LIT("/")) && (SD_SMALL(sd_str_len(L.l_base)) > ((int64_t)1)))) {
-          sd_str _t7 = sd_str_slice(L.l_base, SD_INT(0), SD_INT_S((SD_SMALL(sd_str_len(L.l_base)) - ((int64_t)1))));
+          sd_str _t26 = sd_str_slice(L.l_base, SD_INT(0), SD_INT_S((SD_SMALL(sd_str_len(L.l_base)) - ((int64_t)1))));
           sd_str_release(L.l_base);
-          L.l_base = _t7;
+          L.l_base = _t26;
         }
-        bool _t8 = sd_f_fs_isDir(L.l_base);
-        if ((!_t8)) {
-          sd_str _t9[] = {SD_STR_LIT("seed test: "), L.l_base, SD_STR_LIT(" is not a directory")};
-          L._t10 = sd_str_concat_n(_t9, 3);
-          sd_err _t11 = sd_f_errors_new(L._t10);
-          sd_T_T2ie _t12 = (sd_T_T2ie){SD_INT(2), _t11};
+        bool _t27 = sd_f_fs_isDir(L.l_base);
+        if ((!_t27)) {
+          sd_str _t28[] = {SD_STR_LIT("seed test: "), L.l_base, SD_STR_LIT(" is not a directory")};
+          L._t29 = sd_str_concat_n(_t28, 3);
+          sd_err _t30 = sd_f_errors_new(L._t29);
+          sd_T_T2ie _t31 = (sd_T_T2ie){SD_INT(2), _t30};
           SD_LF_LEAVE(L);
-          sd_str_release(L._t10);
-          sd_str_release(L.l_base);
-          sd_int_release(l_built);
-          sd_str_release(L.l_tmp);
-          sd_int_release(l_failed);
-          sd_int_release(l_passed);
-          sd_list_release(L.l_dirs);
-          sd_defer_run(_dm);
-          return _t12;
-        }
-        L._t13 = sd_list_new(&sd_type_str, 0);
-        L._t14 = sd_f_testPackages(L.l_base, L._t13);
-        if (!sd_err_is_null(L._t14.r1)) {
-          sd_list_release(L._t14.r0);
-          sd_T_T2ie _t15 = (sd_T_T2ie){.r1 = L._t14.r1};
-          SD_LF_LEAVE(L);
-          sd_list_release(L._t13);
+          sd_str_release(L._t29);
           sd_str_release(L.l_base);
           sd_int_release(l_built);
           sd_str_release(L.l_tmp);
           sd_int_release(l_failed);
           sd_int_release(l_passed);
+          sd_str_release(L.l_filter);
+          sd_list_release(L.l_opts);
           sd_list_release(L.l_dirs);
           sd_defer_run(_dm);
-          return _t15;
+          return _t31;
         }
-        sd_list * _t16 = L._t14.r0;
-        L._t14 = ((sd_T_T2Lse){0});
-        L.l_pkgs = _t16;
-        sd_list_release(L._t13); L._t13 = NULL;
-        bool _t18 = (SD_SMALL(sd_list_len(L.l_pkgs)) == ((int64_t)0));
-        if (_t18) {
-          sd_str _t17 = sd_f_baseName(L.l_base);
-          _t18 = sd_str_eq(_t17, SD_STR_LIT("tests"));
-          sd_str_release(_t17); 
-        }
-        if (_t18) {
-          L._t19 = sd_f_dirName(L.l_base);
-          sd_str _t20[] = {SD_STR_LIT("seed test: "), L.l_base, SD_STR_LIT(" holds the tests of a package; name the package's directory instead: seed test "), L._t19};
-          L._t21 = sd_str_concat_n(_t20, 4);
-          sd_err _t22 = sd_f_errors_new(L._t21);
-          sd_T_T2ie _t23 = (sd_T_T2ie){SD_INT(2), _t22};
+        L._t32 = sd_list_new(&sd_type_str, 0);
+        L._t33 = sd_f_testPackages(L.l_base, L._t32);
+        if (!sd_err_is_null(L._t33.r1)) {
+          sd_list_release(L._t33.r0);
+          sd_T_T2ie _t34 = (sd_T_T2ie){.r1 = L._t33.r1};
           SD_LF_LEAVE(L);
-          sd_str_release(L._t21);
-          sd_str_release(L._t19);
+          sd_list_release(L._t32);
+          sd_str_release(L.l_base);
+          sd_int_release(l_built);
+          sd_str_release(L.l_tmp);
+          sd_int_release(l_failed);
+          sd_int_release(l_passed);
+          sd_str_release(L.l_filter);
+          sd_list_release(L.l_opts);
+          sd_list_release(L.l_dirs);
+          sd_defer_run(_dm);
+          return _t34;
+        }
+        sd_list * _t35 = L._t33.r0;
+        L._t33 = ((sd_T_T2Lse){0});
+        L.l_pkgs = _t35;
+        sd_list_release(L._t32); L._t32 = NULL;
+        bool _t37 = (SD_SMALL(sd_list_len(L.l_pkgs)) == ((int64_t)0));
+        if (_t37) {
+          sd_str _t36 = sd_f_baseName(L.l_base);
+          _t37 = sd_str_eq(_t36, SD_STR_LIT("tests"));
+          sd_str_release(_t36); 
+        }
+        if (_t37) {
+          L._t38 = sd_f_dirName(L.l_base);
+          sd_str _t39[] = {SD_STR_LIT("seed test: "), L.l_base, SD_STR_LIT(" holds the tests of a package; name the package's directory instead: seed test "), L._t38};
+          L._t40 = sd_str_concat_n(_t39, 4);
+          sd_err _t41 = sd_f_errors_new(L._t40);
+          sd_T_T2ie _t42 = (sd_T_T2ie){SD_INT(2), _t41};
+          SD_LF_LEAVE(L);
+          sd_str_release(L._t40);
+          sd_str_release(L._t38);
           sd_list_release(L.l_pkgs);
           sd_str_release(L.l_base);
           sd_int_release(l_built);
           sd_str_release(L.l_tmp);
           sd_int_release(l_failed);
           sd_int_release(l_passed);
+          sd_str_release(L.l_filter);
+          sd_list_release(L.l_opts);
           sd_list_release(L.l_dirs);
           sd_defer_run(_dm);
-          return _t23;
+          return _t42;
         }
         {
           int64_t l_j = ((int64_t)0);
           for (;;) {
             if (!((l_j < SD_SMALL(sd_list_len(L.l_pkgs))))) break;
             {
-              sd_int _t25 = sd_int_add(l_built, SD_INT(1)); sd_int_release(l_built); l_built = _t25;
-              sd_str_part _t26[] = {{L.l_tmp}, {SD_STR_LIT("/")}, {NULL, l_built}};
-              sd_str _t27 = sd_str_concat_parts(_t26, 3);
-              L.l_work = _t27;
-              L._t28 = sd_f_fs_mkdir(L.l_work);
-              if (!sd_err_is_null(L._t28)) {
-                sd_T_T2ie _t29 = (sd_T_T2ie){.r1 = L._t28};
+              sd_int _t44 = sd_int_add(l_built, SD_INT(1)); sd_int_release(l_built); l_built = _t44;
+              sd_str_part _t45[] = {{L.l_tmp}, {SD_STR_LIT("/")}, {NULL, l_built}};
+              sd_str _t46 = sd_str_concat_parts(_t45, 3);
+              L.l_work = _t46;
+              L._t47 = sd_f_fs_mkdir(L.l_work);
+              if (!sd_err_is_null(L._t47)) {
+                sd_T_T2ie _t48 = (sd_T_T2ie){.r1 = L._t47};
                 SD_LF_LEAVE(L);
                 sd_str_release(L.l_work);
                 sd_list_release(L.l_pkgs);
@@ -45114,15 +45349,22 @@ static sd_T_T2ie sd_f_testCommand(sd_str l_root, sd_list * l_args) {
                 sd_str_release(L.l_tmp);
                 sd_int_release(l_failed);
                 sd_int_release(l_passed);
+                sd_str_release(L.l_filter);
+                sd_list_release(L.l_opts);
                 sd_list_release(L.l_dirs);
                 sd_defer_run(_dm);
-                return _t29;
+                return _t48;
               }
-              L._t30 = sd_f_testPackage(l_root, L.l_base, SD_LIST_GET(L.l_pkgs, sd_str, SD_INT_S(l_j)), L.l_work);
-              L._t28 = SD_IFACE_NULL;
-              if (!sd_err_is_null(L._t30.r1)) {
-                sd_list_release(L._t30.r0);
-                sd_T_T2ie _t31 = (sd_T_T2ie){.r1 = L._t30.r1};
+              if (l_verbose) {
+              L._t47 = SD_IFACE_NULL;
+                L._t49 = sd_str_concat(SD_STR_LIT("testing "), SD_LIST_GET(L.l_pkgs, sd_str, SD_INT_S(l_j)));
+                sd_f_fmt_println(L._t49);
+                sd_str_release(L._t49); L._t49 = NULL;
+              }
+              L._t50 = sd_f_testPackage(l_root, L.l_base, SD_LIST_GET(L.l_pkgs, sd_str, SD_INT_S(l_j)), L.l_work, L.l_opts);
+              if (!sd_err_is_null(L._t50.r1)) {
+                sd_list_release(L._t50.r0);
+                sd_T_T2ie _t51 = (sd_T_T2ie){.r1 = L._t50.r1};
                 SD_LF_LEAVE(L);
                 sd_str_release(L.l_work);
                 sd_list_release(L.l_pkgs);
@@ -45131,57 +45373,80 @@ static sd_T_T2ie sd_f_testCommand(sd_str l_root, sd_list * l_args) {
                 sd_str_release(L.l_tmp);
                 sd_int_release(l_failed);
                 sd_int_release(l_passed);
+                sd_str_release(L.l_filter);
+                sd_list_release(L.l_opts);
                 sd_list_release(L.l_dirs);
                 sd_defer_run(_dm);
-                return _t31;
+                return _t51;
               }
-              sd_list * _t32 = L._t30.r0;
-              L._t30 = ((sd_T_T2Lie){0});
-              L.l_counts = _t32;
-              sd_int _t33 = sd_int_add(l_passed, SD_LIST_GET(L.l_counts, sd_int, SD_INT(0)));
+              sd_list * _t52 = L._t50.r0;
+              L._t50 = ((sd_T_T2Lie){0});
+              L.l_counts = _t52;
+              sd_int _t53 = sd_int_add(l_passed, SD_LIST_GET(L.l_counts, sd_int, SD_INT(0)));
               sd_int_release(l_passed);
-              l_passed = _t33;
-              sd_int _t34 = sd_int_add(l_failed, SD_LIST_GET(L.l_counts, sd_int, SD_INT(1)));
+              l_passed = _t53;
+              sd_int _t54 = sd_int_add(l_failed, SD_LIST_GET(L.l_counts, sd_int, SD_INT(1)));
               sd_int_release(l_failed);
-              l_failed = _t34;
+              l_failed = _t54;
               sd_list_release(L.l_counts); L.l_counts = NULL;
               sd_str_release(L.l_work); L.l_work = NULL;
             }
-            _c24:;
+            _c43:;
             l_j++;
           }
         }
         sd_list_release(L.l_pkgs); L.l_pkgs = NULL;
         sd_str_release(L.l_base); L.l_base = NULL;
       }
-      _c5:;
+      _c24:;
       l_i++;
     }
   }
-  sd_str_part _t35[] = {{NULL, l_passed}, {SD_STR_LIT(" passed, ")}, {NULL, l_failed}, {SD_STR_LIT(" failed")}};
-  L._t36 = sd_str_concat_parts(_t35, 4);
-  sd_f_fmt_println(L._t36);
-  sd_str_release(L._t36); L._t36 = NULL;
+  sd_str_part _t55[] = {{NULL, l_passed}, {SD_STR_LIT(" passed, ")}, {NULL, l_failed}, {SD_STR_LIT(" failed")}};
+  L._t56 = sd_str_concat_parts(_t55, 4);
+  sd_f_fmt_println(L._t56);
+  sd_str_release(L._t56); L._t56 = NULL;
   if (sd_int_gt(l_failed, SD_INT(0))) {
-    sd_T_T2ie _t37 = (sd_T_T2ie){SD_INT(1), SD_IFACE_NULL};
+    sd_T_T2ie _t57 = (sd_T_T2ie){SD_INT(1), SD_IFACE_NULL};
     SD_LF_LEAVE(L);
     sd_int_release(l_built);
     sd_str_release(L.l_tmp);
     sd_int_release(l_failed);
     sd_int_release(l_passed);
+    sd_str_release(L.l_filter);
+    sd_list_release(L.l_opts);
     sd_list_release(L.l_dirs);
     sd_defer_run(_dm);
-    return _t37;
+    return _t57;
   }
-  sd_T_T2ie _t38 = (sd_T_T2ie){SD_INT(0), SD_IFACE_NULL};
+  if (((!((L.l_filter) == NULL)) && sd_int_eq(l_passed, SD_INT(0)))) {
+    sd_str _t58[] = {SD_STR_LIT("seed test: no test description contains \""), L.l_filter, SD_STR_LIT("\"")};
+    L._t59 = sd_str_concat_n(_t58, 3);
+    sd_f_fmt_eprintln(L._t59);
+    sd_str_release(L._t59); L._t59 = NULL;
+    sd_T_T2ie _t60 = (sd_T_T2ie){SD_INT(1), SD_IFACE_NULL};
+    SD_LF_LEAVE(L);
+    sd_int_release(l_built);
+    sd_str_release(L.l_tmp);
+    sd_int_release(l_failed);
+    sd_int_release(l_passed);
+    sd_str_release(L.l_filter);
+    sd_list_release(L.l_opts);
+    sd_list_release(L.l_dirs);
+    sd_defer_run(_dm);
+    return _t60;
+  }
+  sd_T_T2ie _t61 = (sd_T_T2ie){SD_INT(0), SD_IFACE_NULL};
   SD_LF_LEAVE(L);
   sd_int_release(l_built);
   sd_str_release(L.l_tmp);
   sd_int_release(l_failed);
   sd_int_release(l_passed);
+  sd_str_release(L.l_filter);
+  sd_list_release(L.l_opts);
   sd_list_release(L.l_dirs);
   sd_defer_run(_dm);
-  return _t38;
+  return _t61;
 }
 
 typedef struct { sd_lframe h; sd_list * l_out; sd_T_T2Lse _t1; sd_list * l_names; sd_str l_path; sd_str l_tests; sd_T_T2Lse _t11; sd_str l_sub; sd_T_T2Lse _t19; } sd_L_sd_f_testPackages;
@@ -45303,7 +45568,7 @@ static sd_T_T2Lse sd_f_testPackages(sd_str l_dir, sd_list * l_found) {
   return _t22;
 }
 
-typedef struct { sd_lframe h; sd_T_T2Lse _t1; sd_list * l_files; sd_str l_name; sd_S_Build l_t; sd_T_T2Ose _t8; sd_str l_program; sd_str _t12; sd_str l_exe; sd_str l_results; sd_str _t17; sd_err _t18; sd_list * _t20; sd_T_T2ie _t21; sd_str l_text; sd_str _t26; sd_str _t29; sd_list * l_parts; sd_str _t31; sd_err _t32; sd_T_T2ie _t34; sd_T_T2ie _t37; } sd_L_sd_f_testPackage;
+typedef struct { sd_lframe h; sd_T_T2Lse _t1; sd_list * l_files; sd_str l_name; sd_S_Build l_t; sd_T_T2Ose _t8; sd_str l_program; sd_str _t12; sd_str l_exe; sd_str l_results; sd_str _t17; sd_err _t18; sd_list * l_argv; sd_T_T2ie _t23; sd_str l_text; sd_str _t28; sd_str _t31; sd_list * l_parts; sd_str _t33; sd_err _t34; sd_T_T2ie _t36; sd_T_T2ie _t39; } sd_L_sd_f_testPackage;
 static void sd_lr_sd_f_testPackage(sd_lframe *p) {
   sd_L_sd_f_testPackage *L = (sd_L_sd_f_testPackage *)p;
   sd_rl_T2Lse(L->_t1);
@@ -45317,18 +45582,18 @@ static void sd_lr_sd_f_testPackage(sd_lframe *p) {
   sd_str_release(L->l_results);
   sd_str_release(L->_t17);
   sd_iface_release(L->_t18);
-  sd_list_release(L->_t20);
-  sd_rl_T2ie(L->_t21);
+  sd_list_release(L->l_argv);
+  sd_rl_T2ie(L->_t23);
   sd_str_release(L->l_text);
-  sd_str_release(L->_t26);
-  sd_str_release(L->_t29);
-  sd_list_release(L->l_parts);
+  sd_str_release(L->_t28);
   sd_str_release(L->_t31);
-  sd_iface_release(L->_t32);
-  sd_rl_T2ie(L->_t34);
-  sd_rl_T2ie(L->_t37);
+  sd_list_release(L->l_parts);
+  sd_str_release(L->_t33);
+  sd_iface_release(L->_t34);
+  sd_rl_T2ie(L->_t36);
+  sd_rl_T2ie(L->_t39);
 }
-static sd_T_T2Lie sd_f_testPackage(sd_str l_root, sd_str l_base, sd_str l_dir, sd_str l_work) {
+static sd_T_T2Lie sd_f_testPackage(sd_str l_root, sd_str l_base, sd_str l_dir, sd_str l_work, sd_list * l_opts) {
   sd_L_sd_f_testPackage L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_f_testPackage);
   L._t1 = sd_f_sourceFiles(l_dir);
@@ -45406,82 +45671,80 @@ static sd_T_T2Lie sd_f_testPackage(sd_str l_root, sd_str l_base, sd_str l_dir, s
   }
   sd_str_release(L._t17); L._t17 = NULL;
   L._t18 = SD_IFACE_NULL;
-  L._t20 = sd_list_new(&sd_type_str, 2);
-  SD_LIST_PUSH(&L._t20, sd_str, sd_str_retain(L.l_exe));
-  SD_LIST_PUSH(&L._t20, sd_str, sd_str_retain(L.l_results));
-  L._t21 = sd_f_os_run(L._t20);
-  if (!sd_err_is_null(L._t21.r1)) {
-    sd_int_release(L._t21.r0);
-    sd_T_T2Lie _t22 = (sd_T_T2Lie){.r1 = L._t21.r1};
+  sd_list * _t20 = sd_list_new(&sd_type_str, 2);
+  SD_LIST_PUSH(&_t20, sd_str, sd_str_retain(L.l_exe));
+  SD_LIST_PUSH(&_t20, sd_str, sd_str_retain(L.l_results));
+  L.l_argv = _t20;
+  {
+    int64_t l_i = ((int64_t)0);
+    for (;;) {
+      if (!((l_i < SD_SMALL(sd_list_len(l_opts))))) break;
+      {
+        sd_str _t22 = sd_str_retain(SD_LIST_GET(l_opts, sd_str, SD_INT_S(l_i)));
+        SD_LIST_PUSH((&L.l_argv), sd_str, _t22);
+      }
+      _c21:;
+      l_i++;
+    }
+  }
+  L._t23 = sd_f_os_run(L.l_argv);
+  if (!sd_err_is_null(L._t23.r1)) {
+    sd_int_release(L._t23.r0);
+    sd_T_T2Lie _t24 = (sd_T_T2Lie){.r1 = L._t23.r1};
     SD_LF_LEAVE(L);
-    sd_list_release(L._t20);
+    sd_list_release(L.l_argv);
     sd_str_release(L.l_results);
     sd_str_release(L.l_exe);
     sd_str_release(L.l_program);
     sd_rl_S5Build(L.l_t);
     sd_str_release(L.l_name);
     sd_list_release(L.l_files);
-    return _t22;
+    return _t24;
   }
-  sd_int _t23 = L._t21.r0;
-  L._t21 = ((sd_T_T2ie){0});
-  sd_int l_code = _t23;
-  sd_list_release(L._t20); L._t20 = NULL;
-  sd_T_T2se _t24 = sd_f_fs_read(L.l_results);
-  if (!sd_err_is_null(_t24.r1)) { sd_str_release(_t24.r0); _t24.r0 = NULL; }
-  L.l_text = (sd_err_is_null(_t24.r1) ? _t24.r0 : NULL);
-  _t24.r0 = NULL;
-  sd_iface_release(_t24.r1); _t24.r1 = SD_IFACE_NULL;
+  sd_int _t25 = L._t23.r0;
+  L._t23 = ((sd_T_T2ie){0});
+  sd_int l_code = _t25;
+  sd_T_T2se _t26 = sd_f_fs_read(L.l_results);
+  if (!sd_err_is_null(_t26.r1)) { sd_str_release(_t26.r0); _t26.r0 = NULL; }
+  L.l_text = (sd_err_is_null(_t26.r1) ? _t26.r0 : NULL);
+  _t26.r0 = NULL;
+  sd_iface_release(_t26.r1); _t26.r1 = SD_IFACE_NULL;
   if (((L.l_text) == NULL)) {
-    sd_str_part _t25[] = {{SD_STR_LIT("FAIL ")}, {l_dir}, {SD_STR_LIT(": the test program ended with exit code ")}, {NULL, l_code}};
-    L._t26 = sd_str_concat_parts(_t25, 4);
-    sd_f_fmt_println(L._t26);
-    sd_str_release(L._t26); L._t26 = NULL;
-    sd_list * _t27 = sd_list_new(&sd_type_int, 2);
-    SD_LIST_PUSH(&_t27, sd_int, SD_INT(0));
-    SD_LIST_PUSH(&_t27, sd_int, SD_INT(1));
-    sd_T_T2Lie _t28 = (sd_T_T2Lie){_t27, SD_IFACE_NULL};
+    sd_str_part _t27[] = {{SD_STR_LIT("FAIL ")}, {l_dir}, {SD_STR_LIT(": the test program ended with exit code ")}, {NULL, l_code}};
+    L._t28 = sd_str_concat_parts(_t27, 4);
+    sd_f_fmt_println(L._t28);
+    sd_str_release(L._t28); L._t28 = NULL;
+    sd_list * _t29 = sd_list_new(&sd_type_int, 2);
+    SD_LIST_PUSH(&_t29, sd_int, SD_INT(0));
+    SD_LIST_PUSH(&_t29, sd_int, SD_INT(1));
+    sd_T_T2Lie _t30 = (sd_T_T2Lie){_t29, SD_IFACE_NULL};
     SD_LF_LEAVE(L);
     sd_str_release(L.l_text);
     sd_int_release(l_code);
+    sd_list_release(L.l_argv);
     sd_str_release(L.l_results);
     sd_str_release(L.l_exe);
     sd_str_release(L.l_program);
     sd_rl_S5Build(L.l_t);
     sd_str_release(L.l_name);
     sd_list_release(L.l_files);
-    return _t28;
+    return _t30;
   }
-  L._t29 = sd_str_trim(L.l_text);
-  sd_list * _t30 = sd_str_split(L._t29, SD_STR_LIT(" "));
-  L.l_parts = _t30;
-  sd_str_release(L._t29); L._t29 = NULL;
+  L._t31 = sd_str_trim(L.l_text);
+  sd_list * _t32 = sd_str_split(L._t31, SD_STR_LIT(" "));
+  L.l_parts = _t32;
+  sd_str_release(L._t31); L._t31 = NULL;
   if ((SD_SMALL(sd_list_len(L.l_parts)) != ((int64_t)2))) {
-    L._t31 = sd_str_concat(SD_STR_LIT("seed test: unexpected results file "), L.l_results);
-    L._t32 = sd_f_errors_new(L._t31);
-    if (sd_err_is_null(L._t32)) sd_crash("%s", "testPackage returned null as result 1 without an error");
-    sd_T_T2Lie _t33 = (sd_T_T2Lie){NULL, L._t32};
+    L._t33 = sd_str_concat(SD_STR_LIT("seed test: unexpected results file "), L.l_results);
+    L._t34 = sd_f_errors_new(L._t33);
+    if (sd_err_is_null(L._t34)) sd_crash("%s", "testPackage returned null as result 1 without an error");
+    sd_T_T2Lie _t35 = (sd_T_T2Lie){NULL, L._t34};
     SD_LF_LEAVE(L);
-    sd_str_release(L._t31);
+    sd_str_release(L._t33);
     sd_list_release(L.l_parts);
     sd_str_release(L.l_text);
     sd_int_release(l_code);
-    sd_str_release(L.l_results);
-    sd_str_release(L.l_exe);
-    sd_str_release(L.l_program);
-    sd_rl_S5Build(L.l_t);
-    sd_str_release(L.l_name);
-    sd_list_release(L.l_files);
-    return _t33;
-  }
-  L._t34 = ({ sd_int o_; sd_err e_ = sd_str_to_int(SD_LIST_GET(L.l_parts, sd_str, SD_INT(0)), &o_); (sd_T_T2ie){o_, e_}; });
-  if (!sd_err_is_null(L._t34.r1)) {
-    sd_int_release(L._t34.r0);
-    sd_T_T2Lie _t35 = (sd_T_T2Lie){.r1 = L._t34.r1};
-    SD_LF_LEAVE(L);
-    sd_list_release(L.l_parts);
-    sd_str_release(L.l_text);
-    sd_int_release(l_code);
+    sd_list_release(L.l_argv);
     sd_str_release(L.l_results);
     sd_str_release(L.l_exe);
     sd_str_release(L.l_program);
@@ -45490,46 +45753,65 @@ static sd_T_T2Lie sd_f_testPackage(sd_str l_root, sd_str l_base, sd_str l_dir, s
     sd_list_release(L.l_files);
     return _t35;
   }
-  sd_int _t36 = L._t34.r0;
-  L._t34 = ((sd_T_T2ie){0});
-  sd_int l_p = _t36;
-  L._t37 = ({ sd_int o_; sd_err e_ = sd_str_to_int(SD_LIST_GET(L.l_parts, sd_str, SD_INT(1)), &o_); (sd_T_T2ie){o_, e_}; });
-  if (!sd_err_is_null(L._t37.r1)) {
-    sd_int_release(L._t37.r0);
-    sd_T_T2Lie _t38 = (sd_T_T2Lie){.r1 = L._t37.r1};
+  L._t36 = ({ sd_int o_; sd_err e_ = sd_str_to_int(SD_LIST_GET(L.l_parts, sd_str, SD_INT(0)), &o_); (sd_T_T2ie){o_, e_}; });
+  if (!sd_err_is_null(L._t36.r1)) {
+    sd_int_release(L._t36.r0);
+    sd_T_T2Lie _t37 = (sd_T_T2Lie){.r1 = L._t36.r1};
     SD_LF_LEAVE(L);
-    sd_int_release(l_p);
     sd_list_release(L.l_parts);
     sd_str_release(L.l_text);
     sd_int_release(l_code);
+    sd_list_release(L.l_argv);
     sd_str_release(L.l_results);
     sd_str_release(L.l_exe);
     sd_str_release(L.l_program);
     sd_rl_S5Build(L.l_t);
     sd_str_release(L.l_name);
     sd_list_release(L.l_files);
-    return _t38;
+    return _t37;
   }
-  sd_int _t39 = L._t37.r0;
-  L._t37 = ((sd_T_T2ie){0});
-  sd_int l_f = _t39;
-  sd_list * _t40 = sd_list_new(&sd_type_int, 2);
-  SD_LIST_PUSH(&_t40, sd_int, sd_int_retain(l_p));
-  SD_LIST_PUSH(&_t40, sd_int, sd_int_retain(l_f));
-  sd_T_T2Lie _t41 = (sd_T_T2Lie){_t40, SD_IFACE_NULL};
+  sd_int _t38 = L._t36.r0;
+  L._t36 = ((sd_T_T2ie){0});
+  sd_int l_p = _t38;
+  L._t39 = ({ sd_int o_; sd_err e_ = sd_str_to_int(SD_LIST_GET(L.l_parts, sd_str, SD_INT(1)), &o_); (sd_T_T2ie){o_, e_}; });
+  if (!sd_err_is_null(L._t39.r1)) {
+    sd_int_release(L._t39.r0);
+    sd_T_T2Lie _t40 = (sd_T_T2Lie){.r1 = L._t39.r1};
+    SD_LF_LEAVE(L);
+    sd_int_release(l_p);
+    sd_list_release(L.l_parts);
+    sd_str_release(L.l_text);
+    sd_int_release(l_code);
+    sd_list_release(L.l_argv);
+    sd_str_release(L.l_results);
+    sd_str_release(L.l_exe);
+    sd_str_release(L.l_program);
+    sd_rl_S5Build(L.l_t);
+    sd_str_release(L.l_name);
+    sd_list_release(L.l_files);
+    return _t40;
+  }
+  sd_int _t41 = L._t39.r0;
+  L._t39 = ((sd_T_T2ie){0});
+  sd_int l_f = _t41;
+  sd_list * _t42 = sd_list_new(&sd_type_int, 2);
+  SD_LIST_PUSH(&_t42, sd_int, sd_int_retain(l_p));
+  SD_LIST_PUSH(&_t42, sd_int, sd_int_retain(l_f));
+  sd_T_T2Lie _t43 = (sd_T_T2Lie){_t42, SD_IFACE_NULL};
   SD_LF_LEAVE(L);
   sd_int_release(l_f);
   sd_int_release(l_p);
   sd_list_release(L.l_parts);
   sd_str_release(L.l_text);
   sd_int_release(l_code);
+  sd_list_release(L.l_argv);
   sd_str_release(L.l_results);
   sd_str_release(L.l_exe);
   sd_str_release(L.l_program);
   sd_rl_S5Build(L.l_t);
   sd_str_release(L.l_name);
   sd_list_release(L.l_files);
-  return _t41;
+  return _t43;
 }
 
 typedef struct { sd_lframe h; sd_S_Lexer l_lx; sd_str _t4; sd_str _t5; sd_str _t17; sd_S_SourceFile l_sf; sd_str _t21; sd_str _t24; sd_str _t28; sd_S_Token l_path; sd_str _t37; sd_str _t46; sd_str _t52; } sd_L_sd_m_Parser__parseFile;

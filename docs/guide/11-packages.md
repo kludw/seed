@@ -194,6 +194,17 @@ FAIL "discount is applied and clamped": cart/tests/cart_test.sd:16: assert faile
 
 An error that leaves a test is shown as `cart/tests/cart_test.sd:4: error: ...` and a crash as `... crash: index out of range: 5 with length 2`, with the line of the test. `seed test` exits with code 1 when a test fails.
 
+Two options help while you work on one test. `--run text` runs only the tests whose description contains the text (a plain substring, not a pattern), and `-v` prints each package and each test as it runs, the passing ones too:
+
+```
+$ seed test -v --run discount
+testing cart
+PASS "discount is applied and clamped"
+1 passed, 0 failed
+```
+
+The options come before the directories. When `--run` matches no test at all, `seed test` says so and exits with code 1, so that a typo does not look like success.
+
 After `assert(x != null)` the compiler knows that `x` is not null, as after an `if` that returns. To test that a function crashes on a caller's mistake, run it in a group and check the error:
 
 ```seed

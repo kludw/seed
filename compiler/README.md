@@ -42,7 +42,7 @@ will do (see "Adding a language feature").
 ```
 seed build [-o out] <dir | file.sd>   compile a program (default output: the directory's or file's name)
 seed run <dir | file.sd> [args...]    compile into $TMPDIR and run; passes the exit code
-seed test [dir...]                    run the tests of every package under the dirs (default .)
+seed test [-v] [--run text] [dir...]  run the tests of every package under the dirs (default .)
 seed fmt [--check] <file.sd>...       format in place, or report unformatted files
 seed c <dir | file.sd...>             C program on stdout (what tests/run.sh uses)
 seed ast <file.sd>...                 print the syntax tree (debugging aid)
@@ -86,7 +86,12 @@ subdirectory of a new `$TMPDIR/seed-test-XXXXXX` (removed at the end) and
 run with the name of a results file; it
 prints one line per failed test and writes its counts there, and `seed
 test` prints the total, `N passed, M failed`, and exits with 1 if anything
-failed. A package that does not compile counts as one failure.
+failed. A package that does not compile counts as one failure. The options
+`-v` and `--run text` are passed on to every test program after the
+results file (the runner applies them, runtime/README.md); with `-v`, `seed
+test` also prints `testing <dir>` before each package. When `--run` matched
+no test in any package, `seed test` says so on stderr and exits with 1. Any
+other argument starting with `-` is a usage error (exit 2).
 
 A test block is parsed into a `TestDecl` and also into a `FnDecl` with
 `isTest` set (no parameters, result `error`, the description as its name),
@@ -122,7 +127,10 @@ imports into one `Ast`. Each `SourceFile` has the index of its package in
   be imported.
 - Every file must be formatted: after parsing, `formatSource` must give
   the same text, otherwise the error points at the first differing line
-  with the hint `run: seed fmt <file>`.
+  with the hint `run: seed fmt <file>`. These errors are kept apart
+  (`Loader.unformatted`) and do not stop the checker: `compileProgram`
+  prints the other errors first and the formatting errors after them
+  (`printUnformatted`), so that formatting never hides a real error.
 - Cycles are found by a depth-first search over the import graph and
   reported at the import that closes them: `import cycle: a -> b -> a`.
 

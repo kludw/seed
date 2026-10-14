@@ -113,6 +113,78 @@ else
   failed "seed test on a tests directory" "exit $code: $out"
 fi
 
+# seed test -v prints each package and each test as it runs; --run runs
+# only the tests whose description contains the text, and is an error when
+# it matches none; unknown options (Go's -run) are usage errors.
+out=$(cd "$here" && "$seed" test -v testcmd/pass 2>&1); code=$?
+want='testing testcmd/pass/calc
+PASS "sum adds every element"
+PASS "private names are visible to tests"
+PASS "assert narrows"
+testing testcmd/pass/calc/inner
+PASS "add"
+PASS "odd error"
+5 passed, 0 failed'
+if [ "$code" = 0 ] && [ "$out" = "$want" ]; then pass=$((pass+1)); else failed "seed test -v" "exit $code: $out"; fi
+out=$(cd "$here" && "$seed" test --run add testcmd/pass 2>&1); code=$?
+if [ "$code" = 0 ] && [ "$out" = "2 passed, 0 failed" ]; then pass=$((pass+1)); else failed "seed test --run add" "exit $code: $out"; fi
+out=$(cd "$here" && "$seed" test -v --run "comparison" testcmd/fail 2>&1); code=$?
+want='testing testcmd/fail/checks
+FAIL "int comparison": testcmd/fail/checks/tests/checks_test.sd:12: assert failed: n == 42 (41 == 42)
+FAIL "string comparison": testcmd/fail/checks/tests/checks_test.sd:18: assert failed: s == "abc" ("a\tb\"c" == "abc")
+0 passed, 2 failed'
+if [ "$code" = 1 ] && [ "$out" = "$want" ]; then pass=$((pass+1)); else failed "seed test -v --run comparison" "exit $code: $out"; fi
+out=$(cd "$here" && "$seed" test --run nothing-matches testcmd/pass 2>&1); code=$?
+if [ "$code" = 1 ] && [ "$out" = "$(printf '0 passed, 0 failed\nseed test: no test description contains "nothing-matches"')" ]; then
+  pass=$((pass+1))
+else
+  failed "seed test --run matching nothing" "exit $code: $out"
+fi
+out=$(cd "$here" && "$seed" test -run add testcmd/pass 2>&1); code=$?
+case "$code:$out" in
+  "2:seed test: unknown option -run; write --run <text>"*) pass=$((pass+1)) ;;
+  *) failed "seed test -run" "exit $code: $out" ;;
+esac
+out=$(cd "$here" && "$seed" test testcmd/pass --run 2>&1); code=$?
+case "$code:$out" in
+  "2:seed test: --run needs the text"*) pass=$((pass+1)) ;;
+  *) failed "seed test --run without text" "exit $code: $out" ;;
+esac
+
+# A deadlock keeps its first line, then says how many goroutines are
+# blocked and on what, each named by its spawn (indented under the
+# goroutine that waits for its group); in a test program the goroutine is
+# the test's.
+out=$("$seed" run "$here/full/group_deadlock.sd" 2>&1 >/dev/null); code=$?
+want='crash: deadlock: all goroutines are blocked
+3 goroutines are blocked:
+  main(): waiting for its group'"'"'s goroutines
+    ping(): receiving from a channel
+    ping(): receiving from a channel'
+if [ "$code" = 2 ] && [ "$out" = "$want" ]; then pass=$((pass+1)); else failed "deadlock report" "exit $code: $out"; fi
+mkdir -p "$tmp/stuck/box/tests"
+printf 'package box\n\npub fn one() int {\n    return 1\n}\n' > "$tmp/stuck/box/box.sd"
+printf 'package box\n\ntest "one" {\n    assert(one() == 1)\n}\n\ntest "stuck" {\n    chan int c = chan int(0)\n    int? v = c.receive()\n    assert(v == null)\n}\n' > "$tmp/stuck/box/tests/box_test.sd"
+out=$(cd "$tmp/stuck" && "$seed" test --run stuck 2>&1); code=$?
+want='crash: deadlock: all goroutines are blocked
+2 goroutines are blocked:
+  the test runner: waiting for its group'"'"'s goroutines
+    test "stuck": receiving from a channel
+FAIL box: the test program ended with exit code 2
+0 passed, 1 failed'
+if [ "$code" = 1 ] && [ "$out" = "$want" ]; then pass=$((pass+1)); else failed "deadlock in a test" "exit $code: $out"; fi
+
+# A file that is not formatted and has other errors reports those errors
+# first, then that it is not formatted, so that formatting does not hide them.
+mkdir -p "$tmp/unfmt"
+printf 'package main\n\nimport "fmt"\n\nfn main([]string args) error {\n    []int xs = []int{1}\n    fmt.println(len(xs))\n    int n=2\n    return null\n}\n' > "$tmp/unfmt/u.sd"
+out=$(cd "$tmp/unfmt" && "$seed" build u.sd 2>&1); code=$?
+errs=$(printf '%s\n' "$out" | grep ': error: ')
+want='u.sd:7:17: error: undefined function len
+u.sd:8:9: error: n is declared but never used
+u.sd:8:1: error: u.sd is not formatted'
+if [ "$code" = 1 ] && [ "$errs" = "$want" ]; then pass=$((pass+1)); else failed "unformatted file with other errors" "exit $code: $out"; fi
+
 # SPEC "Toolchain": seed build of a single file names the executable after
 # the file, or as -o says; seed ast prints the syntax tree.
 mkdir -p "$tmp/buildfile"

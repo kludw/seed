@@ -31,6 +31,9 @@ check error 'main body\nmain deferred' 'error: shutting down' 1
 check exit 'buffered' '' 3
 check deadlock 'waiting' 'crash: deadlock: all goroutines are blocked' 2
 check deadlock_group '' 'crash: deadlock' 2
+check deadlock 'waiting' '  main(): receiving from a channel' 2
+check deadlock_group '' '3 goroutines are blocked:' 2
+check deadlock_group '' '    a goroutine: receiving from a channel' 2
 check group_crash_body 'child cleanup\nmain cleanup' 'crash: division by zero' 2
 check eprint 'out1 out2' 'err' 0
 check timeout 'timeout\nslept' '' 0

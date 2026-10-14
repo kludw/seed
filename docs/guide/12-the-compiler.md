@@ -331,6 +331,8 @@ messy.sd:2:1: error: messy.sd is not formatted
     hint: run: seed fmt messy.sd
 ```
 
+If the file also has other errors, the compiler still checks it and reports those first, followed by the formatting error, so formatting never hides a real mistake.
+
 `seed fmt --check` reports the same without compiling (useful in a build script):
 
 ```

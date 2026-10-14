@@ -583,7 +583,27 @@ sd_err l_err;
   running the defers registered before it.
 - **Deadlock detection.** When every goroutine is blocked on a channel or a
   group and no timer is pending, the program prints `crash: deadlock: all
-  goroutines are blocked` and exits with code 2 (instead of hanging).
+  goroutines are blocked` and exits with code 2 (instead of hanging). Then
+  it reports the blocked goroutines (`sd_deadlock`): their number, and one
+  line each (at most 20) with its name and what it is parked on
+  (`blocked_kind`: receiving, sending, a select, a group), found from the
+  main task through the groups each task owns (its cleanup entries and
+  `waiting_group`), the members of a group indented under their owner:
+
+  ```
+  crash: deadlock: all goroutines are blocked
+  3 goroutines are blocked:
+    main(): waiting for its group's goroutines
+      ping(): receiving from a channel
+      ping(): receiving from a channel
+  ```
+
+  A goroutine's name is its spawn, taken from the descriptor of its
+  arguments, which the generator names `spawn <expression>`; a spawn
+  without arguments has no descriptor and shows as `a goroutine`. The test
+  runner names itself and each test's goroutine (`test "<description>"`).
+  Every goroutine is parked when this runs, so the tasks are read without
+  locks.
 - Crashes in the main goroutine (including in a group block) end the program
   as in section 9, after stopping and waiting for its groups.
 
@@ -1069,7 +1089,10 @@ FAIL "lookup": cart/tests/cart_test.sd:31: crash: index out of range: 5 with len
 ```
 
 `"<passed> <failed>"` is written to the file named by `argv[1]`, if any,
-and the program exits with 1 if a test failed. `sd_str_quote(s)` and
+and the program exits with 1 if a test failed. The arguments after it are
+options from `seed test`: `-v` prints `PASS "<description>"` for each test
+that passes, and `--run TEXT` runs only the tests whose description
+contains TEXT (the others count as neither passed nor failed). `sd_str_quote(s)` and
 `sd_err_show(e)` give the text a failed assert shows for a string
 (`"a\tb"`) and an error (its quoted message, or `null`).
 
@@ -1088,7 +1111,7 @@ runtime/tests/run.sh asan     # or tsan, plain, bench
 | `test_pkg.c` | `os.env`, `os.run` (exit codes, program not found), `fs.*` |
 | `test_block.c` | blocking calls as stop points: cancelling goroutines blocked in `time.sleep`, in `sd_wait_fd` on a pipe, in a handle read on a non-blocking and on a blocking descriptor, in accept, in `os.run` (a `sleep 30` child is killed), and one waiting for another goroutine's operation lock; close waking a reader; read timeouts; line reading (CRLF, empty lines, a last line without newline, a 200 KB line); 3 MB over a socket pair; 20,000 goroutines spawned one after another in one group (freed while it runs) |
 | `test_conc.c` | buffered/unbuffered channels, copy semantics, ping-pong, 1000 goroutines in a group with deep-copied arguments, group error and crash with cancellation and defers (order checked), nested group cancellation, crash inside defers, select fairness (100,000 selects within 45-55%), select send/receive/closed/timeout, cancelling goroutines blocked in select, a 50-stage pipeline, the parallel word count |
-| `test_exit.c` + `test_exit.sh` | exit codes and messages: crash in main (defers run), error from main, `os.exit` flushing, deadlock (2 kinds), crash in a group block, stderr/stdout ordering, timers, stack overflow in main and in a goroutine |
+| `test_exit.c` + `test_exit.sh` | exit codes and messages: crash in main (defers run), error from main, `os.exit` flushing, deadlock (2 kinds, with the report of the blocked goroutines), crash in a group block, stderr/stdout ordering, timers, stack overflow in main and in a goroutine |
 | `example.c` | the hand-lowered program from sections 3-11; output must equal `example.out` and it checks it leaks nothing |
 | `bench.c` | the numbers below |
 

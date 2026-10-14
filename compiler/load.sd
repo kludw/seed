@@ -19,11 +19,15 @@ type Loader struct {
     string projectRoot
     string libDir
     map[string]int byDir
+    // The "not formatted" errors, kept apart from l.p.diags so that a file
+    // with other errors is still checked and those errors are shown too
+    // (compileProgram prints these after them).
+    []Diag unformatted
 }
 
 fn newLoader(string seedRoot, string projectRoot) Loader {
     string lib = absPath(seedRoot) + "/lib"
-    return Loader{p: newParser(newDiags()), seedRoot: seedRoot, projectRoot: projectRoot, libDir: lib, byDir: map[string]int{}}
+    return Loader{p: newParser(newDiags()), seedRoot: seedRoot, projectRoot: projectRoot, libDir: lib, byDir: map[string]int{}, unformatted: []Diag{}}
 }
 
 // Adds a package and returns its index. Its files are parsed with
@@ -49,7 +53,7 @@ fn (Loader l) mut addFiles(int pkg, []string files, bool isTest) error {
             string formatted = formatSource(src)
             if (formatted != src) {
                 Pos pos = Pos{file: file, line: firstDiffLine(src, formatted), col: 1}
-                l.p.diags.errorHint(pos, files[i] + " is not formatted", "run: seed fmt " + files[i])
+                l.unformatted.push(Diag{pos: pos, message: files[i] + " is not formatted", hint: "run: seed fmt " + files[i]})
             }
         }
     }

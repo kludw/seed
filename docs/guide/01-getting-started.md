@@ -86,7 +86,7 @@ Hello, world!
 |---|---|
 | `seed run <file.sd or dir> [args...]` | Compiles the program into a temporary executable and runs it. The exit code is the program's. |
 | `seed build [-o out] <file.sd or dir>` | Compiles the program into an executable (named after the file or directory unless `-o` names it): a single binary with no dependencies. |
-| `seed test [dir...]` | Runs the tests of the packages under the directories (see [chapter 11](11-packages.md)). |
+| `seed test [-v] [--run text] [dir...]` | Runs the tests of the packages under the directories; `-v` lists each test as it runs, `--run` runs only the tests whose description contains the text (see [chapter 11](11-packages.md)). |
 | `seed fmt file.sd...` | Rewrites the files in the one canonical layout. |
 | `seed fmt --check file.sd...` | Changes nothing, and reports the files that are not formatted (exit code 1). |
 | `seed c <file.sd or dir>` | Writes the generated C program to stdout. |

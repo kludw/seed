@@ -9,7 +9,7 @@ This is part of the language spec ([SPEC.md](../SPEC.md)). It lists every method
 | `main` returns an error | `error: <message>` is printed to stderr, exit code 1. |
 | A crash (index out of range, division by zero, failed conversion, sending on a closed channel, `os.crash(message)`, ...) | `crash: <message>` is printed to stderr, exit code 2. Inside a `group`, the crash becomes the group's error instead. Either way the crashing goroutine's deferred calls run first. |
 | `os.exit(n)` | Exits immediately with code `n` (its low 8 bits), without running defers. |
-| Every goroutine is blocked on a channel (or waits for a group) and no timer is pending | `crash: deadlock: all goroutines are blocked` is printed to stderr, exit code 2. Defers do not run. |
+| Every goroutine is blocked on a channel (or waits for a group) and no timer is pending | `crash: deadlock: all goroutines are blocked` is printed to stderr, followed by the number of blocked goroutines and one line for each: its spawn (`worker()`, or `main()`) and what it waits for (receiving from or sending on a channel, a select, its group's goroutines). Exit code 2. Defers do not run. |
 
 ## int
 

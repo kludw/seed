@@ -100,7 +100,7 @@ There is one binary, `seed`:
 |---|---|
 | `seed run <dir \| file.sd> [args...]` | Compiles a program and runs it with the arguments. |
 | `seed build [-o out] <dir \| file.sd>` | Compiles a program into one executable. |
-| `seed test [dir...]` | Runs the `test` blocks of every package under the directories. |
+| `seed test [-v] [--run text] [dir...]` | Runs the `test` blocks of every package under the directories (`--run`: only the tests whose description contains the text; `-v`: list each test). |
 | `seed fmt [--check] <file.sd>...` | Formats files in place, or reports the ones that aren't formatted. |
 | `seed c <dir \| file.sd...>` | Prints the generated C (for testing the compiler). |
 | `seed ast <file.sd>...` | Prints the syntax tree (for debugging the parser). |

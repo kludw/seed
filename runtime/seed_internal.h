@@ -41,6 +41,10 @@ char *sd_fmt(const char *fmt, ...) SD_PRINTF(1, 2);
  * (the cleanup frames release everything else). */
 SD_NORETURN void sd_crash_owned(char *msg);
 
+/* Names the current goroutine in the deadlock report (name: a static
+ * string, or one that lives as long as the goroutine). */
+void sd_task_set_name_(const char *name);
+
 /* Internal string helpers. */
 sd_str sd_str_alloc_(int64_t len); /* uninitialised data of len bytes, NUL written */
 sd_str sd_str_byte_(uint8_t c);    /* immortal one-byte string */

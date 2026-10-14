@@ -365,7 +365,7 @@ if (err != null) {
 - Goroutines share nothing. Sending a value on a channel copies it, so data races are impossible.
 - A `group` block is ordinary code: `spawn` may appear anywhere inside it, including in loops and `if`s.
 - Channels are the one reference type. Copying a channel value (into a struct, an enum, a list, another channel) gives another handle to the same channel, which is how reply channels work.
-- When every goroutine is blocked on a channel or waiting for a group, and no timer is pending, nothing can happen any more: the program prints `crash: deadlock: all goroutines are blocked` and exits with code 2, without running `defer`s.
+- When every goroutine is blocked on a channel or waiting for a group, and no timer is pending, nothing can happen any more: the program prints `crash: deadlock: all goroutines are blocked` (followed by a list of the blocked goroutines and what each waits for) and exits with code 2, without running `defer`s.
 
 ### Groups
 
@@ -466,7 +466,7 @@ test "load skips empty lines" {
 - A test is a `test "description" { ... }` block, so nothing depends on function naming. Its body is like the body of a function that returns `error`: `try` works, and an error that leaves the test fails it. `return` is not allowed in a test.
 - `assert(bool)` is built in and only allowed in tests (not inside a `group` block). A failed `assert` ends the test. The message shows where it is, the condition as written, and for a comparison of numbers, bools, bytes, strings or errors, the value of each side (as `.string()` gives it, so a byte shows as its number: `b == 'b' (97 == 98)`): `users/tests/load_test.sd:7: assert failed: names.len() == 3 (2 == 3)`. After `assert(cond)`, the compiler narrows on `cond` as after an `if`.
 - A test fails when an `assert` fails, when an error leaves it, or when it crashes. Each test runs in a goroutine of its own group, one after the other, so a crash fails only that test.
-- `seed test [dir...]` runs the tests of every package under the directories (by default the current one), prints one line per failed test (`FAIL "<name>": <where>: <reason>`) and a summary `N passed, M failed`, and exits with 1 when a test failed (or a package didn't compile).
+- `seed test [dir...]` runs the tests of every package under the directories (by default the current one), prints one line per failed test (`FAIL "<name>": <where>: <reason>`) and a summary `N passed, M failed`, and exits with 1 when a test failed (or a package didn't compile). `-v` also prints a line for each package and each test that passes; `--run text` runs only the tests whose description contains the text, and exits with 1 when it matches none.
 - A test of a crash runs the code in a group and checks the error: `error err = group { spawn f() }` then `assert(err.message() == "crash: ...")`.
 
 ## Memory
@@ -507,7 +507,7 @@ There is one binary, `seed`, with these commands:
 
 - `seed run <dir | file.sd> [args...]` compiles a program and runs it with the arguments (a `--` before them is skipped), exiting with its exit code.
 - `seed build [-o out] <dir | file.sd>` compiles a program (the `package main` of a directory and the packages it imports, or a single file) into one executable, named after the directory or file unless `-o` says otherwise.
-- `seed test [dir...]` runs the tests (see [Tests](#tests)).
+- `seed test [-v] [--run text] [dir...]` runs the tests (see [Tests](#tests)).
 - `seed fmt [--check] <file.sd>...` formats the code (the rules are in [docs/formatting.md](docs/formatting.md)). Compiling a file that is not formatted is an error pointing at the first line that differs, with the hint `run: seed fmt <file>`.
 - `seed c <dir | file.sd...>` prints the generated C program, and `seed ast <file.sd>...` prints the syntax tree. They are for testing and debugging the compiler.
 

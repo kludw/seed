@@ -2,7 +2,7 @@
 //
 //   seed build [-o out] <dir | file.sd>   compile a program to an executable
 //   seed run <dir | file.sd> [args...]    compile and run, passing the exit code
-//   seed test [dir...]                    run the tests of the packages under the dirs
+//   seed test [-v] [--run text] [dir...]  run the tests of the packages under the dirs
 //   seed fmt [--check] <file.sd>...       format the files in place (see fmt.sd)
 //   seed c <dir | file.sd...>             write the C program to stdout (for tests)
 //   seed ast <file.sd>...                 print the syntax tree (for debugging)
@@ -23,7 +23,7 @@ const string cCompiler = "cc"
 const []string cFlags = []string{"-std=c11", "-O2", "-w"}
 const []string cLibs = []string{"-lm", "-lpthread"}
 
-const string usage = "usage:\n  seed build [-o out] <dir | file.sd>\n  seed run <dir | file.sd> [args...]\n  seed test [dir...]\n  seed fmt [--check] <file.sd>...\n  seed c <dir | file.sd...>\n  seed ast <file.sd>...\n"
+const string usage = "usage:\n  seed build [-o out] <dir | file.sd>\n  seed run <dir | file.sd> [args...]\n  seed test [-v] [--run text] [dir...]\n  seed fmt [--check] <file.sd>...\n  seed c <dir | file.sd...>\n  seed ast <file.sd>...\n"
 
 fn main([]string args) error {
     if (args.len() < 2) {
@@ -218,19 +218,30 @@ fn compileProgram(string root, Build t, bool testMode) (string?, error) {
     try l.loadImports()
     if (l.p.diags.count() > 0) {
         l.p.diags.print()
+        printUnformatted(l.p.diags, l.unformatted)
         return null, null
     }
+    // An unformatted file is an error, but the program is still checked,
+    // so that the real errors are not hidden behind it; they come first.
     Checker c = newChecker(l.p.ast, l.p.diags, testMode)
     c.libDir = l.libDir
     c.projectRoot = t.projectRoot
     c.checkProgram()
-    if (c.diags.count() > 0) {
+    if (c.diags.count() > 0 || l.unformatted.len() > 0) {
         c.diags.print()
+        printUnformatted(c.diags, l.unformatted)
         return null, null
     }
     string natives = try readNatives(c.ast)
     Gen g = newGen(c)
     return g.genProgram(natives), null
+}
+
+// Prints the "not formatted" errors (Loader.unformatted) after the others.
+fn printUnformatted(Diags d, []Diag list) {
+    for (int i = 0; i < list.len(); i++) {
+        fmt.eprint(d.render(list[i]))
+    }
 }
 
 // Parses the files into one tree (for seed ast). Syntax errors are printed
@@ -384,13 +395,44 @@ fn run(string root, Build t, []string args) (int, error) {
 
 // ---- seed test ----
 
-// `seed test [dir...]`: finds every package under the directories (default:
-// the current one) that has a tests/ directory, builds a test program for
-// it and runs it. Each test program prints one line per failed test and
-// writes its counts to a file; the summary adds them up. Returns the exit
-// code: 1 if a test failed or a package did not compile.
+// `seed test [-v] [--run text] [dir...]`: finds every package under the
+// directories (default: the current one) that has a tests/ directory,
+// builds a test program for it and runs it. Each test program prints one
+// line per failed test (and with -v one per passed test) and writes its
+// counts to a file; the summary adds them up. --run runs only the tests
+// whose description contains the text; the options are passed on to the
+// test programs. Returns the exit code: 1 if a test failed, a package did
+// not compile or --run matched no test, 2 for a bad option.
 fn testCommand(string root, []string args) (int, error) {
-    []string dirs = args
+    []string dirs = []string{}
+    []string opts = []string{}
+    bool verbose = false
+    string? filter = null
+    for (int a = 0; a < args.len(); a++) {
+        string arg = args[a]
+        if (arg == "-v") {
+            verbose = true
+            opts.push(arg)
+        } else if (arg == "--run") {
+            if (a + 1 >= args.len()) {
+                fmt.eprint("seed test: --run needs the text to look for in test descriptions\n" + usage)
+                return 2, null
+            }
+            a++
+            filter = args[a]
+            opts.push(arg)
+            opts.push(args[a])
+        } else if (arg.startsWith("-")) {
+            string hint = ""
+            if (arg == "-run" || arg.startsWith("--run=") || arg.startsWith("-run=")) {
+                hint = "; write --run <text>"
+            }
+            fmt.eprint("seed test: unknown option " + arg + hint + "\n" + usage)
+            return 2, null
+        } else {
+            dirs.push(arg)
+        }
+    }
     if (dirs.len() == 0) {
         dirs = []string{"."}
     }
@@ -418,13 +460,20 @@ fn testCommand(string root, []string args) (int, error) {
             built++
             string work = tmp + "/" + built.string()
             try fs.mkdir(work)
-            []int counts = try testPackage(root, base, pkgs[j], work)
+            if (verbose) {
+                fmt.println("testing " + pkgs[j])
+            }
+            []int counts = try testPackage(root, base, pkgs[j], work, opts)
             passed = passed + counts[0]
             failed = failed + counts[1]
         }
     }
     fmt.println(passed.string() + " passed, " + failed.string() + " failed")
     if (failed > 0) {
+        return 1, null
+    }
+    if (filter != null && passed == 0) {
+        fmt.eprintln("seed test: no test description contains \"" + filter + "\"")
         return 1, null
     }
     return 0, null
@@ -461,9 +510,9 @@ fn testPackages(string dir, []string found) ([]string, error) {
 }
 
 // Builds and runs the tests of the package in dir (base is the project
-// root) in the directory work. Returns the numbers of passed and failed
-// tests.
-fn testPackage(string root, string base, string dir, string work) ([]int, error) {
+// root) in the directory work, passing the options opts (-v, --run text)
+// to the test program. Returns the numbers of passed and failed tests.
+fn testPackage(string root, string base, string dir, string work, []string opts) ([]int, error) {
     []string files = try sourceFiles(dir)
     string name = baseName(dir)
     if (dir != base && base == ".") {
@@ -480,7 +529,11 @@ fn testPackage(string root, string base, string dir, string work) ([]int, error)
     string exe = work + "/test"
     string results = work + "/results"
     try compileProgramC(root, program, work + "/test.c", exe)
-    int code = try os.run([]string{exe, results})
+    []string argv = []string{exe, results}
+    for (int i = 0; i < opts.len(); i++) {
+        argv.push(opts[i])
+    }
+    int code = try os.run(argv)
     string? text, _ = fs.read(results)
     if (text == null) {
         fmt.println("FAIL " + dir + ": the test program ended with exit code " + code.string())
