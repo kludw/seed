@@ -38,3 +38,62 @@ test "crash fails the goroutine" {
     assert(err != null)
     assert(err.message() == "crash: os test: deliberate")
 }
+
+test "output captures stdout and the exit code" {
+    string out, int code, error err = output([]string{"sh", "-c", "printf 'a\\nb'; exit 4"})
+    assert(err == null)
+    assert(out == "a\nb")
+    assert(code == 4)
+    string echo, int ok, error err2 = output([]string{"echo", "hello", "world"})
+    assert(err2 == null)
+    assert(echo == "hello world\n")
+    assert(ok == 0)
+}
+
+test "output with no output and large output" {
+    string empty, int code, error err = output([]string{"true"})
+    assert(err == null)
+    assert(empty == "")
+    assert(code == 0)
+    // More than a pipe buffer: the parent must read while the child writes.
+    string big, int code2, error err2 = output([]string{"sh", "-c", "i=0; while [ $i -lt 20000 ]; do echo 0123456789; i=$((i+1)); done"})
+    assert(err2 == null)
+    assert(code2 == 0)
+    assert(big.len() == 220000)
+}
+
+test "output reports a signal as 128 plus the signal" {
+    _, int code, error err = output([]string{"sh", "-c", "kill -9 $$"})
+    assert(err == null)
+    assert(code == 137)
+}
+
+test "output of a missing program" {
+    _, _, error err = output([]string{"seed-no-such-program"})
+    assert(err != null)
+    assert(err.message() == "os.output: seed-no-such-program: no such file or directory")
+    _, _, error err2 = output([]string{"/nonexistent-seed/prog"})
+    assert(err2 != null)
+    assert(err2.message() == "os.output: /nonexistent-seed/prog: no such file or directory")
+}
+
+fn crashOutputEmpty() {
+    _, _, _ = output([]string{})
+}
+
+test "output of an empty argv crashes" {
+    error err = group {
+        spawn crashOutputEmpty()
+    }
+    assert(err != null)
+    assert(err.message() == "crash: os.output: argv is empty")
+}
+
+test "hostname matches the hostname program" {
+    string name = try hostname()
+    assert(name != "")
+    string out, int code, error err = output([]string{"hostname"})
+    if (err == null && code == 0) {
+        assert(out.trim() == name)
+    }
+}

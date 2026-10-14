@@ -109,6 +109,6 @@ The rules are in [formatting.md](../formatting.md), and [chapter 12](12-the-comp
 
 ## The current compiler
 
-Seed is young, and the compiler doesn't do everything the language describes yet. The language itself is complete, but most of the standard library ([stdlib.md](../stdlib.md)) is not written yet: today there are the core packages `fmt`, `os`, `fs`, `errors` and `time` and the pure-Seed packages `strings`, `path`, `math`, `encoding`, `rand`, `crypto`, `json` and part of `http` (see [lib/README.md](../../lib/README.md)).
+Seed is young, and the compiler doesn't do everything the language describes yet. The language itself is complete, and so is most of the standard library ([stdlib.md](../stdlib.md)): `errors`, `fmt`, `os`, `fs`, `path`, `strings`, `math`, `rand`, `time`, `encoding`, `json` and `crypto` are written; `io`, `net` and the server and client of `http` are not yet (see [lib/README.md](../../lib/README.md)).
 
 Next: [Basics](02-basics.md).

@@ -5,18 +5,15 @@ one directory per package, imported by its name (`import "json"`). The
 compiler finds it next to its own binary (`<root>/lib`, or
 `$SEED_ROOT/lib`) and looks there before the project's own packages.
 
-- The core packages `fmt`, `os`, `fs` and `time` declare their functions
-  without a body (native functions) and implement them in C, in
-  `<pkg>/<pkg>.c`, on top of the runtime (`runtime/seed_pkg.c`,
-  `seed_task.c`). `errors` is plain Seed. They provide what
-  [docs/builtins.md](../docs/builtins.md#core-packages) lists, plus
-  `errors.wrap`, `os.crash`, `os.executable` and `os.cwd`.
-- `strings`, `path`, `math`, `encoding`, `rand`, `crypto`, `json` and `http`
-  are written in Seed (no natives yet).
-- `io`, `net`, the rest of `os`, `fs`, `time`, `math`, `rand` and `crypto`
-  (the natives listed below and in docs/stdlib.md) are still to be written.
-  How to write a native function is in
+- `fmt`, `os`, `fs`, `time`, `math`, `rand` and `crypto` have native
+  functions (declared without a body) written in C, in `<pkg>/<pkg>.c`,
+  some on top of the runtime (`runtime/seed_pkg.c`, `seed_task.c`). How to
+  write a native function is in
   [runtime/README.md](../runtime/README.md#13-native-functions).
+- `errors`, `strings`, `path`, `encoding`, `json` and `http` are plain Seed;
+  `time`, `math` and `rand` are partly Seed.
+- `io` and `net` (and `http.serve`, `get` and `send`, which need `net`) are
+  still to be written.
 
 ## Layout
 
@@ -86,18 +83,92 @@ checks it).
 | Package | Implemented | Still to do (natives, or blocked) |
 |---|---|---|
 | `errors` | everything: `new`, `wrap` | — |
-| `fmt` | `print`, `println`, `eprint`, `eprintln` (natives) | `fixed` |
-| `os` | `exit`, `crash`, `env`, `run`, `executable`, `cwd` (natives) | `output`, `hostname` |
-| `fs` | `read`, `write`, `exists`, `isDir`, `list`, `mkdir`, `remove` (natives) | `append`, `stat`, `rename`, `removeAll`, `makeTemp`, `open`, `create`, `File` |
-| `time` | the duration constants, `after`, `sleep` (natives) | `now`, `monotonic`, `date`, `fromDate`, `format`, `parse` |
+| `fmt` | everything: `print`, `println`, `eprint`, `eprintln`, `fixed` (natives) | — |
+| `os` | everything: `exit`, `crash`, `env`, `run`, `output`, `executable`, `cwd`, `hostname` (natives) | `run` and `output` are not stop points yet (runtime hooks) |
+| `fs` | everything: `read`, `write`, `append`, `exists`, `isDir`, `stat`, `list`, `mkdir`, `rename`, `remove`, `removeAll`, `makeTemp`, `open`, `create`, `File` with `readLine`, `read`, `write`, `close` (natives) | — |
+| `time` | everything: the duration constants, `now`, `monotonic`, `after`, `sleep` (natives); `Date`, `date`, `fromDate`, `format`, `parse` (Seed) | — |
 | `strings` | everything: `repeat`, `padLeft`, `padRight`, `lastIndex`, `fields`, `isDigit`, `isLetter`, `isSpace` | — |
 | `path` | everything: `join`, `clean`, `base`, `dir`, `ext` | — |
-| `math` | `pi`, `e`, `absInt`, `minInt`, `maxInt`, `powInt`, `absFloat`, `minFloat`, `maxFloat`, `isNan`, `isInf`, `inf` | `powFloat`, `sqrt`, `floor`, `ceil`, `round`, `trunc`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2`, `exp`, `log`, `log2`, `log10` |
+| `math` | everything: `pi`, `e`, `absInt`, `minInt`, `maxInt`, `powInt`, `absFloat`, `minFloat`, `maxFloat`, `isNan`, `isInf`, `inf` (Seed); `powFloat`, `sqrt`, `floor`, `ceil`, `round`, `trunc`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2`, `exp`, `log`, `log2`, `log10` (natives over libm) | — |
 | `encoding` | everything: hex, base64 (standard and URL), `urlEncode`, `urlDecode` | — |
-| `rand` | `seeded`, `Source` (SplitMix64) with `range`, `fraction`, `permutation` | `nextOs` (private native); then the package functions `range`, `fraction`, `permutation` |
-| `crypto` | `sha256`, `hmacSha256` (docs/stdlib.md makes them native; see below) | `randomBytes`, `equal` |
+| `rand` | everything: `seeded`, `Source` (SplitMix64) with `range`, `fraction`, `permutation`; the package functions `range`, `fraction`, `permutation` on the private native `nextOs` | — |
+| `crypto` | everything: `sha256`, `hmacSha256`, `randomBytes`, `equal` (natives) | — |
 | `json` | everything: `Value`, `parse`, `string`, `pretty`, all accessors | — |
 | `http` | `Request`, `Response`, `Handler`, `path`, `query`, `statusText`, the status constants, `textResponse`, `jsonResponse`; the message reader and writer for `serve`/`send` (wire.sd) | `serve`, `get`, `send` need `net` (written in Seed on top of it, not native) |
+
+### fmt
+
+`fixed(f, places)` is `snprintf("%.*f")`, which macOS and glibc round
+correctly from the exact binary value (ties to even: `fixed(2.5, 0)` is
+`"2"`, `fixed(0.125, 2)` is `"0.12"`); `nan` (of either sign), `inf` and
+`-inf` are spelled out. Crash: `fmt.fixed: places (101) must be between 0
+and 100`.
+
+### os
+
+- `output` is `run` with the child's stdout on a pipe (both ends
+  close-on-exec, so concurrent children don't inherit them); the parent
+  reads until end of file, then waits. Errors: `os.output: <program>:
+  <reason>` when it cannot start (or reading or waiting fails); crash
+  `os.output: argv is empty`.
+- `hostname` is `gethostname`; error `os.hostname: <reason>`.
+- `run` and `output` block their goroutine's thread but are not stop
+  points yet (that needs the runtime's blocking hooks).
+
+### fs
+
+- `write`, `append`, `create` use mode `0644` and `mkdir` `0755` (before
+  the umask), as docs/stdlib.md says; `write` and `mkdir` are therefore in
+  fs.c rather than calling the runtime's versions, with the same messages
+  as seed0 (`fs.mkdir("")` is `fs.mkdir: : not a directory`).
+- `append` holds a process-wide mutex around its `write` loop and opens
+  with `O_APPEND`, so appends from goroutines never interleave (tested with
+  5000-byte lines from two goroutines).
+- `stat`: `size` is `st_size`; `modified` is `st_mtim` (`st_mtimespec` on
+  macOS) in nanoseconds.
+- `rename`'s error names both paths: `fs.rename: a -> b: <reason>`.
+- `removeAll` uses `lstat`, so a symbolic link is unlinked and never
+  followed. It reads all names of a directory before removing them. An
+  error names the entry that failed: `fs.removeAll: dir/x/f: permission
+  denied`. `removeAll("")` does nothing.
+- `makeTemp` is `mkdtemp("$TMPDIR/<prefix>XXXXXX")` (trailing slashes of
+  `$TMPDIR` removed; `/tmp` when it is unset or empty).
+- **File handles.** docs/stdlib.md puts the handle table in the runtime,
+  shared with `net`; until the runtime has one, fs.c keeps its own. A
+  `File` holds the entry's id (index + 1) and the path (for messages).
+  Ids are never reused and entries are never freed (closing frees the
+  descriptor and buffer, about 100 bytes stay), so a stale copy finds its
+  own closed entry. A table mutex guards lookups and growth; each entry
+  has a mutex that makes every operation atomic (a handle sent to two
+  goroutines writes whole `write` calls). Descriptors are close-on-exec.
+- `open` fails on a directory with `is a directory`. `readLine` and `read`
+  share a buffer that is refilled 64 KiB at a time; `read` returns what is
+  buffered, or does one `read(2)`. End of file is not remembered, so a file
+  that grows can be read further. Messages: `fs.File.<method>: <path>:
+  file is open for reading only` / `writing only` / `file is closed`; crash
+  `fs.File.read: max (0) must be at least 1`.
+- File I/O is not a stop point (regular files don't block for long).
+
+### time
+
+- `now` is `CLOCK_REALTIME`; `monotonic` is the runtime's clock
+  (`CLOCK_MONOTONIC`, the one its timers use).
+- `Date`'s fields are `pub` (docs/stdlib.md now says so). `date`,
+  `fromDate`, `format` and `parse` are Seed, with Howard Hinnant's
+  days-from-civil formulas and floor division, so they work for any `int`
+  (years before 0 and beyond 9999 included; tested against Python's
+  `calendar.timegm` and with 2000 random round trips over ±3000 years).
+- `fromDate` checks month, day (leap years included), hour, minute, second
+  and nanosecond, in that order: `time.fromDate: 2026-02-29T00:00:00Z: day
+  out of range`. The subject shows the fields as given.
+- `format` crashes outside years 0–9999: `time.format: year (10000) must be
+  between 0 and 9999`.
+- `parse` is strict RFC 3339 as docs/stdlib.md describes. Errors: the
+  range reasons above, or `expected a digit`, `expected '-'`, `expected
+  'T'`, `expected ':'`, `expected 'Z' or an offset like +02:00`, `expected a
+  digit after '.'`, `more than 9 fraction digits`, `offset out of range`,
+  `unexpected text`, each followed by ` at offset N`. A leap second `:60`
+  is `second out of range`; offsets must be at most 23:59.
 
 ### strings
 
@@ -115,9 +186,17 @@ the slash), and `ext` gives `""` for the bases `"."` and `".."` and `"."` for
 
 ### math
 
-`inf()` is written in Seed (`1.0 / 0.0`, IEEE) although docs/stdlib.md lists
-it as native. `minFloat`/`maxFloat` treat `-0.0` as smaller than `0.0` and
-return `nan` if either argument is `nan`. `absFloat(-0.0)` is `0.0`.
+`inf()` is written in Seed (`1.0 / 0.0`, IEEE); docs/stdlib.md now says so.
+`minFloat`/`maxFloat` treat `-0.0` as smaller than `0.0` and return `nan`
+if either argument is `nan`. `absFloat(-0.0)` is `0.0`. The other float
+functions are one-line natives over the C library (math.c), so they give
+exactly what C99 gives: `round` is C `round` (halves away from zero),
+`sqrt(-1.0)` is `nan`, `log(0.0)` is `-inf`, `atan2(-0.0, -1.0)` is `-pi`.
+
+The exponent parameter of `powInt` and `powFloat` is `exponent`, not `exp`
+as docs/stdlib.md first had it: a parameter may not shadow a package-level
+name, and `exp` is now a function. The crash reads `math.powInt: exponent
+(-1) must not be negative`.
 
 ### encoding
 
@@ -148,28 +227,32 @@ Apple-silicon Mac (`-O2`): **about 0.5 µs per 64-bit output (2 million per
 second)**, and about 0.6 µs per `range(0, 100)`. A native `next` would be
 much faster; it can replace the Seed one without changing any output.
 
-Not done: the package functions `rand.range`, `rand.fraction` and
-`rand.permutation`, which draw from a per-goroutine generator seeded by the
-OS. They need the native `nextOs() int`. The intended shape: give `Source` a
-private `bool os` field (always false from `seeded`), make `next` return
-`nextOs()` when it is set, and write each package function as
-`Source s = Source{state: 0, os: true}` followed by the method call, so the
-algorithms exist once.
+The package functions `rand.range`, `rand.fraction` and `rand.permutation`
+draw from a per-goroutine generator: the native `nextOs()` (rand.c) is a
+thread-local SplitMix64 state (each goroutine is a thread), seeded with
+`getentropy` (or `/dev/urandom`) on the goroutine's first use. `Source` has
+a private `bool fromOs` (false from `seeded`); when it is set, `next`
+returns `nextOs()`, and each package function is
+`Source{state: 0, fromOs: true}` followed by the method call, so the
+algorithms exist once. Crash messages name the function that was called:
+`rand.range: ...` for the package function, `rand.Source.range: ...` for
+the method.
 
 ### crypto
 
-docs/stdlib.md makes `sha256` and `hmacSha256` native because "64-bit
-wrapping arithmetic is slow with growing ints". SHA-256 only needs 32-bit
-words, and the Seed version keeps every intermediate below 2^62 (a rotation
-masks before shifting left), so nothing allocates a big integer. Measured:
-**about 80 ms per MiB (~12 MiB/s)**; the one-million-`a` FIPS vector takes
-about 0.08 s and is part of the tests. That is fast enough to keep these in
-Seed; if they become native, `tests/crypto_test.sd` holds the vectors they
-must pass (FIPS 180-2 examples, padding-boundary lengths 55, 56, 63, 64, 65,
-119, 120 and 1000, and RFC 4231 cases 1, 2, 3, 4, 6 and 7).
+Everything is native (crypto.c), as docs/stdlib.md says. `sha256` and
+`hmacSha256` were first written in Seed (about 12 MiB/s); the C versions
+pass the same vectors in `tests/crypto_test.sd` (FIPS 180-2 examples,
+padding-boundary lengths 55, 56, 63, 64, 65, 119, 120 and 1000, the
+one-million-`a` vector, and RFC 4231 cases 1, 2, 3, 4, 6 and 7).
 
-`randomBytes` (OS randomness) and `equal` (constant time, kept native so
-that no optimiser can make it exit early) are left native, as the doc says.
+- `randomBytes(n)` uses `getentropy` in 256-byte pieces, falling back to
+  `/dev/urandom`. Crashes: `crypto.randomBytes: n (-1) must not be
+  negative`, and `crypto.randomBytes: the OS provided no randomness:
+  <reason>`.
+- `equal` returns `false` at once when the lengths differ; otherwise it ORs
+  the XOR of every pair of bytes through a `volatile` accumulator, so the
+  time depends only on the length.
 
 ### json
 

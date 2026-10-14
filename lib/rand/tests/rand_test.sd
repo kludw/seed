@@ -136,3 +136,99 @@ test "permutation negative crashes" {
     assert(err != null)
     assert(err.message() == "crash: rand.Source.permutation: n (-1) must not be negative")
 }
+
+test "os generator range" {
+    for (int i = 0; i < 1000; i++) {
+        int x = range(-3, 4)
+        assert(x >= -3 && x < 4)
+    }
+    assert(range(7, 8) == 7)
+    // Every value of a small range turns up.
+    []int counts = []int{0, 0, 0, 0}
+    for (int i = 0; i < 400; i++) {
+        counts[range(0, 4)]++
+    }
+    for (int i = 0; i < 4; i++) {
+        assert(counts[i] > 40)
+    }
+    // Ranges wider than 64 bits.
+    int big = 1 << 100
+    for (int i = 0; i < 20; i++) {
+        int x = range(-big, big)
+        assert(x >= -big && x < big)
+    }
+}
+
+test "os generator outputs 64 bits" {
+    bool high = false
+    for (int i = 0; i < 64; i++) {
+        int x = nextOs()
+        assert(x >= 0 && x <= 0xffffffffffffffff)
+        if (x >= 1 << 63) {
+            high = true
+        }
+    }
+    assert(high)
+}
+
+test "os generator fraction" {
+    float sum = 0.0
+    for (int i = 0; i < 1000; i++) {
+        float f = fraction()
+        assert(f >= 0.0 && f < 1.0)
+        sum = sum + f
+    }
+    assert(sum > 400.0 && sum < 600.0)
+}
+
+test "os generator permutation" {
+    assert(permutation(0) == []int{})
+    assert(permutation(1) == []int{0})
+    []int p = permutation(50)
+    []int sorted = p
+    sorted.sort()
+    []int want = []int{}
+    for (int i = 0; i < 50; i++) {
+        want.push(i)
+    }
+    assert(sorted == want)
+    assert(p != want || permutation(50) != want)
+}
+
+fn randTestDraw(chan int out) {
+    out.send(nextOs())
+}
+
+test "each goroutine has its own generator" {
+    chan int out = chan int(2)
+    error err = group {
+        spawn randTestDraw(out)
+        spawn randTestDraw(out)
+    }
+    assert(err == null)
+    int? a = out.receive()
+    int? b = out.receive()
+    assert(a != null && b != null)
+    assert(a != b)
+}
+
+fn crashOsRangeEmpty() {
+    fmt.println(range(5, 5).string())
+}
+
+fn crashOsPermutationNegative() {
+    fmt.println(permutation(-2).len().string())
+}
+
+test "package functions crash with their own names" {
+    error err = group {
+        spawn crashOsRangeEmpty()
+    }
+    assert(err != null)
+    assert(err.message() == "crash: rand.range: lo (5) must be less than hi (5)")
+    error err2 = group {
+        spawn crashOsPermutationNegative()
+    }
+    assert(err2 != null)
+    assert(err2.message() == "crash: rand.permutation: n (-2) must not be negative")
+}

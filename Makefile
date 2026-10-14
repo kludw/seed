@@ -10,6 +10,9 @@ SEED_LIBS = -lm -lpthread
 SEED_SRC = $(sort $(wildcard compiler/*.sd))
 # The runtime that the compiler pastes into every generated program.
 RUNTIME_SRC = $(wildcard runtime/*.h runtime/seed_*.c)
+# The standard library packages the compiler imports are compiled into it
+# (their natives are pasted into the generated C), so they are inputs too.
+LIB_SRC = $(wildcard lib/*/*.sd lib/*/*.c)
 
 .PHONY: all test0 test test-full test-leaks test-fmt test-lib verify clean
 
@@ -40,13 +43,13 @@ build/stage1.c: build/seed0 $(SEED_SRC)
 build/seed1: build/stage1.c
 	$(CC) $(SEED_CFLAGS) -o $@ build/stage1.c $(SEED_LIBS)
 
-build/stage2.c: build/seed1 $(SEED_SRC) $(RUNTIME_SRC)
+build/stage2.c: build/seed1 $(SEED_SRC) $(RUNTIME_SRC) $(LIB_SRC)
 	build/seed1 c $(SEED_SRC) > $@
 
 build/seed2: build/stage2.c
 	$(CC) $(SEED_CFLAGS) -o $@ build/stage2.c $(SEED_LIBS)
 
-build/stage3.c: build/seed2 $(SEED_SRC) $(RUNTIME_SRC)
+build/stage3.c: build/seed2 $(SEED_SRC) $(RUNTIME_SRC) $(LIB_SRC)
 	build/seed2 c $(SEED_SRC) > $@
 
 verify: build/stage2.c build/stage3.c

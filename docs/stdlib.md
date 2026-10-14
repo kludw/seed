@@ -198,15 +198,18 @@ Files and directories. Most programs only need the whole-file functions; `fs.Fil
 
 ```
 pub type Info struct {
-    int size        // in bytes; for a directory, whatever the OS reports
-    bool isDir
-    int modified    // last modification, Unix nanoseconds
+    pub int size        // in bytes; for a directory, whatever the OS reports
+    pub bool isDir
+    pub int modified    // last modification, Unix nanoseconds
 }
 
 pub type File struct {
-    // opaque: a handle, see "Handles" under net
+    // opaque: a handle, see "Handles" under net (private fields: the id,
+    // and the path for error messages)
 }
 ```
+
+`Info`'s fields are `pub` (fields are private unless marked, see [Spec changes](#spec-changes-this-design-relies-on) 2), so a program can read them.
 
 ### Functions
 
@@ -220,11 +223,11 @@ pub type File struct {
 | `fs.stat(string path) (Info, error)` | Size, kind and modification time, following symbolic links. |
 | `fs.list(string dir) ([]string, error)` | Entry names (not paths), sorted by bytes, without `.` and `..`. |
 | `fs.mkdir(string path) error` | Creates the directory and any missing parents, with mode `0755`. Succeeds if it already exists as a directory. |
-| `fs.rename(string from, string to) error` | Moves or renames, replacing `to` if it is a file. Both must be on the same file system. |
+| `fs.rename(string from, string to) error` | Moves or renames, replacing `to` if it is a file. Both must be on the same file system. The error names both paths: `fs.rename: a.txt -> b/a.txt: no such file or directory`. |
 | `fs.remove(string path) error` | Removes a file or an empty directory. Fails if nothing is there. |
-| `fs.removeAll(string path) error` | Removes `path` and everything inside it. Does not follow symbolic links: a link is removed, not what it points to. Succeeds if nothing is there. |
-| `fs.makeTemp(string prefix) (string, error)` | Creates a new, empty directory in `$TMPDIR` (or `/tmp` when it is unset), named `prefix` followed by random characters, and returns its path. The caller removes it with `fs.removeAll`. |
-| `fs.open(string path) (File, error)` | Opens an existing file for reading. |
+| `fs.removeAll(string path) error` | Removes `path` and everything inside it. Does not follow symbolic links: a link is removed, not what it points to. Succeeds if nothing is there. The error names the entry that could not be removed. |
+| `fs.makeTemp(string prefix) (string, error)` | Creates a new, empty directory in `$TMPDIR` (or `/tmp` when it is unset or empty), named `prefix` followed by six random characters, and returns its path. The caller removes it with `fs.removeAll`. |
+| `fs.open(string path) (File, error)` | Opens an existing file for reading. Fails on a directory with `is a directory`. |
 | `fs.create(string path) (File, error)` | Creates a file, or empties an existing one, and opens it for writing. New files get mode `0644`. |
 
 ### File methods
@@ -238,7 +241,9 @@ pub type File struct {
 
 - Reading a file opened with `fs.create`, or writing one opened with `fs.open`, returns an error: `fs.File.write: notes.txt: file is open for reading only`.
 - `readLine` and `read` share a buffer, so they can be mixed.
-- Every operation after `close()` returns an error ending in `file is closed`.
+- Reading a file opened with `fs.create` gives `fs.File.read: notes.txt: file is open for writing only` (or `fs.File.readLine: ...`).
+- Every operation after `close()` returns an error ending in `file is closed`: `fs.File.readLine: notes.txt: file is closed`.
+- `f.read(0)` crashes with `fs.File.read: max (0) must be at least 1`.
 - Paths are passed to the OS unchanged. Relative paths are relative to the current directory.
 
 ```
@@ -319,7 +324,7 @@ Numeric functions and constants. Float functions follow IEEE 754 and C99: they r
 | `math.absInt(int x) int` | The absolute value. |
 | `math.minInt(int a, int b) int` | The smaller of the two. |
 | `math.maxInt(int a, int b) int` | The larger of the two. |
-| `math.powInt(int base, int exp) int` | `base` to the power `exp`, exactly (integers grow). `math.powInt(0, 0)` is 1. Crashes if `exp` is negative. |
+| `math.powInt(int base, int exponent) int` | `base` to the power `exponent`, exactly (integers grow). `math.powInt(0, 0)` is 1. Crashes if `exponent` is negative: `math.powInt: exponent (-1) must not be negative`. |
 
 ### Float functions
 
@@ -328,7 +333,7 @@ Numeric functions and constants. Float functions follow IEEE 754 and C99: they r
 | `math.absFloat(float x) float` | The absolute value. |
 | `math.minFloat(float a, float b) float` | The smaller; `nan` if either is `nan`. `-0.0` is smaller than `0.0`. |
 | `math.maxFloat(float a, float b) float` | The larger; `nan` if either is `nan`. |
-| `math.powFloat(float base, float exp) float` | C `pow`. |
+| `math.powFloat(float base, float exponent) float` | C `pow`. |
 | `math.sqrt(float x) float` | Square root. |
 | `math.floor(float x) float` | Rounds down. |
 | `math.ceil(float x) float` | Rounds up. |
@@ -346,6 +351,7 @@ Numeric functions and constants. Float functions follow IEEE 754 and C99: they r
 
 - The rounding functions return `float`, because the result may be too large or not finite. Convert explicitly: `int(math.round(x))`, which crashes on `nan` and infinities as `int(f)` always does.
 - There is no `math.nan()`. A program that needs to mark "no value" uses `float?`.
+- The parameter of `powInt` and `powFloat` is called `exponent`, not `exp`: a parameter may not shadow a package-level name, and `math.exp` is one.
 
 ```
 float dist = math.sqrt(dx * dx + dy * dy)
@@ -421,15 +427,17 @@ There is no `day`: a day is not always 24 hours once time zones exist, so the li
 
 ```
 pub type Date struct {
-    int year         // e.g. 2026
-    int month        // 1–12
-    int day          // 1–31
-    int hour         // 0–23
-    int minute       // 0–59
-    int second       // 0–59 (leap seconds are not represented)
-    int nanosecond   // 0–999999999
+    pub int year         // e.g. 2026
+    pub int month        // 1–12
+    pub int day          // 1–31
+    pub int hour         // 0–23
+    pub int minute       // 0–59
+    pub int second       // 0–59 (leap seconds are not represented)
+    pub int nanosecond   // 0–999999999
 }
 ```
+
+The fields are `pub`, so that a program can read a `Date` and build one for `time.fromDate`.
 
 ### Functions
 
@@ -440,13 +448,14 @@ pub type Date struct {
 | `time.sleep(int d)` | Pauses the goroutine for at least `d` nanoseconds. Returns at once if `d <= 0`. |
 | `time.after(int d) chan int` | A channel that receives `time.now()` once, `d` nanoseconds from now, and is then closed. Meant for timeouts in `select`. |
 | `time.date(int t) Date` | The UTC calendar date and time of `t`. Works for any `t`, including before 1970 (proleptic Gregorian calendar). |
-| `time.fromDate(Date d) (int, error)` | The Unix time of a UTC date. Fails if any field is out of range, including days that don't exist (February 30). |
-| `time.format(int t) string` | `t` in RFC 3339, in UTC: `"2026-10-13T08:30:00Z"`. Fractional seconds appear only when non-zero, without trailing zeros: `"2026-10-13T08:30:00.25Z"`. Crashes if the year is outside 0–9999. |
+| `time.fromDate(Date d) (int, error)` | The Unix time of a UTC date. Fails if any field is out of range, including days that don't exist (February 30): `time.fromDate: 2026-02-30T00:00:00Z: day out of range`. Any year is accepted. |
+| `time.format(int t) string` | `t` in RFC 3339, in UTC: `"2026-10-13T08:30:00Z"`. Fractional seconds appear only when non-zero, without trailing zeros: `"2026-10-13T08:30:00.25Z"`. Crashes if the year is outside 0–9999: `time.format: year (10000) must be between 0 and 9999`. |
 | `time.parse(string s) (int, error)` | Reads an RFC 3339 date-time, `YYYY-MM-DDTHH:MM:SS[.fraction](Z|±HH:MM)`, and returns its Unix time. `T` may also be `t` or a space, `Z` may be `z`. Up to 9 fraction digits. Offsets are applied, so `"2026-10-13T10:30:00+02:00"` and `"2026-10-13T08:30:00Z"` give the same `int`. |
 
 - `time.sleep` and a receive on a `time.after` channel are stop points: a goroutine whose group is stopped wakes up and stops.
 - `time.after` has a buffer of one and is closed after its value, so a timer nobody reads never blocks anything.
 - There is no `time.since(t)`; write `time.monotonic() - start`.
+- `time.parse` errors name the text and either the field out of range (`month out of range`, `day out of range`, `hour out of range`, `minute out of range`, `second out of range`) or what was expected where: `time.parse: 2026-10-13: expected 'T' at offset 10`, `expected a digit at offset 5`, `expected 'Z' or an offset like +02:00 at offset 19`, `more than 9 fraction digits at offset 29`, `offset out of range at offset 20`, `unexpected text at offset 20`. A leap second (`:60`) is `second out of range`.
 
 ```
 int start = time.monotonic()
@@ -806,7 +815,7 @@ pub fn (Conn c) read(int max) (string?, error)
 - The compiler emits a call to a C function with a fixed name: `sd_lib_<pkg>_<name>` for functions and `sd_lib_<pkg>_<Type>_<method>` for methods (`sd_lib_math_sqrt`, `sd_lib_net_Conn_read`). Arguments and results use the runtime's normal C representation of each Seed type; with several results, the last one (normally the `error`) is returned and the others are written through out-pointers after the arguments. A `mut` native method receives a pointer to the receiver. The full contract is in [runtime/README.md](../runtime/README.md#13-native-functions).
 - Errors are made with the runtime helper that `errors.new` uses, so their messages follow the format above. The native code builds the full message (`fs.read: notes.txt: no such file or directory`) from `sd_strerror(errno)` (`strerror` with a lowercase first letter).
 - **Blocking.** A native call that can wait (reading, accepting, connecting, sleeping, waiting for a child process) must call the runtime's `sd_block_begin()` and `sd_block_end()` around the wait, so that other goroutines keep running and so that a group can stop the goroutine there. `sd_block_end()` reports whether the goroutine was asked to stop; the native then cleans up (kills a child, abandons a read) and returns to the runtime's stop path, which runs `defer`s. How this maps to the scheduler (OS threads, or an event loop with non-blocking descriptors) is the runtime's choice; the observable behaviour is the same.
-- **Handles.** The runtime keeps one process-wide table (shared by `fs` and `net`, so it belongs in `runtime/`, not in one package's C file). Each entry holds the kind (file, conn, listener), the descriptor, the read buffer used by `readLine` and `read`, the timeout, the closed flag, and a mutex that makes each operation atomic. The Seed struct holds only the entry's `int` id; ids count up and are never reused.
+- **Handles.** The runtime keeps one process-wide table (shared by `fs` and `net`, so it belongs in `runtime/`, not in one package's C file). Until the runtime has it, `fs` keeps its own table of open files in `lib/fs/fs.c`, with the same rules. Each entry holds the kind (file, conn, listener), the descriptor, the read buffer used by `readLine` and `read`, the timeout, the closed flag, and a mutex that makes each operation atomic. The Seed struct holds only the entry's `int` id; ids count up and are never reused.
 - **The core packages in seed0.** `seed0` implements `errors.new`, `fmt`, `os.exit`, `os.env`, `os.run`, `os.executable`, `os.cwd` and the `fs` functions in [builtins.md](builtins.md) directly in its runtime and does not read `lib/`. The real compiler uses `lib/`, and both must behave identically for that subset (including the error messages).
 - **Blocking natives are not stop points yet.** The runtime has no `sd_block_begin`/`sd_block_end` hooks so far; a native that blocks only blocks its own goroutine (each goroutine is a thread), but a failed group cannot stop it there.
 
@@ -821,8 +830,8 @@ pub fn (Conn c) read(int max) (string?, error)
 | `fs` | `read`, `write`, `append`, `exists`, `isDir`, `stat`, `list`, `mkdir`, `rename`, `remove`, `removeAll` (needs `lstat` to avoid following links), `makeTemp`, `open`, `create`, and the four `File` methods | — |
 | `path` | — | all |
 | `strings` | — | all |
-| `math` | `powFloat`, `sqrt`, `floor`, `ceil`, `round`, `trunc`, the six trigonometric functions, `atan2`, `exp`, `log`, `log2`, `log10`, `inf` | `pi`, `e`, the `Int` functions, `absFloat`, `minFloat`, `maxFloat`, `isNan` (`x != x`), `isInf` |
-| `rand` | `nextOs() int` (private: the next 64-bit output of the calling goroutine's generator, seeded from the OS) | `seeded`, SplitMix64 for `Source`, and `range`, `fraction` and `permutation` on top of one 64-bit step |
+| `math` | `powFloat`, `sqrt`, `floor`, `ceil`, `round`, `trunc`, the six trigonometric functions, `atan2`, `exp`, `log`, `log2`, `log10` | `pi`, `e`, the `Int` functions, `absFloat`, `minFloat`, `maxFloat`, `isNan` (`x != x`), `isInf`, `inf` (`1.0 / 0.0`) |
+| `rand` | `nextOs() int` (private: the next 64-bit output of the calling goroutine's generator, a thread-local SplitMix64 seeded from the OS) | `seeded`, SplitMix64 for `Source`, and `range`, `fraction` and `permutation` on top of one 64-bit step; the package functions run the same methods on a `Source` whose private `fromOs` flag makes the step call `nextOs` |
 | `time` | `now`, `monotonic`, `sleep`, `after` (a runtime timer that sends on and closes a channel; not a Seed goroutine) | constants, `date`, `fromDate`, `format`, `parse` (days-from-civil arithmetic) |
 | `encoding` | — | all |
 | `json` | — | all (a recursive-descent parser and printer); float printing uses the built-in `f.string()` |

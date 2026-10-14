@@ -1,0 +1,361 @@
+package fs
+
+import "os"
+import "strings"
+import "time"
+
+// A new temporary directory for one test.
+fn fsTestDir() string {
+    string? dir, error err = makeTemp("seed-fs-test-")
+    if (err != null || dir == null) {
+        os.crash("fsTestDir: makeTemp failed")
+    }
+    return dir
+}
+
+// A nullable string as text that a test can compare: null becomes "<null>".
+fn fsTestText(string? s) string {
+    if (s == null) {
+        return "<null>"
+    }
+    return s
+}
+
+test "makeTemp creates a fresh directory in TMPDIR" {
+    string a = try makeTemp("seed-fs-test-")
+    defer _ = removeAll(a)
+    string b = try makeTemp("seed-fs-test-")
+    defer _ = removeAll(b)
+    assert(a != b)
+    assert(isDir(a) && isDir(b))
+    assert(try list(a) == []string{})
+    string tmp = "/tmp"
+    string? env = os.env("TMPDIR")
+    if (env != null && env != "") {
+        tmp = env
+    }
+    for (; tmp.len() > 1 && tmp.endsWith("/"); ) {
+        tmp = tmp.slice(0, tmp.len() - 1)
+    }
+    assert(a.startsWith(tmp + "/seed-fs-test-"))
+    assert(a.len() == (tmp + "/seed-fs-test-").len() + 6)
+}
+
+test "makeTemp error" {
+    _, error err = makeTemp("no-such-dir-seed/x")
+    assert(err != null)
+    assert(err.message().startsWith("fs.makeTemp: "))
+    assert(err.message().endsWith("/no-such-dir-seed/x: no such file or directory"))
+}
+
+test "write replaces and append adds" {
+    string dir = fsTestDir()
+    defer _ = removeAll(dir)
+    string p = dir + "/log.txt"
+    try append(p, "one\n")
+    try append(p, "two\n")
+    assert(try read(p) == "one\ntwo\n")
+    try write(p, "new")
+    assert(try read(p) == "new")
+    try append(p, "")
+    assert(try read(p) == "new")
+    try write(p, "")
+    assert(try read(p) == "")
+    error err = append(dir, "x")
+    assert(err != null)
+    assert(err.message() == "fs.append: " + dir + ": is a directory")
+    error err2 = append(dir + "/missing/x", "x")
+    assert(err2 != null)
+    assert(err2.message() == "fs.append: " + dir + "/missing/x: no such file or directory")
+    error err3 = write(dir, "x")
+    assert(err3 != null)
+    assert(err3.message() == "fs.write: " + dir + ": is a directory")
+}
+
+fn fsTestAppender(string p, string line) error {
+    for (int i = 0; i < 200; i++) {
+        try append(p, line)
+    }
+    return null
+}
+
+test "appends from goroutines never interleave" {
+    string dir = fsTestDir()
+    defer _ = removeAll(dir)
+    string p = dir + "/shared.txt"
+    string a = strings.repeat("a", 5000) + "\n"
+    string b = strings.repeat("b", 5000) + "\n"
+    try group {
+        spawn fsTestAppender(p, a)
+        spawn fsTestAppender(p, b)
+    }
+    []string lines = (try read(p)).split("\n")
+    assert(lines.len() == 401)
+    for (int i = 0; i < 400; i++) {
+        assert(lines[i] == a.trim() || lines[i] == b.trim())
+    }
+}
+
+test "stat" {
+    string dir = fsTestDir()
+    defer _ = removeAll(dir)
+    int before = time.now()
+    try write(dir + "/f", "12345")
+    Info info = try stat(dir + "/f")
+    assert(info.size == 5)
+    assert(!info.isDir)
+    // Within a minute of now, allowing for coarse file system clocks.
+    assert(info.modified > before - time.minute)
+    assert(info.modified < time.now() + time.minute)
+    Info d = try stat(dir)
+    assert(d.isDir)
+    _, error err = stat(dir + "/missing")
+    assert(err != null)
+    assert(err.message() == "fs.stat: " + dir + "/missing: no such file or directory")
+}
+
+test "rename" {
+    string dir = fsTestDir()
+    defer _ = removeAll(dir)
+    try write(dir + "/a", "A")
+    try write(dir + "/b", "B")
+    try rename(dir + "/a", dir + "/b")
+    assert(!exists(dir + "/a"))
+    assert(try read(dir + "/b") == "A")
+    try mkdir(dir + "/sub")
+    try rename(dir + "/b", dir + "/sub/c")
+    assert(try read(dir + "/sub/c") == "A")
+    try rename(dir + "/sub", dir + "/moved")
+    assert(try read(dir + "/moved/c") == "A")
+    error err = rename(dir + "/nothing", dir + "/x")
+    assert(err != null)
+    assert(err.message() == "fs.rename: " + dir + "/nothing -> " + dir + "/x: no such file or directory")
+}
+
+test "removeAll removes a tree and not what links point to" {
+    string dir = fsTestDir()
+    defer _ = removeAll(dir)
+    try mkdir(dir + "/keep")
+    try write(dir + "/keep/precious", "p")
+    try mkdir(dir + "/tree/a/b/c")
+    try write(dir + "/tree/a/b/c/deep", "d")
+    try write(dir + "/tree/a/f1", "1")
+    try write(dir + "/tree/f2", "2")
+    int code = try os.run([]string{"ln", "-s", dir + "/keep", dir + "/tree/link"})
+    assert(code == 0)
+    try removeAll(dir + "/tree")
+    assert(!exists(dir + "/tree"))
+    assert(try read(dir + "/keep/precious") == "p")
+    // Nothing there is not an error; a single file is removed.
+    try removeAll(dir + "/tree")
+    try removeAll(dir + "/keep/precious")
+    assert(!exists(dir + "/keep/precious"))
+    try removeAll("")
+}
+
+test "removeAll reports what it cannot remove" {
+    string dir = fsTestDir()
+    defer _ = removeAll(dir)
+    try mkdir(dir + "/locked/inner")
+    try write(dir + "/locked/inner/f", "x")
+    int code = try os.run([]string{"chmod", "555", dir + "/locked/inner"})
+    assert(code == 0)
+    error err = removeAll(dir + "/locked")
+    int code2 = try os.run([]string{"chmod", "755", dir + "/locked/inner"})
+    assert(code2 == 0)
+    // Root may remove anything; everybody else gets permission denied.
+    if (err != null) {
+        assert(err.message() == "fs.removeAll: " + dir + "/locked/inner/f: permission denied")
+    }
+}
+
+test "mkdir mode and errors" {
+    string dir = fsTestDir()
+    defer _ = removeAll(dir)
+    try write(dir + "/file", "")
+    error err = mkdir(dir + "/file")
+    assert(err != null)
+    assert(err.message() == "fs.mkdir: " + dir + "/file: not a directory")
+    error err2 = mkdir(dir + "/file/sub")
+    assert(err2 != null)
+    assert(err2.message() == "fs.mkdir: " + dir + "/file/sub: not a directory")
+    error err3 = mkdir("")
+    assert(err3 != null)
+    assert(err3.message() == "fs.mkdir: : not a directory")
+}
+
+test "create, write, open and readLine" {
+    string dir = fsTestDir()
+    defer _ = removeAll(dir)
+    string p = dir + "/lines.txt"
+    File w = try create(p)
+    try w.write("first\r\n")
+    try w.write("")
+    try w.write("second\n\nfourth\r")
+    w.close()
+    w.close()
+    assert(try read(p) == "first\r\nsecond\n\nfourth\r")
+    File r = try open(p)
+    defer r.close()
+    assert(fsTestText(try r.readLine()) == "first")
+    assert(fsTestText(try r.readLine()) == "second")
+    assert(fsTestText(try r.readLine()) == "")
+    assert(fsTestText(try r.readLine()) == "fourth\r")
+    assert(try r.readLine() == null)
+    assert(try r.readLine() == null)
+    assert(try r.read(10) == null)
+}
+
+test "create empties an existing file" {
+    string dir = fsTestDir()
+    defer _ = removeAll(dir)
+    string p = dir + "/f"
+    try write(p, "old contents")
+    File f = try create(p)
+    f.close()
+    assert(try read(p) == "")
+    File e = try open(p)
+    assert(try e.readLine() == null)
+    e.close()
+}
+
+test "read and readLine share a buffer" {
+    string dir = fsTestDir()
+    defer _ = removeAll(dir)
+    string p = dir + "/mix"
+    try write(p, "abc\ndefgh\nij")
+    File f = try open(p)
+    defer f.close()
+    assert(fsTestText(try f.read(2)) == "ab")
+    assert(fsTestText(try f.readLine()) == "c")
+    assert(fsTestText(try f.read(3)) == "def")
+    assert(fsTestText(try f.read(100)) == "gh\nij")
+    assert(try f.read(1) == null)
+    assert(try f.readLine() == null)
+}
+
+test "large file in pieces" {
+    string dir = fsTestDir()
+    defer _ = removeAll(dir)
+    string p = dir + "/big"
+    File w = try create(p)
+    for (int i = 0; i < 20000; i++) {
+        try w.write(i.string() + "\n")
+    }
+    w.close()
+    File r = try open(p)
+    defer r.close()
+    for (int i = 0; i < 20000; i++) {
+        string? line = try r.readLine()
+        assert(fsTestText(line) == i.string())
+    }
+    assert(try r.readLine() == null)
+    File r2 = try open(p)
+    defer r2.close()
+    int total = 0
+    for (;;) {
+        string? piece = try r2.read(1000)
+        if (piece == null) {
+            break
+        }
+        assert(piece.len() >= 1 && piece.len() <= 1000)
+        total = total + piece.len()
+    }
+    assert(total == (try read(p)).len())
+    // A line longer than the read buffer.
+    string long = strings.repeat("x", 200000)
+    try write(p, long + "\nend")
+    File r3 = try open(p)
+    defer r3.close()
+    assert(fsTestText(try r3.readLine()) == long)
+    assert(fsTestText(try r3.readLine()) == "end")
+}
+
+test "file errors" {
+    string dir = fsTestDir()
+    defer _ = removeAll(dir)
+    _, error e1 = open(dir + "/missing")
+    assert(e1 != null)
+    assert(e1.message() == "fs.open: " + dir + "/missing: no such file or directory")
+    _, error e2 = open(dir)
+    assert(e2 != null)
+    assert(e2.message() == "fs.open: " + dir + ": is a directory")
+    _, error e3 = create(dir + "/no/such/file")
+    assert(e3 != null)
+    assert(e3.message() == "fs.create: " + dir + "/no/such/file: no such file or directory")
+    _, error e4 = create(dir)
+    assert(e4 != null)
+    assert(e4.message() == "fs.create: " + dir + ": is a directory")
+    string p = dir + "/f"
+    File w = try create(p)
+    _, error e5 = w.readLine()
+    assert(e5 != null)
+    assert(e5.message() == "fs.File.readLine: " + p + ": file is open for writing only")
+    _, error e6 = w.read(1)
+    assert(e6 != null)
+    assert(e6.message() == "fs.File.read: " + p + ": file is open for writing only")
+    w.close()
+    File r = try open(p)
+    error e7 = r.write("x")
+    assert(e7 != null)
+    assert(e7.message() == "fs.File.write: " + p + ": file is open for reading only")
+    File copy = r
+    assert(copy == r)
+    r.close()
+    _, error e8 = copy.readLine()
+    assert(e8 != null)
+    assert(e8.message() == "fs.File.readLine: " + p + ": file is closed")
+    _, error e9 = r.read(5)
+    assert(e9 != null)
+    assert(e9.message() == "fs.File.read: " + p + ": file is closed")
+    error e10 = w.write("x")
+    assert(e10 != null)
+    assert(e10.message() == "fs.File.write: " + p + ": file is closed")
+    // Ids are not reused: a new file does not revive a closed handle.
+    File again = try open(p)
+    defer again.close()
+    assert(again != r)
+    _, error e11 = r.readLine()
+    assert(e11 != null)
+}
+
+fn fsTestReadZero(File f) {
+    _, _ = f.read(0)
+}
+
+test "read with max below 1 crashes" {
+    string dir = fsTestDir()
+    defer _ = removeAll(dir)
+    try write(dir + "/f", "x")
+    File f = try open(dir + "/f")
+    defer f.close()
+    error err = group {
+        spawn fsTestReadZero(f)
+    }
+    assert(err != null)
+    assert(err.message() == "crash: fs.File.read: max (0) must be at least 1")
+}
+
+fn fsTestWriter(File f, string line) error {
+    for (int i = 0; i < 100; i++) {
+        try f.write(line)
+    }
+    return null
+}
+
+test "a handle sent to goroutines writes atomically" {
+    string dir = fsTestDir()
+    defer _ = removeAll(dir)
+    string p = dir + "/shared"
+    File f = try create(p)
+    try group {
+        spawn fsTestWriter(f, strings.repeat("a", 3000) + "\n")
+        spawn fsTestWriter(f, strings.repeat("b", 3000) + "\n")
+    }
+    f.close()
+    []string lines = (try read(p)).split("\n")
+    assert(lines.len() == 201)
+    for (int i = 0; i < 200; i++) {
+        assert(lines[i].len() == 3000)
+    }
+}
