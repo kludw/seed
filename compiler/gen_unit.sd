@@ -35,6 +35,7 @@ fn (Gen g) mut genUnits([]string natives) []Unit {
     g.genTypes()
     g.computeModSets()
     g.findFastFns()
+    g.findPreemptFns()
     g.genProtos()
     []Unit out = []Unit{}
     for (int p = 1; p < g.c.ast.pkgs.len(); p++) {

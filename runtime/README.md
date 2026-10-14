@@ -655,7 +655,11 @@ most that many run at once.
   half of another P's queue (and, after a short sleep, its `runnext`, if
   that P ran nothing meanwhile); without anything to steal it gives its P
   back and sleeps. Readying a goroutine wakes a sleeping M only when a P is
-  idle and no M is already looking for work.
+  idle and no M is already looking for work. A goroutine readied by a
+  thread without a P (the poller, a child's waiter, a foreign thread) goes
+  to the **wake-up queue**, which a P takes from before anything else when
+  its goroutine parks, ends or is preempted (it is counted with the global
+  queue, so everything that looks there sees it).
 - **Parking.** A goroutine that waits makes itself findable by its waker (a
   channel's wait queue, the group, the poller), then parks: its state goes
   from running to parked on g0, unless a waker marked it notified first, in
@@ -665,20 +669,49 @@ most that many run at once.
 - **The poller.** One thread waits in epoll (Linux, with a timerfd for the
   earliest timer) or kqueue (macOS and the BSDs) for the descriptors that
   goroutines wait on and for the timers, and readies those goroutines
-  (section 13).
+  (section 13) into the wake-up queue. It needs no P, so timers fire on
+  time however busy the Ps are; the goroutine they wake runs at the next
+  park or preemption on any P.
 - **Block sections and sysmon.** A native about to make a call that may
   block in the OS for long marks it with `sd_block_begin` /
   `sd_block_end` (`fmt` output, the file system, starting a program,
   `waitpid`, reading a regular file or stdin once it is ready). A monitor
-  thread (sysmon) checks every 20 us to 10 ms; a P whose goroutine has been
+  thread (sysmon, started by the first `sd_spawn` or block section) checks
+  every 20 us to 10 ms while a P runs or is in a block section, and sleeps
+  while every P is idle (`acquirep` wakes it); a P whose goroutine has been
   in the same block section since its last look is handed to another M, so
   however many goroutines block in the OS, the others keep running. When
   the call returns, the goroutine takes its P back, or an idle one, or
   queues itself.
-- **No preemption.** A goroutine runs until it parks, blocks or ends. A
-  goroutine that computes for a long time without a channel operation
-  keeps its CPU; the others run on the other CPUs, but with as many such
-  goroutines as CPUs, the rest wait (as in Go before 1.14).
+- **Preemption** is cooperative: the compiler puts a *preemption point*,
+  `SD_PREEMPT()` (seed.h), at the top of every loop iteration and before
+  every call that may close a cycle of calls (compiler/README.md), so a
+  goroutine that computes reaches one often. It is one relaxed load of a
+  process-wide word, `sd_preempt_req_[0]` (on a cache line of its own),
+  and a branch not taken; no thread-local storage. sysmon tracks each
+  running P's `schedtick`: when a P has run the same goroutine for 10 ms
+  (`SD_PREEMPT_NS`, Go's value) while goroutines wait to run (in its
+  queue, the global queue or the wake-up queue), it sets the P's `preempt`
+  flag and counts it in the word. While the word is not zero, preemption
+  points call `sd_preempt_` (noinline, cold), which reads the current M
+  (`tls_m()`, by the rule below), and, if the goroutine's own P was asked,
+  clears the flag and parks the goroutine with `SD_ACT_YIELD`: g0 puts it
+  at the global queue's tail (as Go's `gopreempt_m`) and the P runs what
+  is next, the wake-up queue first. A request is withdrawn when the P
+  starts another goroutine or goes idle, so a goroutine that parked meanwhile
+  is not preempted at its next point. A yield is a park, but not a stop
+  point: the goroutine is neither cancelled nor unwound there (cancellation
+  still waits for a stop point, section 10's list), so no cleanup frame
+  or defer runs, and values in C locals simply wait on its stack. Not
+  preempted: a goroutine in a block section (its P is not its to give),
+  a thread the scheduler does not run, and C code of the runtime or a
+  native, which has no preemption points (a long `sort` or big-integer
+  operation runs to its end, decision 26); while a request waits for such
+  a goroutine, the other goroutines' points take the slow path (a call
+  that returns at once). A sleeper beside more spinning
+  goroutines than CPUs wakes 10 to 20 ms late instead of when one of them
+  ends (tests/full/preempt_sleep.sd, `test_preempt` in
+  runtime/tests/test_conc.c).
 - **Threads that the scheduler does not run** (the main thread of a C test
   that calls the runtime without `sd_main`, say) get a task on first use
   and park by blocking on a condition variable; everything else works the
@@ -721,8 +754,11 @@ rule:
    functions that glibc declares `const` and that depend on the thread
    (`pthread_self`) must not be used in goroutine code.
 5. The generated code follows the rule: cleanup frames are linked into the
-   goroutine's chain (`sd_lf_top_()`, section 9) and package constants are
-   cached in goroutine-local storage (section 12).
+   goroutine's chain (`sd_lf_top_()`, section 9), package constants are
+   cached in goroutine-local storage (section 12), and preemption points
+   read a process-wide word; their slow path `sd_preempt_` finds the
+   goroutine through `tls_m()` and may move it to another thread, like any
+   other park.
 
 ## 11. Channels, select and time
 
@@ -1527,9 +1563,13 @@ Decisions made while writing the runtime (nobody was available to ask):
     about 32,000 goroutines; past a budget derived from the limit, stacks
     have no guard (their overflow is not detected) rather than spawn
     failing.
-26. **No preemption** (section 10): a goroutine keeps its CPU until it
-    parks or blocks. Preempting C code would need signals and could stop a
-    goroutine inside `malloc` or holding a lock.
+26. **Cooperative preemption** (section 10): generated code checks a
+    process-wide word at loop iterations and before calls that may recurse,
+    and yields when sysmon asked its P to. Preempting at any instruction
+    would need signals and could stop a goroutine inside `malloc`, holding a
+    lock, or with a value in no cleanup frame; the runtime's and natives' C
+    code is never preempted. A check per loop iteration costs a load and a
+    branch (docs/performance.md, "Preemption").
 27. **Thread-local state is read only through noinline functions**
     (section 10, "Thread-local storage"), and `errno` is redefined to one.
     Saving and restoring the thread's variables at each switch would not
@@ -1550,8 +1590,10 @@ Limitations and things left for later:
   default `vm.max_map_count`), new stacks have no guard (decision 25).
   `sd_spawn` ends the program with `crash: cannot start a goroutine (out of
   memory for its stack)` when no stack can be mapped.
-- No preemption: as many goroutines computing without parking as there are
-  CPUs keep the others (and timers' goroutines) waiting.
+- Preemption is only at the generated code's preemption points: a
+  goroutine inside a long runtime operation (sorting a huge list,
+  multiplying huge integers) or a native call keeps its CPU until it
+  returns to Seed code.
 - A call that blocks in the OS without a block section (a native that
   forgot it) holds up its worker until sysmon cannot help: sysmon hands off
   only Ps in block sections.
@@ -1591,9 +1633,6 @@ scheduler (M:N)"). The parts that made it work:
 
 What is left:
 
-- **Preemption** of goroutines that compute for long (section 10). Go does
-  it with signals at safe points; for generated C, a check of a
-  per-processor flag at loop back-edges would be simpler.
 - **Growable or smaller stacks.** Stacks are 8 MB reservations; a
   goroutine costs its touched pages (8 KB or more) where Go starts at
   2 KB. Stacks that move need every pointer into them known, which C does

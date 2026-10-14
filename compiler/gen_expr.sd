@@ -923,7 +923,9 @@ fn (Gen g) mut gshort(int e) string {
     int mark = g.slots.len()
     []string saved = g.out
     g.out = []string{}
+    g.pcCond++
     string b = g.gexpr(x.b)
+    g.pcCond--
     []string lines = g.out
     g.out = saved
     string op = "&&"

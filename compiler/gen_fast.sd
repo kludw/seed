@@ -290,6 +290,7 @@ fn (Gen g) mut genFast(int f) {
     g.ntmp = 0
     g.frameOn = false
     g.fastLoops = []int{}
+    g.pcStart(fd.body)
     g.emit(head + " {")
     g.indent++
     g.fastBlock(fd.body)
@@ -328,7 +329,10 @@ fn (Gen g) mut fastBlock(int b) {
     }
     Block bl = g.c.ast.blocks[b]
     for (int i = 0; i < bl.count; i++) {
-        g.fastStmt(g.c.ast.at(bl.list, i))
+        int s = g.c.ast.at(bl.list, i)
+        bool top = g.pcEnter(b, s)
+        g.fastStmt(s)
+        g.pcTop = top
     }
 }
 
@@ -396,6 +400,7 @@ fn (Gen g) mut fastStmt(int s) {
         int label = g.ntmp
         g.emit("for (;;) {")
         g.indent++
+        g.emit("SD_PREEMPT();")
         if (st.expr >= 0) {
             string fc = g.fastExpr(st.expr)
             g.emit("if (!(" + fc + ")) break;")
@@ -473,6 +478,9 @@ fn (Gen g) mut fastExpr(int e) string {
             args.push(g.fastExpr(g.c.ast.at(x.list, k)))
         }
         string r = g.newTmp()
+        if (g.callMayRecurse(i.ref)) {
+            g.preemptLine()
+        }
         g.emit("int64_t " + r + " = " + g.fastName(i.ref) + "(" + args.join(", ") + "); if (" + r + " & 1) return 1;")
         if (g.c.fnRet[i.ref] == tyBool) {
             return "(" + r + " != 0)"
@@ -496,7 +504,9 @@ fn (Gen g) mut fastBinary(int e) string {
         []string saved = g.out
         g.out = []string{}
         g.indent++
+        g.pcCond++
         string b = g.fastExpr(x.b)
+        g.pcCond--
         g.indent--
         []string lines = g.out
         g.out = saved

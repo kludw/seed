@@ -1,0 +1,270 @@
+// The C generator, continued: where the generated code checks for
+// preemption.
+//
+// The scheduler preempts a goroutine that has computed for a while without
+// parking by asking it to yield; the generated code notices with
+// SD_PREEMPT() (runtime/seed.h: one relaxed load of a process-wide word and
+// a branch not taken). Code runs for long without reaching one only in a
+// loop or a recursion, so the checks are:
+//
+//   - at the top of every loop iteration (genFor, fastStmt);
+//   - before every call that may close a cycle of calls (preemptCall): a
+//     direct call (of a function or method by name, or a deferred one) of a
+//     function in the caller's own strongly connected component of the
+//     direct call graph, and every indirect call (a function value, an
+//     interface method, sortBy's function, an error's message), which may
+//     lead anywhere;
+//   - on entry to the methods in vtables (preemptFns), which the runtime
+//     may call (comparing errors, say) from code that makes no indirect
+//     call of its own.
+//
+// Every cycle of calls is made of direct calls within one component, or
+// has an indirect edge: an explicit indirect call, checked before it, or a
+// call by the runtime, whose callee checks on entry. The check is before
+// the call rather than on the callee's entry so that the C compiler can
+// still shrink-wrap the callee (fib's leaf calls return before saving
+// registers). Direct calls only go from a package to itself or to the
+// packages it imports, so the choices for a package depend only on it and
+// the packages it imports (the cache of compiled packages relies on it).
+package main
+
+// The direct call graph and the state of Tarjan's search for its strongly
+// connected components: comp is each function's component, cyclic whether
+// it is on a cycle (its component has several functions, or it calls
+// itself).
+type CallGraph struct {
+    [][]int callees
+    []int index
+    []int low
+    []bool onStack
+    []int stack
+    int next
+    []int comp
+    []bool cyclic
+}
+
+// Computes the components of the direct call graph (g.pcComp, g.pcCyclic)
+// and the functions that check on entry (g.preemptFns).
+fn (Gen g) mut findPreemptFns() {
+    g.preemptFns = map[int]bool{}
+    int n = g.c.ast.fns.len()
+    CallGraph cg = CallGraph{callees: [][]int{}, index: []int{}, low: []int{}, onStack: []bool{}, stack: []int{}, next: 0, comp: []int{}, cyclic: []bool{}}
+    for (int f = 0; f < n; f++) {
+        g.pcCallees = []int{}
+        FnDecl fd = g.c.ast.fns[f]
+        if (fd.body >= 0) {
+            g.pcBlock(fd.body)
+        }
+        cg.callees.push(g.pcCallees)
+        cg.index.push(-1)
+        cg.low.push(0)
+        cg.onStack.push(false)
+        cg.comp.push(-1)
+        cg.cyclic.push(false)
+    }
+    for (int v = 0; v < n; v++) {
+        if (cg.index[v] < 0) {
+            cg.strong(v)
+        }
+    }
+    g.pcComp = cg.comp
+    g.pcCyclic = cg.cyclic
+    for (int i = 0; i < g.c.impls.len(); i++) {
+        Impl im = g.c.impls[i]
+        for (int j = 0; j < g.c.ifaceMethodCount(im.iface); j++) {
+            int? m = g.c.methods[methodKey(im.decl, g.c.ifaceMethodName(im.iface, j))]
+            if (m != null) {
+                g.preemptFns[m] = true
+            }
+        }
+    }
+}
+
+// Whether function f checks for preemption on entry.
+fn (Gen g) preemptsOnEntry(int f) bool {
+    return g.preemptFns[f] != null
+}
+
+// Whether a direct call of callee from the function being generated may
+// close a cycle: both are in one component, which has a cycle.
+fn (Gen g) callMayRecurse(int callee) bool {
+    int f = g.curFn
+    return f >= 0 && callee >= 0 && g.pcCyclic[f] && g.pcComp[f] == g.pcComp[callee]
+}
+
+// Whether call e (a call expression) needs a preemption check before it
+// (see above).
+fn (Gen g) callNeedsCheck(int e) bool {
+    ExprInfo i = g.c.info[e]
+    switch (i.res) {
+    case Res.Func, Res.Method:
+        return g.callMayRecurse(i.ref)
+    case Res.ValueCall, Res.IfaceMethod:
+        return true
+    case Res.Builtin:
+        return i.builtin == Builtin.SortBy || i.builtin == Builtin.Message
+    case Res.None, Res.Local, Res.Const, Res.Conv, Res.EnumNew, Res.EnumVal, Res.Field, Res.ListIndex, Res.StringIndex, Res.MapIndex:
+        return false
+    }
+}
+
+// Emits the preemption check before call e, if it needs one.
+fn (Gen g) mut preemptCall(int e) {
+    if (g.callNeedsCheck(e)) {
+        g.preemptLine()
+    }
+}
+
+// Emits a check before a call, unless one that ran earlier in the same
+// call of the function already covers it: a function makes at most one
+// check on every path through its top-level statements, so fib(n - 1) +
+// fib(n - 2) checks once. A check made while a top-level statement of the
+// function's body that runs straight through (pcTop: an expression,
+// assignment, declaration, ++/-- or return) is generated, outside the
+// right side of && and || (pcCond), runs whenever the code after it does
+// (pcSeen). The line goes straight to the output: the temporaries that the call's line moves out (Gen.moved)
+// are set to null after that line, not this one.
+fn (Gen g) mut preemptLine() {
+    if (g.pcSeen) {
+        return
+    }
+    string pad = ""
+    if (g.indent > 0) {
+        pad = spaces(g.indent * 2)
+    }
+    g.out.push(pad + "SD_PREEMPT();\n")
+    if (g.pcTop && g.pcCond == 0) {
+        g.pcSeen = true
+    }
+}
+
+// Starts a function (or a constant, body -1): no check made yet.
+fn (Gen g) mut pcStart(int body) {
+    g.pcBody = body
+    g.pcSeen = false
+    g.pcTop = false
+    g.pcCond = 0
+}
+
+// Before statement s of block b: whether s is a straight top-level
+// statement (see preemptLine). Returns the previous pcTop, to restore.
+fn (Gen g) mut pcEnter(int b, int s) bool {
+    bool prev = g.pcTop
+    StmtKind k = g.c.ast.stmts[s].kind
+    g.pcTop = b == g.pcBody && (k == StmtKind.ExprStmt || k == StmtKind.Assign || k == StmtKind.IncDec || k == StmtKind.Const || k == StmtKind.Return)
+    return prev
+}
+
+// Tarjan's algorithm from v: marks the functions of every component with
+// more than one function, or with a function that calls itself.
+fn (CallGraph cg) mut strong(int v) {
+    cg.index[v] = cg.next
+    cg.low[v] = cg.next
+    cg.next++
+    cg.stack.push(v)
+    cg.onStack[v] = true
+    []int cs = cg.callees[v]
+    for (int i = 0; i < cs.len(); i++) {
+        int w = cs[i]
+        if (w == v) {
+            cg.cyclic[v] = true
+        }
+        if (cg.index[w] < 0) {
+            cg.strong(w)
+            if (cg.low[w] < cg.low[v]) {
+                cg.low[v] = cg.low[w]
+            }
+        } else if (cg.onStack[w] && cg.index[w] < cg.low[v]) {
+            cg.low[v] = cg.index[w]
+        }
+    }
+    if (cg.low[v] != cg.index[v]) {
+        return
+    }
+    int top = cg.stack.len()
+    int first = top - 1
+    for (; cg.stack[first] != v; ) {
+        first--
+    }
+    for (int k = first; k < top; k++) {
+        cg.onStack[cg.stack[k]] = false
+        cg.comp[cg.stack[k]] = v
+        if (top - first > 1) {
+            cg.cyclic[cg.stack[k]] = true
+        }
+    }
+    cg.stack = cg.stack.slice(0, first)
+}
+
+// The walk: the direct callees with a body (g.pcCallees).
+fn (Gen g) mut pcBlock(int b) {
+    if (b < 0) {
+        return
+    }
+    Block bl = g.c.ast.blocks[b]
+    for (int i = 0; i < bl.count; i++) {
+        g.pcStmt(g.c.ast.at(bl.list, i))
+    }
+}
+
+fn (Gen g) mut pcStmt(int s) {
+    if (s < 0) {
+        return
+    }
+    Stmt st = g.c.ast.stmts[s]
+    g.pcExpr(st.expr)
+    switch (st.kind) {
+    case StmtKind.Assign:
+        for (int i = 0; i < st.count; i++) {
+            g.pcExpr(g.c.ast.targets[g.c.ast.at(st.list, i)].expr)
+        }
+    case StmtKind.Return:
+        for (int j = 0; j < st.count; j++) {
+            g.pcExpr(g.c.ast.at(st.list, j))
+        }
+    case StmtKind.If:
+        g.pcBlock(st.body)
+        g.pcStmt(st.elseIf)
+        g.pcBlock(st.els)
+    case StmtKind.For:
+        g.pcStmt(st.init)
+        g.pcBlock(st.body)
+        g.pcStmt(st.post)
+    case StmtKind.Switch, StmtKind.Select:
+        for (int k = 0; k < st.count; k++) {
+            Case cs = g.c.ast.cases[g.c.ast.at(st.list, k)]
+            for (int l = 0; l < cs.labelCount; l++) {
+                g.pcExpr(g.c.ast.labels[g.c.ast.at(cs.labels, l)].expr)
+            }
+            g.pcStmt(cs.comm)
+            g.pcBlock(cs.body)
+        }
+    case StmtKind.ExprStmt, StmtKind.IncDec, StmtKind.Defer, StmtKind.Spawn, StmtKind.Assert, StmtKind.Const:
+        return
+    case StmtKind.Break, StmtKind.Continue, StmtKind.Bad:
+        return
+    }
+}
+
+fn (Gen g) mut pcExpr(int e) {
+    if (e < 0) {
+        return
+    }
+    Expr x = g.c.ast.exprs[e]
+    if (x.kind == ExprKind.Group) {
+        g.pcBlock(x.block)
+        return
+    }
+    g.pcExpr(x.a)
+    g.pcExpr(x.b)
+    for (int k = 0; k < x.count; k++) {
+        g.pcExpr(g.c.ast.at(x.list, k))
+    }
+    if (x.kind != ExprKind.Call) {
+        return
+    }
+    ExprInfo i = g.c.info[e]
+    if ((i.res == Res.Func || i.res == Res.Method) && i.ref >= 0 && g.c.ast.fns[i.ref].body >= 0 && !g.pcCallees.contains(i.ref)) {
+        g.pcCallees.push(i.ref)
+    }
+}

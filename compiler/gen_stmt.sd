@@ -33,7 +33,9 @@ fn (Gen g) mut genStmts(int b) {
         // The locals this statement may move out of (gen_move.sd).
         map[string]bool saved = g.movable
         g.movable = g.movesAt(s)
+        bool top = g.pcEnter(b, s)
         g.genStmt(s)
+        g.pcTop = top
         g.movable = saved
     }
 }
@@ -565,10 +567,11 @@ fn (Gen g) mut genIf(Stmt st) {
 
 // for (init; cond; post) { body } becomes
 //
-//   { init; for (;;) { if (!cond) break; { body } _cN:; post } }
+//   { init; for (;;) { SD_PREEMPT(); if (!cond) break; { body } _cN:; post } }
 //
 // so that the condition and the post statement can have temporaries, and
-// continue jumps to the post statement.
+// continue jumps to the post statement. SD_PREEMPT() is the preemption
+// check of every iteration (gen_preempt.sd).
 fn (Gen g) mut genFor(Stmt st) {
     g.emit("{")
     g.indent++
@@ -583,6 +586,7 @@ fn (Gen g) mut genFor(Stmt st) {
     }
     g.emit("for (;;) {")
     g.indent++
+    g.emit("SD_PREEMPT();")
     if (st.expr >= 0) {
         int mark = g.slots.len()
         string c = g.condVal(g.gexpr(st.expr), mark)
@@ -959,6 +963,15 @@ fn (Gen g) mut genDefer(Stmt st) {
     int savedIndent = g.indent
     g.out = []string{}
     g.indent = 1
+    // The thunk is a function of its own: its check is not dominated by
+    // those of the function that defers.
+    bool seen = g.pcSeen
+    bool top = g.pcTop
+    g.pcSeen = false
+    g.pcTop = false
+    g.preemptCall(e)
+    g.pcSeen = seen
+    g.pcTop = top
     string call = g.callFrom(e, evals)
     int rt = g.coreType(e)
     if (rt == tyVoid) {

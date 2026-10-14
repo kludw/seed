@@ -198,6 +198,7 @@ never return (`isNoReturn`).
 | `gen_move.sd` | gen | moving a local's value on its last use; borrowed locals and the mod sets of mut methods |
 | `gen_unit.sd` | gen | the program as one C unit per package (for the object cache of build, run and test) |
 | `gen_fast.sd` | gen | small-int versions of pure int functions, and the functions that choose between them and the general ones |
+| `gen_preempt.sd` | gen | where the generated code checks for preemption: the direct call graph's strongly connected components |
 
 ## Data structures
 
@@ -697,6 +698,42 @@ versions are the checked-at-run-time form of "the parameters are small".
   `time.second` is the constant `sd_c_time_second()`.
 - `defer ch.close()` uses the defer machinery with the channel as the one
   operand.
+
+*Preemption points* (gen_preempt.sd; runtime/README.md, "The
+scheduler"): `SD_PREEMPT()` is a relaxed load of a process-wide word and a
+branch not taken; the runtime sets the word when a goroutine has computed
+for 10 ms while others wait, and the slow path yields if it was this one.
+A goroutine runs for long only in a loop or a recursion, so the points are:
+
+- at the top of every loop iteration, before the condition (`genFor`, and
+  `fastStmt` in fast versions);
+- before every call that may close a cycle of calls (`preemptCall`): a
+  call of a function or method by name (or a deferred one, in its thunk)
+  whose callee is in the caller's own strongly connected component of the
+  direct call graph (`findPreemptFns`: Tarjan's algorithm over the calls by
+  name, including those in `defer` and `spawn`), and every indirect call
+  (function value, interface method, `sortBy`'s function, `message()` of
+  an error), which may lead anywhere;
+- on entry to the methods in vtables (`preemptsOnEntry`), which the runtime
+  calls without a call in the generated code (comparing errors, say).
+
+Every cycle of calls is either made of direct calls within one component,
+or has an explicit indirect call, or a call by the runtime into a vtable
+method. Checking before the call rather than on the callee's entry keeps
+the callee shrink-wrappable: GCC compiles fib's leaves (`n < 2`) without
+saving registers, which an entry check (a call on its cold path) prevents,
+doubling fib's time. A function checks at most once on each path through
+its top-level statements (`preemptLine`): a check made while a top-level
+statement that runs straight through (an expression, assignment,
+declaration, `++`/`--` or `return`, outside the right side of `&&`/`||`)
+is generated covers the calls after it (`pcSeen`), so `fib(n - 1) + fib(n - 2)` checks once. Direct calls only go
+from a package to itself or to those it imports, so a package's checks do
+not depend on the packages that import it (the object cache relies on a
+unit's text depending only on its package and its imports). A preemption
+point is not a stop point and crashes nothing, so `SD_PREEMPT` is in
+`safeCallSet`: a value held in a C local across one is not lost (nothing
+unwinds there), and it needs no frame field. The compiler's own C has 513 loop
+points and 570 call and entry points.
 
 Per-type helpers (`sd_rt_`/`sd_rl_` retain and release for structs and
 tuples, `sd_eq_` for struct `==`, `sd_less_` sortBy adapters) are requested

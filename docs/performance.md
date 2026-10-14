@@ -457,6 +457,86 @@ The compiler compiling itself (each compiler built by its own code
 generator): 2,266 M instructions before, 1,384 M after (-39%); wall time
 0.70x (391 ms to 273 ms, interleaved best of 11).
 
+## Preemption
+
+The M:N scheduler had no preemption: a goroutine ran until it parked. With
+8 goroutines computing on 4 CPUs, one that slept 10 ms woke after 57 to
+2,051 ms (five runs), whenever a computing goroutine happened to end; with
+`SEED_PROCS=1`, after 14.3 s. The thread-per-goroutine runtime had the
+kernel's time slices. Now (runtime/README.md, "The scheduler";
+compiler/README.md, "Preemption points"):
+
+- **The compiler** puts `SD_PREEMPT()` at the top of every loop iteration,
+  before every call that may close a cycle of calls (a call within the
+  caller's strongly connected component of the call graph, or an indirect
+  call), and on entry to vtable methods. It is a relaxed load of a
+  process-wide word and a branch not taken: `mov`, `test`, `jne` to a cold
+  call, no thread-local storage. A function checks at most once per path
+  through its top-level statements, so `fib(n - 1) + fib(n - 2)` checks
+  once.
+- **sysmon** (the monitor thread of the block sections, which now runs from
+  the first `spawn` and sleeps while every P is idle) asks a P to yield
+  when it has run the same goroutine for 10 ms while others wait; the word
+  counts the Ps asked. The slow path yields the goroutine to the global
+  queue's tail if its P was asked.
+- **The wake-up queue.** Goroutines readied by the poller (timers, sockets)
+  or another thread without a P go to a queue that a P takes from first at
+  its next park or preemption, so a timer's goroutine waits for one
+  preemption, not for a P's whole queue.
+
+The starvation program (8 goroutines spinning, one sleeping 10 ms, 4 CPUs):
+
+| | Default (4 Ps) | `SEED_PROCS=1` | `SEED_PROCS=2` |
+|---|---|---|---|
+| before | 57 to 2,051 ms | 14,175 to 14,624 ms | |
+| after | 10 to 20 ms | 15 ms | 15 ms |
+
+tests/full/preempt_sleep.sd checks that a 30 ms sleep beside 64 spinning
+goroutines ends within 200 ms of its spawn (430 ms before, 46 to 66 ms
+after, with any `SEED_PROCS`); `test_preempt` in runtime/tests/test_conc.c
+does the same in C under the sanitizers (a 10 ms sleep takes 20.6 ms).
+
+**Where the checks go, and what they cost.** A check on entry to every
+function that may recurse was the first version: `fib` took twice as long
+(0.42 to 0.83 s), because the check's cold call made GCC save registers
+on entry to every call, where before it returned from the leaves
+(`n < 2`) without touching the stack (shrink-wrapping). Checking before
+the recursive calls instead keeps the leaves as they were. What is left is
+a load and a branch per loop iteration and per recursive call. On Linux
+x86_64 (GCC 13, Xeon, 4 cores, a shared VM), against the code before
+(instructions from cachegrind; times are the mean of 20 runs of
+`perf stat`, whose run-to-run noise is 1 to 2%, and the best of 7
+interleaved runs):
+
+| Benchmark | Instructions | Mean time | Best time |
+|---|---|---|---|
+| `fib` | 0.985 | 1.03 | 1.01 |
+| `intloop` | 1.125 | 1.13 | 1.12 |
+| `json` | 1.029 | 1.07 | 0.96 |
+| `maps` | 1.005 | 1.01 | 0.95 |
+| `sort` | 1.003 | 1.00 | 1.00 |
+| `strings` | 1.007 | 1.00 | 1.04 |
+| `pingpong` | | 1.01 | 0.99 |
+| `spawn` | | 0.93 | 0.99 |
+
+`intloop` is the worst case: its loop body is 24 instructions, and the
+check adds 3 (the next section takes them back). `json`'s 3% more
+instructions are the checks of its per-character loops (its time moves by
+up to 7% either way between identical binaries). The compiler compiling
+itself: 2.9% more instructions (with the analysis that places the checks),
+the same wall time. Go pays a comparable price on every call that is not a
+leaf (its stack-bound check in the prologue, a load, a compare and a
+branch) and nothing in loops, which it preempts with signals.
+
+A note on measuring on this machine: Skylake-derived CPUs (this one is a
+Cascade Lake) penalise a jump that crosses or ends on a 32-byte boundary
+(the JCC erratum), so moving code by a few bytes changes a tight loop's
+time by up to 25%. `intloop` built as one C file runs in 0.68 s, 0.88 s
+with the checks, and 0.58 s and 0.64 s with the assembler told to avoid
+the boundaries (GNU as's `-mbranches-within-32B-boundaries`, which
+`seed build` does not pass). The instruction counts above do not depend on
+it.
+
 ## Build speed
 
 Building a program was almost all C compiler: the front end and generator

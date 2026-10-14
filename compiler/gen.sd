@@ -127,6 +127,16 @@ type Gen struct {
     map[int]bool fastFns
     []int fastCalls
     []int fastLoops
+    // Preemption checks (gen_preempt.sd): the functions that check on
+    // entry, the components of the direct call graph, and the walk's state.
+    map[int]bool preemptFns
+    []int pcComp
+    []bool pcCyclic
+    []int pcCallees
+    int pcBody
+    bool pcSeen
+    bool pcTop
+    int pcCond
     // Units (gen_unit.sd): whether the program is generated as one C file
     // per package, and the identifiers the unit being assembled refers to.
     bool split
@@ -188,6 +198,14 @@ fn newGen(Checker c) Gen {
         fastFns: map[int]bool{},
         fastCalls: []int{},
         fastLoops: []int{},
+        preemptFns: map[int]bool{},
+        pcComp: []int{},
+        pcCyclic: []bool{},
+        pcCallees: []int{},
+        pcBody: -1,
+        pcSeen: false,
+        pcTop: false,
+        pcCond: 0,
         split: false,
         refs: map[string]bool{},
     }
@@ -201,6 +219,7 @@ fn (Gen g) mut genProgram(string natives) string {
     g.genTypes()
     g.computeModSets()
     g.findFastFns()
+    g.findPreemptFns()
     g.genProtos()
     g.genConsts(-1)
     g.genFns(-1)
@@ -302,7 +321,7 @@ fn (Gen g) mut emit(string line) {
 // leaked by a crash. Everything else that is called may crash.
 fn safeCallSet() map[string]bool {
     map[string]bool m = map[string]bool{}
-    []string names = []string{"sd_int_retain", "sd_int_release", "sd_str_retain", "sd_str_release", "sd_list_retain", "sd_list_release", "sd_map_retain", "sd_map_release", "sd_box_retain", "sd_box_release", "sd_iface_retain", "sd_iface_release", "sd_chan_retain", "sd_chan_release", "sd_list_new", "sd_map_new", "sd_box_new", "sd_iface_new", "SD_LIST_PUSH", "sd_str_concat", "sd_str_concat_n", "sd_str_concat_parts", "sd_str_append", "sd_int_to_str", "sd_float_to_str", "sd_bool_to_str", "sd_byte_to_str", "sd_str_from_bytes", "SD_INT", "SD_INT_S", "SD_SMALL", "SD_STR_LIT", "SD_BOX_REF", "SD_BOX_GET", "sd_err_is_null", "sd_iface_is_null", "sd_int_is_null", "sd_str_len", "sd_list_len", "sd_map_len", "sd_str_eq", "sd_str_cmp", "sd_int_eq", "sd_int_lt", "sd_int_le", "sd_int_gt", "sd_int_ge", "sd_int_add", "sd_int_sub", "sd_int_mul", "sd_int_neg", "sd_int_and", "sd_int_or", "sd_int_xor", "sd_byte_to_int", "sd_int_to_float", "sd_iface_self", "sd_str_contains", "sd_str_starts_with", "sd_str_ends_with", "sd_defer_mark", "sd_group_begin", "sd_int_add_slow", "sd_int_sub_slow", "SD_LIKELY", "__builtin_add_overflow", "__builtin_sub_overflow"}
+    []string names = []string{"sd_int_retain", "sd_int_release", "sd_str_retain", "sd_str_release", "sd_list_retain", "sd_list_release", "sd_map_retain", "sd_map_release", "sd_box_retain", "sd_box_release", "sd_iface_retain", "sd_iface_release", "sd_chan_retain", "sd_chan_release", "sd_list_new", "sd_map_new", "sd_box_new", "sd_iface_new", "SD_LIST_PUSH", "sd_str_concat", "sd_str_concat_n", "sd_str_concat_parts", "sd_str_append", "sd_int_to_str", "sd_float_to_str", "sd_bool_to_str", "sd_byte_to_str", "sd_str_from_bytes", "SD_INT", "SD_INT_S", "SD_SMALL", "SD_STR_LIT", "SD_BOX_REF", "SD_BOX_GET", "sd_err_is_null", "sd_iface_is_null", "sd_int_is_null", "sd_str_len", "sd_list_len", "sd_map_len", "sd_str_eq", "sd_str_cmp", "sd_int_eq", "sd_int_lt", "sd_int_le", "sd_int_gt", "sd_int_ge", "sd_int_add", "sd_int_sub", "sd_int_mul", "sd_int_neg", "sd_int_and", "sd_int_or", "sd_int_xor", "sd_byte_to_int", "sd_int_to_float", "sd_iface_self", "sd_str_contains", "sd_str_starts_with", "sd_str_ends_with", "sd_defer_mark", "sd_group_begin", "sd_int_add_slow", "sd_int_sub_slow", "SD_LIKELY", "__builtin_add_overflow", "__builtin_sub_overflow", "SD_PREEMPT"}
     for (int i = 0; i < names.len(); i++) {
         m[names[i]] = true
     }
@@ -1357,6 +1376,7 @@ fn (Gen g) mut genConsts(int unit) {
         g.ntmp = 0
         g.frameOn = false
         g.varRange = map[int]IntRange{}
+        g.pcStart(-1)
         if (isLiteralKind(g.c.ast.exprs[cd.expr].kind)) {
             g.emit(head + " { return " + g.gexpr(cd.expr) + "; }")
             g.consts.push(g.out.join(""))
@@ -1568,6 +1588,7 @@ fn (Gen g) mut genFn(int f) {
     g.analyzeInts(fd.body)
     g.analyzeBorrows(fd.body)
     g.analyzeMoves(fd.body)
+    g.pcStart(fd.body)
     g.defers = g.blockHasDefer(fd.body)
     string sig = g.fnSig(f)
     if (g.isFast(f)) {
@@ -1577,6 +1598,9 @@ fn (Gen g) mut genFn(int f) {
     }
     g.emit(sig + " {")
     g.indent++
+    if (g.preemptsOnEntry(f)) {
+        g.emit("SD_PREEMPT();")
+    }
     if (g.defers) {
         g.emit("size_t _dm = sd_defer_mark();")
     }

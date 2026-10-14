@@ -287,6 +287,9 @@ struct sd_p {
   _Atomic uint32_t schedtick;    /* counts goroutines run (written by the owner) */
   uint32_t sm_tick;              /* sysmon's view of syscalltick, and when it changed */
   int64_t sm_when;
+  uint32_t sm_stick;             /* sysmon's view of schedtick, and when it changed */
+  int64_t sm_swhen;
+  _Atomic int preempt;           /* 1: the running goroutine is asked to yield (counted in sd_preempt_req_) */
   sd_p *link;                    /* in the idle list */
   sd_task *gfree;                /* finished goroutines kept for reuse */
   int ngfree;
@@ -295,7 +298,7 @@ struct sd_p {
 
 /* A worker thread. g0sp is its own stack (the scheduler context), saved
  * while it runs a goroutine. */
-enum { SD_ACT_NONE = 0, SD_ACT_PARK, SD_ACT_PARK_COUNTED, SD_ACT_EXIT, SD_ACT_BLOCKEND };
+enum { SD_ACT_NONE = 0, SD_ACT_PARK, SD_ACT_PARK_COUNTED, SD_ACT_EXIT, SD_ACT_BLOCKEND, SD_ACT_YIELD };
 
 struct sd_m {
   void *g0sp;
@@ -318,6 +321,13 @@ struct sd_m {
 static struct {
   pthread_mutex_t mu;     /* the global run queue, the idle Ps and Ms */
   sd_task *runq_head, *runq_tail;
+  /* Goroutines readied from a thread without a P (the poller's timers and
+   * descriptors, a child's waiter, a foreign thread): taken before the
+   * global queue, and by a P before its own queue, so that a wake-up runs
+   * at the next preemption even when every P is busy. Counted in runq_size
+   * too, so everything that looks at the global queue sees them. */
+  sd_task *wakeq_head, *wakeq_tail;
+  _Atomic int64_t nwake;
   _Atomic int64_t runq_size;
   sd_p *pidle;
   _Atomic int npidle;
@@ -1051,11 +1061,29 @@ static void globrunq_putbatch_locked(sd_task *head, sd_task *tail, int n) {
   atomic_fetch_add(&sched.runq_size, n);
 }
 
+/* A goroutine readied from outside the Ps, into the wake-up queue. */
+static void wakeq_put_locked(sd_task *g) {
+  g->schedlink = NULL;
+  if (sched.wakeq_tail) sched.wakeq_tail->schedlink = g;
+  else sched.wakeq_head = g;
+  sched.wakeq_tail = g;
+  atomic_fetch_add(&sched.nwake, 1);
+  atomic_fetch_add(&sched.runq_size, 1);
+}
+
+/* The wake-up queue's head, else the global queue's. */
 static sd_task *globrunq_pop_locked(void) {
-  sd_task *g = sched.runq_head;
-  if (!g) return NULL;
-  sched.runq_head = g->schedlink;
-  if (!sched.runq_head) sched.runq_tail = NULL;
+  sd_task *g = sched.wakeq_head;
+  if (g) {
+    sched.wakeq_head = g->schedlink;
+    if (!sched.wakeq_head) sched.wakeq_tail = NULL;
+    atomic_fetch_sub(&sched.nwake, 1);
+  } else {
+    g = sched.runq_head;
+    if (!g) return NULL;
+    sched.runq_head = g->schedlink;
+    if (!sched.runq_head) sched.runq_tail = NULL;
+  }
   atomic_fetch_sub(&sched.runq_size, 1);
   g->schedlink = NULL;
   return g;
@@ -1184,9 +1212,40 @@ static sd_task *globrunq_get_locked(sd_p *p, int max) {
   return g;
 }
 
+/* ------------------------------------------------------- preemption
+ *
+ * Generated code checks sd_preempt_req_[0] at the top of every loop
+ * iteration and on entry to every function that may recurse (SD_PREEMPT in
+ * seed.h): one relaxed load and a branch not taken. It counts the Ps whose
+ * goroutine sysmon asked to yield (p->preempt): sysmon asks when a P has run
+ * the same goroutine for SD_PREEMPT_NS while other goroutines wait to run.
+ * While it is not zero, every check calls sd_preempt_, which yields the
+ * calling goroutine if its own P was asked (to the global queue's tail, as
+ * Go does) and returns at once otherwise. A request is withdrawn when the P
+ * runs another goroutine or goes idle. A yield is not a stop point: the
+ * goroutine is not cancelled there, and nothing is released. */
+
+#define SD_PREEMPT_NS 10000000 /* 10 ms, as Go's forcePreemptNS */
+
+_Alignas(64) int sd_preempt_req_[16]; /* [0]: Ps asked to yield; a cache line of its own */
+
+static void preempt_request(sd_p *p) {
+  if (atomic_exchange(&p->preempt, 1) == 0) __atomic_fetch_add(&sd_preempt_req_[0], 1, __ATOMIC_SEQ_CST);
+}
+
+/* Withdraws p's request, if any (cheap when there is none). */
+static inline void preempt_clear(sd_p *p) {
+  if (SD_UNLIKELY(atomic_load_explicit(&p->preempt, memory_order_relaxed)) && atomic_exchange(&p->preempt, 0) == 1)
+    __atomic_fetch_sub(&sd_preempt_req_[0], 1, __ATOMIC_SEQ_CST);
+}
+
+static atomic_int sysmon_idle; /* sysmon sleeps until a P runs or a block section begins */
+static void sysmon_wake(void);
+
 /* ------------------------------------------------------- idle Ps and Ms */
 
 static void pidle_put_locked(sd_p *p) {
+  preempt_clear(p);
   atomic_store_explicit(&p->status, SD_P_IDLE, memory_order_release);
   p->link = sched.pidle;
   sched.pidle = p;
@@ -1204,7 +1263,9 @@ static sd_p *pidle_get_locked(void) {
 
 static void acquirep(sd_m *m, sd_p *p) {
   m->p = p;
-  atomic_store_explicit(&p->status, SD_P_RUNNING, memory_order_release);
+  /* sequentially consistent, against sysmon going to sleep (sysmon_main) */
+  atomic_store(&p->status, SD_P_RUNNING);
+  if (atomic_load(&sysmon_idle)) sysmon_wake();
 }
 
 static void *m_main(void *arg);
@@ -1304,15 +1365,16 @@ static void handoffp(sd_p *p) {
   pthread_mutex_unlock(&sched.mu);
 }
 
-/* Makes g runnable: on the current P (to run next), or on the global queue
- * from a thread without one. */
+/* Makes g runnable: on the current P (to run next), or on the wake-up
+ * queue from a thread without one (the poller, say), which a P takes
+ * before anything else when its goroutine parks or is preempted. */
 static void ready(sd_task *g) {
   sd_m *m = tls_m();
   if (m && m->p && atomic_load_explicit(&m->p->status, memory_order_relaxed) == SD_P_RUNNING) {
     runq_put(m->p, g, true);
   } else {
     pthread_mutex_lock(&sched.mu);
-    globrunq_put_locked(g);
+    wakeq_put_locked(g);
     pthread_mutex_unlock(&sched.mu);
   }
   wakep();
@@ -1421,7 +1483,9 @@ static sd_task *find_runnable(sd_m *m) {
 top:;
   sd_p *p = m->p;
   sd_task *g;
-  if (atomic_load_explicit(&p->schedtick, memory_order_relaxed) % 61 == 0 && atomic_load_explicit(&sched.runq_size, memory_order_relaxed) > 0) {
+  if ((atomic_load_explicit(&sched.nwake, memory_order_relaxed) > 0 ||
+       atomic_load_explicit(&p->schedtick, memory_order_relaxed) % 61 == 0) &&
+      atomic_load_explicit(&sched.runq_size, memory_order_relaxed) > 0) {
     pthread_mutex_lock(&sched.mu);
     g = globrunq_get_locked(p, 1);
     pthread_mutex_unlock(&sched.mu);
@@ -1526,6 +1590,12 @@ static sd_task *handle_act(sd_m *m, sd_task *g) {
   case SD_ACT_EXIT:
     goroutine_exit_g0(g);
     return NULL;
+  case SD_ACT_YIELD:
+    /* g was preempted: to the global queue's tail, behind what waits. */
+    pthread_mutex_lock(&sched.mu);
+    globrunq_put_locked(g);
+    pthread_mutex_unlock(&sched.mu);
+    return NULL;
   case SD_ACT_BLOCKEND: {
     /* g left a block section and its P is gone: run it on an idle P, or
      * queue it for the next one. */
@@ -1557,6 +1627,7 @@ static SD_NORETURN void schedule(sd_m *m) {
     while (g) {
       m->curg = g;
       tls_set_task(g);
+      preempt_clear(m->p); /* a request was for the goroutine that ran before */
       atomic_store_explicit(&m->p->schedtick, atomic_load_explicit(&m->p->schedtick, memory_order_relaxed) + 1,
                             memory_order_relaxed);
       switch_to_g(m, g);
@@ -1598,12 +1669,23 @@ static void *m_main(void *arg) {
  * longer than one sysmon tick (20 us, up to 10 ms when nothing happens),
  * sysmon hands the P to another M, so the other goroutines keep running
  * however many are blocked. When the call returns, the goroutine takes its
- * P back if it is still there, or an idle one, or queues itself. */
+ * P back if it is still there, or an idle one, or queues itself.
+ *
+ * sysmon also preempts: a P that has run the same goroutine for
+ * SD_PREEMPT_NS while goroutines wait (in its queue, the global queue or
+ * the wake-up queue) is asked to yield (preempt_request). It runs from the
+ * first spawn, and sleeps while every P is idle. */
 
 static pthread_once_t sysmon_once = PTHREAD_ONCE_INIT;
 static pthread_mutex_t sysmon_mu = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t sysmon_cv = PTHREAD_COND_INITIALIZER;
-static atomic_int sysmon_idle; /* sysmon sleeps until a block section begins */
+
+static void sysmon_wake(void) {
+  pthread_mutex_lock(&sysmon_mu);
+  atomic_store(&sysmon_idle, 0);
+  pthread_cond_signal(&sysmon_cv);
+  pthread_mutex_unlock(&sysmon_mu);
+}
 
 static void *sysmon_main(void *arg) {
   (void)arg;
@@ -1613,10 +1695,24 @@ static void *sysmon_main(void *arg) {
     struct timespec ts = {0, (long)delay};
     nanosleep(&ts, NULL);
     int64_t now = mono_ns();
-    bool insys = false, took = false;
+    bool insys = false, took = false, busy = false;
+    bool waiting = atomic_load_explicit(&sched.runq_size, memory_order_relaxed) > 0;
     for (int i = 0; i < sched.nprocs; i++) {
       sd_p *p = &sched.allp[i];
-      if (atomic_load_explicit(&p->status, memory_order_acquire) != SD_P_SYSCALL) continue;
+      int st = atomic_load_explicit(&p->status, memory_order_acquire);
+      if (st == SD_P_RUNNING) {
+        busy = true;
+        uint32_t tick = atomic_load_explicit(&p->schedtick, memory_order_relaxed);
+        if (p->sm_stick != tick) { /* another goroutine since the last look */
+          p->sm_stick = tick;
+          p->sm_swhen = now;
+        } else if (now - p->sm_swhen >= SD_PREEMPT_NS && (waiting || !runq_empty(p))) {
+          preempt_request(p);
+          p->sm_swhen = now; /* ask again in SD_PREEMPT_NS if it is still running */
+        }
+        continue;
+      }
+      if (st != SD_P_SYSCALL) continue;
       insys = true;
       uint32_t tick = atomic_load_explicit(&p->syscalltick, memory_order_relaxed);
       if (p->sm_tick != tick) { /* another block section since the last look */
@@ -1640,13 +1736,15 @@ static void *sysmon_main(void *arg) {
     } else if (++quiet > 50 && delay < 10000000) {
       delay *= 2;
     }
-    if (!insys && quiet > 200) {
-      /* Nothing in a block section for a while: sleep until one begins. */
+    if (!insys && !busy && quiet > 200) {
+      /* Every P idle for a while: sleep until one runs (acquirep) or a block
+       * section begins. sysmon_idle is set before the Ps are looked at, and
+       * acquirep marks its P running before it reads sysmon_idle (both
+       * sequentially consistent), so one of them sees the other. */
       pthread_mutex_lock(&sysmon_mu);
       atomic_store(&sysmon_idle, 1);
       bool any = false;
-      for (int i = 0; i < sched.nprocs && !any; i++)
-        any = atomic_load(&sched.allp[i].status) == SD_P_SYSCALL;
+      for (int i = 0; i < sched.nprocs && !any; i++) any = atomic_load(&sched.allp[i].status) != SD_P_IDLE;
       while (!any && atomic_load(&sysmon_idle)) pthread_cond_wait(&sysmon_cv, &sysmon_mu);
       atomic_store(&sysmon_idle, 0);
       pthread_mutex_unlock(&sysmon_mu);
@@ -1674,13 +1772,25 @@ void sd_block_begin(void) {
   pthread_once(&sysmon_once, sysmon_start);
   sd_p *p = m->p;
   atomic_fetch_add_explicit(&p->syscalltick, 1, memory_order_relaxed);
-  atomic_store_explicit(&p->status, SD_P_SYSCALL, memory_order_release);
-  if (atomic_load_explicit(&sysmon_idle, memory_order_relaxed)) {
-    pthread_mutex_lock(&sysmon_mu);
-    atomic_store(&sysmon_idle, 0);
-    pthread_cond_signal(&sysmon_cv);
-    pthread_mutex_unlock(&sysmon_mu);
-  }
+  atomic_store(&p->status, SD_P_SYSCALL);
+  if (atomic_load(&sysmon_idle)) sysmon_wake();
+}
+
+/* A preemption check found sd_preempt_req_ set (SD_PREEMPT): yields the
+ * goroutine if its P was asked to. Reads the thread's M itself (noinline),
+ * like every function that reads thread-local storage, and keeps nothing
+ * of the thread after the yield, after which the goroutine may run on
+ * another thread. Not inside a block section (the P is not the
+ * goroutine's to give up), nor on a thread the scheduler does not run. */
+SD_NOINLINE void sd_preempt_(void) {
+  sd_m *m = tls_m();
+  if (!m) return;
+  sd_task *t = m->curg;
+  sd_p *p = m->p;
+  if (!t || !p || t->blockdepth > 0 || !atomic_load_explicit(&p->preempt, memory_order_relaxed)) return;
+  if (atomic_exchange(&p->preempt, 0) != 1) return;
+  __atomic_fetch_sub(&sd_preempt_req_[0], 1, __ATOMIC_SEQ_CST);
+  mcall(t, SD_ACT_YIELD);
 }
 
 static void block_end_now(sd_task *t) {
@@ -2129,6 +2239,7 @@ void sd_spawn(sd_group *g, sd_task_fn body, const sd_type *args_type, const void
   }
   atomic_fetch_add(&sd_running, 1);
   ctx_prepare(c);
+  pthread_once(&sysmon_once, sysmon_start); /* preemption needs it from now on */
   ready(c);
 }
 

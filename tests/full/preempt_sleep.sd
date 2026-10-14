@@ -1,0 +1,54 @@
+// Preemption: a goroutine that sleeps wakes on time while more goroutines
+// than there are processors compute without ever parking. Without
+// preemption the sleeper would wait until a computing goroutine ends.
+package main
+
+import "fmt"
+import "time"
+
+const int spinners = 64
+
+// Computes until the deadline; never parks (time.monotonic does not).
+fn spin(int deadline) error {
+    int x = 0
+    for (; time.monotonic() < deadline; ) {
+        for (int i = 0; i < 20000; i++) {
+            x = (x + i) % 1000003
+        }
+    }
+    if (x < 0) {
+        fmt.println("impossible")
+    }
+    return null
+}
+
+// Sleeps 30 ms while the spinners take every processor, and reports how
+// long it took from start, before the goroutines were spawned (starting
+// takes a processor too).
+fn sleeper(int start, chan int out) error {
+    time.sleep(30 * time.millisecond)
+    out.send((time.monotonic() - start) / time.millisecond)
+    return null
+}
+
+fn main([]string args) error {
+    chan int took = chan int(1)
+    int start = time.monotonic()
+    int deadline = start + 400 * time.millisecond
+    try group {
+        spawn sleeper(start, took)
+        for (int k = 0; k < spinners; k++) {
+            spawn spin(deadline)
+        }
+    }
+    int? ms = took.receive()
+    if (ms == null) {
+        return null
+    }
+    if (ms >= 30 && ms < 200) {
+        fmt.println("the sleeper woke in time")
+    } else {
+        fmt.println("the sleeper woke after " + ms.string() + " ms")
+    }
+    return null
+}

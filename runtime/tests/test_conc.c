@@ -620,6 +620,50 @@ static void test_word_count(void) {
   sd_chan_release(partials);
 }
 
+/* ---- preemption: a sleeper wakes on time while spinners fill every P ---- */
+
+static atomic_int spin_stop;
+static atomic_long spin_rounds;
+
+static sd_err spinner(void *p) {
+  (void)p;
+  double end = now_s() + 2.0; /* a bound, in case the sleeper never wakes */
+  volatile uint64_t x = 0;
+  long rounds = 0;
+  while (!atomic_load_explicit(&spin_stop, memory_order_relaxed) && now_s() < end) {
+    for (int i = 0; i < 1000; i++) {
+      SD_PREEMPT(); /* what generated code does at the top of every loop iteration */
+      x = x * 31 + (uint64_t)i;
+    }
+    rounds++;
+  }
+  atomic_fetch_add(&spin_rounds, rounds);
+  return SD_ERR_NULL;
+}
+
+static double sleep_took;
+
+static sd_err sleeper(void *p) {
+  (void)p;
+  sd_time_sleep(SD_INT(30000000)); /* let the spinners take every P */
+  double t0 = now_s();
+  sd_time_sleep(SD_INT(10000000));
+  sleep_took = now_s() - t0;
+  atomic_store(&spin_stop, 1);
+  return SD_ERR_NULL;
+}
+
+static void test_preempt(void) {
+  atomic_store(&spin_stop, 0);
+  sd_group *g = sd_group_begin();
+  sd_spawn(g, sleeper, NULL, NULL);
+  for (int i = 0; i < 64; i++) sd_spawn(g, spinner, NULL, NULL);
+  CHECK_ERR(sd_group_wait(g), NULL);
+  CHECK(sleep_took >= 0.010 && sleep_took < 0.200);
+  CHECK(atomic_load(&spin_rounds) > 0);
+  printf("preemption: a 10 ms sleep took %.1f ms beside 64 spinning goroutines\n", sleep_took * 1e3);
+}
+
 int main(int argc, char **argv) {
   int64_t live0 = sd_live_objects();
   int64_t pp = argc > 1 ? atol(argv[1]) : 20000;
@@ -636,6 +680,7 @@ int main(int argc, char **argv) {
   test_select_cancel();
   test_pipeline();
   test_word_count();
+  test_preempt();
   int64_t live1 = sd_live_objects();
   /* Crashed and cancelled goroutines leak nothing: their cleanup frames
    * release what the unwound locals held. */

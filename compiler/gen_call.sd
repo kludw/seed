@@ -7,17 +7,17 @@ fn (Gen g) mut gcall(int e) string {
     ExprInfo i = g.c.info[e]
     switch (i.res) {
     case Res.Func, Res.ValueCall:
-        return g.finishCall(e, g.callFrom(e, g.operands(g.callOperands(e))))
+        return g.plainCall(e)
     case Res.Method:
         if (g.c.ast.fns[i.ref].recvMut) {
             return g.gmutCall(e)
         }
-        return g.finishCall(e, g.callFrom(e, g.operands(g.callOperands(e))))
+        return g.plainCall(e)
     case Res.IfaceMethod:
         if (g.c.ifaceMethod(i.ref, i.sub).isMut) {
             return g.gmutCall(e)
         }
-        return g.finishCall(e, g.callFrom(e, g.operands(g.callOperands(e))))
+        return g.plainCall(e)
     case Res.EnumNew:
         return g.genumNew(e)
     case Res.Conv:
@@ -27,6 +27,14 @@ fn (Gen g) mut gcall(int e) string {
     case Res.None, Res.Local, Res.Const, Res.EnumVal, Res.Field, Res.ListIndex, Res.StringIndex, Res.MapIndex:
         return "/* internal error: unresolved call */"
     }
+}
+
+// A call that is not mut: the operands, the preemption check if it needs
+// one (gen_preempt.sd), the call.
+fn (Gen g) mut plainCall(int e) string {
+    string call = g.callFrom(e, g.operands(g.callOperands(e)))
+    g.preemptCall(e)
+    return g.finishCall(e, call)
 }
 
 // The receiver of a method call (base.name(args)).
@@ -99,6 +107,7 @@ fn (Gen g) mut gmutCall(int e) string {
     ExprInfo i = g.c.info[e]
     []string vals = g.mutArgs(g.recvOf(e), g.argList(e))
     string place = g.gplace(g.recvOf(e))
+    g.preemptCall(e)
     if (i.res == Res.Method) {
         []string margs = []string{place}
         for (int j = 0; j < vals.len(); j++) {
@@ -266,6 +275,7 @@ fn (Gen g) mut gbuiltin(int e) string {
     case Builtin.SSlice, Builtin.SIndex, Builtin.Split, Builtin.Trim, Builtin.Replace, Builtin.Upper, Builtin.Lower:
         return g.temp(t, builtinFn(b) + "(" + vals.join(", ") + ")")
     case Builtin.Bytes, Builtin.Chars, Builtin.Join, Builtin.Message, Builtin.LSlice, Builtin.Keys:
+        g.preemptCall(e)
         return g.temp(t, builtinFn(b) + "(" + vals.join(", ") + ")")
     case Builtin.LContains:
         return "sd_list_contains(" + v + ", " + g.addr(g.typeOf(args[0]), vals[1]) + ")"
@@ -384,6 +394,7 @@ fn (Gen g) mut gmutBuiltin(int e, Builtin b, int r, int rt, []int args) string {
         g.emit("sd_list_sort(" + place + ");")
         return ""
     case Builtin.SortBy:
+        g.preemptCall(e)
         g.emit("sd_list_sort_by(" + place + ", " + g.lessFn(g.typeOf(args[0])) + ", (void *)" + vals[0] + ");")
         return ""
     case Builtin.Delete:
