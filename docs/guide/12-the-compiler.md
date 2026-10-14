@@ -297,6 +297,7 @@ The compiler rejects:
 | A `mut` method called on a parameter | [7](07-structs-and-methods.md) |
 | A struct literal that misses a field | [7](07-structs-and-methods.md) |
 | A type whose methods don't match its `implements` | [9](09-interfaces-and-functions.md) |
+| `spawn` outside a group, a spawned `mut` method, `return` or `try` inside a group block | [10](10-concurrency.md) |
 | A name, field or method of another package that isn't `pub` | [11](11-packages.md) |
 | An import cycle | [11](11-packages.md) |
 | `assert` outside a test | [11](11-packages.md) |

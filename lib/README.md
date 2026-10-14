@@ -364,7 +364,7 @@ Decisions not fixed by docs/stdlib.md:
 - Responses: 1xx interim responses are skipped; HEAD, 204 and 304 have no
   body; with neither length nor chunking, the body runs until the
   connection closes.
-- No `date` header is written yet (it needs `time`).
+- No `date` header is written yet (`time` exists now; nothing uses it here).
 
 The server and the client (server.sd, client.sd):
 
@@ -385,8 +385,8 @@ The server and the client (server.sd, client.sd):
   runtime reaps finished members of a group at each `spawn`).
 - Timeouts: 60 s for the next request on an idle kept-alive connection, and
   30 s without progress while a request is arriving (docs/stdlib.md says
-  30 s for the whole request; that needs a clock, `time.monotonic`, which
-  is not written yet, so a client trickling bytes can keep a connection
+  30 s for the whole request; the server does not track that with
+  `time.monotonic` yet, so a client trickling bytes can keep a connection
   longer).
 - HTTP/1.0 requests close the connection unless they say `connection:
   keep-alive`; `connection: close` closes after the response. A request
@@ -406,7 +406,7 @@ The server and the client (server.sd, client.sd):
 ## Inconsistencies found in the docs
 
 - docs/stdlib.md says two `json.Value`s compare with key order counting, "as
-  it does for maps", but DECISIONS.md 30 (and the runtime) make map `==`
+  it does for maps", but DECISIONS.md ("Types and values") and the runtime make map `==`
   ignore insertion order. `Value`'s `==` is the built-in enum `==`, so key
   order is ignored; the json tests check that.
 - The task brief asked for JSON errors with a byte offset; docs/stdlib.md

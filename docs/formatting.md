@@ -1,6 +1,6 @@
 # Formatting
 
-This is part of the language spec ([SPEC.md](../SPEC.md)). Seed code has one canonical layout, produced by `seed fmt`. Formatting is part of the language: code that isn't formatted will fail to compile, and the error names the command that fixes it (this check is not wired into the compiler yet; `seed fmt --check` performs it).
+This is part of the language spec ([SPEC.md](../SPEC.md)). Seed code has one canonical layout, produced by `seed fmt`. Formatting is part of the language: code that isn't formatted fails to compile, with an error at the first line that differs and the hint `run: seed fmt <file>`.
 
 The style is close to Go's `gofmt`, with 4-space indentation and C-style conditions in parentheses.
 
