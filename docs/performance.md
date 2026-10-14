@@ -435,6 +435,28 @@ The compiler compiling itself, after the refcount work and these changes:
 | instructions | 2,240 M | 2,040 M | 1,544 M |
 | wall time (interleaved, best of 11) | 1.00 | 0.95 | 0.77 |
 
+### On the M:N scheduler and the new allocator
+
+The numbers above were measured on the thread-per-goroutine runtime. On the
+runtime with the M:N scheduler and the small-object allocator, the same
+code generator against the one before these three sections (interleaved,
+best of 7; Linux x86_64, GCC 13):
+
+| Benchmark | Before | After | After / before | `bench/run.sh` (best of 5): seed / Go |
+|---|---|---|---|---|
+| `fib` | 1.74 | 0.41 | 0.24 | 0.46 / 0.58 = 0.8 |
+| `intloop` | 0.90 | 0.67 | 0.74 | 0.69 / 0.41 = 1.7 |
+| `json` | 1.16 | 1.12 | 0.96 | 1.06 / 1.03 = 1.0 |
+| `maps` | 1.20 | 1.20 | 1.00 | 1.27 / 1.95 = 0.7 |
+| `pingpong` | 0.128 | 0.131 | 1.02 | 0.131 / 0.120 = 1.1 |
+| `sort` | 0.52 | 0.57 | 1.10 (same instructions: noise) | 0.59 / 0.94 = 0.6 |
+| `spawn` | 0.094 | 0.081 | 0.86 | 0.109 / 0.074 = 1.5 |
+| `strings` | 0.73 | 0.73 | 0.99 | 0.77 / 2.09 = 0.4 |
+
+The compiler compiling itself (each compiler built by its own code
+generator): 2,266 M instructions before, 1,384 M after (-39%); wall time
+0.70x (391 ms to 273 ms, interleaved best of 11).
+
 ## Build speed
 
 Building a program was almost all C compiler: the front end and generator
