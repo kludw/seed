@@ -9,9 +9,10 @@ for a test that pins it down. The existing suites were searched first
 `tests/spec/` only where a rule wasn't covered.
 
 Run the new tests with `tests/run.sh "build/seed2 c" tests/spec` (part of
-`make test-full`; 201 tests), `tests/test_cmd.sh build/seed2` (the
-`spec/testcmd/` projects and the toolchain checks) and, for the known bugs,
-`tests/run.sh "build/seed2 c" tests/spec/pending` (5 tests, all failing).
+`make test-full`; 211 tests since the resolution) and `tests/test_cmd.sh
+build/seed2` (the `spec/testcmd/` projects and the toolchain checks). The
+five bugs were fixed and their tests moved from `spec/pending/errors/` to
+`spec/errors/`; every finding's outcome is under [Resolution](#resolution).
 
 ## Summary
 
@@ -25,7 +26,7 @@ Run the new tests with `tests/run.sh "build/seed2 c" tests/spec` (part of
 | New compile-error tests (`spec/errors/`) | 157 (14 of them `fmt_*`) |
 | New `seed test` projects (`spec/testcmd/`) | 3 |
 | New checks in `tests/test_cmd.sh` | 10 |
-| Implementation bugs (tests in `spec/pending/`) | 5 |
+| Implementation bugs (tests were in `spec/pending/`; all fixed) | 5 |
 | Spec problems | 19 |
 
 Names below: `lang/x` is `tests/lang/x.sd`, `full/errors/x` is
@@ -50,15 +51,15 @@ Names below: `lang/x` is `tests/lang/x.sd`, `full/errors/x` is
 | Null (8): plain `T` never null; narrowing of variables and fields, not of elements, lookups or call results; `&&`, `\|\|`, `!`; after an `if` that leaves (`return`, `break`, `continue`, `os.exit`, `os.crash`); `assert`; assignment of a non-null value; where narrowing ends | lang/nullable_narrowing, lang/nullable_fields, lang/nullable_loops, core/narrowing, full/narrow_assign, full/loop_post_narrowing, lang/errors/nullable_*, core/errors/narrow_*, core/errors/null_to_plain, full/errors/narrow_*, full/errors/nullable_element_hint, full/errors/loop_post_narrowing_killed, testcmd/pass (assert narrows) | **null_narrowing_not**, **null_narrowing_after_crash**, **null_narrowing_else_early_exit**, **null_narrowing_or_early_exit**, **null_narrowing_kept**, **errors/null_plain_param**, **errors/null_narrowing_list_element**, **errors/null_narrowing_call_result**, **errors/null_narrowing_not_else**, **errors/null_narrowing_or_wrong_side**, **errors/null_narrowing_prefix_assign**, **errors/null_narrowing_prefix_mut**, **testcmd/rules** |
 | Values, not pointers (4) | lang/value_semantics_*, core/value_copies, core/value_enums, core/errors/assign_param, full/chan_reply_struct | |
 | Functions and methods (9) | lang/multiple_returns, lang/methods, lang/mut_methods, core/mut_paths, full/errors/duplicate_function, full/errors/receiver_not_mut, full/errors/pkg_foreign_method, lang/errors/mut_method_on_param, lang/errors/builtin_mut_on_param, lang/errors/mut_on_param_field, core/errors/mut_param*, core/errors/mut_temporary | **errors/fn_naked_return**, **errors/fn_named_results**, **errors/fn_variadic**, **errors/fn_overloading**, **errors/fn_default_argument**, **errors/method_on_builtin_type**, **errors/method_on_interface**, **errors/method_plain_receiver_mut_call** |
-| Function values (5) | full/fn_values, full/fn_values_more, full/fn_nullable_field, full/errors/compare_functions | **errors/fn_anonymous**, **fn_type_nullable**, **errors/fn_value_nullable_needs_parens**, **fn_field_called_directly**, **fn_field_and_method_same_name**, pending/errors/fn_value_nullable_hint |
-| Structs, enums, interfaces (8) | full/errors/struct_literal_missing_field, core/errors/missing_struct_field, full/errors/pkg_private_field, lang/enum_*, full/enum_patterns, full/errors/enum_pattern_*, full/errors/switch_enum_missing_case, full/interface_*, full/errors/implements_*, full/errors/missing_implements, full/errors/interface_mut_on_param | **errors/enum_case_without_type**, **errors/enum_pattern_without_type**, **errors/enum_value_empty_parens**, **errors/enum_pattern_wrong_type**, **errors/interface_value_not_implementing**, **errors/interface_mut_on_call_result**, **implements_several**, pending/errors/enum_case_empty_parens_decl |
-| Control flow (10) | lang/for_loops, lang/break_continue, lang/switch_values, full/switch_loop_control, full/select_cases, full/errors/switch_*, core/errors/enum_default, core/errors/value_switch_default, full/defer_*, full/errors/defer_*, lang/os_exit | **errors/for_while_form**, **errors/for_post_call**, **errors/op_increment_expression**, **errors/switch_string_no_default**, **errors/switch_bool_no_default**, **errors/switch_byte_no_default**, **errors/switch_struct_value**, **errors/enum_pattern_untyped_binding**, **errors/break_outside_loop**, **errors/continue_in_switch_outside_loop**, **errors/goto_label**, **defer_kinds**, **os_exit_low_bits**, **errors/defer_builtin_send**, **errors/defer_not_call**, pending/errors/switch_default_not_last |
+| Function values (5) | full/fn_values, full/fn_values_more, full/fn_nullable_field, full/errors/compare_functions | **errors/fn_anonymous**, **fn_type_nullable**, **errors/fn_value_nullable_needs_parens**, **fn_field_called_directly**, **errors/struct_field_and_method_same_name**, **errors/fn_value_nullable_hint** |
+| Structs, enums, interfaces (8) | full/errors/struct_literal_missing_field, core/errors/missing_struct_field, full/errors/pkg_private_field, lang/enum_*, full/enum_patterns, full/errors/enum_pattern_*, full/errors/switch_enum_missing_case, full/interface_*, full/errors/implements_*, full/errors/missing_implements, full/errors/interface_mut_on_param | **errors/enum_case_without_type**, **errors/enum_pattern_without_type**, **errors/enum_value_empty_parens**, **errors/enum_pattern_wrong_type**, **errors/interface_value_not_implementing**, **errors/interface_mut_on_call_result**, **implements_several**, **errors/enum_case_empty_parens_decl** |
+| Control flow (10) | lang/for_loops, lang/break_continue, lang/switch_values, full/switch_loop_control, full/select_cases, full/errors/switch_*, core/errors/enum_default, core/errors/value_switch_default, full/defer_*, full/errors/defer_*, lang/os_exit | **errors/for_while_form**, **errors/for_post_call**, **errors/op_increment_expression**, **errors/switch_string_no_default**, **errors/switch_bool_no_default**, **errors/switch_byte_no_default**, **errors/switch_struct_value**, **errors/enum_pattern_untyped_binding**, **errors/break_outside_loop**, **errors/continue_in_switch_outside_loop**, **errors/goto_label**, **defer_kinds**, **os_exit_low_bits**, **errors/defer_builtin_send**, **errors/defer_not_call**, **errors/switch_default_not_last** |
 | Errors (8): `error` interface; null error; `(..., error)`; every result handled; error guards; `try`; `return null, err`; `_` | lang/errors_basic, full/interface_custom_error, full/error_*, full/errors/guard_*, full/errors/unchecked_error_*, full/errors/ignored_error, full/errors/unused_return_value, lang/errors/error_*, lang/try_*, core/errors/try_no_error_result, full/return_null_without_error, full/errors/return_null_*, lang/discard, lang/errors/discard_plain_type, core/errors/discard_plain, full/group_crash, full/os_crash | **error_guard_or_early_exit**, **error_guard_nullable_field_target**, **errors/error_guard_element_target**, **try_precedence**, **errors/try_in_function_without_error**, **errors/error_return_value_ignored**, **errors/unused_builtin_result**, **errors/error_return_null_beside_null**, **errors/error_discard_plain_beside**, **testcmd/rules** (guard lifted by `assert`) |
 | Concurrency (8) | full/group_*, full/chan_deadlock, full/group_deadlock, full/group_cancel_receiver, full/os_stop_points, full/fs_file_stop, full/spawn_kinds, full/chan_copy_semantics, full/errors/spawn_outside_group | **io_stdin_stop_point** (+ test_cmd), **errors/spawn_in_function_called_by_group** |
 | Groups (4) | full/group_forms, full/group_nested, full/errors/group_*, full/group_error | **group_block_not_stopped**, **errors/group_statement_alone**, **errors/group_in_condition**, **errors/group_continue_outer_loop** |
 | Spawn (3) | full/spawn_kinds, full/group_spawn_loop, full/errors/spawn_* | **errors/spawn_builtin_method** |
 | Channels (7) | full/chan_*, full/errors/chan_*, full/errors/const_chan, full/group_basic (channel parameters) | **chan_negative_buffer_crash**, **chan_close_twice_crash**, **select_send_closed_crash**, **errors/chan_nullable_elem_list**, **errors/chan_receive_error_is_error** |
-| Select (6) | full/select_*, full/errors/select_* | **select_random_choice**, **select_evaluation_order**, **select_receive_error**, **errors/select_default**, **errors/select_receive_plain_type**, **time_after_value**, pending/errors/select_receive_error_unhandled |
+| Select (6) | full/select_*, full/errors/select_* | **select_random_choice**, **select_evaluation_order**, **select_receive_error**, **errors/select_default**, **errors/select_receive_plain_type**, **time_after_value**, **errors/select_receive_error_unhandled** |
 | Packages (8) | full/pkg_basic, full/errors/pkg_* (17), core/errors/import_unknown, core/errors/missing_import, full/errors/unused_import | **pkg_tests_dir_ignored/**, **errors/pkg_import_per_file/**, **errors/pkg_mixed_package_names/**, **errors/pkg_import_path_uppercase/**, **errors/pkg_private_const/**, **errors/pkg_private_field_write/**, **errors/pkg_name_same_as_import**, **errors/pkg_core_not_imported** |
 | Native functions (1) | full/errors/pkg_native | |
 | Program entry (4) | core/errors/main_signature, lang/main_args, lang/main_error, lang/crash_*, lang/os_exit | **program_args** (+ test_cmd) |
@@ -71,7 +72,7 @@ Names below: `lang/x` is `tests/lang/x.sd`, `full/errors/x` is
 
 | Section (rules) | Existing tests | New tests |
 |---|---|---|
-| Lexical structure (6): UTF-8 `.sd`; comments; identifiers and `_`; keywords; built-in type names; operators | full/errors/builtin_type_name, full/errors/builtin_name_function | **errors/identifier_starts_with_digit**, **errors/identifier_non_ascii_letter**, **errors/discard_read**, **errors/keyword_select_as_name**, **errors/keyword_group_as_name**, **errors/keyword_test_as_name**, **errors/keyword_map_as_name**, pending/errors/identifier_non_ascii_message |
+| Lexical structure (6): UTF-8 `.sd`; comments; identifiers and `_`; keywords; built-in type names; operators | full/errors/builtin_type_name, full/errors/builtin_name_function | **errors/identifier_starts_with_digit**, **errors/identifier_non_ascii_letter**, **errors/discard_read**, **errors/keyword_select_as_name**, **errors/keyword_group_as_name**, **errors/keyword_test_as_name**, **errors/keyword_map_as_name**, **errors/identifier_non_ascii_message** |
 | Newlines (2) | core/errors/statement_newline, fmt/continuation | **newlines_continuation**, **errors/syntax_operator_starts_line** |
 | Files (4) | full/errors/pkg_test_outside, full/errors/pkg_native | **errors/import_after_declaration**, **errors/package_line_missing**, **errors/import_two_on_one_line** |
 | Declarations (9) | fmt/decls, full/pkg_basic, full/interface_enum, lang/const | (see SPEC sections) |
@@ -106,8 +107,8 @@ Names below: `lang/x` is `tests/lang/x.sd`, `full/errors/x` is
 
 ## Implementation bugs
 
-The spec is right in each case. The tests are in `tests/spec/pending/errors/`;
-move each one to `tests/spec/errors/` once it passes.
+The spec is right in each case. The tests were in `tests/spec/pending/errors/`
+and are now in `tests/spec/errors/`, where they pass (see [Resolution](#resolution)).
 
 1. **`switch_default_not_last`**: a value `switch` with `default` before
    another `case` compiles.
@@ -195,3 +196,42 @@ or silent. The tests pin what the implementation does.
     Proposed: "A `switch` is over an enum, `int`, `byte`, `string` or `bool`."
 19. **How a failed `assert` shows bytes.** "the value of each side" for bytes prints numbers: `b == 'b' (97 == 98)` (`spec/testcmd/rules`). That matches `byte.string()`, but a reader might expect `'a'`.
     Proposed: "...the value of each side (as `.string()` gives it: a byte as its number)".
+
+## Resolution
+
+The decisions were made by the project manager; DECISIONS.md records them.
+All tests listed above pass; `tests/spec/pending/` no longer exists.
+
+### Implementation bugs
+
+| # | Test | Resolution |
+|---|---|---|
+| 1 | `errors/switch_default_not_last` | Fixed: a `case` after `default` in a value switch is an error ("default must be the last case of a switch"). |
+| 2 | `errors/enum_case_empty_parens_decl` | Fixed: `Eof()` in an enum declaration is a syntax error with the hint `write Eof`; the AST no longer records the parentheses, so the formatter never sees them. |
+| 3 | `errors/select_receive_error_unhandled` | Fixed: `case errs.receive():` on a `chan error` is an unhandled error; the hint gives `case error e = ...:` and `case _ = ...:`. |
+| 4 | `errors/fn_value_nullable_hint` | Fixed: the hint names `(fn(int) int?)?` (also in the hint for a value beside a discarded error). |
+| 5 | `errors/identifier_non_ascii_message` | Fixed: a non-ASCII character is reported once, as the whole UTF-8 character; a byte that isn't valid UTF-8 (or a control character) is reported once as `0xHH` (new: `errors/source_invalid_utf8_byte`). |
+
+### Spec problems
+
+| # | Resolution |
+|---|---|
+| 1 | Spec fixed (SPEC "Concurrency", stdlib.md, builtins.md, guide, README): reading an `fs.File` and waiting for a handle's operation lock are stop points; the other file operations are not. |
+| 2 | Spec fixed ("Null", Operators table): a `T?` compares only with `null`; narrow first. |
+| 3 | Spec fixed ("Maps", builtins.md, grammar.md): map values can't be nullable. |
+| 4 | Spec fixed ("Errors", "Variables and constants"): only a local variable receives a plain `T` beside an error. |
+| 5 | Spec fixed ("Null", guide): a `mut` method ends the narrowing of the paths under its receiver, not of the receiver itself. |
+| 6 | Spec fixed ("Select", builtins.md): `error e = ch.receive()` and `_ = ch.receive()` for a `chan error` (with bug 3). |
+| 7 | grammar.md fixed: `Defer = "defer" [ "_" "=" ] Expr` and `SelectClause = "case" ( VarDecl \| Assign \| Expr ) ...`. |
+| 8 | SPEC's summary aligned with grammar.md's token rule. |
+| 9 | **Implementation changed:** a number that starts with `0` followed by a digit (`017`, `00`, also `01.5`) is an error with the hint `write 17`. Tests: `errors/literal_leading_zero`, `errors/literal_leading_zeros_only`, `errors/literal_float_leading_zero`, `literal_zero_forms`. |
+| 10 | Spec fixed (grammar.md, SPEC "Syntax basics"): identifiers are ASCII. |
+| 11 | grammar.md fixed: built-in type names are predeclared identifiers that can't be declared again. |
+| 12 | Spec fixed ("Types", "Errors", grammar.md): `error?` is not a type. |
+| 13 | Spec fixed (builtins.md, SPEC "Lists"): crash conditions of `xs[i] = v`, `insert`, `remove` and `slice`. |
+| 14 | Spec fixed ("Operators", builtins.md): shift count type, negative count crashes, `>>` floors on `int`, `byte` keeps the low 8 bits. |
+| 15 | Spec fixed ("Packages"): such an import is an error; rename the package. |
+| 16 | Spec fixed ("Maps", builtins.md, grammar.md, "Compiler"): `m[k]++` is rejected; nesting is limited to 256 levels. |
+| 17 | **Implementation changed:** a struct can't have a field and a method with the same name (compile error at the method). `spec/fn_field_and_method_same_name` became `errors/struct_field_and_method_same_name`; `full/pkg_basic`'s `Counter.name` field was renamed `label`. |
+| 18 | Spec fixed ("Control flow"): a `switch` is over an enum, `int`, `byte`, `string` or `bool`. |
+| 19 | Spec fixed ("Tests"): the sides of a failed `assert` are shown as `.string()` gives them, a byte as its number. |

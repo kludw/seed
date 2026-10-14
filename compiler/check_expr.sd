@@ -69,7 +69,7 @@ fn (Checker c) mut coerce(int e, int want, string context) {
     }
     Pos pos = c.ast.exprs[e].pos
     if (t == tyNull) {
-        c.errorHint(pos, "null cannot be used as " + c.typeName(want) + " " + context + ": only nullable types (T?) and error can be null", "declare it as " + c.typeName(want) + "? if it may be missing")
+        c.errorHint(pos, "null cannot be used as " + c.typeName(want) + " " + context + ": only nullable types (T?) and error can be null", "declare it as " + c.types.optName(want) + " if it may be missing")
     } else if (c.types.isOpt(t) && c.types.elem(t) == want) {
         c.errorHint(pos, c.describe(e) + " is nullable (" + c.typeName(t) + ") and cannot be used as " + c.typeName(want) + " " + context, "check " + c.describe(e) + " != null first")
     } else if ((c.kindOf(want) == Kind.Interface || want == tyError) && (c.kindOf(t) == Kind.Struct || c.kindOf(t) == Kind.Enum)) {

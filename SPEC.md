@@ -15,17 +15,17 @@ This document is the reference for the language. The details live in four compan
 
 - Comments use `//`. There are no block comments.
 - Statements end at the end of a line. There are no semicolons: one statement per line. (`;` only separates the three parts of a `for` header.)
-- A line that continues must end with an operator, a comma or an opening bracket (Go's newline rule, see [grammar.md](docs/grammar.md#newlines)).
+- A line continues when its last token can't end a statement: an operator, `=`, `.`, a comma or an opening bracket (Go's newline rule, see [grammar.md](docs/grammar.md#newlines)).
 - Braces are always required, and the opening brace goes on the same line.
 - Conditions are always in parentheses: `if (...)`, `for (...)`, `switch (...)`.
 - Formatting is part of the language. Code that isn't formatted fails to compile, and the error gives the command that fixes it.
-- Naming is enforced by the compiler. Types and enum cases use `PascalCase`, and everything else uses `camelCase`, including constants.
+- Naming is enforced by the compiler. Types and enum cases use `PascalCase`, and everything else uses `camelCase`, including constants. Names are ASCII (letters, digits and `_`); other characters may appear only in strings, byte literals and comments.
 
 ## Literals
 
 | Literal            | Type     | Notes                                                      |
 |--------------------|----------|------------------------------------------------------------|
-| `42`, `0xff`       | `int`    | Decimal or hexadecimal, of any size. No octal, binary or `_` separators. A leading `-` is the unary operator. |
+| `42`, `0xff`       | `int`    | Decimal or hexadecimal, of any size. No octal, binary or `_` separators. A number never starts with `0` followed by a digit (`017` and `00` are errors; `0`, `0.5` and `0x0f` are fine). A leading `-` is the unary operator. |
 | `3.14`, `1.0e9`    | `float`  | Must contain a `.`; `1e9` alone is not a float.            |
 | `'a'`, `'\n'`      | `byte`   | A single byte. Escapes are the same as in strings.         |
 | `"hi\n"`           | `string` | Escapes: `\n \t \r \0 \\ \" \' \xHH`. Any other escape is an error. No raw or multi-line strings. |
@@ -54,7 +54,7 @@ This document is the reference for the language. The details live in four compan
 | `error`       | The built-in error interface.                                      |
 
 - There are no implicit conversions. Converting is always explicit: `float(i)`, `int(f)` (truncates), `byte(i)` (crashes outside 0–255), `int(b)`, `string(bytes)` for a `[]byte`. Text is made with `.string()` and parsed with `s.toInt()` and `s.toFloat()`.
-- `?` applies to the whole type on its left: `[]string?` is a nullable list, and a list of nullable strings is `[](string?)`. `T??` is not a type.
+- `?` applies to the whole type on its left: `[]string?` is a nullable list, and a list of nullable strings is `[](string?)`. `T??` is not a type, and neither is `error?` (`error` is already nullable).
 - The built-in types (`[]T`, `map[K]V`, `chan T`, `T?`) are generic. User code cannot define generic types or functions.
 - A struct cannot contain itself by value (directly or through other structs); break the cycle with a nullable field (`Node? next`), a list or an enum.
 
@@ -67,7 +67,7 @@ The methods of every built-in type are listed in [builtins.md](docs/builtins.md)
 | `len()`         | The number of elements.                                       |
 | `push(x)`       | Adds `x` to the end. `mut`.                                   |
 | `pop()`         | Removes the last element and returns it as `T?`, or `null` if the list is empty. `mut`. |
-| `insert(i, x)`  | Inserts `x` at index `i`. `mut`.                              |
+| `insert(i, x)`  | Inserts `x` at index `i` (`0 <= i <= len`). `mut`.            |
 | `remove(i)`     | Removes the element at index `i`. `mut`.                      |
 | `contains(x)`   | `bool`.                                                       |
 | `index(x)`      | The first index of `x` as `int?`, or `null` if it is absent.  |
@@ -78,7 +78,7 @@ The methods of every built-in type are listed in [builtins.md](docs/builtins.md)
 | `join(sep)`     | Only for `[]string`: the strings joined with `sep` between them. |
 
 - `push` is the only way to add to the end of a list. There is no separate `append`.
-- Indexing with `xs[i]` out of bounds crashes the goroutine.
+- Indexing out of bounds crashes the goroutine, both reading `xs[i]` and writing `xs[i] = v` (writing never grows the list). So do `insert`, `remove` and `slice` with an index out of range ([builtins.md](docs/builtins.md#lists-t) gives the exact conditions).
 
 ### Maps
 
@@ -91,6 +91,8 @@ The methods of every built-in type are listed in [builtins.md](docs/builtins.md)
 | `keys()`        | The keys as `[]K`, in insertion order.                        |
 
 - Maps keep insertion order, so iterating over them is deterministic. Two maps are equal when they have the same entries, in any order.
+- Values cannot be nullable (`map[K](V?)` is rejected): `m[k]` already uses null for a missing key.
+- `m[k]++` and `m[k]--` are not allowed, because the entry may be missing; write `m[k] = v`.
 
 ### Converting to text
 
@@ -121,7 +123,7 @@ const int maxUsers = 100
 - A declaration always writes the type first, then the name, then `= value`. There is no `var`, no `:=` and no type inference.
 - Every declaration must have a value, including nullable ones (`string? email = null`). There are no zero values.
 - Shadowing is a compile error. Declaring a name that already exists in an enclosing scope (a local, a parameter, a package-level name or an imported package) fails, and the error suggests assigning with `=` instead.
-- With several return values, a name with a type in front of it is declared, and a name without one is an existing variable (or a field or element) being assigned. `_` discards a value:
+- With several return values, a name with a type in front of it is declared, and a name without one is an existing variable (or a field or element) being assigned (beside an error, a field or element can only receive a `T?`; see [Errors](#errors)). `_` discards a value:
 
 ```
 []string names, error err = loadNames(path)
@@ -138,13 +140,14 @@ string text, err = fs.read(other)     // text is new, err is reused
 | Arithmetic | `+ - * / %`                   | `int`, `float` (`%` on `int` only) |
 | Joining    | `+`                           | `string`                         |
 | Bitwise    | `& \| ^ << >>`                | `int`, `byte`                    |
-| Comparison | `== !=`                       | Every type except channels and function values (and types that contain them). |
+| Comparison | `== !=`                       | Every type except channels and function values (and types that contain them). A `T?` is compared with `null` only (see [Null](#null)). |
 | Ordering   | `< <= > >=`                   | `int`, `float`, `string`, `byte` |
 | Logic      | `&& \|\| !`                   | `bool`                           |
 | Unary      | `-` (numbers), `!` (`bool`)   |                                  |
 
 - `==` compares contents: structs field by field, lists element by element, maps by their entries (ignoring order), enums by case and data, interface values by their dynamic type and value, and errors by their messages.
 - Integer division truncates toward zero, and `%` has the sign of the left operand. Integer division and `%` by zero crash. Float division by zero follows IEEE and gives `inf`, `-inf` or `nan`.
+- `x << n` and `x >> n` take `n` of the same type as `x` (`b << byte(1)`), and a negative `n` crashes. On `int`, `<<` never overflows and `>>` rounds toward negative infinity (`-7 >> 1` is `-4`); on `byte`, the result keeps the low 8 bits (`byte(200) << byte(1)` is `144`).
 - Both sides of an operator must have the same type, so mixing `int` and `float` is a compile error: `float(n) * 1.5`. Bytes have no arithmetic; convert with `int(b)`.
 - There is no compound assignment (`+=` and the like). Write `x = x + 1`. `x++` and `x--` are statements.
 - There is no ternary `?:` operator and no unary `^`.
@@ -161,6 +164,7 @@ if (u.email != null) {
 }
 ```
 
+- A `T?` can be compared with `null`, but not with a value: `n == 2` is an error for an `int? n`. Narrow it first: `n != null && n == 2`. Nullable elements and fields of lists, structs and enums compare as part of their container.
 - Narrowing applies to variables and their fields (`x`, `u.email`, `u.address.city`), not to list elements, map lookups or call results: store those in a variable first (`int? n = m[k]`).
 - A condition narrows where it is known to be true: `x != null` inside the `if` block, `x == null` in its `else`, and through `&&`, `||` and `!` (`if (x != null && x.len() > 0)`, `if (x == null || x.len() == 0)`).
 - After an `if` whose block always leaves (`return`, `break`, `continue`, a call of `os.exit` or `os.crash`), the rest of the block knows the opposite of its condition:
@@ -174,7 +178,7 @@ use(x)                   // x is a T from here on
 
 - In a test, `assert(cond)` narrows like such an `if`.
 - After an assignment of a non-null value, `x = <non-null value>`, `x` is treated as `T` until it may become null again, so `if (x == null) { x = "default" }` leaves `x` non-null after the `if`.
-- Narrowing ends when the variable (or a part of the path, such as `u` for `u.email`) is assigned a value that may be null, or when a `mut` method is called on it or on a part of the path. Before a loop, every path the loop assigns or mutates loses its narrowing, because the loop may come around.
+- Narrowing of a path ends when the path itself is assigned a value that may be null, when a part of the path above it (`u` for `u.email`) is assigned, or when a `mut` method (including a built-in one such as `push`) is called on a part above it: `u.reset()` ends the narrowing of `u.email`. A `mut` method called on the narrowed value itself keeps it narrowed (`xs.push(x)` on a narrowed `xs`, `c.bump()` on a narrowed `c`), because inside the method the receiver is a plain `T` that can't be made null; it does end the narrowing of the paths under it (`c.bump()` ends that of `c.next`). Before a loop, every path the loop assigns or mutates loses its narrowing, because the loop may come around.
 
 ## Values, not pointers
 
@@ -206,7 +210,7 @@ fn divide(int a, int b) (int, error) {
 ### Methods
 
 ```
-fn (User u) name() string {
+fn (User u) displayName() string {
     return u.name
 }
 
@@ -234,7 +238,7 @@ people.sortBy(olderThan)
 - A named function can be passed as a value. Its type is written `fn(Person, Person) bool`.
 - There are no anonymous functions and no closures, so a function value never carries hidden state.
 - A nullable function type needs parentheses: `(fn(int) int)?`, because `fn(int) int?` is a function that returns `int?`.
-- A struct field of function type is called directly: `op.apply(1, 2)` (when the struct has no method of that name).
+- A struct field of function type is called directly: `op.apply(1, 2)`. A struct can't have a field and a method with the same name, so `op.apply` always means one thing.
 - Function values cannot be compared with `==`.
 
 ## Structs, enums, interfaces
@@ -252,13 +256,13 @@ type Shape enum {
 }
 
 pub type Named interface {
-    name() string
+    displayName() string
 }
 ```
 
 - A struct literal must set every field: `User{name: "k", email: null, tags: []string{}}`.
 - Struct fields are private to their package unless marked `pub` (see [Packages](#packages)).
-- An enum case is always written with its type, both when creating a value and in a `switch`: `Shape.Circle(2.0)`, `case Shape.Circle(float r):`. A case without data has no parentheses: `Token.Eof`.
+- An enum case is always written with its type, both when creating a value and in a `switch`: `Shape.Circle(2.0)`, `case Shape.Circle(float r):`. A case without data has no parentheses, in its declaration (`Eof`, not `Eof()`) and as a value: `Token.Eof`.
 - A case pattern matches its enum case exactly: when the case carries data, the pattern binds every field with its type (`case Shape.Rect(float w, float h):`), using `_` as the name of a field it doesn't need (`case Shape.Rect(float w, float _):`); a case without data is written without parentheses (`case Token.Eof:`). A `case` with several labels can't bind names, so all its bindings are `_`: `case Shape.Circle(float _), Shape.Point:`.
 - An enum case can carry data, and a `switch` over an enum must cover every case.
 - A struct or enum satisfies an interface only by declaring it with `implements` (several interfaces are separated by commas). The compiler then checks that every required method exists, with exactly the same signature (including `mut`). Methods cannot be declared on an interface type.
@@ -304,7 +308,8 @@ defer f.close()
 - `i++` and `i--` are statements, not expressions, so `x = i++` does not compile.
 - `switch` cases never fall through.
 - A `switch` over an enum must list every case and cannot have `default`, so adding a case later makes the compiler point at every `switch` that needs updating.
-- A `switch` over an `int`, `byte`, `string` or `bool` must end with `default`. One case can list several values.
+- A `switch` is over an enum, `int`, `byte`, `string` or `bool`; other types (`float`, structs, lists, nullable values, ...) can't be switched on.
+- A `switch` over an `int`, `byte`, `string` or `bool` must end with `default`: it is the last case, after every `case`. One case can list several values.
 - Variables bound in a `case` also write their type, like every other declaration.
 - `break` and `continue` work in loops. There are no labels and no `goto`. `break` and `continue` inside a `switch` or `select` apply to the enclosing loop.
 - `defer` runs when the enclosing function returns (or its goroutine crashes or is stopped). Several defers run in reverse order (last first). The call's arguments are evaluated when the `defer` statement runs. `os.exit` does not run defers.
@@ -326,6 +331,8 @@ if (err != null) {
 ```
 
 - **Error guards.** A plain `T` declared or assigned beside an error cannot be read until the error is known to be null: inside `if (err == null)`, after `if (err != null) { return ... }` (or any block that always leaves), right of `err == null &&`, or after `assert(err == null)` in a test. Assigning the variable again also lifts the guard. A `T?` declared beside an error is not guarded, because it must be checked against null anyway.
+- Only a local variable can receive a plain `T` beside an error. A field or element can't (`b.s, err = f()` is an error), because it would hold null until the check: assign to a local, check the error, then store it. A `T?` field or element is fine.
+- `error?` is not a type: `error` is already nullable.
 - Writing `string text = try fs.read(path)` returns `null, ..., err` from the current function when `fs.read` fails. `try` can be used on any call whose last result is `error` (and on a `group`), anywhere in an expression, in a function whose last result is `error`. It is the only syntax sugar in the language.
 - `return null, err` gives a plain `T` result as `null` and is only meant together with an error. Returning a literal `null` for a plain `T` beside a null error is a compile error, and returning `null` beside an error that turns out to be null crashes (`f returned null as result 1 without an error`).
 - `_` discards an error explicitly. If a value comes back alongside the discarded error, that value must be declared as `T?`, and the compiler rejects a plain `T`:
@@ -353,7 +360,7 @@ if (err != null) {
 - `spawn` is only allowed inside a `group` block, and the group waits for every goroutine it started. Goroutines cannot leak.
 - Failures work like Erlang:
   - When a goroutine returns an error or crashes, the other goroutines in its group are stopped, and the group returns the first error. A crash becomes the error `crash: <message>`.
-  - A goroutine can only be stopped at a *stop point*, and its `defer`s still run. The stop points are channel sends and receives, `select`, `time.sleep`, and the standard library's blocking calls: reading stdin (`io.readLine`, `io.readAll`), network I/O (`net`, and so `http`), and waiting for a child process (`os.run`, `os.output`). File I/O (`fs`) is not a stop point.
+  - A goroutine can only be stopped at a *stop point*, and its `defer`s still run. The stop points are channel sends and receives, `select`, `time.sleep`, and the standard library's blocking calls: reading stdin (`io.readLine`, `io.readAll`), reading an `fs.File` (`f.readLine()`, `f.read(n)`, which can wait on a FIFO or a device), network I/O (`net`, and so `http`), waiting for a child process (`os.run`, `os.output`), and waiting for another goroutine's operation on the same file, socket or stdin handle. The other file operations (`fs.read`, `fs.write`, `fs.open`, `f.write`, ...) are not stop points: on regular files they don't block for long.
   - An error that nothing handles ends up in `main`, and the program exits with a clear message.
 - Goroutines share nothing. Sending a value on a channel copies it, so data races are impossible.
 - A `group` block is ordinary code: `spawn` may appear anywhere inside it, including in loops and `if`s.
@@ -397,7 +404,8 @@ case time.after(5 * time.second).receive():
 ```
 
 - `select` waits until one of its channel operations can proceed, then runs that case. When several can, one is chosen at random.
-- A case is `ch.send(v)`, `ch.receive()`, `_ = ch.receive()` or `T? v = ch.receive()`, which declares a new variable for that case. It cannot assign to an existing variable.
+- A case is `ch.send(v)`, `ch.receive()`, `_ = ch.receive()` or `T? v = ch.receive()`, which declares a new variable for that case (`error e = ch.receive()` for a `chan error`). It cannot assign to an existing variable.
+- On a `chan error`, the received value is an error and must be handled like any other: `case ch.receive():` is an error; write `case error e = ch.receive():`, or `case _ = ch.receive():` to discard it.
 - The channels and the values to send of every case are evaluated first, in order, before `select` waits.
 - There is no `default` case, so `select` always waits.
 - `break` and `continue` inside a case apply to the enclosing loop.
@@ -417,7 +425,7 @@ shop/
 
 - A package is a directory. Every `.sd` file directly in it belongs to the package and starts with the same `package name` line; the name is the directory's name, except for `package main`. Package `main` (the program) can't be imported.
 - Imports come after the `package` line, one per line: `import "fmt"`. They are per file: a file imports the packages it uses itself. An unused import is a compile error, and so is an import cycle (the error shows it: `import cycle: a -> b -> a`).
-- `import "path"` looks for the package in the standard library first (`lib/path` next to the `seed` toolchain), then in the directory `path` relative to the **project root**, the directory of the program's `package main` (or the directory given to `seed test`). There is no project file. Import paths are lowercase names separated by `/`. Code calls the package by the last element of the path: after `import "shop/money"`, it writes `money.Amount`. A project package with the name of a standard library package can't be imported (the standard library wins).
+- `import "path"` looks for the package in the standard library first (`lib/path` next to the `seed` toolchain), then in the directory `path` relative to the **project root**, the directory of the program's `package main` (or the directory given to `seed test`). There is no project file. Import paths are lowercase names separated by `/`. Code calls the package by the last element of the path: after `import "shop/money"`, it writes `money.Amount`. Importing a project package that has the name of a standard library package is an error at the import; rename the project's package.
 - A name from another package is always written with the package name: `cart.newCart()`, `cart.Item`, `cart.maxItems`, `shapes.Shape.Circle(2.0)`, `case shapes.Shape.Circle(float r):`, `cart.Item{name: "pen"}`. A local or package-level name can't be the same as an imported package's name.
 - Everything is private. Mark a top-level name (function, method, type, constant) `pub` to make it usable from other packages. Struct fields are private too, unless marked `pub` (`pub string name`); another package can only read and write `pub` fields, and can only write a struct literal of the type if every field is `pub`. Enum cases and interface methods are as visible as their type.
 - Nothing runs implicitly when a program starts or a package is imported.
@@ -456,7 +464,7 @@ test "load skips empty lines" {
 - Tests live in a `tests/` directory inside the package they test, so they stay out of the package's code. They are compiled only by `seed test`; a `test` block anywhere else is a compile error.
 - Files in `tests/` belong to the package they test, so tests can reach its private names. They may also declare helper functions and types, and import packages.
 - A test is a `test "description" { ... }` block, so nothing depends on function naming. Its body is like the body of a function that returns `error`: `try` works, and an error that leaves the test fails it. `return` is not allowed in a test.
-- `assert(bool)` is built in and only allowed in tests (not inside a `group` block). A failed `assert` ends the test. The message shows where it is, the condition as written, and for a comparison of numbers, bools, bytes, strings or errors, the value of each side: `users/tests/load_test.sd:7: assert failed: names.len() == 3 (2 == 3)`. After `assert(cond)`, the compiler narrows on `cond` as after an `if`.
+- `assert(bool)` is built in and only allowed in tests (not inside a `group` block). A failed `assert` ends the test. The message shows where it is, the condition as written, and for a comparison of numbers, bools, bytes, strings or errors, the value of each side (as `.string()` gives it, so a byte shows as its number: `b == 'b' (97 == 98)`): `users/tests/load_test.sd:7: assert failed: names.len() == 3 (2 == 3)`. After `assert(cond)`, the compiler narrows on `cond` as after an `if`.
 - A test fails when an `assert` fails, when an error leaves it, or when it crashes. Each test runs in a goroutine of its own group, one after the other, so a crash fails only that test.
 - `seed test [dir...]` runs the tests of every package under the directories (by default the current one), prints one line per failed test (`FAIL "<name>": <where>: <reason>`) and a summary `N passed, M failed`, and exits with 1 when a test failed (or a package didn't compile).
 - A test of a crash runs the code in a group and checks the error: `error err = group { spawn f() }` then `assert(err.message() == "crash: ...")`.
@@ -475,7 +483,7 @@ Every error message shows the code it's about, explains what's wrong and suggest
 
 The compiler rejects:
 
-- a `switch` that doesn't cover every case, or an enum `switch` with `default`
+- a `switch` that doesn't cover every case, an enum `switch` with `default`, or a value `switch` whose `default` isn't last
 - an unchecked error, or an unused call result
 - a nullable value used without a null check, or a value read before the error beside it was checked
 - an unused local variable (including a pattern binding) or import
@@ -490,6 +498,8 @@ The compiler rejects:
 - unformatted code
 
 Unused parameters and unused package-level declarations are allowed.
+
+The compiler has one limit: blocks and expressions can be nested at most 256 levels deep.
 
 ## Toolchain
 

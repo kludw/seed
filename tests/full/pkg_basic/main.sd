@@ -48,7 +48,7 @@ fn main([]string args) error {
     shapes.Counter c = shapes.newCounter("clicks")
     c.add(2)
     c.add(3)
-    fmt.println(c.name + " " + c.total().string())
+    fmt.println(c.label + " " + c.total().string())
     shapes.Named n = c
     fmt.println("named: " + n.name())
     n = Robot{id: "r2"}

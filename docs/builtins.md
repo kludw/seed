@@ -16,6 +16,7 @@ This is part of the language spec ([SPEC.md](../SPEC.md)). It lists every method
 | Method / conversion | Result |
 |---|---|
 | `i.string()` | Decimal text, e.g. `"-42"`. |
+| `i << n`, `i >> n` | `n` is an `int`; crashes if `n` is negative (`negative shift count`). `<<` never overflows; `>>` rounds toward negative infinity (`-7 >> 1` is `-4`). |
 | `float(i)` | The nearest `float`. |
 | `byte(i)` | The byte with that value. Crashes unless `0 <= i <= 255`. |
 
@@ -38,6 +39,7 @@ This is part of the language spec ([SPEC.md](../SPEC.md)). It lists every method
 |---|---|
 | `b.string()` | Decimal text, e.g. `'a'.string()` is `"97"`. |
 | `int(b)` | The value 0–255. |
+| `b << n`, `b >> n` | `n` is a `byte`. The result keeps the low 8 bits: `byte(200) << byte(1)` is `144`, and `b << byte(8)` is `0`. |
 
 ## string
 
@@ -68,14 +70,14 @@ Strings are immutable UTF-8 bytes. Lengths and indexes count bytes.
 | Method | Result |
 |---|---|
 | `xs.len()` | `int`. |
-| `xs[i]`, `xs[i] = v` | Read or write an element. Crashes when out of range. |
+| `xs[i]`, `xs[i] = v` | Read or write an element. Crashes unless `0 <= i < len` (`index out of range`); writing never grows the list. |
 | `xs.push(x)` | `mut`. Adds to the end. |
 | `xs.pop()` | `mut`. Removes and returns the last element as `T?`, or `null` when empty. |
-| `xs.insert(i, x)` | `mut`. `0 <= i <= len`. |
-| `xs.remove(i)` | `mut`. Removes the element at `i`. |
+| `xs.insert(i, x)` | `mut`. Inserts `x` before the element at `i`. Crashes unless `0 <= i <= len` (`insert index out of range`). |
+| `xs.remove(i)` | `mut`. Removes the element at `i`. Crashes unless `0 <= i < len` (`index out of range`). |
 | `xs.contains(x)` | `bool`. |
 | `xs.index(x)` | `int?`. |
-| `xs.slice(a, b)` | A new list with elements `a` up to (not including) `b`. |
+| `xs.slice(a, b)` | A new list with elements `a` up to (not including) `b`. Crashes unless `0 <= a <= b <= len` (`slice bounds out of range`). |
 | `xs.reverse()` | `mut`. |
 | `xs.sort()` | `mut`. Only for `[]int`, `[]float`, `[]string`, `[]byte`. |
 | `xs.sortBy(f)` | `mut`. `f` is `fn(T, T) bool`, returning true when the first argument goes first. The sort is stable. |
@@ -83,12 +85,12 @@ Strings are immutable UTF-8 bytes. Lengths and indexes count bytes.
 
 ## Maps `map[K]V`
 
-`K` is `int`, `byte`, `bool` or `string`.
+`K` is `int`, `byte`, `bool` or `string`. `V` cannot be nullable (`map[K](V?)` is rejected), because `m[k]` already uses null for a missing key.
 
 | Operation | Result |
 |---|---|
 | `m[k]` | `V?`. |
-| `m[k] = v` | Inserts or replaces. A new key goes to the end of the order. |
+| `m[k] = v` | Inserts or replaces. A new key goes to the end of the order. (`m[k]++` and `m[k]--` are not allowed: the entry may be missing.) |
 | `m.len()` | `int`. |
 | `m.delete(k)` | `mut`. Does nothing if `k` is missing. The order of the other keys is kept. |
 | `m.keys()` | `[]K` in insertion order. |
@@ -104,10 +106,10 @@ Strings are immutable UTF-8 bytes. Lengths and indexes count bytes.
 | Method | Result |
 |---|---|
 | `ch.send(v)` | Sends a copy of `v`, waiting while the buffer is full. Crashes if the channel is closed (`send on closed channel`). |
-| `ch.receive()` | The next value as `T?`, waiting until there is one; `null` once the channel is closed and empty. For `chan error` the result is `error` (null when closed). |
+| `ch.receive()` | The next value as `T?`, waiting until there is one; `null` once the channel is closed and empty. For `chan error` the result is `error` (null when closed), which must be handled like any other error, also in a `select` case (`case error e = ch.receive():` or `case _ = ch.receive():`). |
 | `ch.close()` | Closes the channel: buffered values can still be received. Crashes if it is already closed (`close of closed channel`). |
 
-`send`, `receive` and `select` are stop points, where a goroutine whose group has failed stops (so are `time.sleep` and the standard library's blocking calls, listed in [SPEC.md](../SPEC.md#concurrency)); `close` is not.
+`send`, `receive` and `select` are stop points, where a goroutine whose group has failed stops (so are `time.sleep` and the standard library's blocking calls, such as reading stdin or an `fs.File`, listed in [SPEC.md](../SPEC.md#concurrency)); `close` is not.
 
 ## Core packages
 

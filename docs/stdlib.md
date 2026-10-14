@@ -246,7 +246,7 @@ pub type File struct {
 - Every operation after `close()` returns an error ending in `file is closed`: `fs.File.readLine: notes.txt: file is closed`.
 - `f.read(0)` crashes with `fs.File.read: max (0) must be at least 1`.
 - Paths are passed to the OS unchanged. Relative paths are relative to the current directory. A path that contains a NUL byte is an error, since the OS would only see the part before it: `fs.write: a.txt\x00.png: path contains a NUL byte` (each NUL is shown as `\x00`); `fs.exists` and `fs.isDir` return `false` for it.
-- File operations are not stop points: reading and writing regular files does not block for long, so a goroutine whose group is stopped stops at its next channel operation or blocking call instead.
+- Reading an `fs.File` (`readLine`, `read`) is a stop point, because it can wait for ever on a FIFO or a device: a goroutine whose group is stopped while it waits there stops. The other file operations (`fs.read`, `fs.write`, `fs.open`, `f.write`, ...) are not stop points: on regular files they don't block for long, so a goroutine whose group is stopped stops at its next channel operation or blocking call instead.
 
 ```
 fs.File f = try fs.open("access.log")
@@ -898,7 +898,7 @@ The design needed these changes to the language. All of them have been decided, 
 
 1. **Native functions.** A function may be declared without a body, only in the standard library (SPEC.md, "Standard library").
 2. **Private struct fields.** Fields are private unless marked `pub`, and a struct literal of another package's type is only allowed if every field is `pub`, so a program can't forge a handle (`net.Conn`, `fs.File`) or a `rand.Source` (SPEC.md, "Packages").
-3. **Stop points.** Blocking standard-library calls are stop points as well as channel operations (SPEC.md, "Concurrency"). What the library implements: `time.sleep`, `time.after`, `io`, every blocking `net` operation, `os.run` and `os.output`; not `fs` (regular files don't block for long).
+3. **Stop points.** Blocking standard-library calls are stop points as well as channel operations (SPEC.md, "Concurrency"). What the library implements: `time.sleep`, `time.after`, `io`, reads of an `fs.File`, every blocking `net` operation, `os.run` and `os.output`; not the other `fs` operations (regular files don't block for long).
 4. **`spawn` inside loops in a `group`.** A `group` block is ordinary code, `spawn` may appear anywhere inside it, finished goroutines are freed while the group runs, and `return` and `try` are not allowed inside the block (SPEC.md, "Groups").
 5. **Strings hold any bytes** (SPEC.md, "Types").
 6. **Float division by zero** gives `inf` or `nan`; only `int` division by zero crashes (SPEC.md, "Operators").

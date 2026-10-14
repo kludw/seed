@@ -4,15 +4,15 @@ pub type Named interface {
     name() string
 }
 
-// A counter: name can be read and written by other packages, count only
-// through the methods.
+// A counter: label can be read and written by other packages, count only
+// through the methods. (A field can't share its name with a method.)
 pub type Counter struct implements Named {
-    pub string name
+    pub string label
     int count
 }
 
 pub fn newCounter(string name) Counter {
-    return Counter{name: name, count: 0}
+    return Counter{label: name, count: 0}
 }
 
 pub fn (Counter c) mut add(int n) {
@@ -24,5 +24,5 @@ pub fn (Counter c) total() int {
 }
 
 fn (Counter c) name() string {
-    return c.name + "!"
+    return c.label + "!"
 }

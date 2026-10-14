@@ -671,6 +671,14 @@ fn (Checker c) mut resolveSignature(int f) {
         return
     }
     c.methods[key] = f
+    if (td.kind == DeclKind.Struct) {
+        for (int i = 0; i < td.fieldCount; i++) {
+            Param fp = c.ast.params[c.ast.at(td.fields, i)]
+            if (fp.name == fd.name) {
+                c.errorHint(fd.pos, "struct " + td.name + " has a field and a method both named " + fd.name, "rename the method or the field (" + td.name + "." + fd.name + " must name one thing)")
+            }
+        }
+    }
     if (fd.recvMut) {
         c.mutNames[fd.name] = true
     }

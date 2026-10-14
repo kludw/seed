@@ -261,7 +261,6 @@ type TypeDecl struct {
 type EnumCase struct {
     Pos pos
     string name
-    bool parens
     int params
     int paramCount
 }

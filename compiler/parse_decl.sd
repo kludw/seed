@@ -258,11 +258,15 @@ fn (Parser p) mut parseTypeDecl(bool isPub) {
             p.ast.params.push(Param{pos: npos, typeExpr: te, name: name, isPub: fieldPub})
             members.push(p.ast.params.len() - 1)
         } else if (td.kind == DeclKind.Enum) {
-            EnumCase c = EnumCase{pos: p.here(), name: "", parens: false, params: 0, paramCount: 0}
+            EnumCase c = EnumCase{pos: p.here(), name: "", params: 0, paramCount: 0}
             c.name = p.expectIdent("for the enum case")
+            Pos lparen = p.here()
             if (p.accept(Tok.LParen)) {
-                c.parens = true
                 []int cps = p.parseParams("for the case field")
+                if (!p.failed && cps.len() == 0) {
+                    // Reported without failing: the rest of the declaration still parses.
+                    p.diags.errorHint(lparen, "the enum case " + c.name + " has empty parentheses", "a case without data has no parentheses: write " + c.name)
+                }
                 c.params = p.ast.addList(cps)
                 c.paramCount = cps.len()
             }

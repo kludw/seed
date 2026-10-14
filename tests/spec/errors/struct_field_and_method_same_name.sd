@@ -1,0 +1,23 @@
+// expect-error: struct Job has a field and a method both named run
+// expect-errors: 1
+// SPEC "Function values": a struct can't have a field and a method with the
+// same name, so op.apply(...) always means one thing.
+package main
+
+fn fieldRun() string {
+    return "field"
+}
+
+type Job struct {
+    fn() string run
+}
+
+fn (Job j) run() string {
+    return "method"
+}
+
+fn main([]string args) error {
+    Job j = Job{run: fieldRun}
+    _ = j
+    return null
+}

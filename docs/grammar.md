@@ -6,11 +6,11 @@ This is part of the language spec ([SPEC.md](../SPEC.md)). It uses EBNF: `{ x }`
 
 - Source files are UTF-8 and use the `.sd` extension.
 - Comments start with `//` and run to the end of the line. There are no block comments.
-- Identifiers: a letter or `_`, followed by letters, digits or `_`. `_` alone is the discard name.
+- Identifiers: an ASCII letter (`a`–`z`, `A`–`Z`) or `_`, followed by ASCII letters, digits or `_`. `_` alone is the discard name. Outside strings, byte literals and comments, a source file is ASCII: any other character is an error (reported once, as the whole UTF-8 character).
 - Keywords:
   `package import pub fn type struct enum interface implements const if else for switch case default break continue return defer try null true false mut test assert select spawn group chan map`
-- Built-in type names (`int float bool byte string error`) are ordinary identifiers that refer to built-in types.
-- Literals are described in [SPEC.md](../SPEC.md#literals).
+- Built-in type names (`int float bool byte string error`) are not keywords but predeclared identifiers that refer to the built-in types. Like every name, they can't be declared again: a variable, parameter, field, function, type or constant can't be called `int` or `string`.
+- Literals are described in [SPEC.md](../SPEC.md#literals). A number never starts with `0` followed by a digit: `017` and `00` are errors (only `0` itself, `0.5` and the like, and `0x...` start with `0`).
 - Operators and punctuation:
   `+ - * / % & | ^ << >> == != < <= > >= && || ! = ++ -- ( ) [ ] { } , ; : . ?`
 
@@ -22,7 +22,7 @@ A newline ends a statement. As in Go, the lexer turns a newline into a statement
 - `return`, `break`, `continue`
 - `)`, `]`, `}`, `?`, `++`, `--`
 
-Blank lines and comment-only lines produce nothing. Because of this rule, an expression that continues on the next line must break after an operator or a comma, never before it:
+Blank lines and comment-only lines produce nothing. Because of this rule, a line continues exactly when its last token is not one of these, for example an operator, `=`, `.`, a comma or an opening bracket. So an expression that continues on the next line must break after an operator or a comma, never before it:
 
 ```
 int total = first +
@@ -56,7 +56,7 @@ TypeDecl    = "type" Ident ( StructType | EnumType | InterfaceType ) .
 Implements  = "implements" TypeName { "," TypeName } .
 StructType  = "struct" [ Implements ] "{" NL { Field NL } "}" .
 Field       = [ "pub" ] Type Ident .
-EnumType    = "enum" [ Implements ] "{" NL { Ident [ "(" Params ")" ] NL } "}" .
+EnumType    = "enum" [ Implements ] "{" NL { Ident [ "(" Params ")" ] NL } "}" .   // no () for a case without data
 InterfaceType = "interface" "{" NL { MethodSig NL } "}" .
 MethodSig   = [ "mut" ] Ident "(" [ Params ] ")" [ Result ] .
 
@@ -84,7 +84,7 @@ BaseType    = TypeName
 TypeName    = Ident [ "." Ident ] .
 ```
 
-`?` applies to the whole type on its left: `[]string?` is a nullable list of strings. A list of nullable strings needs parentheses: `[](string?)`. `T??` is not a valid type.
+`?` applies to the whole type on its left: `[]string?` is a nullable list of strings. A list of nullable strings needs parentheses: `[](string?)`, and so does a nullable function type: `(fn(int) int?)?`. `T??` and `error?` are not valid types, and neither are a nullable map value or channel element (`map[K](V?)`, `chan (T?)`).
 
 ## Statements
 
@@ -98,7 +98,7 @@ VarDecl     = DeclTarget { "," DeclTarget } "=" Expr .     // at least one typed
 DeclTarget  = Type Ident | LValue | "_" .
 Assign      = LValue { "," LValue } "=" Expr .
 LValue      = Ident { "." Ident | "[" Expr "]" } | "_" .
-IncDec      = LValue ( "++" | "--" ) .
+IncDec      = LValue ( "++" | "--" ) .                      // not on a map entry m[k]
 ExprStmt    = Expr .                                      // must be a call or try
 
 If          = "if" "(" Expr ")" Block [ "else" ( If | Block ) ] .
@@ -107,15 +107,15 @@ ForInit     = VarDecl | Assign .
 ForPost     = Assign | IncDec .
 
 Switch      = "switch" "(" Expr ")" "{" NL { CaseClause } "}" .
-CaseClause  = ( "case" CaseLabel { "," CaseLabel } | "default" ) ":" NL { Stmt NL } .
+CaseClause  = ( "case" CaseLabel { "," CaseLabel } | "default" ) ":" NL { Stmt NL } .   // default only last
 CaseLabel   = Expr | EnumPattern .
 EnumPattern = TypeName "." Ident [ "(" Params ")" ] .
 
 Select      = "select" "{" NL { SelectClause } "}" .
-SelectClause = "case" ( VarDecl | Expr ) ":" NL { Stmt NL } .   // ch.send(v), ch.receive(), _ = ch.receive() or T? v = ch.receive()
+SelectClause = "case" ( VarDecl | Assign | Expr ) ":" NL { Stmt NL } .   // ch.send(v), ch.receive(), _ = ch.receive() or T? v = ch.receive()
 
 Return      = "return" [ Expr { "," Expr } ] .
-Defer       = "defer" Expr .                               // a call
+Defer       = "defer" [ "_" "=" ] Expr .                   // a call; _ = discards its error
 Spawn       = "spawn" Expr .                               // a call, only inside a group block
 Assert      = "assert" "(" Expr ")" .                      // only inside a test
 ```
@@ -155,4 +155,5 @@ Group       = "group" Block .
 - A conversion looks like a call to a type name: `int(x)`, `float(n)`, `byte(i)`, `string(bytes)`.
 - An enum value is `Type.Case(args)`, or `Type.Case` for a case without data. In an `EnumPattern`, a case with data has a `Param` for every field (`_` as the name ignores one), and a case without data has no parentheses.
 - Conditions in `if`, `for` and `switch` are always parenthesised, so `Name{` is always a struct literal.
+- Blocks and expressions nest at most 256 levels deep.
 - A `Group` is only used whole: as the value of an assignment (`error err = group {...}`, `err = ...`, `_ = ...`), of `return`, or after `try`.

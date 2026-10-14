@@ -1,0 +1,15 @@
+// SPEC "Literals": 0 itself, 0x... (with zeros after the x) and 0.5 are
+// the numbers that may start with 0.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    int zero = 0
+    int hex = 0x0f
+    int hexZero = 0x00
+    float half = 0.5
+    float tiny = 0.05e-1
+    fmt.println(zero.string() + " " + hex.string() + " " + hexZero.string() + " " + half.string() + " " + tiny.string())
+    return null
+}

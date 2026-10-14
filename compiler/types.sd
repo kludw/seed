@@ -161,11 +161,16 @@ fn (Types ts) mut mapOf(int k, int v) int {
 }
 
 fn (Types ts) mut optOf(int e) int {
-    string name = ts.name(e) + "?"
+    return ts.compound(Kind.Opt, e, -1, "O" + ts.mangle(e), ts.optName(e))
+}
+
+// How the nullable form of e is written: T?, or (fn(...) R)? for a
+// function type (fn(int) int? is a function that returns int?).
+fn (Types ts) optName(int e) string {
     if (e != tyInvalid && ts.kind(e) == Kind.Func) {
-        name = "(" + ts.name(e) + ")?"
+        return "(" + ts.name(e) + ")?"
     }
-    return ts.compound(Kind.Opt, e, -1, "O" + ts.mangle(e), name)
+    return ts.name(e) + "?"
 }
 
 fn (Types ts) mut chanOf(int e) int {

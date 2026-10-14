@@ -12,7 +12,7 @@ fn balanceOf(Bank b, string id) int {
     if (a == null) {
         return -1
     }
-    return a.balance
+    return a.cents
 }
 
 test "formatCents groups thousands and keeps two decimals" {
@@ -38,21 +38,21 @@ test "the balance is the sum of the history" {
     try a.withdraw(300, "two")
     try a.closeMonth()
     int sum = 0
-    for (int i = 0; i < a.history.len(); i++) {
-        sum = sum + a.history[i].amount()
+    for (int i = 0; i < a.transactions.len(); i++) {
+        sum = sum + a.transactions[i].amount()
     }
-    assert(sum == a.balance)
-    assert(a.balance == 1000 - 300 - 500)
+    assert(sum == a.cents)
+    assert(a.cents == 1000 - 300 - 500)
 }
 
 test "checking allows an overdraft up to its limit" {
     Account a = newAccount("A", "ann", standardChecking())
     try a.withdraw(50000, "all of it")
-    assert(a.balance == -50000)
+    assert(a.cents == -50000)
     error err = a.withdraw(1, "one more cent")
     assert(err != null)
-    assert(a.balance == -50000)
-    assert(a.history.len() == 1)
+    assert(a.cents == -50000)
+    assert(a.transactions.len() == 1)
 }
 
 test "savings has no overdraft and earns interest" {
@@ -61,7 +61,7 @@ test "savings has no overdraft and earns interest" {
     assert(err.message() == "S: withdrawal: x: insufficient funds (balance 0.00, savings overdraft limit 0.00)")
     try a.deposit(100000, "x")
     try a.closeMonth()
-    assert(a.balance == 101500)
+    assert(a.cents == 101500)
 }
 
 test "the checking fee is waived for a high balance" {

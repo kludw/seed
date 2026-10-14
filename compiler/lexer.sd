@@ -450,6 +450,15 @@ fn (Lexer lx) mut lexNumber() {
         for (; lx.i < n && isDigit(lx.src[lx.i]); ) {
             lx.i++
         }
+        // 017 would be octal in C and Go; Seed has no octal, so a number
+        // never starts with 0 followed by a digit (0, 0.5 and 0x1f do).
+        int zeros = 0
+        if (lx.src[start] == '0' && lx.i - start > 1) {
+            zeros = 1
+            for (; start + zeros < lx.i - 1 && lx.src[start + zeros] == '0'; ) {
+                zeros++
+            }
+        }
         if (lx.peekByte(0) == '.' && isDigit(lx.peekByte(1))) {
             lx.i++
             for (; lx.i < n && isDigit(lx.src[lx.i]); ) {
@@ -468,6 +477,13 @@ fn (Lexer lx) mut lexNumber() {
                 }
             }
             kind = Tok.Float
+        }
+        if (zeros > 0) {
+            string why = " starts with 0 (Seed has no octal literals)"
+            if (kind == Tok.Float) {
+                why = " starts with 0 (a number has no leading zeros)"
+            }
+            lx.errors.push(Diag{pos: pos, message: "the number " + lx.src.slice(start, lx.i) + why, hint: "write " + lx.src.slice(start + zeros, lx.i)})
         }
     }
     if (lx.i < n && (isLetter(lx.src[lx.i]) || isDigit(lx.src[lx.i]))) {
@@ -584,13 +600,60 @@ fn (Lexer lx) mut lexOperator(byte c) {
         kind = singleCharToken(c)
     }
     if (kind == Tok.Eof) {
-        lx.fail(pos, "unexpected character '" + string([]byte{c}) + "'")
-        lx.i++
-        lx.col++
+        // A character outside ASCII is reported once, as itself (all of its
+        // UTF-8 bytes); a byte that isn't valid UTF-8 or can't be shown is
+        // reported as a number.
+        int len = utf8Length(lx.src, lx.i)
+        if (len > 0 && int(c) >= 128) {
+            lx.fail(pos, "unexpected character '" + lx.src.slice(lx.i, lx.i + len) + "' (only ASCII is allowed outside strings and comments)")
+        } else if (int(c) < 32 || int(c) >= 127) {
+            len = 1
+            lx.fail(pos, "unexpected byte " + byteHex(c) + " (only ASCII is allowed outside strings and comments)")
+        } else {
+            len = 1
+            lx.fail(pos, "unexpected character '" + string([]byte{c}) + "'")
+        }
+        lx.i = lx.i + len
+        lx.col = lx.col + len
         return
     }
     lx.i = lx.i + size
     lx.add(kind, pos, "", start)
+}
+
+// The length of the UTF-8 character at src[i] (1 to 4), or 0 when the
+// bytes there are not a valid UTF-8 character.
+fn utf8Length(string src, int i) int {
+    int b = int(src[i])
+    int len = 0
+    if (b < 128) {
+        return 1
+    } else if (b >= 194 && b <= 223) {
+        len = 2
+    } else if (b >= 224 && b <= 239) {
+        len = 3
+    } else if (b >= 240 && b <= 244) {
+        len = 4
+    } else {
+        return 0
+    }
+    if (i + len > src.len()) {
+        return 0
+    }
+    for (int k = 1; k < len; k++) {
+        int cb = int(src[i + k])
+        if (cb < 128 || cb > 191) {
+            return 0
+        }
+    }
+    return len
+}
+
+// A byte as 0xHH.
+fn byteHex(byte c) string {
+    string digits = "0123456789abcdef"
+    int v = int(c)
+    return "0x" + digits.slice(v / 16, v / 16 + 1) + digits.slice(v % 16, v % 16 + 1)
 }
 
 // The token for a one-character operator, or Tok.Eof if there is none.

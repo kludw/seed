@@ -54,27 +54,29 @@ pub fn (Transaction t) describe() string {
     }
 }
 
-// The id and owner can be read by anyone; the balance and history only
-// change through the methods below, which keep them consistent: the balance
-// is always the sum of the history, and never below what the plan allows.
+// The id and owner can be read by anyone; the balance (cents) and history
+// (transactions) only change through the methods below, which keep them
+// consistent: the balance is always the sum of the history, and never below
+// what the plan allows. (A field can't share its name with a method, so the
+// fields behind balance() and history() have names of their own.)
 pub type Account struct {
     pub string id
     pub string owner
     Plan plan
-    int balance
-    []Transaction history
+    int cents
+    []Transaction transactions
 }
 
 pub fn newAccount(string id, string owner, Plan plan) Account {
-    return Account{id: id, owner: owner, plan: plan, balance: 0, history: []Transaction{}}
+    return Account{id: id, owner: owner, plan: plan, cents: 0, transactions: []Transaction{}}
 }
 
 pub fn (Account a) balance() int {
-    return a.balance
+    return a.cents
 }
 
 pub fn (Account a) history() []Transaction {
-    return a.history
+    return a.transactions
 }
 
 pub fn (Account a) planName() string {
@@ -87,11 +89,11 @@ pub fn (Account a) mut apply(Transaction t) error {
     if (amount == 0) {
         return errors.new(a.id + ": " + t.describe() + ": the amount must not be zero")
     }
-    if (amount < 0 && a.balance + amount < -a.plan.overdraftLimit()) {
-        return errors.new(a.id + ": " + t.describe() + ": insufficient funds (balance " + formatCents(a.balance) + ", " + a.plan.name() + " overdraft limit " + formatCents(a.plan.overdraftLimit()) + ")")
+    if (amount < 0 && a.cents + amount < -a.plan.overdraftLimit()) {
+        return errors.new(a.id + ": " + t.describe() + ": insufficient funds (balance " + formatCents(a.cents) + ", " + a.plan.name() + " overdraft limit " + formatCents(a.plan.overdraftLimit()) + ")")
     }
-    a.balance = a.balance + amount
-    a.history.push(t)
+    a.cents = a.cents + amount
+    a.transactions.push(t)
     return null
 }
 
@@ -111,7 +113,7 @@ pub fn (Account a) mut withdraw(int cents, string memo) error {
 
 // Runs the plan's month-end rules: fees and interest.
 pub fn (Account a) mut closeMonth() error {
-    []Transaction due = a.plan.monthEnd(a.balance)
+    []Transaction due = a.plan.monthEnd(a.cents)
     for (int i = 0; i < due.len(); i++) {
         try a.apply(due[i])
     }

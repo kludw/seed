@@ -5205,7 +5205,7 @@ struct sd_S_TypeExpr { sd_box * f_kind; sd_S_Pos f_pos; sd_str f_pkg; sd_str f_n
 struct sd_S_Param { sd_S_Pos f_pos; sd_int f_typeExpr; sd_str f_name; bool f_isPub; };
 struct sd_S_FnDecl { sd_S_Pos f_pos; sd_S_Pos f_start; sd_int f_file; bool f_isPub; bool f_isTest; sd_str f_name; bool f_isMethod; sd_int f_recvType; sd_str f_recvName; sd_S_Pos f_recvPos; bool f_recvMut; sd_int f_params; sd_int f_paramCount; sd_int f_results; sd_int f_resultCount; sd_int f_body; };
 struct sd_S_TypeDecl { sd_S_Pos f_pos; sd_int f_file; bool f_isPub; sd_str f_name; sd_box * f_kind; sd_int f_impls; sd_int f_implCount; sd_int f_fields; sd_int f_fieldCount; sd_int f_cases; sd_int f_caseCount; sd_int f_methods; sd_int f_methodCount; };
-struct sd_S_EnumCase { sd_S_Pos f_pos; sd_str f_name; bool f_parens; sd_int f_params; sd_int f_paramCount; };
+struct sd_S_EnumCase { sd_S_Pos f_pos; sd_str f_name; sd_int f_params; sd_int f_paramCount; };
 struct sd_S_MethodSig { sd_S_Pos f_pos; bool f_isMut; sd_str f_name; sd_int f_params; sd_int f_paramCount; sd_int f_results; sd_int f_resultCount; };
 struct sd_S_ConstDecl { sd_S_Pos f_pos; sd_int f_file; bool f_isPub; sd_str f_name; sd_int f_typeExpr; sd_int f_expr; };
 struct sd_S_TestDecl { sd_S_Pos f_pos; sd_int f_file; sd_str f_name; sd_int f_body; };
@@ -5417,7 +5417,7 @@ SD_BOX_STATIC(sd_k_DeclKind__Enum, &sd_D_DeclKind, sd_E_DeclKind, {.tag = 1});
 SD_BOX_STATIC(sd_k_DeclKind__Interface, &sd_D_DeclKind, sd_E_DeclKind, {.tag = 2});
 static const sd_field sd_F_TypeDecl[] = {SD_FIELD(sd_S_TypeDecl, f_pos, &sd_D_Pos), SD_FIELD(sd_S_TypeDecl, f_file, &sd_type_int), SD_FIELD(sd_S_TypeDecl, f_isPub, &sd_type_bool), SD_FIELD(sd_S_TypeDecl, f_name, &sd_type_str), SD_FIELD(sd_S_TypeDecl, f_kind, &sd_type_box), SD_FIELD(sd_S_TypeDecl, f_impls, &sd_type_int), SD_FIELD(sd_S_TypeDecl, f_implCount, &sd_type_int), SD_FIELD(sd_S_TypeDecl, f_fields, &sd_type_int), SD_FIELD(sd_S_TypeDecl, f_fieldCount, &sd_type_int), SD_FIELD(sd_S_TypeDecl, f_cases, &sd_type_int), SD_FIELD(sd_S_TypeDecl, f_caseCount, &sd_type_int), SD_FIELD(sd_S_TypeDecl, f_methods, &sd_type_int), SD_FIELD(sd_S_TypeDecl, f_methodCount, &sd_type_int)};
 static const sd_type sd_D_TypeDecl = SD_STRUCT_TYPE("TypeDecl", sd_S_TypeDecl, sd_F_TypeDecl);
-static const sd_field sd_F_EnumCase[] = {SD_FIELD(sd_S_EnumCase, f_pos, &sd_D_Pos), SD_FIELD(sd_S_EnumCase, f_name, &sd_type_str), SD_FIELD(sd_S_EnumCase, f_parens, &sd_type_bool), SD_FIELD(sd_S_EnumCase, f_params, &sd_type_int), SD_FIELD(sd_S_EnumCase, f_paramCount, &sd_type_int)};
+static const sd_field sd_F_EnumCase[] = {SD_FIELD(sd_S_EnumCase, f_pos, &sd_D_Pos), SD_FIELD(sd_S_EnumCase, f_name, &sd_type_str), SD_FIELD(sd_S_EnumCase, f_params, &sd_type_int), SD_FIELD(sd_S_EnumCase, f_paramCount, &sd_type_int)};
 static const sd_type sd_D_EnumCase = SD_STRUCT_TYPE("EnumCase", sd_S_EnumCase, sd_F_EnumCase);
 static const sd_field sd_F_MethodSig[] = {SD_FIELD(sd_S_MethodSig, f_pos, &sd_D_Pos), SD_FIELD(sd_S_MethodSig, f_isMut, &sd_type_bool), SD_FIELD(sd_S_MethodSig, f_name, &sd_type_str), SD_FIELD(sd_S_MethodSig, f_params, &sd_type_int), SD_FIELD(sd_S_MethodSig, f_paramCount, &sd_type_int), SD_FIELD(sd_S_MethodSig, f_results, &sd_type_int), SD_FIELD(sd_S_MethodSig, f_resultCount, &sd_type_int)};
 static const sd_type sd_D_MethodSig = SD_STRUCT_TYPE("MethodSig", sd_S_MethodSig, sd_F_MethodSig);
@@ -6191,6 +6191,8 @@ static void sd_m_Lexer__lexWord(sd_S_Lexer * l_lx);
 static void sd_m_Lexer__lexNumber(sd_S_Lexer * l_lx);
 static void sd_m_Lexer__lexQuoted(sd_S_Lexer * l_lx, uint8_t l_quote);
 static void sd_m_Lexer__lexOperator(sd_S_Lexer * l_lx, uint8_t l_c);
+static sd_int sd_f_utf8Length(sd_str l_src, sd_int l_i);
+static sd_str sd_f_byteHex(uint8_t l_c);
 static sd_box * sd_f_singleCharToken(uint8_t l_c);
 static sd_S_Loader sd_f_newLoader(sd_str l_seedRoot, sd_str l_projectRoot);
 static sd_int sd_m_Loader__addPackage(sd_S_Loader * l_l, sd_str l_path, sd_str l_dir, bool l_isLib);
@@ -6305,6 +6307,7 @@ static sd_int sd_m_Types__compound(sd_S_Types * l_ts, sd_box * l_kind, sd_int l_
 static sd_int sd_m_Types__listOf(sd_S_Types * l_ts, sd_int l_e);
 static sd_int sd_m_Types__mapOf(sd_S_Types * l_ts, sd_int l_k, sd_int l_v);
 static sd_int sd_m_Types__optOf(sd_S_Types * l_ts, sd_int l_e);
+static sd_str sd_m_Types__optName(sd_S_Types l_ts, sd_int l_e);
 static sd_int sd_m_Types__chanOf(sd_S_Types * l_ts, sd_int l_e);
 static sd_int sd_m_Types__declared(sd_S_Types * l_ts, sd_box * l_kind, sd_int l_decl, sd_str l_name, sd_str l_cname);
 static sd_int sd_m_Types__tupleOf(sd_S_Types * l_ts, sd_list * l_parts);
@@ -9837,7 +9840,7 @@ static void sd_m_Checker__checkStructCycles(sd_S_Checker * l_c, sd_int l_d, sd_l
   SD_LF_LEAVE(L);
 }
 
-typedef struct { sd_lframe h; sd_S_FnDecl l_fd; sd_list * l_rs; sd_list * _t10; sd_str l_prefix; sd_S_TypeExpr l_rte; sd_str _t30; sd_str _t31; sd_S_TypeDecl l_td; sd_str _t37; sd_str _t38; sd_str l_key; sd_str _t54; sd_str _t56; sd_str _t58; } sd_L_sd_m_Checker__resolveSignature;
+typedef struct { sd_lframe h; sd_S_FnDecl l_fd; sd_list * l_rs; sd_list * _t10; sd_str l_prefix; sd_S_TypeExpr l_rte; sd_str _t30; sd_str _t31; sd_S_TypeDecl l_td; sd_str _t37; sd_str _t38; sd_str l_key; sd_str _t54; sd_str _t56; sd_S_Param l_fp; sd_str _t61; sd_str _t63; sd_str _t66; } sd_L_sd_m_Checker__resolveSignature;
 static void sd_lr_sd_m_Checker__resolveSignature(sd_lframe *p) {
   sd_L_sd_m_Checker__resolveSignature *L = (sd_L_sd_m_Checker__resolveSignature *)p;
   sd_rl_S6FnDecl(L->l_fd);
@@ -9853,7 +9856,10 @@ static void sd_lr_sd_m_Checker__resolveSignature(sd_lframe *p) {
   sd_str_release(L->l_key);
   sd_str_release(L->_t54);
   sd_str_release(L->_t56);
-  sd_str_release(L->_t58);
+  sd_rl_S5Param(L->l_fp);
+  sd_str_release(L->_t61);
+  sd_str_release(L->_t63);
+  sd_str_release(L->_t66);
 }
 static void sd_m_Checker__resolveSignature(sd_S_Checker * l_c, sd_int l_f) {
   sd_L_sd_m_Checker__resolveSignature L = {{0}};
@@ -10028,11 +10034,39 @@ static void sd_m_Checker__resolveSignature(sd_S_Checker * l_c, sd_int l_f) {
   L._t56 = sd_str_retain(L.l_key);
   sd_map_set((&(l_c)->f_methods), &L._t56, &_t55);
   L._t56 = NULL;
+  if (sd_box_equal((L.l_td).f_kind, SD_BOX_REF(sd_k_DeclKind__Struct))) {
+    {
+      sd_int l_i = SD_INT(0);
+      for (;;) {
+        if (!(sd_int_lt(l_i, (L.l_td).f_fieldCount))) break;
+        {
+          sd_int _t58 = sd_m_Ast__at(((*l_c)).f_ast, (L.l_td).f_fields, l_i);
+          L.l_fp = sd_rt_S5Param(SD_LIST_GET((((*l_c)).f_ast).f_params, sd_S_Param, _t58));
+          sd_int_release(_t58);
+          if (sd_str_eq((L.l_fp).f_name, (L.l_fd).f_name)) {
+            sd_S_Pos _t59 = sd_rt_S3Pos((L.l_fd).f_pos);
+            sd_str _t60[] = {SD_STR_LIT("struct "), (L.l_td).f_name, SD_STR_LIT(" has a field and a method both named "), (L.l_fd).f_name};
+            L._t61 = sd_str_concat_n(_t60, 4);
+            sd_str _t62[] = {SD_STR_LIT("rename the method or the field ("), (L.l_td).f_name, SD_STR_LIT("."), (L.l_fd).f_name, SD_STR_LIT(" must name one thing)")};
+            L._t63 = sd_str_concat_n(_t62, 5);
+            sd_m_Checker__errorHint(l_c, _t59, L._t61, L._t63);
+            sd_str_release(L._t63); L._t63 = NULL;
+            sd_str_release(L._t61); L._t61 = NULL;
+            sd_rl_S3Pos(_t59);
+          }
+          sd_rl_S5Param(L.l_fp); L.l_fp = ((sd_S_Param){0});
+        }
+        _c57:;
+        sd_int _t64 = sd_int_add(l_i, SD_INT(1)); sd_int_release(l_i); l_i = _t64;
+      }
+      sd_int_release(l_i);
+    }
+  }
   if ((L.l_fd).f_recvMut) {
-    bool _t57 = true;
-    L._t58 = sd_str_retain((L.l_fd).f_name);
-    sd_map_set((&(l_c)->f_mutNames), &L._t58, &_t57);
-    L._t58 = NULL;
+    bool _t65 = true;
+    L._t66 = sd_str_retain((L.l_fd).f_name);
+    sd_map_set((&(l_c)->f_mutNames), &L._t66, &_t65);
+    L._t66 = NULL;
   }
   sd_str_release(L.l_key); L.l_key = NULL;
   sd_rl_S8TypeDecl(L.l_td); L.l_td = ((sd_S_TypeDecl){0});
@@ -14919,8 +14953,8 @@ static void sd_m_Checker__coerce(sd_S_Checker * l_c, sd_int l_e, sd_int l_want, 
     L._t46 = sd_m_Checker__typeName((*l_c), l_want);
     sd_str _t47[] = {SD_STR_LIT("null cannot be used as "), L._t46, SD_STR_LIT(" "), l_context, SD_STR_LIT(": only nullable types (T\?) and error can be null")};
     L._t48 = sd_str_concat_n(_t47, 5);
-    L._t49 = sd_m_Checker__typeName((*l_c), l_want);
-    sd_str _t50[] = {SD_STR_LIT("declare it as "), L._t49, SD_STR_LIT("\? if it may be missing")};
+    L._t49 = sd_m_Types__optName(((*l_c)).f_types, l_want);
+    sd_str _t50[] = {SD_STR_LIT("declare it as "), L._t49, SD_STR_LIT(" if it may be missing")};
     L._t51 = sd_str_concat_n(_t50, 3);
     sd_m_Checker__errorHint(l_c, _t45, L._t48, L._t51);
     sd_str_release(L._t51); L._t51 = NULL;
@@ -21037,11 +21071,11 @@ static void sd_m_Checker__checkAssign(sd_S_Checker * l_c, sd_int l_s) {
         }
         if ((_t96 && (!sd_int_eq(l_tt, sd_c_tyError())))) {
           sd_S_Pos _t97 = sd_rt_S3Pos((L.l_tg2).f_pos);
-          L._t98 = sd_m_Checker__typeName((*l_c), l_tt);
-          sd_str _t99[] = {SD_STR_LIT("the error is discarded with _, so "), L.l_what, SD_STR_LIT(" may be null and must be declared as "), L._t98, SD_STR_LIT("\?")};
-          L._t100 = sd_str_concat_n(_t99, 5);
-          L._t101 = sd_m_Checker__typeName((*l_c), l_tt);
-          sd_str _t102[] = {SD_STR_LIT("declare it as "), L._t101, SD_STR_LIT("\? and check it against null before using it")};
+          L._t98 = sd_m_Types__optName(((*l_c)).f_types, l_tt);
+          sd_str _t99[] = {SD_STR_LIT("the error is discarded with _, so "), L.l_what, SD_STR_LIT(" may be null and must be declared as "), L._t98};
+          L._t100 = sd_str_concat_n(_t99, 4);
+          L._t101 = sd_m_Types__optName(((*l_c)).f_types, l_tt);
+          sd_str _t102[] = {SD_STR_LIT("declare it as "), L._t101, SD_STR_LIT(" and check it against null before using it")};
           L._t103 = sd_str_concat_n(_t102, 3);
           sd_m_Checker__errorHint(l_c, _t97, L._t100, L._t103);
           sd_str_release(L._t103); L._t103 = NULL;
@@ -21382,7 +21416,7 @@ static void sd_m_Checker__endCase(sd_S_Checker * l_c, sd_int l_body, sd_list * l
   *_t5 = _t4;
 }
 
-typedef struct { sd_lframe h; sd_list * l_before; sd_list * _t9; sd_S_Stmt _t14; sd_str _t18; sd_str _t19; sd_str _t21; sd_str _t22; sd_str _t24; sd_str _t26; sd_str _t28; sd_str _t32; sd_S_Label l_l; sd_str _t37; sd_str _t38; sd_str _t41; sd_list * _t45; sd_str _t48; sd_str _t50; sd_str _t51; } sd_L_sd_m_Checker__checkSwitchCases;
+typedef struct { sd_lframe h; sd_list * l_before; sd_list * _t9; sd_S_Stmt _t14; sd_str _t18; sd_str _t19; sd_str _t21; sd_str _t22; sd_str _t24; sd_str _t26; sd_str _t28; sd_str _t32; sd_str _t35; sd_str _t36; sd_S_Label l_l; sd_str _t40; sd_str _t41; sd_str _t44; sd_list * _t48; sd_str _t51; sd_str _t53; sd_str _t54; } sd_L_sd_m_Checker__checkSwitchCases;
 static void sd_lr_sd_m_Checker__checkSwitchCases(sd_lframe *p) {
   sd_L_sd_m_Checker__checkSwitchCases *L = (sd_L_sd_m_Checker__checkSwitchCases *)p;
   sd_list_release(L->l_before);
@@ -21396,14 +21430,16 @@ static void sd_lr_sd_m_Checker__checkSwitchCases(sd_lframe *p) {
   sd_str_release(L->_t26);
   sd_str_release(L->_t28);
   sd_str_release(L->_t32);
+  sd_str_release(L->_t35);
+  sd_str_release(L->_t36);
   sd_rl_S5Label(L->l_l);
-  sd_str_release(L->_t37);
-  sd_str_release(L->_t38);
+  sd_str_release(L->_t40);
   sd_str_release(L->_t41);
-  sd_list_release(L->_t45);
-  sd_str_release(L->_t48);
-  sd_str_release(L->_t50);
+  sd_str_release(L->_t44);
+  sd_list_release(L->_t48);
   sd_str_release(L->_t51);
+  sd_str_release(L->_t53);
+  sd_str_release(L->_t54);
 }
 static void sd_m_Checker__checkSwitchCases(sd_S_Checker * l_c, sd_S_Stmt l_st) {
   sd_L_sd_m_Checker__checkSwitchCases L = {{0}};
@@ -21513,68 +21549,78 @@ static void sd_m_Checker__checkSwitchCases(sd_S_Checker * l_c, sd_S_Stmt l_st) {
           }
           bool _t33 = true;
           l_hasDefault = _t33;
+        } else {
+          if (l_hasDefault) {
+            sd_S_Pos _t34 = sd_rt_S3Pos((l_cs).f_pos);
+            L._t35 = sd_str_retain(SD_STR_LIT("default must be the last case of a switch, but a case follows it"));
+            L._t36 = sd_str_retain(SD_STR_LIT("move default: and its statements to the end of the switch"));
+            sd_m_Checker__errorHint(l_c, _t34, L._t35, L._t36);
+            sd_str_release(L._t36); L._t36 = NULL;
+            sd_str_release(L._t35); L._t35 = NULL;
+            sd_rl_S3Pos(_t34);
+          }
         }
         {
           sd_int l_k = SD_INT(0);
           for (;;) {
             if (!(sd_int_lt(l_k, (l_cs).f_labelCount))) break;
             {
-              sd_int _t35 = sd_m_Ast__at(((*l_c)).f_ast, (l_cs).f_labels, l_k);
-              L.l_l = sd_rt_S5Label(SD_LIST_GET((((*l_c)).f_ast).f_labels, sd_S_Label, _t35));
-              sd_int_release(_t35);
+              sd_int _t38 = sd_m_Ast__at(((*l_c)).f_ast, (l_cs).f_labels, l_k);
+              L.l_l = sd_rt_S5Label(SD_LIST_GET((((*l_c)).f_ast).f_labels, sd_S_Label, _t38));
+              sd_int_release(_t38);
               if (((L.l_l).f_parens && (sd_int_gt((L.l_l).f_paramCount, SD_INT(0)) || sd_int_lt((L.l_l).f_expr, SD_INT(0))))) {
-                sd_S_Pos _t36 = sd_rt_S3Pos((L.l_l).f_pos);
-                L._t37 = sd_m_Checker__typeName((*l_c), l_t);
-                L._t38 = sd_str_concat(L._t37, SD_STR_LIT(" is not an enum, so case patterns with bindings cannot be used"));
-                sd_m_Checker__error(l_c, _t36, L._t38);
-                sd_str_release(L._t38); L._t38 = NULL;
-                sd_str_release(L._t37); L._t37 = NULL;
-                sd_rl_S3Pos(_t36);
+                sd_S_Pos _t39 = sd_rt_S3Pos((L.l_l).f_pos);
+                L._t40 = sd_m_Checker__typeName((*l_c), l_t);
+                L._t41 = sd_str_concat(L._t40, SD_STR_LIT(" is not an enum, so case patterns with bindings cannot be used"));
+                sd_m_Checker__error(l_c, _t39, L._t41);
+                sd_str_release(L._t41); L._t41 = NULL;
+                sd_str_release(L._t40); L._t40 = NULL;
+                sd_rl_S3Pos(_t39);
                 sd_rl_S5Label(L.l_l); L.l_l = ((sd_S_Label){0});
-                goto _c34;
+                goto _c37;
               }
-              sd_int _t39 = sd_int_retain((L.l_l).f_expr);
-              sd_int _t40 = sd_int_retain(l_t);
-              L._t41 = sd_str_retain(SD_STR_LIT("as a case value"));
-              sd_m_Checker__checkValue(l_c, _t39, _t40, L._t41);
-              sd_str_release(L._t41); L._t41 = NULL;
-              sd_int_release(_t40);
-              sd_int_release(_t39);
+              sd_int _t42 = sd_int_retain((L.l_l).f_expr);
+              sd_int _t43 = sd_int_retain(l_t);
+              L._t44 = sd_str_retain(SD_STR_LIT("as a case value"));
+              sd_m_Checker__checkValue(l_c, _t42, _t43, L._t44);
+              sd_str_release(L._t44); L._t44 = NULL;
+              sd_int_release(_t43);
+              sd_int_release(_t42);
               sd_rl_S5Label(L.l_l); L.l_l = ((sd_S_Label){0});
             }
-            _c34:;
-            sd_int _t42 = sd_int_add(l_k, SD_INT(1)); sd_int_release(l_k); l_k = _t42;
+            _c37:;
+            sd_int _t45 = sd_int_add(l_k, SD_INT(1)); sd_int_release(l_k); l_k = _t45;
           }
           sd_int_release(l_k);
         }
         sd_m_Checker__pushScope(l_c);
-        sd_int _t43 = sd_int_retain((l_cs).f_body);
-        sd_m_Checker__checkBlock(l_c, _t43);
-        sd_int_release(_t43);
+        sd_int _t46 = sd_int_retain((l_cs).f_body);
+        sd_m_Checker__checkBlock(l_c, _t46);
+        sd_int_release(_t46);
         sd_m_Checker__popScope(l_c);
-        sd_int _t44 = sd_int_retain((l_cs).f_body);
-        L._t45 = sd_list_retain(L.l_before);
-        sd_m_Checker__endCase(l_c, _t44, L._t45);
-        sd_list_release(L._t45); L._t45 = NULL;
-        sd_int_release(_t44);
+        sd_int _t47 = sd_int_retain((l_cs).f_body);
+        L._t48 = sd_list_retain(L.l_before);
+        sd_m_Checker__endCase(l_c, _t47, L._t48);
+        sd_list_release(L._t48); L._t48 = NULL;
+        sd_int_release(_t47);
         sd_rl_S4Case(l_cs);
       }
       _c29:;
-      sd_int _t46 = sd_int_add(l_j, SD_INT(1)); sd_int_release(l_j); l_j = _t46;
+      sd_int _t49 = sd_int_add(l_j, SD_INT(1)); sd_int_release(l_j); l_j = _t49;
     }
     sd_int_release(l_j);
   }
   if ((!l_hasDefault)) {
-    sd_S_Pos _t47 = sd_rt_S3Pos((l_st).f_pos);
-    L._t48 = sd_m_Checker__typeName((*l_c), l_t);
-    sd_str _t49[] = {SD_STR_LIT("a switch over "), L._t48, SD_STR_LIT(" must end with a default case")};
-    L._t50 = sd_str_concat_n(_t49, 3);
-    L._t51 = sd_str_retain(SD_STR_LIT("add default: for the values not listed"));
-    sd_m_Checker__errorHint(l_c, _t47, L._t50, L._t51);
+    sd_S_Pos _t50 = sd_rt_S3Pos((l_st).f_pos);
+    L._t51 = sd_m_Checker__typeName((*l_c), l_t);
+    sd_str _t52[] = {SD_STR_LIT("a switch over "), L._t51, SD_STR_LIT(" must end with a default case")};
+    L._t53 = sd_str_concat_n(_t52, 3);
+    L._t54 = sd_str_retain(SD_STR_LIT("add default: for the values not listed"));
+    sd_m_Checker__errorHint(l_c, _t50, L._t53, L._t54);
+    sd_str_release(L._t54); L._t54 = NULL;
+    sd_str_release(L._t53); L._t53 = NULL;
     sd_str_release(L._t51); L._t51 = NULL;
-    sd_str_release(L._t50); L._t50 = NULL;
-    sd_str_release(L._t48); L._t48 = NULL;
-    sd_rl_S3Pos(_t47);
+    sd_rl_S3Pos(_t50);
   }
   sd_rl_S3Pos(l_vpos);
   sd_int_release(l_t);
@@ -22344,26 +22390,29 @@ static void sd_m_Checker__checkSelect(sd_S_Checker * l_c, sd_S_Stmt l_st) {
   SD_LF_LEAVE(L);
 }
 
-typedef struct { sd_lframe h; sd_S_Stmt l_st; sd_str l_hint; sd_str _t7; sd_str _t8; sd_str _t10; sd_str _t11; sd_S_Target l_tg; sd_str _t18; sd_str _t19; sd_str _t22; sd_str _t23; sd_str _t29; sd_str _t30; sd_str _t32; sd_str _t33; sd_str _t35; sd_str _t36; } sd_L_sd_m_Checker__checkSelectComm;
+typedef struct { sd_lframe h; sd_S_Stmt l_st; sd_str l_hint; sd_str _t6; sd_str _t7; sd_str l_d; sd_str _t15; sd_str _t17; sd_str _t19; sd_str _t20; sd_S_Target l_tg; sd_str _t27; sd_str _t28; sd_str _t31; sd_str _t32; sd_str _t38; sd_str _t39; sd_str _t41; sd_str _t42; sd_str _t44; sd_str _t45; } sd_L_sd_m_Checker__checkSelectComm;
 static void sd_lr_sd_m_Checker__checkSelectComm(sd_lframe *p) {
   sd_L_sd_m_Checker__checkSelectComm *L = (sd_L_sd_m_Checker__checkSelectComm *)p;
   sd_rl_S4Stmt(L->l_st);
   sd_str_release(L->l_hint);
+  sd_str_release(L->_t6);
   sd_str_release(L->_t7);
-  sd_str_release(L->_t8);
-  sd_str_release(L->_t10);
-  sd_str_release(L->_t11);
-  sd_rl_S6Target(L->l_tg);
-  sd_str_release(L->_t18);
+  sd_str_release(L->l_d);
+  sd_str_release(L->_t15);
+  sd_str_release(L->_t17);
   sd_str_release(L->_t19);
-  sd_str_release(L->_t22);
-  sd_str_release(L->_t23);
-  sd_str_release(L->_t29);
-  sd_str_release(L->_t30);
+  sd_str_release(L->_t20);
+  sd_rl_S6Target(L->l_tg);
+  sd_str_release(L->_t27);
+  sd_str_release(L->_t28);
+  sd_str_release(L->_t31);
   sd_str_release(L->_t32);
-  sd_str_release(L->_t33);
-  sd_str_release(L->_t35);
-  sd_str_release(L->_t36);
+  sd_str_release(L->_t38);
+  sd_str_release(L->_t39);
+  sd_str_release(L->_t41);
+  sd_str_release(L->_t42);
+  sd_str_release(L->_t44);
+  sd_str_release(L->_t45);
 }
 static void sd_m_Checker__checkSelectComm(sd_S_Checker * l_c, sd_int l_s) {
   sd_L_sd_m_Checker__checkSelectComm L = {{0}};
@@ -22379,73 +22428,98 @@ static void sd_m_Checker__checkSelectComm(sd_S_Checker * l_c, sd_int l_s) {
     sd_m_Checker__checkExpr(l_c, _t1);
     sd_int_release(_t1);
     sd_int _t2 = sd_m_Checker__typeOf((*l_c), (L.l_st).f_expr);
-    bool _t4 = (!sd_int_eq(_t2, sd_c_tyInvalid()));
+    sd_int l_et = _t2;
+    bool _t4 = (!sd_int_eq(l_et, sd_c_tyInvalid()));
     if (_t4) {
       bool _t3 = sd_m_Checker__isChanOp((*l_c), (L.l_st).f_expr, true);
       _t4 = (!_t3);
     }
-    bool _t5 = _t4;
-    sd_int_release(_t2);
-    if (_t5) {
-      sd_S_Pos _t6 = sd_rt_S3Pos((SD_LIST_GET((((*l_c)).f_ast).f_exprs, sd_S_Expr, (L.l_st).f_expr)).f_pos);
-      L._t7 = sd_str_retain(SD_STR_LIT("a select case must send or receive on a channel"));
-      L._t8 = sd_str_retain(L.l_hint);
-      sd_m_Checker__errorHint(l_c, _t6, L._t7, L._t8);
-      sd_str_release(L._t8); L._t8 = NULL;
+    if (_t4) {
+      sd_S_Pos _t5 = sd_rt_S3Pos((SD_LIST_GET((((*l_c)).f_ast).f_exprs, sd_S_Expr, (L.l_st).f_expr)).f_pos);
+      L._t6 = sd_str_retain(SD_STR_LIT("a select case must send or receive on a channel"));
+      L._t7 = sd_str_retain(L.l_hint);
+      sd_m_Checker__errorHint(l_c, _t5, L._t6, L._t7);
       sd_str_release(L._t7); L._t7 = NULL;
-      sd_rl_S3Pos(_t6);
+      sd_str_release(L._t6); L._t6 = NULL;
+      sd_rl_S3Pos(_t5);
+    } else {
+      bool _t9 = (!sd_int_eq(l_et, sd_c_tyInvalid()));
+      if (_t9) {
+        bool _t8 = sd_m_Checker__isChanOp((*l_c), (L.l_st).f_expr, false);
+        _t9 = _t8;
+      }
+      bool _t11 = _t9;
+      if (_t11) {
+        bool _t10 = sd_m_Types__endsWithError(((*l_c)).f_types, l_et);
+        _t11 = _t10;
+      }
+      if (_t11) {
+        sd_str _t12 = sd_m_Checker__describe((*l_c), (L.l_st).f_expr);
+        L.l_d = _t12;
+        sd_S_Pos _t13 = sd_rt_S3Pos((SD_LIST_GET((((*l_c)).f_ast).f_exprs, sd_S_Expr, (L.l_st).f_expr)).f_pos);
+        sd_str _t14[] = {SD_STR_LIT("the error received by "), L.l_d, SD_STR_LIT(" is not handled")};
+        L._t15 = sd_str_concat_n(_t14, 3);
+        sd_str _t16[] = {SD_STR_LIT("declare it (case error e = "), L.l_d, SD_STR_LIT(":) or discard it explicitly (case _ = "), L.l_d, SD_STR_LIT(":)")};
+        L._t17 = sd_str_concat_n(_t16, 5);
+        sd_m_Checker__errorHint(l_c, _t13, L._t15, L._t17);
+        sd_str_release(L._t17); L._t17 = NULL;
+        sd_str_release(L._t15); L._t15 = NULL;
+        sd_rl_S3Pos(_t13);
+        sd_str_release(L.l_d); L.l_d = NULL;
+      }
     }
     SD_LF_LEAVE(L);
+    sd_int_release(l_et);
     sd_str_release(L.l_hint);
     sd_rl_S4Stmt(L.l_st);
     return;
   }
   if (((!sd_box_equal((L.l_st).f_kind, SD_BOX_REF(sd_k_StmtKind__Assign))) || (!sd_int_eq((L.l_st).f_count, SD_INT(1))))) {
-    sd_S_Pos _t9 = sd_rt_S3Pos((L.l_st).f_pos);
-    L._t10 = sd_str_retain(SD_STR_LIT("a select case must send or receive on a channel"));
-    L._t11 = sd_str_retain(L.l_hint);
-    sd_m_Checker__errorHint(l_c, _t9, L._t10, L._t11);
-    sd_str_release(L._t11); L._t11 = NULL;
-    sd_str_release(L._t10); L._t10 = NULL;
-    sd_rl_S3Pos(_t9);
+    sd_S_Pos _t18 = sd_rt_S3Pos((L.l_st).f_pos);
+    L._t19 = sd_str_retain(SD_STR_LIT("a select case must send or receive on a channel"));
+    L._t20 = sd_str_retain(L.l_hint);
+    sd_m_Checker__errorHint(l_c, _t18, L._t19, L._t20);
+    sd_str_release(L._t20); L._t20 = NULL;
+    sd_str_release(L._t19); L._t19 = NULL;
+    sd_rl_S3Pos(_t18);
     SD_LF_LEAVE(L);
     sd_str_release(L.l_hint);
     sd_rl_S4Stmt(L.l_st);
     return;
   }
-  sd_int _t12 = sd_m_Ast__at(((*l_c)).f_ast, (L.l_st).f_list, SD_INT(0));
-  sd_int l_ti = _t12;
+  sd_int _t21 = sd_m_Ast__at(((*l_c)).f_ast, (L.l_st).f_list, SD_INT(0));
+  sd_int l_ti = _t21;
   L.l_tg = sd_rt_S6Target(SD_LIST_GET((((*l_c)).f_ast).f_targets, sd_S_Target, l_ti));
-  sd_int _t13 = sd_int_retain((L.l_st).f_expr);
-  sd_m_Checker__checkExpr(l_c, _t13);
-  sd_int_release(_t13);
-  sd_int _t14 = sd_m_Checker__typeOf((*l_c), (L.l_st).f_expr);
-  sd_int l_rt = _t14;
-  bool _t16 = (!sd_int_eq(l_rt, sd_c_tyInvalid()));
-  if (_t16) {
-    bool _t15 = sd_m_Checker__isChanOp((*l_c), (L.l_st).f_expr, false);
-    _t16 = (!_t15);
+  sd_int _t22 = sd_int_retain((L.l_st).f_expr);
+  sd_m_Checker__checkExpr(l_c, _t22);
+  sd_int_release(_t22);
+  sd_int _t23 = sd_m_Checker__typeOf((*l_c), (L.l_st).f_expr);
+  sd_int l_rt = _t23;
+  bool _t25 = (!sd_int_eq(l_rt, sd_c_tyInvalid()));
+  if (_t25) {
+    bool _t24 = sd_m_Checker__isChanOp((*l_c), (L.l_st).f_expr, false);
+    _t25 = (!_t24);
   }
-  if (_t16) {
-    sd_S_Pos _t17 = sd_rt_S3Pos((SD_LIST_GET((((*l_c)).f_ast).f_exprs, sd_S_Expr, (L.l_st).f_expr)).f_pos);
-    L._t18 = sd_str_retain(SD_STR_LIT("a select case with a variable must receive from a channel"));
-    L._t19 = sd_str_retain(L.l_hint);
-    sd_m_Checker__errorHint(l_c, _t17, L._t18, L._t19);
-    sd_str_release(L._t19); L._t19 = NULL;
-    sd_str_release(L._t18); L._t18 = NULL;
-    sd_rl_S3Pos(_t17);
-    sd_int _t20 = sd_int_retain(sd_c_tyInvalid());
+  if (_t25) {
+    sd_S_Pos _t26 = sd_rt_S3Pos((SD_LIST_GET((((*l_c)).f_ast).f_exprs, sd_S_Expr, (L.l_st).f_expr)).f_pos);
+    L._t27 = sd_str_retain(SD_STR_LIT("a select case with a variable must receive from a channel"));
+    L._t28 = sd_str_retain(L.l_hint);
+    sd_m_Checker__errorHint(l_c, _t26, L._t27, L._t28);
+    sd_str_release(L._t28); L._t28 = NULL;
+    sd_str_release(L._t27); L._t27 = NULL;
+    sd_rl_S3Pos(_t26);
+    sd_int _t29 = sd_int_retain(sd_c_tyInvalid());
     sd_int_release(l_rt);
-    l_rt = _t20;
+    l_rt = _t29;
   }
   if (sd_box_equal((L.l_tg).f_kind, SD_BOX_REF(sd_k_TargetKind__Place))) {
-    sd_S_Pos _t21 = sd_rt_S3Pos((L.l_tg).f_pos);
-    L._t22 = sd_str_retain(SD_STR_LIT("a select case cannot assign to an existing variable"));
-    L._t23 = sd_str_retain(SD_STR_LIT("declare a new one (T\? v = ch.receive()) and assign it in the case body"));
-    sd_m_Checker__errorHint(l_c, _t21, L._t22, L._t23);
-    sd_str_release(L._t23); L._t23 = NULL;
-    sd_str_release(L._t22); L._t22 = NULL;
-    sd_rl_S3Pos(_t21);
+    sd_S_Pos _t30 = sd_rt_S3Pos((L.l_tg).f_pos);
+    L._t31 = sd_str_retain(SD_STR_LIT("a select case cannot assign to an existing variable"));
+    L._t32 = sd_str_retain(SD_STR_LIT("declare a new one (T\? v = ch.receive()) and assign it in the case body"));
+    sd_m_Checker__errorHint(l_c, _t30, L._t31, L._t32);
+    sd_str_release(L._t32); L._t32 = NULL;
+    sd_str_release(L._t31); L._t31 = NULL;
+    sd_rl_S3Pos(_t30);
     SD_LF_LEAVE(L);
     sd_int_release(l_rt);
     sd_rl_S6Target(L.l_tg);
@@ -22463,43 +22537,43 @@ static void sd_m_Checker__checkSelectComm(sd_S_Checker * l_c, sd_int l_s) {
     sd_rl_S4Stmt(L.l_st);
     return;
   }
-  sd_int _t24 = sd_int_retain((L.l_tg).f_typeExpr);
-  sd_int _t25 = sd_m_Checker__resolve(l_c, _t24);
-  sd_int l_t = _t25;
-  sd_int_release(_t24);
-  sd_int _t26 = sd_int_retain(l_t);
-  sd_int _t27 = sd_int_retain(l_ti);
-  sd_list_set((&(l_c)->f_targetType), _t27, &_t26);
-  sd_int_release(_t27);
+  sd_int _t33 = sd_int_retain((L.l_tg).f_typeExpr);
+  sd_int _t34 = sd_m_Checker__resolve(l_c, _t33);
+  sd_int l_t = _t34;
+  sd_int_release(_t33);
+  sd_int _t35 = sd_int_retain(l_t);
+  sd_int _t36 = sd_int_retain(l_ti);
+  sd_list_set((&(l_c)->f_targetType), _t36, &_t35);
+  sd_int_release(_t36);
   if ((((!sd_int_eq(l_t, sd_c_tyInvalid())) && (!sd_int_eq(l_rt, sd_c_tyInvalid()))) && (!sd_int_eq(l_t, l_rt)))) {
-    sd_S_Pos _t28 = sd_rt_S3Pos((L.l_tg).f_pos);
-    L._t29 = sd_m_Checker__typeName((*l_c), l_rt);
-    L._t30 = sd_m_Checker__typeName((*l_c), l_t);
-    sd_str _t31[] = {SD_STR_LIT("the received value has type "), L._t29, SD_STR_LIT(", not "), L._t30};
-    L._t32 = sd_str_concat_n(_t31, 4);
-    L._t33 = sd_m_Checker__typeName((*l_c), l_rt);
-    sd_str _t34[] = {SD_STR_LIT("declare it as "), L._t33, SD_STR_LIT(" "), (L.l_tg).f_name};
-    L._t35 = sd_str_concat_n(_t34, 4);
-    sd_m_Checker__errorHint(l_c, _t28, L._t32, L._t35);
-    sd_str_release(L._t35); L._t35 = NULL;
-    sd_str_release(L._t33); L._t33 = NULL;
-    sd_str_release(L._t32); L._t32 = NULL;
-    sd_str_release(L._t30); L._t30 = NULL;
-    sd_str_release(L._t29); L._t29 = NULL;
-    sd_rl_S3Pos(_t28);
+    sd_S_Pos _t37 = sd_rt_S3Pos((L.l_tg).f_pos);
+    L._t38 = sd_m_Checker__typeName((*l_c), l_rt);
+    L._t39 = sd_m_Checker__typeName((*l_c), l_t);
+    sd_str _t40[] = {SD_STR_LIT("the received value has type "), L._t38, SD_STR_LIT(", not "), L._t39};
+    L._t41 = sd_str_concat_n(_t40, 4);
+    L._t42 = sd_m_Checker__typeName((*l_c), l_rt);
+    sd_str _t43[] = {SD_STR_LIT("declare it as "), L._t42, SD_STR_LIT(" "), (L.l_tg).f_name};
+    L._t44 = sd_str_concat_n(_t43, 4);
+    sd_m_Checker__errorHint(l_c, _t37, L._t41, L._t44);
+    sd_str_release(L._t44); L._t44 = NULL;
+    sd_str_release(L._t42); L._t42 = NULL;
+    sd_str_release(L._t41); L._t41 = NULL;
+    sd_str_release(L._t39); L._t39 = NULL;
+    sd_str_release(L._t38); L._t38 = NULL;
+    sd_rl_S3Pos(_t37);
   }
-  L._t36 = sd_str_retain((L.l_tg).f_name);
-  sd_int _t37 = sd_int_retain(l_t);
-  sd_box * _t38 = sd_box_retain(SD_BOX_REF(sd_k_VarKind__Local));
-  sd_S_Pos _t39 = sd_rt_S3Pos((L.l_tg).f_pos);
-  sd_int _t40 = sd_m_Checker__declare(l_c, L._t36, _t37, _t38, _t39);
-  sd_int _t41 = sd_int_retain(l_ti);
-  sd_list_set((&(l_c)->f_targetVar), _t41, &_t40);
-  sd_int_release(_t41);
-  sd_rl_S3Pos(_t39);
-  sd_box_release(_t38);
-  sd_int_release(_t37);
-  sd_str_release(L._t36); L._t36 = NULL;
+  L._t45 = sd_str_retain((L.l_tg).f_name);
+  sd_int _t46 = sd_int_retain(l_t);
+  sd_box * _t47 = sd_box_retain(SD_BOX_REF(sd_k_VarKind__Local));
+  sd_S_Pos _t48 = sd_rt_S3Pos((L.l_tg).f_pos);
+  sd_int _t49 = sd_m_Checker__declare(l_c, L._t45, _t46, _t47, _t48);
+  sd_int _t50 = sd_int_retain(l_ti);
+  sd_list_set((&(l_c)->f_targetVar), _t50, &_t49);
+  sd_int_release(_t50);
+  sd_rl_S3Pos(_t48);
+  sd_box_release(_t47);
+  sd_int_release(_t46);
+  sd_str_release(L._t45); L._t45 = NULL;
   sd_int_release(l_t);
   sd_int_release(l_rt);
   sd_rl_S6Target(L.l_tg); L.l_tg = ((sd_S_Target){0});
@@ -41709,13 +41783,16 @@ static void sd_m_Lexer__lexWord(sd_S_Lexer * l_lx) {
   SD_LF_LEAVE(L);
 }
 
-typedef struct { sd_lframe h; sd_str _t14; sd_str _t48; sd_str l_raw; sd_str _t58; } sd_L_sd_m_Lexer__lexNumber;
+typedef struct { sd_lframe h; sd_str _t14; sd_str l_why; sd_str _t53; sd_str _t55; sd_str _t66; sd_str l_raw; sd_str _t76; } sd_L_sd_m_Lexer__lexNumber;
 static void sd_lr_sd_m_Lexer__lexNumber(sd_lframe *p) {
   sd_L_sd_m_Lexer__lexNumber *L = (sd_L_sd_m_Lexer__lexNumber *)p;
   sd_str_release(L->_t14);
-  sd_str_release(L->_t48);
+  sd_str_release(L->l_why);
+  sd_str_release(L->_t53);
+  sd_str_release(L->_t55);
+  sd_str_release(L->_t66);
   sd_str_release(L->l_raw);
-  sd_str_release(L->_t58);
+  sd_str_release(L->_t76);
 }
 static void sd_m_Lexer__lexNumber(sd_S_Lexer * l_lx) {
   sd_L_sd_m_Lexer__lexNumber L = {{0}};
@@ -41780,121 +41857,175 @@ static void sd_m_Lexer__lexNumber(sd_S_Lexer * l_lx) {
         }
       }
     }
-    uint8_t _t19 = sd_m_Lexer__peekByte((*l_lx), SD_INT(0));
-    bool _t22 = ((_t19) == (((uint8_t)46)));
-    if (_t22) {
-      uint8_t _t20 = sd_m_Lexer__peekByte((*l_lx), SD_INT(1));
-      bool _t21 = sd_f_isDigit(_t20);
-      _t22 = _t21;
+    sd_int l_zeros = SD_INT(0);
+    bool _t20 = ((sd_str_at(((*l_lx)).f_src, l_start)) == (((uint8_t)48)));
+    if (_t20) {
+      sd_int _t19 = sd_int_sub(((*l_lx)).f_i, l_start);
+      _t20 = sd_int_gt(_t19, SD_INT(1));
+      sd_int_release(_t19);
     }
-    if (_t22) {
-      sd_int *_t23 = (&(l_lx)->f_i);
-      sd_int _t24 = sd_int_add(*_t23, SD_INT(1)); sd_int_release(*_t23); *_t23 = _t24;
+    if (_t20) {
+      sd_int _t21 = sd_int_retain(SD_INT(1));
+      sd_int_release(l_zeros);
+      l_zeros = _t21;
       {
         for (;;) {
-          bool _t26 = sd_int_lt(((*l_lx)).f_i, SD_INT_S(l_n));
-          if (_t26) {
-            bool _t25 = sd_f_isDigit(sd_str_at(((*l_lx)).f_src, ((*l_lx)).f_i));
-            _t26 = _t25;
+          sd_int _t22 = sd_int_add(l_start, l_zeros);
+          sd_int _t23 = sd_int_sub(((*l_lx)).f_i, SD_INT(1));
+          bool _t25 = sd_int_lt(_t22, _t23);
+          if (_t25) {
+            sd_int _t24 = sd_int_add(l_start, l_zeros);
+            _t25 = ((sd_str_at(((*l_lx)).f_src, _t24)) == (((uint8_t)48)));
+            sd_int_release(_t24);
           }
+          bool _t26 = _t25;
+          sd_int_release(_t23);
+          sd_int_release(_t22);
           if (!(_t26)) break;
           {
-            sd_int *_t27 = (&(l_lx)->f_i);
-            sd_int _t28 = sd_int_add(*_t27, SD_INT(1)); sd_int_release(*_t27); *_t27 = _t28;
+            sd_int _t27 = sd_int_add(l_zeros, SD_INT(1)); sd_int_release(l_zeros); l_zeros = _t27;
           }
         }
       }
-      uint8_t _t29 = sd_m_Lexer__peekByte((*l_lx), SD_INT(0));
-      bool _t31 = ((_t29) == (((uint8_t)101)));
-      if (!_t31) {
-        uint8_t _t30 = sd_m_Lexer__peekByte((*l_lx), SD_INT(0));
-        _t31 = ((_t30) == (((uint8_t)69)));
+    }
+    uint8_t _t28 = sd_m_Lexer__peekByte((*l_lx), SD_INT(0));
+    bool _t31 = ((_t28) == (((uint8_t)46)));
+    if (_t31) {
+      uint8_t _t29 = sd_m_Lexer__peekByte((*l_lx), SD_INT(1));
+      bool _t30 = sd_f_isDigit(_t29);
+      _t31 = _t30;
+    }
+    if (_t31) {
+      sd_int *_t32 = (&(l_lx)->f_i);
+      sd_int _t33 = sd_int_add(*_t32, SD_INT(1)); sd_int_release(*_t32); *_t32 = _t33;
+      {
+        for (;;) {
+          bool _t35 = sd_int_lt(((*l_lx)).f_i, SD_INT_S(l_n));
+          if (_t35) {
+            bool _t34 = sd_f_isDigit(sd_str_at(((*l_lx)).f_src, ((*l_lx)).f_i));
+            _t35 = _t34;
+          }
+          if (!(_t35)) break;
+          {
+            sd_int *_t36 = (&(l_lx)->f_i);
+            sd_int _t37 = sd_int_add(*_t36, SD_INT(1)); sd_int_release(*_t36); *_t36 = _t37;
+          }
+        }
       }
-      if (_t31) {
-        sd_int _t32 = sd_int_add(((*l_lx)).f_i, SD_INT(1));
-        sd_int l_j = _t32;
+      uint8_t _t38 = sd_m_Lexer__peekByte((*l_lx), SD_INT(0));
+      bool _t40 = ((_t38) == (((uint8_t)101)));
+      if (!_t40) {
+        uint8_t _t39 = sd_m_Lexer__peekByte((*l_lx), SD_INT(0));
+        _t40 = ((_t39) == (((uint8_t)69)));
+      }
+      if (_t40) {
+        sd_int _t41 = sd_int_add(((*l_lx)).f_i, SD_INT(1));
+        sd_int l_j = _t41;
         if ((sd_int_lt(l_j, SD_INT_S(l_n)) && (((sd_str_at(((*l_lx)).f_src, l_j)) == (((uint8_t)43))) || ((sd_str_at(((*l_lx)).f_src, l_j)) == (((uint8_t)45)))))) {
-          sd_int _t33 = sd_int_add(l_j, SD_INT(1)); sd_int_release(l_j); l_j = _t33;
+          sd_int _t42 = sd_int_add(l_j, SD_INT(1)); sd_int_release(l_j); l_j = _t42;
         }
-        bool _t35 = sd_int_lt(l_j, SD_INT_S(l_n));
-        if (_t35) {
-          bool _t34 = sd_f_isDigit(sd_str_at(((*l_lx)).f_src, l_j));
-          _t35 = _t34;
+        bool _t44 = sd_int_lt(l_j, SD_INT_S(l_n));
+        if (_t44) {
+          bool _t43 = sd_f_isDigit(sd_str_at(((*l_lx)).f_src, l_j));
+          _t44 = _t43;
         }
-        if (_t35) {
-          sd_int _t36 = sd_int_retain(l_j);
-          sd_int *_t37 = (&(l_lx)->f_i);
-          sd_int_release(*_t37);
-          *_t37 = _t36;
+        if (_t44) {
+          sd_int _t45 = sd_int_retain(l_j);
+          sd_int *_t46 = (&(l_lx)->f_i);
+          sd_int_release(*_t46);
+          *_t46 = _t45;
           {
             for (;;) {
-              bool _t39 = sd_int_lt(((*l_lx)).f_i, SD_INT_S(l_n));
-              if (_t39) {
-                bool _t38 = sd_f_isDigit(sd_str_at(((*l_lx)).f_src, ((*l_lx)).f_i));
-                _t39 = _t38;
+              bool _t48 = sd_int_lt(((*l_lx)).f_i, SD_INT_S(l_n));
+              if (_t48) {
+                bool _t47 = sd_f_isDigit(sd_str_at(((*l_lx)).f_src, ((*l_lx)).f_i));
+                _t48 = _t47;
               }
-              if (!(_t39)) break;
+              if (!(_t48)) break;
               {
-                sd_int *_t40 = (&(l_lx)->f_i);
-                sd_int _t41 = sd_int_add(*_t40, SD_INT(1)); sd_int_release(*_t40); *_t40 = _t41;
+                sd_int *_t49 = (&(l_lx)->f_i);
+                sd_int _t50 = sd_int_add(*_t49, SD_INT(1)); sd_int_release(*_t49); *_t49 = _t50;
               }
             }
           }
         }
         sd_int_release(l_j);
       }
-      sd_box * _t42 = sd_box_retain(SD_BOX_REF(sd_k_Tok__Float));
+      sd_box * _t51 = sd_box_retain(SD_BOX_REF(sd_k_Tok__Float));
       sd_box_release(l_kind);
-      l_kind = _t42;
+      l_kind = _t51;
     }
-  }
-  bool _t46 = sd_int_lt(((*l_lx)).f_i, SD_INT_S(l_n));
-  if (_t46) {
-    bool _t43 = sd_f_isLetter(sd_str_at(((*l_lx)).f_src, ((*l_lx)).f_i));
-    bool _t45 = _t43;
-    if (!_t45) {
-      bool _t44 = sd_f_isDigit(sd_str_at(((*l_lx)).f_src, ((*l_lx)).f_i));
-      _t45 = _t44;
+    if (sd_int_gt(l_zeros, SD_INT(0))) {
+      L.l_why = SD_STR_LIT(" starts with 0 (Seed has no octal literals)");
+      if (sd_box_equal(l_kind, SD_BOX_REF(sd_k_Tok__Float))) {
+        sd_str _t52 = sd_str_retain(SD_STR_LIT(" starts with 0 (a number has no leading zeros)"));
+        sd_str_release(L.l_why);
+        L.l_why = _t52;
+      }
+      L._t53 = sd_str_slice(((*l_lx)).f_src, l_start, ((*l_lx)).f_i);
+      sd_str _t54[] = {SD_STR_LIT("the number "), L._t53, L.l_why};
+      L._t55 = sd_str_concat_n(_t54, 3);
+      sd_int _t56 = sd_int_add(l_start, l_zeros);
+      sd_str _t57 = sd_str_slice(((*l_lx)).f_src, _t56, ((*l_lx)).f_i);
+      sd_str _t58 = sd_str_concat(SD_STR_LIT("write "), _t57);
+      sd_S_Diag _t59 = (sd_S_Diag){.f_pos = sd_rt_S3Pos(l_pos), .f_message = L._t55, .f_hint = _t58};
+      L._t55 = NULL;
+      sd_list ** _t60 = (&(l_lx)->f_errors);
+      SD_LIST_PUSH(_t60, sd_S_Diag, _t59);
+      sd_str_release(_t57); 
+      sd_int_release(_t56);
+      sd_str_release(L._t53); L._t53 = NULL;
+      sd_str_release(L.l_why); L.l_why = NULL;
     }
-    _t46 = _t45;
+    sd_int_release(l_zeros);
   }
-  if (_t46) {
-    sd_S_Pos _t47 = sd_rt_S3Pos(l_pos);
-    L._t48 = sd_str_retain(SD_STR_LIT("invalid number literal (a float needs a '.', for example 1.0e9)"));
-    sd_m_Lexer__fail(l_lx, _t47, L._t48);
-    sd_str_release(L._t48); L._t48 = NULL;
-    sd_rl_S3Pos(_t47);
+  bool _t64 = sd_int_lt(((*l_lx)).f_i, SD_INT_S(l_n));
+  if (_t64) {
+    bool _t61 = sd_f_isLetter(sd_str_at(((*l_lx)).f_src, ((*l_lx)).f_i));
+    bool _t63 = _t61;
+    if (!_t63) {
+      bool _t62 = sd_f_isDigit(sd_str_at(((*l_lx)).f_src, ((*l_lx)).f_i));
+      _t63 = _t62;
+    }
+    _t64 = _t63;
+  }
+  if (_t64) {
+    sd_S_Pos _t65 = sd_rt_S3Pos(l_pos);
+    L._t66 = sd_str_retain(SD_STR_LIT("invalid number literal (a float needs a '.', for example 1.0e9)"));
+    sd_m_Lexer__fail(l_lx, _t65, L._t66);
+    sd_str_release(L._t66); L._t66 = NULL;
+    sd_rl_S3Pos(_t65);
     {
       for (;;) {
-        bool _t52 = sd_int_lt(((*l_lx)).f_i, SD_INT_S(l_n));
-        if (_t52) {
-          bool _t49 = sd_f_isLetter(sd_str_at(((*l_lx)).f_src, ((*l_lx)).f_i));
-          bool _t51 = _t49;
-          if (!_t51) {
-            bool _t50 = sd_f_isDigit(sd_str_at(((*l_lx)).f_src, ((*l_lx)).f_i));
-            _t51 = _t50;
+        bool _t70 = sd_int_lt(((*l_lx)).f_i, SD_INT_S(l_n));
+        if (_t70) {
+          bool _t67 = sd_f_isLetter(sd_str_at(((*l_lx)).f_src, ((*l_lx)).f_i));
+          bool _t69 = _t67;
+          if (!_t69) {
+            bool _t68 = sd_f_isDigit(sd_str_at(((*l_lx)).f_src, ((*l_lx)).f_i));
+            _t69 = _t68;
           }
-          _t52 = _t51;
+          _t70 = _t69;
         }
-        if (!(_t52)) break;
+        if (!(_t70)) break;
         {
-          sd_int *_t53 = (&(l_lx)->f_i);
-          sd_int _t54 = sd_int_add(*_t53, SD_INT(1)); sd_int_release(*_t53); *_t53 = _t54;
+          sd_int *_t71 = (&(l_lx)->f_i);
+          sd_int _t72 = sd_int_add(*_t71, SD_INT(1)); sd_int_release(*_t71); *_t71 = _t72;
         }
       }
     }
   }
-  sd_str _t55 = sd_str_slice(((*l_lx)).f_src, l_start, ((*l_lx)).f_i);
-  L.l_raw = _t55;
-  sd_box * _t56 = sd_box_retain(l_kind);
-  sd_S_Pos _t57 = sd_rt_S3Pos(l_pos);
-  L._t58 = sd_str_retain(L.l_raw);
-  sd_int _t59 = sd_int_retain(l_start);
-  sd_m_Lexer__add(l_lx, _t56, _t57, L._t58, _t59);
-  sd_int_release(_t59);
-  sd_str_release(L._t58); L._t58 = NULL;
-  sd_rl_S3Pos(_t57);
-  sd_box_release(_t56);
+  sd_str _t73 = sd_str_slice(((*l_lx)).f_src, l_start, ((*l_lx)).f_i);
+  L.l_raw = _t73;
+  sd_box * _t74 = sd_box_retain(l_kind);
+  sd_S_Pos _t75 = sd_rt_S3Pos(l_pos);
+  L._t76 = sd_str_retain(L.l_raw);
+  sd_int _t77 = sd_int_retain(l_start);
+  sd_m_Lexer__add(l_lx, _t74, _t75, L._t76, _t77);
+  sd_int_release(_t77);
+  sd_str_release(L._t76); L._t76 = NULL;
+  sd_rl_S3Pos(_t75);
+  sd_box_release(_t74);
   sd_str_release(L.l_raw); L.l_raw = NULL;
   sd_box_release(l_kind);
   sd_rl_S3Pos(l_pos);
@@ -42092,13 +42223,17 @@ static void sd_m_Lexer__lexQuoted(sd_S_Lexer * l_lx, uint8_t l_quote) {
   SD_LF_LEAVE(L);
 }
 
-typedef struct { sd_lframe h; sd_list * _t15; sd_str _t16; sd_str _t18; sd_str _t27; } sd_L_sd_m_Lexer__lexOperator;
+typedef struct { sd_lframe h; sd_str _t17; sd_str _t19; sd_str _t22; sd_str _t24; sd_list * _t27; sd_str _t28; sd_str _t30; sd_str _t39; } sd_L_sd_m_Lexer__lexOperator;
 static void sd_lr_sd_m_Lexer__lexOperator(sd_lframe *p) {
   sd_L_sd_m_Lexer__lexOperator *L = (sd_L_sd_m_Lexer__lexOperator *)p;
-  sd_list_release(L->_t15);
-  sd_str_release(L->_t16);
-  sd_str_release(L->_t18);
-  sd_str_release(L->_t27);
+  sd_str_release(L->_t17);
+  sd_str_release(L->_t19);
+  sd_str_release(L->_t22);
+  sd_str_release(L->_t24);
+  sd_list_release(L->_t27);
+  sd_str_release(L->_t28);
+  sd_str_release(L->_t30);
+  sd_str_release(L->_t39);
 }
 static void sd_m_Lexer__lexOperator(sd_S_Lexer * l_lx, uint8_t l_c) {
   sd_L_sd_m_Lexer__lexOperator L = {{0}};
@@ -42175,44 +42310,150 @@ static void sd_m_Lexer__lexOperator(sd_S_Lexer * l_lx, uint8_t l_c) {
     }
   }
   if (sd_box_equal(l_kind, SD_BOX_REF(sd_k_Tok__Eof))) {
-    sd_S_Pos _t14 = sd_rt_S3Pos(l_pos);
-    L._t15 = sd_list_new(&sd_type_byte, 1);
-    SD_LIST_PUSH(&L._t15, uint8_t, l_c);
-    L._t16 = sd_str_from_bytes(L._t15);
-    sd_str _t17[] = {SD_STR_LIT("unexpected character '"), L._t16, SD_STR_LIT("'")};
-    L._t18 = sd_str_concat_n(_t17, 3);
-    sd_m_Lexer__fail(l_lx, _t14, L._t18);
-    sd_str_release(L._t18); L._t18 = NULL;
-    sd_str_release(L._t16); L._t16 = NULL;
-    sd_list_release(L._t15); L._t15 = NULL;
-    sd_rl_S3Pos(_t14);
-    sd_int *_t19 = (&(l_lx)->f_i);
-    sd_int _t20 = sd_int_add(*_t19, SD_INT(1)); sd_int_release(*_t19); *_t19 = _t20;
-    sd_int *_t21 = (&(l_lx)->f_col);
-    sd_int _t22 = sd_int_add(*_t21, SD_INT(1)); sd_int_release(*_t21); *_t21 = _t22;
+    sd_int _t14 = sd_f_utf8Length(((*l_lx)).f_src, ((*l_lx)).f_i);
+    sd_int l_len = _t14;
+    if ((sd_int_gt(l_len, SD_INT(0)) && (SD_SMALL(sd_byte_to_int(l_c)) >= ((int64_t)128)))) {
+      sd_S_Pos _t15 = sd_rt_S3Pos(l_pos);
+      sd_int _t16 = sd_int_add(((*l_lx)).f_i, l_len);
+      L._t17 = sd_str_slice(((*l_lx)).f_src, ((*l_lx)).f_i, _t16);
+      sd_str _t18[] = {SD_STR_LIT("unexpected character '"), L._t17, SD_STR_LIT("' (only ASCII is allowed outside strings and comments)")};
+      L._t19 = sd_str_concat_n(_t18, 3);
+      sd_m_Lexer__fail(l_lx, _t15, L._t19);
+      sd_str_release(L._t19); L._t19 = NULL;
+      sd_str_release(L._t17); L._t17 = NULL;
+      sd_int_release(_t16);
+      sd_rl_S3Pos(_t15);
+    } else {
+      if (((SD_SMALL(sd_byte_to_int(l_c)) < ((int64_t)32)) || (SD_SMALL(sd_byte_to_int(l_c)) >= ((int64_t)127)))) {
+        sd_int _t20 = sd_int_retain(SD_INT(1));
+        sd_int_release(l_len);
+        l_len = _t20;
+        sd_S_Pos _t21 = sd_rt_S3Pos(l_pos);
+        L._t22 = sd_f_byteHex(l_c);
+        sd_str _t23[] = {SD_STR_LIT("unexpected byte "), L._t22, SD_STR_LIT(" (only ASCII is allowed outside strings and comments)")};
+        L._t24 = sd_str_concat_n(_t23, 3);
+        sd_m_Lexer__fail(l_lx, _t21, L._t24);
+        sd_str_release(L._t24); L._t24 = NULL;
+        sd_str_release(L._t22); L._t22 = NULL;
+        sd_rl_S3Pos(_t21);
+      } else {
+        sd_int _t25 = sd_int_retain(SD_INT(1));
+        sd_int_release(l_len);
+        l_len = _t25;
+        sd_S_Pos _t26 = sd_rt_S3Pos(l_pos);
+        L._t27 = sd_list_new(&sd_type_byte, 1);
+        SD_LIST_PUSH(&L._t27, uint8_t, l_c);
+        L._t28 = sd_str_from_bytes(L._t27);
+        sd_str _t29[] = {SD_STR_LIT("unexpected character '"), L._t28, SD_STR_LIT("'")};
+        L._t30 = sd_str_concat_n(_t29, 3);
+        sd_m_Lexer__fail(l_lx, _t26, L._t30);
+        sd_str_release(L._t30); L._t30 = NULL;
+        sd_str_release(L._t28); L._t28 = NULL;
+        sd_list_release(L._t27); L._t27 = NULL;
+        sd_rl_S3Pos(_t26);
+      }
+    }
+    sd_int _t31 = sd_int_add(((*l_lx)).f_i, l_len);
+    sd_int *_t32 = (&(l_lx)->f_i);
+    sd_int_release(*_t32);
+    *_t32 = _t31;
+    sd_int _t33 = sd_int_add(((*l_lx)).f_col, l_len);
+    sd_int *_t34 = (&(l_lx)->f_col);
+    sd_int_release(*_t34);
+    *_t34 = _t33;
     SD_LF_LEAVE(L);
+    sd_int_release(l_len);
     sd_box_release(l_kind);
     sd_rl_S3Pos(l_pos);
     sd_int_release(l_start);
     return;
   }
-  sd_int _t23 = sd_int_add(((*l_lx)).f_i, SD_INT_S(l_size));
-  sd_int *_t24 = (&(l_lx)->f_i);
-  sd_int_release(*_t24);
-  *_t24 = _t23;
-  sd_box * _t25 = sd_box_retain(l_kind);
-  sd_S_Pos _t26 = sd_rt_S3Pos(l_pos);
-  L._t27 = sd_str_retain(SD_STR_LIT(""));
-  sd_int _t28 = sd_int_retain(l_start);
-  sd_m_Lexer__add(l_lx, _t25, _t26, L._t27, _t28);
-  sd_int_release(_t28);
-  sd_str_release(L._t27); L._t27 = NULL;
-  sd_rl_S3Pos(_t26);
-  sd_box_release(_t25);
+  sd_int _t35 = sd_int_add(((*l_lx)).f_i, SD_INT_S(l_size));
+  sd_int *_t36 = (&(l_lx)->f_i);
+  sd_int_release(*_t36);
+  *_t36 = _t35;
+  sd_box * _t37 = sd_box_retain(l_kind);
+  sd_S_Pos _t38 = sd_rt_S3Pos(l_pos);
+  L._t39 = sd_str_retain(SD_STR_LIT(""));
+  sd_int _t40 = sd_int_retain(l_start);
+  sd_m_Lexer__add(l_lx, _t37, _t38, L._t39, _t40);
+  sd_int_release(_t40);
+  sd_str_release(L._t39); L._t39 = NULL;
+  sd_rl_S3Pos(_t38);
+  sd_box_release(_t37);
   sd_box_release(l_kind);
   sd_rl_S3Pos(l_pos);
   sd_int_release(l_start);
   SD_LF_LEAVE(L);
+}
+
+static sd_int sd_f_utf8Length(sd_str l_src, sd_int l_i) {
+  int64_t l_b = SD_SMALL(sd_int_retain(sd_byte_to_int(sd_str_at(l_src, l_i))));
+  int64_t l_len = ((int64_t)0);
+  if ((l_b < ((int64_t)128))) {
+    return SD_INT(1);
+  } else {
+    if (((l_b >= ((int64_t)194)) && (l_b <= ((int64_t)223)))) {
+      l_len = ((int64_t)2);
+    } else {
+      if (((l_b >= ((int64_t)224)) && (l_b <= ((int64_t)239)))) {
+        l_len = ((int64_t)3);
+      } else {
+        if (((l_b >= ((int64_t)240)) && (l_b <= ((int64_t)244)))) {
+          l_len = ((int64_t)4);
+        } else {
+          return SD_INT(0);
+        }
+      }
+    }
+  }
+  sd_int _t1 = sd_int_add(l_i, SD_INT_S(l_len));
+  bool _t2 = sd_int_gt(_t1, sd_str_len(l_src));
+  sd_int_release(_t1);
+  if (_t2) {
+    return SD_INT(0);
+  }
+  {
+    int64_t l_k = ((int64_t)1);
+    for (;;) {
+      if (!((l_k < l_len))) break;
+      {
+        sd_int _t4 = sd_int_add(l_i, SD_INT_S(l_k));
+        int64_t l_cb = SD_SMALL(sd_int_retain(sd_byte_to_int(sd_str_at(l_src, _t4))));
+        sd_int_release(_t4);
+        if (((l_cb < ((int64_t)128)) || (l_cb > ((int64_t)191)))) {
+          return SD_INT(0);
+        }
+      }
+      _c3:;
+      l_k++;
+    }
+  }
+  return SD_INT_S(l_len);
+}
+
+typedef struct { sd_lframe h; sd_str l_digits; sd_str _t1; sd_str _t2; } sd_L_sd_f_byteHex;
+static void sd_lr_sd_f_byteHex(sd_lframe *p) {
+  sd_L_sd_f_byteHex *L = (sd_L_sd_f_byteHex *)p;
+  sd_str_release(L->l_digits);
+  sd_str_release(L->_t1);
+  sd_str_release(L->_t2);
+}
+static sd_str sd_f_byteHex(uint8_t l_c) {
+  sd_L_sd_f_byteHex L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_byteHex);
+  L.l_digits = SD_STR_LIT("0123456789abcdef");
+  int64_t l_v = SD_SMALL(sd_int_retain(sd_byte_to_int(l_c)));
+  L._t1 = sd_str_slice(L.l_digits, SD_INT_S((l_v / ((int64_t)16))), SD_INT_S(((l_v / ((int64_t)16)) + ((int64_t)1))));
+  L._t2 = sd_str_slice(L.l_digits, SD_INT_S((l_v % ((int64_t)16))), SD_INT_S(((l_v % ((int64_t)16)) + ((int64_t)1))));
+  sd_str _t3[] = {SD_STR_LIT("0x"), L._t1, L._t2};
+  sd_str _t4 = sd_str_concat_n(_t3, 3);
+  sd_str _t5 = _t4;
+  SD_LF_LEAVE(L);
+  sd_str_release(L._t2);
+  sd_str_release(L._t1);
+  sd_str_release(L.l_digits);
+  return _t5;
 }
 
 static sd_box * sd_f_singleCharToken(uint8_t l_c) {
@@ -45713,7 +45954,7 @@ static sd_list * sd_m_Parser__parseResult(sd_S_Parser * l_p) {
   return _t16;
 }
 
-typedef struct { sd_lframe h; sd_S_TypeDecl l_td; sd_str _t5; sd_S_Token l_k; sd_str _t15; sd_str _t16; sd_str _t23; sd_list * l_impls; sd_list * _t29; sd_str _t35; sd_list * l_members; sd_str _t46; sd_S_EnumCase l_c; sd_str _t53; sd_str _t61; sd_list * l_cps; sd_list * _t63; sd_str _t75; sd_str _t77; sd_list * _t78; } sd_L_sd_m_Parser__parseTypeDecl;
+typedef struct { sd_lframe h; sd_S_TypeDecl l_td; sd_str _t5; sd_S_Token l_k; sd_str _t15; sd_str _t16; sd_str _t23; sd_list * l_impls; sd_list * _t29; sd_str _t35; sd_list * l_members; sd_str _t46; sd_S_EnumCase l_c; sd_str _t53; sd_str _t60; sd_list * l_cps; sd_str _t64; sd_str _t65; sd_list * _t66; sd_str _t78; sd_str _t80; sd_list * _t81; } sd_L_sd_m_Parser__parseTypeDecl;
 static void sd_lr_sd_m_Parser__parseTypeDecl(sd_lframe *p) {
   sd_L_sd_m_Parser__parseTypeDecl *L = (sd_L_sd_m_Parser__parseTypeDecl *)p;
   sd_rl_S8TypeDecl(L->l_td);
@@ -45729,12 +45970,14 @@ static void sd_lr_sd_m_Parser__parseTypeDecl(sd_lframe *p) {
   sd_str_release(L->_t46);
   sd_rl_S8EnumCase(L->l_c);
   sd_str_release(L->_t53);
-  sd_str_release(L->_t61);
+  sd_str_release(L->_t60);
   sd_list_release(L->l_cps);
-  sd_list_release(L->_t63);
-  sd_str_release(L->_t75);
-  sd_str_release(L->_t77);
-  sd_list_release(L->_t78);
+  sd_str_release(L->_t64);
+  sd_str_release(L->_t65);
+  sd_list_release(L->_t66);
+  sd_str_release(L->_t78);
+  sd_str_release(L->_t80);
+  sd_list_release(L->_t81);
 }
 static void sd_m_Parser__parseTypeDecl(sd_S_Parser * l_p, bool l_isPub) {
   sd_L_sd_m_Parser__parseTypeDecl L = {{0}};
@@ -45881,7 +46124,7 @@ static void sd_m_Parser__parseTypeDecl(sd_S_Parser * l_p, bool l_isPub) {
         } else {
           if (sd_box_equal((L.l_td).f_kind, SD_BOX_REF(sd_k_DeclKind__Enum))) {
             sd_S_Pos _t51 = sd_m_Parser__here((*l_p));
-            sd_S_EnumCase _t52 = (sd_S_EnumCase){.f_pos = _t51, .f_name = SD_STR_LIT(""), .f_parens = false, .f_params = SD_INT(0), .f_paramCount = SD_INT(0)};
+            sd_S_EnumCase _t52 = (sd_S_EnumCase){.f_pos = _t51, .f_name = SD_STR_LIT(""), .f_params = SD_INT(0), .f_paramCount = SD_INT(0)};
             L.l_c = _t52;
             L._t53 = sd_str_retain(SD_STR_LIT("for the enum case"));
             sd_str _t54 = sd_m_Parser__expectIdent(l_p, L._t53);
@@ -45889,105 +46132,115 @@ static void sd_m_Parser__parseTypeDecl(sd_S_Parser * l_p, bool l_isPub) {
             sd_str_release(*_t55);
             *_t55 = _t54;
             sd_str_release(L._t53); L._t53 = NULL;
-            sd_box * _t56 = sd_box_retain(SD_BOX_REF(sd_k_Tok__LParen));
-            bool _t57 = sd_m_Parser__accept(l_p, _t56);
-            bool _t58 = _t57;
-            sd_box_release(_t56);
-            if (_t58) {
-              bool _t59 = true;
-              bool *_t60 = (&((&L.l_c))->f_parens);
-              *_t60 = _t59;
-              L._t61 = sd_str_retain(SD_STR_LIT("for the case field"));
-              sd_list * _t62 = sd_m_Parser__parseParams(l_p, L._t61);
-              L.l_cps = _t62;
-              sd_str_release(L._t61); L._t61 = NULL;
-              L._t63 = sd_list_retain(L.l_cps);
-              sd_int _t64 = sd_m_Ast__addList((&(l_p)->f_ast), L._t63);
-              sd_int *_t65 = (&((&L.l_c))->f_params);
-              sd_int_release(*_t65);
-              *_t65 = _t64;
-              sd_list_release(L._t63); L._t63 = NULL;
-              sd_int _t66 = sd_int_retain(sd_list_len(L.l_cps));
-              sd_int *_t67 = (&((&L.l_c))->f_paramCount);
-              sd_int_release(*_t67);
-              *_t67 = _t66;
+            sd_S_Pos _t56 = sd_m_Parser__here((*l_p));
+            sd_S_Pos l_lparen = _t56;
+            sd_box * _t57 = sd_box_retain(SD_BOX_REF(sd_k_Tok__LParen));
+            bool _t58 = sd_m_Parser__accept(l_p, _t57);
+            bool _t59 = _t58;
+            sd_box_release(_t57);
+            if (_t59) {
+              L._t60 = sd_str_retain(SD_STR_LIT("for the case field"));
+              sd_list * _t61 = sd_m_Parser__parseParams(l_p, L._t60);
+              L.l_cps = _t61;
+              sd_str_release(L._t60); L._t60 = NULL;
+              if (((!((*l_p)).f_failed) && (SD_SMALL(sd_list_len(L.l_cps)) == ((int64_t)0)))) {
+                sd_S_Pos _t62 = sd_rt_S3Pos(l_lparen);
+                sd_str _t63[] = {SD_STR_LIT("the enum case "), (L.l_c).f_name, SD_STR_LIT(" has empty parentheses")};
+                L._t64 = sd_str_concat_n(_t63, 3);
+                L._t65 = sd_str_concat(SD_STR_LIT("a case without data has no parentheses: write "), (L.l_c).f_name);
+                sd_m_Diags__errorHint((&(l_p)->f_diags), _t62, L._t64, L._t65);
+                sd_str_release(L._t65); L._t65 = NULL;
+                sd_str_release(L._t64); L._t64 = NULL;
+                sd_rl_S3Pos(_t62);
+              }
+              L._t66 = sd_list_retain(L.l_cps);
+              sd_int _t67 = sd_m_Ast__addList((&(l_p)->f_ast), L._t66);
+              sd_int *_t68 = (&((&L.l_c))->f_params);
+              sd_int_release(*_t68);
+              *_t68 = _t67;
+              sd_list_release(L._t66); L._t66 = NULL;
+              sd_int _t69 = sd_int_retain(sd_list_len(L.l_cps));
+              sd_int *_t70 = (&((&L.l_c))->f_paramCount);
+              sd_int_release(*_t70);
+              *_t70 = _t69;
               sd_list_release(L.l_cps); L.l_cps = NULL;
             }
-            sd_S_EnumCase _t68 = sd_rt_S8EnumCase(L.l_c);
-            sd_list ** _t69 = (&((&(l_p)->f_ast))->f_enumCases);
-            SD_LIST_PUSH(_t69, sd_S_EnumCase, _t68);
-            sd_int _t70 = sd_int_retain(SD_INT_S((SD_SMALL(sd_list_len((((*l_p)).f_ast).f_enumCases)) - ((int64_t)1))));
-            SD_LIST_PUSH((&L.l_members), sd_int, _t70);
+            sd_S_EnumCase _t71 = sd_rt_S8EnumCase(L.l_c);
+            sd_list ** _t72 = (&((&(l_p)->f_ast))->f_enumCases);
+            SD_LIST_PUSH(_t72, sd_S_EnumCase, _t71);
+            sd_int _t73 = sd_int_retain(SD_INT_S((SD_SMALL(sd_list_len((((*l_p)).f_ast).f_enumCases)) - ((int64_t)1))));
+            SD_LIST_PUSH((&L.l_members), sd_int, _t73);
+            sd_rl_S3Pos(l_lparen);
             sd_rl_S8EnumCase(L.l_c); L.l_c = ((sd_S_EnumCase){0});
           } else {
-            sd_int _t71 = sd_m_Parser__parseMethodSig(l_p);
-            SD_LIST_PUSH((&L.l_members), sd_int, _t71);
+            sd_int _t74 = sd_m_Parser__parseMethodSig(l_p);
+            SD_LIST_PUSH((&L.l_members), sd_int, _t74);
           }
         }
-        bool _t73 = (!((*l_p)).f_failed);
-        if (_t73) {
-          sd_box * _t72 = sd_m_Parser__kind((*l_p));
-          _t73 = (!sd_box_equal(_t72, SD_BOX_REF(sd_k_Tok__RBrace)));
-          sd_box_release(_t72);
+        bool _t76 = (!((*l_p)).f_failed);
+        if (_t76) {
+          sd_box * _t75 = sd_m_Parser__kind((*l_p));
+          _t76 = (!sd_box_equal(_t75, SD_BOX_REF(sd_k_Tok__RBrace)));
+          sd_box_release(_t75);
         }
-        if (_t73) {
-          sd_box * _t74 = sd_box_retain(SD_BOX_REF(sd_k_Tok__Newline));
-          L._t75 = sd_str_retain(SD_STR_LIT(""));
-          sd_m_Parser__expect(l_p, _t74, L._t75);
-          sd_str_release(L._t75); L._t75 = NULL;
-          sd_box_release(_t74);
+        if (_t76) {
+          sd_box * _t77 = sd_box_retain(SD_BOX_REF(sd_k_Tok__Newline));
+          L._t78 = sd_str_retain(SD_STR_LIT(""));
+          sd_m_Parser__expect(l_p, _t77, L._t78);
+          sd_str_release(L._t78); L._t78 = NULL;
+          sd_box_release(_t77);
         }
         sd_m_Parser__skipNewlines(l_p);
       }
     }
   }
-  sd_box * _t76 = sd_box_retain(SD_BOX_REF(sd_k_Tok__RBrace));
-  L._t77 = sd_str_retain(SD_STR_LIT(" to close the type body"));
-  sd_m_Parser__expect(l_p, _t76, L._t77);
-  sd_str_release(L._t77); L._t77 = NULL;
-  sd_box_release(_t76);
-  L._t78 = sd_list_retain(L.l_members);
-  sd_int _t79 = sd_m_Ast__addList((&(l_p)->f_ast), L._t78);
-  sd_int l_start = _t79;
-  sd_list_release(L._t78); L._t78 = NULL;
+  sd_box * _t79 = sd_box_retain(SD_BOX_REF(sd_k_Tok__RBrace));
+  L._t80 = sd_str_retain(SD_STR_LIT(" to close the type body"));
+  sd_m_Parser__expect(l_p, _t79, L._t80);
+  sd_str_release(L._t80); L._t80 = NULL;
+  sd_box_release(_t79);
+  L._t81 = sd_list_retain(L.l_members);
+  sd_int _t82 = sd_m_Ast__addList((&(l_p)->f_ast), L._t81);
+  sd_int l_start = _t82;
+  sd_list_release(L._t81); L._t81 = NULL;
   if (sd_box_equal((L.l_td).f_kind, SD_BOX_REF(sd_k_DeclKind__Struct))) {
-    sd_int _t80 = sd_int_retain(l_start);
-    sd_int *_t81 = (&((&L.l_td))->f_fields);
-    sd_int_release(*_t81);
-    *_t81 = _t80;
-    sd_int _t82 = sd_int_retain(sd_list_len(L.l_members));
-    sd_int *_t83 = (&((&L.l_td))->f_fieldCount);
-    sd_int_release(*_t83);
-    *_t83 = _t82;
+    sd_int _t83 = sd_int_retain(l_start);
+    sd_int *_t84 = (&((&L.l_td))->f_fields);
+    sd_int_release(*_t84);
+    *_t84 = _t83;
+    sd_int _t85 = sd_int_retain(sd_list_len(L.l_members));
+    sd_int *_t86 = (&((&L.l_td))->f_fieldCount);
+    sd_int_release(*_t86);
+    *_t86 = _t85;
   } else {
     if (sd_box_equal((L.l_td).f_kind, SD_BOX_REF(sd_k_DeclKind__Enum))) {
-      sd_int _t84 = sd_int_retain(l_start);
-      sd_int *_t85 = (&((&L.l_td))->f_cases);
-      sd_int_release(*_t85);
-      *_t85 = _t84;
-      sd_int _t86 = sd_int_retain(sd_list_len(L.l_members));
-      sd_int *_t87 = (&((&L.l_td))->f_caseCount);
-      sd_int_release(*_t87);
-      *_t87 = _t86;
+      sd_int _t87 = sd_int_retain(l_start);
+      sd_int *_t88 = (&((&L.l_td))->f_cases);
+      sd_int_release(*_t88);
+      *_t88 = _t87;
+      sd_int _t89 = sd_int_retain(sd_list_len(L.l_members));
+      sd_int *_t90 = (&((&L.l_td))->f_caseCount);
+      sd_int_release(*_t90);
+      *_t90 = _t89;
     } else {
-      sd_int _t88 = sd_int_retain(l_start);
-      sd_int *_t89 = (&((&L.l_td))->f_methods);
-      sd_int_release(*_t89);
-      *_t89 = _t88;
-      sd_int _t90 = sd_int_retain(sd_list_len(L.l_members));
-      sd_int *_t91 = (&((&L.l_td))->f_methodCount);
-      sd_int_release(*_t91);
-      *_t91 = _t90;
+      sd_int _t91 = sd_int_retain(l_start);
+      sd_int *_t92 = (&((&L.l_td))->f_methods);
+      sd_int_release(*_t92);
+      *_t92 = _t91;
+      sd_int _t93 = sd_int_retain(sd_list_len(L.l_members));
+      sd_int *_t94 = (&((&L.l_td))->f_methodCount);
+      sd_int_release(*_t94);
+      *_t94 = _t93;
     }
   }
-  sd_S_TypeDecl _t92 = sd_rt_S8TypeDecl(L.l_td);
-  sd_list ** _t93 = (&((&(l_p)->f_ast))->f_typeDecls);
-  SD_LIST_PUSH(_t93, sd_S_TypeDecl, _t92);
-  sd_box * _t94 = sd_box_retain(SD_BOX_REF(sd_k_TopKind__Type));
-  sd_int _t95 = sd_int_retain(SD_INT_S((SD_SMALL(sd_list_len((((*l_p)).f_ast).f_typeDecls)) - ((int64_t)1))));
-  sd_m_Parser__addTop(l_p, _t94, _t95);
-  sd_int_release(_t95);
-  sd_box_release(_t94);
+  sd_S_TypeDecl _t95 = sd_rt_S8TypeDecl(L.l_td);
+  sd_list ** _t96 = (&((&(l_p)->f_ast))->f_typeDecls);
+  SD_LIST_PUSH(_t96, sd_S_TypeDecl, _t95);
+  sd_box * _t97 = sd_box_retain(SD_BOX_REF(sd_k_TopKind__Type));
+  sd_int _t98 = sd_int_retain(SD_INT_S((SD_SMALL(sd_list_len((((*l_p)).f_ast).f_typeDecls)) - ((int64_t)1))));
+  sd_m_Parser__addTop(l_p, _t97, _t98);
+  sd_int_release(_t98);
+  sd_box_release(_t97);
   sd_int_release(l_start);
   sd_list_release(L.l_members); L.l_members = NULL;
   sd_rl_S5Token(L.l_k); L.l_k = ((sd_S_Token){0});
@@ -50411,52 +50664,64 @@ static sd_int sd_m_Types__mapOf(sd_S_Types * l_ts, sd_int l_k, sd_int l_v) {
   return _t13;
 }
 
-typedef struct { sd_lframe h; sd_str l_name; sd_str _t11; sd_str _t12; sd_str _t13; } sd_L_sd_m_Types__optOf;
+typedef struct { sd_lframe h; sd_str _t4; sd_str _t5; sd_str _t6; } sd_L_sd_m_Types__optOf;
 static void sd_lr_sd_m_Types__optOf(sd_lframe *p) {
   sd_L_sd_m_Types__optOf *L = (sd_L_sd_m_Types__optOf *)p;
-  sd_str_release(L->l_name);
-  sd_str_release(L->_t11);
-  sd_str_release(L->_t12);
-  sd_str_release(L->_t13);
+  sd_str_release(L->_t4);
+  sd_str_release(L->_t5);
+  sd_str_release(L->_t6);
 }
 static sd_int sd_m_Types__optOf(sd_S_Types * l_ts, sd_int l_e) {
   sd_L_sd_m_Types__optOf L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Types__optOf);
-  sd_str _t1 = sd_m_Types__name((*l_ts), l_e);
-  sd_str _t2 = sd_str_concat(_t1, SD_STR_LIT("\?"));
-  L.l_name = _t2;
-  sd_str_release(_t1); 
-  bool _t4 = (!sd_int_eq(l_e, sd_c_tyInvalid()));
-  if (_t4) {
-    sd_box * _t3 = sd_m_Types__kind((*l_ts), l_e);
-    _t4 = sd_box_equal(_t3, SD_BOX_REF(sd_k_Kind__Func));
-    sd_box_release(_t3);
-  }
-  if (_t4) {
-    sd_str _t5 = sd_m_Types__name((*l_ts), l_e);
-    sd_str _t6[] = {SD_STR_LIT("("), _t5, SD_STR_LIT(")\?")};
-    sd_str _t7 = sd_str_concat_n(_t6, 3);
-    sd_str_release(L.l_name);
-    L.l_name = _t7;
-    sd_str_release(_t5); 
-  }
-  sd_box * _t8 = sd_box_retain(SD_BOX_REF(sd_k_Kind__Opt));
-  sd_int _t9 = sd_int_retain(l_e);
-  sd_int _t10 = sd_int_retain(SD_INT(-1));
-  L._t11 = sd_m_Types__mangle((*l_ts), l_e);
-  L._t12 = sd_str_concat(SD_STR_LIT("O"), L._t11);
-  L._t13 = sd_str_retain(L.l_name);
-  sd_int _t14 = sd_m_Types__compound(l_ts, _t8, _t9, _t10, L._t12, L._t13);
-  sd_int _t15 = _t14;
+  sd_box * _t1 = sd_box_retain(SD_BOX_REF(sd_k_Kind__Opt));
+  sd_int _t2 = sd_int_retain(l_e);
+  sd_int _t3 = sd_int_retain(SD_INT(-1));
+  L._t4 = sd_m_Types__mangle((*l_ts), l_e);
+  L._t5 = sd_str_concat(SD_STR_LIT("O"), L._t4);
+  L._t6 = sd_m_Types__optName((*l_ts), l_e);
+  sd_int _t7 = sd_m_Types__compound(l_ts, _t1, _t2, _t3, L._t5, L._t6);
+  sd_int _t8 = _t7;
   SD_LF_LEAVE(L);
-  sd_str_release(L._t13);
-  sd_str_release(L._t12);
-  sd_str_release(L._t11);
-  sd_int_release(_t10);
-  sd_int_release(_t9);
-  sd_box_release(_t8);
-  sd_str_release(L.l_name);
-  return _t15;
+  sd_str_release(L._t6);
+  sd_str_release(L._t5);
+  sd_str_release(L._t4);
+  sd_int_release(_t3);
+  sd_int_release(_t2);
+  sd_box_release(_t1);
+  return _t8;
+}
+
+typedef struct { sd_lframe h; sd_str _t3; sd_str _t7; } sd_L_sd_m_Types__optName;
+static void sd_lr_sd_m_Types__optName(sd_lframe *p) {
+  sd_L_sd_m_Types__optName *L = (sd_L_sd_m_Types__optName *)p;
+  sd_str_release(L->_t3);
+  sd_str_release(L->_t7);
+}
+static sd_str sd_m_Types__optName(sd_S_Types l_ts, sd_int l_e) {
+  sd_L_sd_m_Types__optName L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_m_Types__optName);
+  bool _t2 = (!sd_int_eq(l_e, sd_c_tyInvalid()));
+  if (_t2) {
+    sd_box * _t1 = sd_m_Types__kind(l_ts, l_e);
+    _t2 = sd_box_equal(_t1, SD_BOX_REF(sd_k_Kind__Func));
+    sd_box_release(_t1);
+  }
+  if (_t2) {
+    L._t3 = sd_m_Types__name(l_ts, l_e);
+    sd_str _t4[] = {SD_STR_LIT("("), L._t3, SD_STR_LIT(")\?")};
+    sd_str _t5 = sd_str_concat_n(_t4, 3);
+    sd_str _t6 = _t5;
+    SD_LF_LEAVE(L);
+    sd_str_release(L._t3);
+    return _t6;
+  }
+  L._t7 = sd_m_Types__name(l_ts, l_e);
+  sd_str _t8 = sd_str_concat(L._t7, SD_STR_LIT("\?"));
+  sd_str _t9 = _t8;
+  SD_LF_LEAVE(L);
+  sd_str_release(L._t7);
+  return _t9;
 }
 
 typedef struct { sd_lframe h; sd_str _t4; sd_str _t5; sd_str _t6; sd_str _t7; } sd_L_sd_m_Types__chanOf;

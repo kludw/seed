@@ -686,7 +686,7 @@ fn (Checker c) mut checkAssign(int s) {
         }
         bool discarded = tg2.kind == TargetKind.Decl && tg2.name == "_"
         if (errSlot && i < n - 1 && !discarded && !c.types.isOpt(tt) && tt != tyError) {
-            c.errorHint(tg2.pos, "the error is discarded with _, so " + what + " may be null and must be declared as " + c.typeName(tt) + "?", "declare it as " + c.typeName(tt) + "? and check it against null before using it")
+            c.errorHint(tg2.pos, "the error is discarded with _, so " + what + " may be null and must be declared as " + c.types.optName(tt), "declare it as " + c.types.optName(tt) + " and check it against null before using it")
         }
     }
     for (int j = 0; j < n; j++) {
@@ -828,6 +828,8 @@ fn (Checker c) mut checkSwitchCases(Stmt st) {
                 c.error(cs.pos, "switch has two default cases")
             }
             hasDefault = true
+        } else if (hasDefault) {
+            c.errorHint(cs.pos, "default must be the last case of a switch, but a case follows it", "move default: and its statements to the end of the switch")
         }
         for (int k = 0; k < cs.labelCount; k++) {
             Label l = c.ast.labels[c.ast.at(cs.labels, k)]
@@ -1085,8 +1087,14 @@ fn (Checker c) mut checkSelectComm(int s) {
     string hint = "a case is ch.send(v), ch.receive() or T? v = ch.receive()"
     if (st.kind == StmtKind.ExprStmt) {
         c.checkExpr(st.expr)
-        if (c.typeOf(st.expr) != tyInvalid && !c.isChanOp(st.expr, true)) {
+        int et = c.typeOf(st.expr)
+        if (et != tyInvalid && !c.isChanOp(st.expr, true)) {
             c.errorHint(c.ast.exprs[st.expr].pos, "a select case must send or receive on a channel", hint)
+        } else if (et != tyInvalid && c.isChanOp(st.expr, false) && c.types.endsWithError(et)) {
+            // A chan error receives an error, which must be handled like
+            // any other: declared, or discarded explicitly.
+            string d = c.describe(st.expr)
+            c.errorHint(c.ast.exprs[st.expr].pos, "the error received by " + d + " is not handled", "declare it (case error e = " + d + ":) or discard it explicitly (case _ = " + d + ":)")
         }
         return
     }

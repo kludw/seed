@@ -120,6 +120,8 @@ fn main([]string args) error {
 sent 3 jobs, received 2 replies
 ```
 
+A receive case either declares a new variable (`string? r = replies.receive()`) or drops the value (`replies.receive()` or `_ = replies.receive()`). On a `chan error` the received error must be handled like any other: `case error e = errs.receive():`, or `case _ = errs.receive():` to discard it.
+
 When several cases are ready, any one of them may run. There is no `default` case: `select` always waits. To wait with a limit, add a timer channel as one more case (see [timeouts](#timeouts)).
 
 ## When a goroutine fails
@@ -171,7 +173,7 @@ group failed: checker: disk is full
 main carries on
 ```
 
-A goroutine is never interrupted in the middle of its work. It is stopped only at a **stop point**: a channel send or receive (including in `select`), or a standard-library call that blocks, such as `time.sleep`, reading stdin with `io.readLine`, socket I/O in `net` (and so `http`), `net.dial`, `os.run` and `os.output`. (Reading and writing regular files with `fs` is not a stop point: it doesn't block for long.) A goroutine that computes for a long time without reaching one finishes its work before it notices.
+A goroutine is never interrupted in the middle of its work. It is stopped only at a **stop point**: a channel send or receive (including in `select`), or a standard-library call that blocks, such as `time.sleep`, reading stdin with `io.readLine`, socket I/O in `net` (and so `http`), `net.dial`, `os.run` and `os.output`. Reading an open `fs.File` is one too, since it can wait on a FIFO. (The other `fs` operations, such as `fs.read` and `fs.write`, are not stop points: on regular files they don't block for long.) A goroutine that computes for a long time without reaching one finishes its work before it notices.
 
 This is Erlang's "let it crash" idea, with the structure of the code deciding who cleans up: a failure is contained by the nearest enclosing `group`, and the code after that group decides what to do about it.
 

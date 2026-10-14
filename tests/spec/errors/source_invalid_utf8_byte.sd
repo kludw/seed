@@ -1,0 +1,11 @@
+// expect-error: unexpected byte 0xff (only ASCII
+// expect-errors: 1
+// SPEC "Compiler": a byte that isn't part of a valid UTF-8 character is
+// reported once, as a number (the line below has the byte 0xff after x).
+package main
+
+fn main([]string args) error {
+    int xÿ = 1
+    _ = x
+    return null
+}

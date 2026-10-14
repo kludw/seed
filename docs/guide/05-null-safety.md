@@ -126,7 +126,7 @@ The compiler narrows a variable, or a field of a variable such as `u.email` or `
 Narrowing ends:
 
 - when the variable (or a part of the path, such as `u` for `u.email`) is assigned a value that may be null;
-- when a `mut` method is called on it or on something that contains it, because the method might have set it back to `null`;
+- when a `mut` method is called on something that contains it (`u.reset()` for `u.email`), because the method might have set it back to `null`. A `mut` method called on the narrowed value itself (`xs.push(1)` on a narrowed `xs`) keeps it narrowed: inside the method the receiver is a plain `T`, which can't become `null`;
 - at the end of the block where the check was made;
 - inside a loop, for anything the loop assigns or calls a `mut` method on, since the check may not hold on the next iteration.
 

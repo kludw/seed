@@ -1,0 +1,10 @@
+// expect-error: hint: write 0
+// expect-errors: 1
+// SPEC "Literals": 00 is not a way to write 0.
+package main
+
+fn main([]string args) error {
+    int x = 00
+    _ = x
+    return null
+}

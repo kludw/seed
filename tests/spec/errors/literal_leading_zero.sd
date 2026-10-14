@@ -1,0 +1,11 @@
+// expect-error: hint: write 17
+// expect-errors: 1
+// SPEC "Literals": a number never starts with 0 followed by a digit (017
+// would be octal in C and Go; Seed has no octal).
+package main
+
+fn main([]string args) error {
+    int x = 017
+    _ = x
+    return null
+}

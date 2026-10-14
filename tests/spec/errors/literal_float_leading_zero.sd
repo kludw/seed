@@ -1,0 +1,10 @@
+// expect-error: hint: write 1.5
+// expect-errors: 1
+// SPEC "Literals": a float doesn't start with 0 followed by a digit either.
+package main
+
+fn main([]string args) error {
+    float x = 01.5
+    _ = x
+    return null
+}

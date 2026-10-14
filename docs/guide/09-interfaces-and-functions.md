@@ -191,7 +191,7 @@ fn(int) int f = square
 fn(Person, Person) bool order = byAge
 ```
 
-Function values can be passed to functions, returned, stored in variables, lists, maps and struct fields. A field of function type is called directly: `cmd.run(7, 2)`.
+Function values can be passed to functions, returned, stored in variables, lists, maps and struct fields. A field of function type is called directly: `cmd.run(7, 2)`. (A struct can't also have a method called `run`, so `cmd.run` always means one thing.)
 
 ```seed
 package main

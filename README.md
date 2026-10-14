@@ -155,7 +155,7 @@ The documentation:
 - Each goroutine is an OS thread, so tens of thousands of simultaneous goroutines hit OS limits.
 - Deadlock detection is global: it fires only when every goroutine is blocked. A goroutine stuck while others keep running waits forever, and defers do not run on a deadlock.
 - When a group fails, the code of the group block itself is not stopped, only the goroutines it started.
-- File I/O is not a stop point, so a goroutine blocked in it is stopped only when the call returns.
+- File I/O other than reading an `fs.File` is not a stop point, so a goroutine blocked in it (opening or writing a FIFO, for example) is stopped only when the call returns.
 - A `select` case can only receive into a new variable.
 - Big integers use quadratic algorithms, so converting a number with millions of digits to text is slow.
 - Only tested on macOS (arm64, Apple clang). The runtime is C11 and POSIX, but Linux is untested.
