@@ -1,0 +1,39 @@
+// Lists: push 2 million pseudo-random ints, sort them, sortBy on structs,
+// and read them back.
+package main
+
+import "fmt"
+
+type Item struct {
+    int key
+    string name
+}
+
+fn byKey(Item a, Item b) bool {
+    return a.key < b.key
+}
+
+fn main([]string args) error {
+    []int xs = []int{}
+    int x = 12345
+    for (int i = 0; i < 2000000; i++) {
+        x = (x * 1103515245 + 12345) % 2147483648
+        xs.push(x)
+    }
+    xs.sort()
+    int check = 0
+    for (int i = 0; i < xs.len(); i = i + 1000) {
+        check = (check + xs[i]) % 1000000007
+    }
+    []Item items = []Item{}
+    for (int i = 0; i < 300000; i++) {
+        x = (x * 1103515245 + 12345) % 2147483648
+        items.push(Item{key: x % 1000, name: "n"})
+    }
+    items.sortBy(byKey)
+    for (int i = 0; i < items.len(); i = i + 1000) {
+        check = (check + items[i].key) % 1000000007
+    }
+    fmt.println(check.string())
+    return null
+}

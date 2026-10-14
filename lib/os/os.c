@@ -20,7 +20,40 @@ void sd_lib_os_crash(sd_str message) { sd_os_crash(message); }
 
 sd_str sd_lib_os_env(sd_str name) { return sd_os_env(name); }
 
-sd_err sd_lib_os_run(sd_list *argv, sd_int *code) { return sd_os_run(argv, code); }
+/* Arguments go to the OS as C strings, which end at the first NUL byte, so
+ * an argument with a NUL inside would silently become a different one
+ * ("rm\0 -rf" would run rm). That is an error, before anything starts; the
+ * program is shown with each NUL as \x00. */
+static sd_err os_check_argv(const char *fn, const sd_list *argv) {
+  sd_str const *xs = sd_list_data(argv);
+  for (int64_t i = 0; i < argv->len; i++) {
+    if (xs[i]->len == 0 || !memchr(xs[i]->data, 0, (size_t)xs[i]->len)) continue;
+    sd_str p = xs[0];
+    char *shown = sd_alloc((size_t)p->len * 4 + 1), *q = shown;
+    for (int64_t j = 0; j < p->len; j++) {
+      if (p->data[j] == 0) {
+        memcpy(q, "\\x00", 4);
+        q += 4;
+      } else {
+        *q++ = p->data[j];
+      }
+    }
+    *q = 0;
+    sd_err e = i == 0 ? sd_errorf("%s: %s: program name contains a NUL byte", fn, shown)
+                      : sd_errorf("%s: %s: argument %lld contains a NUL byte", fn, shown, (long long)i);
+    free(shown);
+    return e;
+  }
+  return SD_ERR_NULL;
+}
+
+sd_err sd_lib_os_run(sd_list *argv, sd_int *code) {
+  if (argv->len > 0) {
+    sd_err e = os_check_argv("os.run", argv);
+    if (!sd_err_is_null(e)) return e;
+  }
+  return sd_os_run(argv, code);
+}
 
 sd_str sd_lib_os_executable(void) { return sd_os_executable(); }
 
@@ -33,6 +66,8 @@ sd_err sd_lib_os_cwd(sd_str *out) { return sd_os_cwd(out); }
  * a stopped goroutine kills and reaps the child. */
 sd_err sd_lib_os_output(sd_list *argv, sd_str *out, sd_int *code) {
   if (argv->len == 0) sd_crash("os.output: argv is empty");
+  sd_err bad = os_check_argv("os.output", argv);
+  if (!sd_err_is_null(bad)) return bad;
   sd_str const *xs = sd_list_data(argv);
   char **av = sd_alloc((size_t)(argv->len + 1) * sizeof(char *));
   for (int64_t i = 0; i < argv->len; i++) av[i] = (char *)xs[i]->data;

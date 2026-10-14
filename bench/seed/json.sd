@@ -1,0 +1,37 @@
+// JSON: build a document of about 1 MB, then print and parse it back 30
+// times.
+package main
+
+import "fmt"
+import "json"
+
+fn document() json.Value {
+    []json.Value users = []json.Value{}
+    for (int i = 0; i < 6000; i++) {
+        users.push(json.Value.Object(map[string]json.Value{
+            "id": json.Value.Number(float(i)),
+            "name": json.Value.String("user " + i.string()),
+            "email": json.Value.String("user" + i.string() + "@example.com"),
+            "score": json.Value.Number(float(i) * 1.5),
+            "active": json.Value.Bool(i % 3 == 0),
+            "tags": json.Value.Array([]json.Value{json.Value.String("a"), json.Value.String("b\n\"c\"")}),
+        }))
+    }
+    return json.Value.Object(map[string]json.Value{"users": json.Value.Array(users), "count": json.Value.Number(6000.0)})
+}
+
+fn main([]string args) error {
+    json.Value doc = document()
+    int total = 0
+    for (int i = 0; i < 30; i++) {
+        string text = doc.string()
+        json.Value back = try json.parse(text)
+        total = total + text.len()
+        int? n = back.get("users").at(i).get("id").asInt()
+        if (n != null) {
+            total = total + n
+        }
+    }
+    fmt.println(total.string())
+    return null
+}

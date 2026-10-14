@@ -1,0 +1,20 @@
+package os
+
+// Regression tests from the library QA pass (lib/BUGS_FIXED.md).
+
+test "an argument with a NUL byte is an error, not a different argument" {
+    // "sh\x00..." used to run sh; "a\x00b" used to pass "a".
+    _, error err = run([]string{"sh\x00-c", "exit 7"})
+    assert(err != null)
+    assert(err.message() == "os.run: sh\\x00-c: program name contains a NUL byte")
+    _, error err2 = run([]string{"sh", "-c", "exit 0\x00; exit 9"})
+    assert(err2 != null)
+    assert(err2.message() == "os.run: sh: argument 2 contains a NUL byte")
+    _, _, error err3 = output([]string{"echo", "a\x00b"})
+    assert(err3 != null)
+    assert(err3.message() == "os.output: echo: argument 1 contains a NUL byte")
+    string out, int code, error err4 = output([]string{"echo", "a", ""})
+    assert(err4 == null)
+    assert(out == "a \n")
+    assert(code == 0)
+}

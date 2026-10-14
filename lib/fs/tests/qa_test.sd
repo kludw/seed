@@ -1,0 +1,53 @@
+package fs
+
+// Regression tests from the library QA pass (lib/BUGS_FIXED.md).
+
+test "a path with a NUL byte is an error and touches nothing" {
+    string dir = try makeTemp("seed-fs-nul-")
+    defer _ = removeAll(dir)
+    try write(dir + "/keep.txt", "kept")
+    // "dir/\x00" used to reach the OS as "dir/": removeAll removed dir.
+    error err = removeAll(dir + "/\x00")
+    assert(err != null)
+    assert(err.message() == "fs.removeAll: " + dir + "/\\x00: path contains a NUL byte")
+    assert(isDir(dir))
+    string kept = try read(dir + "/keep.txt")
+    assert(kept == "kept")
+    // Every function checks.
+    string p = dir + "/keep.txt\x00.png"
+    err = write(p, "x")
+    assert(err != null)
+    assert(err.message() == "fs.write: " + dir + "/keep.txt\\x00.png: path contains a NUL byte")
+    kept = try read(dir + "/keep.txt")
+    assert(kept == "kept")
+    _, error rerr = read(p)
+    assert(rerr != null)
+    assert(rerr.message().endsWith("/keep.txt\\x00.png: path contains a NUL byte"))
+    assert(append(p, "x") != null)
+    assert(!exists(p))
+    assert(!isDir(dir + "/\x00"))
+    _, error serr = stat(p)
+    assert(serr != null)
+    _, error lerr = list(dir + "/\x00")
+    assert(lerr != null)
+    assert(mkdir(dir + "/new\x00dir") != null)
+    assert(!exists(dir + "/new"))
+    assert(remove(p) != null)
+    error nerr = rename(p, dir + "/other")
+    assert(nerr != null)
+    assert(nerr.message() == "fs.rename: " + dir + "/keep.txt\\x00.png -> " + dir + "/other: path contains a NUL byte")
+    assert(rename(dir + "/keep.txt", dir + "/x\x00y") != null)
+    _, error oerr = open(p)
+    assert(oerr != null)
+    assert(oerr.message().startsWith("fs.open: "))
+    _, error cerr = create(p)
+    assert(cerr != null)
+    assert(cerr.message().startsWith("fs.create: "))
+    _, error terr = makeTemp("a\x00b")
+    assert(terr != null)
+    assert(terr.message() == "fs.makeTemp: a\\x00b: path contains a NUL byte")
+    kept = try read(dir + "/keep.txt")
+    assert(kept == "kept")
+    []string names = try list(dir)
+    assert(names == []string{"keep.txt"})
+}

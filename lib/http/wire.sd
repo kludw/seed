@@ -330,6 +330,9 @@ fn (MessageReader r) mut finish() string {
     r.body = []string{}
     r.bodyLen = 0
     r.status = 0
+    // The request is complete: a "100 Continue" is no longer due (the
+    // server sends one only while it waits for this request's body).
+    r.expectContinue = false
     return body
 }
 

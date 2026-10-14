@@ -39,6 +39,7 @@ program that follows every rule below.
 14. [API reference](#14-api-reference)
 15. [Tests and performance](#15-tests-and-performance)
 16. [Decisions and limitations](#16-decisions-and-limitations)
+17. [Future work](#17-future-work)
 
 ## 1. Building
 
@@ -461,9 +462,11 @@ Rules:
 
 ## 10. Goroutines, groups and spawn
 
-Each goroutine is an OS thread (8 MB stack by default). A `group` block is
-lowered to `sd_group_begin`, one `sd_spawn` per `spawn` statement (which may
-be inside loops or ifs in the block), and `sd_group_wait`:
+Each goroutine runs on an OS thread of its own (8 MB stack by default);
+threads are kept and reused by later goroutines (worker threads, below). A
+`group` block is lowered to `sd_group_begin`, one `sd_spawn` per `spawn`
+statement (which may be inside loops or ifs in the block), and
+`sd_group_wait`:
 
 ```c
 /* fn worker(int id, []Item items, chan string out) error */
@@ -511,10 +514,22 @@ sd_err l_err;
   goroutine. `sd_group_wait` returns the first error (`crash: <message>` for a
   crash), or null.
 - **Finished goroutines are freed while the group runs.** A goroutine that
-  ends moves itself to its group's dead list; the next `sd_spawn` in the
-  group (or `sd_group_wait`) joins those threads and frees them. A server's
-  group, which spawns a goroutine per connection for as long as it runs,
-  so holds only the connections that are open.
+  ends moves itself to its group's dead list (its last use of its task);
+  the next `sd_spawn` in the group (or `sd_group_wait`) frees those tasks.
+  A server's group, which spawns a goroutine per connection for as long as
+  it runs, so holds only the connections that are open.
+- **Worker threads.** `sd_spawn` hands the goroutine to an idle worker
+  thread if there is one, and creates a thread otherwise. A worker whose
+  goroutine returned (with an error or not) waits for the next one,
+  spinning for up to 20 us and then on a condition variable; it ends after
+  2 s without work, or at once when 1024 workers are idle. A worker whose
+  goroutine crashed or was stopped ends instead of being reused, so that
+  thread-local state a crash may have left half-made (a package constant
+  being computed, `seed_core.c`'s free queue) never reaches another
+  goroutine. Thread-local caches that live longer than a goroutine must be
+  released or reset by an `sd_goroutine_atexit` function, which runs at
+  the end of every goroutine (the generated constant caches and `rand`'s
+  generator do this).
 - **Nesting.** A goroutine may run its own groups. Cancelling a goroutine that
   is waiting in `sd_group_wait` cancels that inner group too, so whole trees
   stop. A group is always waited for: if the goroutine that owns it crashes
@@ -709,7 +724,7 @@ may contain NULs): make them with `sd_str_new(bytes, n)` or
 it does not fit), `sd_int_from_i64(i)`. Lists: `sd_list_new(&sd_type_str,
 cap)`, `SD_LIST_PUSH(&l, sd_str, value)`, `SD_LIST_GET(l, T, i)`.
 
-**Blocking calls.** Each goroutine is an OS thread, so a native that
+**Blocking calls.** Each goroutine runs on an OS thread, so a native that
 blocks blocks only its own goroutine. To be a **stop point** (SPEC.md,
 DECISIONS.md, "Concurrency": a goroutine whose group fails must stop there too), a
 native never blocks in the OS directly; it waits through the runtime:
@@ -1033,6 +1048,16 @@ and the example under `-fsanitize=thread`, with no reports. The `net` and
 `http` test programs (`seed test lib/net lib/http`) were also run under
 both sanitizers, with no reports.
 
+Soak (QA pass, with the worker threads and spinning of section 16): the 40
+concurrency programs of `tests/full` (`chan_*`, `group_*`, `select_*`,
+`defer_*`, `io_stdin*`, `os_stop_points`, `fs_file_stop`, ...) and the
+test programs of `lib/net`, `lib/http`, `lib/fs`, `lib/time` and
+`lib/rand` ran 1,200 times each at -O2, 24 and then 64 at once on 10 CPUs
+(54,000 runs), and 200 times each under `-fsanitize=thread` (9,000 runs);
+`test_conc` and `test_block` ran 100 times each under TSan, ASan and -O2.
+No failure and no report, apart from one test-isolation bug in `lib/fs`'s
+tests (lib/BUGS_FIXED.md).
+
 Performance on an Apple M-series laptop (`-O2`, `run.sh bench`):
 
 | Operation | Cost |
@@ -1043,15 +1068,22 @@ Performance on an Apple M-series laptop (`-O2`, `run.sh bench`):
 | `x = x + "c"` with `sd_str_append` | 3 ns |
 | 1M `i.string()` + push + join | 30 ms |
 | `map[string]int` insert / lookup (1M keys) | ~70 ns / ~45 ns |
-| buffered channel send + receive in one goroutine | 27 ns |
-| producer -> consumer, `chan int(1024)` / `chan int(0)` | 50 ns / 1.8 us per value |
-| unbuffered ping-pong round trip | 3.5-5 us |
-| `select` over two ready channels | 21 ns |
-| spawn + join | ~15 us per goroutine |
+| buffered channel send + receive in one goroutine | 25 ns |
+| producer -> consumer, `chan int(1024)` / `chan int(0)` | 50 ns / 250 ns per value (1.5 us before spinning) |
+| unbuffered ping-pong round trip | 0.7 us (3.3 us before spinning) |
+| `select` over two ready channels | 20 ns |
+| spawn + join, one at a time | 1.4 us per goroutine (15 us before worker threads) |
 
-Blocking operations cost an OS thread wake-up (a condition variable), which
-dominates unbuffered channels; buffered channels avoid it when they don't
-fill up.
+A blocked goroutine that has to sleep costs an OS thread wake-up (a
+condition variable, several microseconds on macOS). `park` therefore spins
+on the goroutine's wake flag for up to 20 us first, when there are idle
+CPUs (fewer running goroutines than CPUs) and fewer than half the CPUs are
+spinning already; a hand-off that arrives meanwhile costs neither the
+signal nor the wake-up. Buffered channels avoid parking when they don't
+fill up. The `group` and worker-pool locks are taken with a short
+`trylock` loop before blocking, since many threads take them at once when
+goroutines start and end in bursts. bench/ and docs/performance.md compare
+whole programs with Go.
 
 ## 16. Decisions and limitations
 
@@ -1074,8 +1106,9 @@ Decisions made while writing the runtime (nobody was available to ask):
 7. **Deep copy on send happens once, by whichever side completes the
    transfer**, under the channel lock. Immortal objects and channels are
    shared instead of copied.
-8. **Goroutines are OS threads** with 8 MB (lazily committed) stacks. The
-   runtime keeps a count of running goroutines to detect deadlocks.
+8. **Goroutines are OS threads** with 8 MB (lazily committed) stacks,
+   reused by later goroutines (section 10). The runtime keeps a count of
+   running goroutines to detect deadlocks.
 9. **Cancellation points are send, receive, select, sleep and the blocking
    calls of section 13** (handle I/O, `sd_wait_fd`, `sd_wait_child`), not
    `close`; cancelled goroutines run their defers; a channel operation or
@@ -1107,17 +1140,24 @@ Decisions made while writing the runtime (nobody was available to ask):
     with the call being entered) or an event loop (goroutines are threads).
     It costs two descriptors per goroutine that ever blocks.
 18. **Finished goroutines are reaped at the next spawn** in their group
-    (section 10), so long-running groups don't keep their threads.
+    (section 10), so long-running groups don't keep their tasks.
+19. **Worker threads are reused** (section 10) rather than one thread being
+    created and joined per goroutine: starting a goroutine went from about
+    15 us to 1.4 us. Only threads whose goroutine returned are reused.
+20. **Spinning before sleeping** (section 15), bounded to half the CPUs
+    and to times when CPUs are idle, for parked goroutines (20 us) and idle
+    workers (20 us). An unbuffered round trip went from 3.3 us to 0.7 us.
 
 Limitations and things left for later:
 
 - **A crash or cancellation leaks the counted values held in the locals of the
   unwound C frames** (defer environments are released). A long-running program
   that crashes many goroutines loses that memory. Fixing it needs generated
-  code to register its locals (or to unwind by returning).
+  code to register its locals; section 17 has the design, and why a
+  runtime-only fix was measured and not kept.
 - Big integers use quadratic algorithms; `int.string()` of a number with
   millions of digits is slow.
-- Each goroutine is a thread: tens of thousands of simultaneous goroutines
+- Each running goroutine is a thread: tens of thousands of simultaneous goroutines
   will hit OS limits (`ulimit -u`, kernel thread limits); `sd_spawn` ends the
   program with `crash: cannot start a goroutine (out of threads)` when
   thread creation fails.
@@ -1131,3 +1171,91 @@ Limitations and things left for later:
   (`pthread`, `posix_spawnp`, `sigaltstack`, `clock_gettime`); Linux was not
   available for testing. On glibc, `posix_spawnp` may report a missing program
   as exit status 127 rather than an error.
+
+## 17. Future work
+
+### Freeing what an unwound frame held
+
+A crash, or a goroutine stopped at a stop point, unwinds with
+`siglongjmp`, which skips the releases the generated code would have done
+on the way out of each frame. The defers run and their environments are
+released, the goroutine's arguments are released, but every counted value
+that only a C local of an unwound frame (or an owned temporary) held is
+leaked. A server whose handlers crash on bad input loses memory with each
+crash; one that stops connection goroutines at shutdown loses what they
+held. Normal execution leaks nothing.
+
+Three ways to fix it were considered; the measurements are from this
+machine (Apple M-series, `-O2`).
+
+**1. A registry of the objects each goroutine owns (runtime only; built,
+measured and not kept).** Goroutines share nothing, so when a goroutine
+crashes or is stopped, every object it still owns once its defers have run
+is garbage. A prototype kept, per spawned goroutine, an open-addressing
+hash set of the objects allocated while it ran (`sd_obj_alloc` adds,
+`sd_obj_free` removes, `realloc` moves); copies made for another goroutine
+(channel transfers, spawn arguments) were made outside it and adopted by
+the receiver; channels and immortal objects were never tracked. At the end
+of a crashed goroutine the remaining objects were made immortal (so that
+releases between them do nothing), the references they held to untracked
+objects were released, and then they were freed. It worked: the runtime
+tests freed everything except channels held only by unwound locals,
+`make test-leaks` reported the crashing goroutines of `group_crash`,
+`os_stop_points` and `fs_file_stop` clean, and the soak found no problem.
+It also needed `sortBy` to sort a copy (a `less` that crashes halfway
+otherwise leaves an element duplicated in the list, which the sweep would
+release twice). But it cost every allocation and every free in any program
+that has spawned a goroutine: on an allocation-heavy goroutine (the json,
+strings and maps benchmarks run inside one `spawn`) **+18% for the
+thread-local lookup alone** (`_Thread_local` is a call to `tlv_get_addr`
+on macOS) **and +80% in total** with the set (1.13 s to 2.05 s; with a
+million live objects the set is 16 MB and nearly every insert and delete
+misses the cache). An intrusive list or a per-object index in a hidden
+header would avoid the set's misses but adds 8 to 16 bytes to every
+object, and the thread-local lookup remains. Too expensive to make the
+price of a feature that only matters after a crash.
+
+**2. Unwinding by returning (compiler).** Generated code would test a
+per-goroutine "unwinding" flag after every call that can crash and leave
+through the function's normal exit path, which already releases the
+locals (as `try` does). Precise, with no memory overhead and a well
+predicted branch after each call (a few percent), but every runtime
+function that crashes would have to return instead, and every expression
+would need an exit path: a large change to the code generator and the
+runtime API.
+
+**3. Cleanup frames on the defer stack (compiler; recommended).** The
+runtime already keeps a per-goroutine cleanup stack that the unwinder
+walks (defers and groups, `sd_cleanup` in `seed_task.c`). A third kind of
+entry, a frame of counted locals, makes unwinding release them:
+
+- Runtime (small, can be added at any time): `size_t
+  sd_frame_push(void *locals, const sd_type *desc)` pushes an entry
+  `{locals, desc}` and returns the mark; `void sd_frame_pop(size_t mark)`
+  drops it without running anything (normal exit). When `unwind_to` meets
+  such an entry it calls `sd_release(desc, locals)`, which releases every
+  counted field. Entries need no arena space.
+- Compiler: in a function that has counted locals or owned temporaries
+  (strings, lists, maps, boxes, interfaces, errors; `int` can be left out,
+  see below), declare them as fields of one local struct
+  `struct { sd_str l_name; sd_list *l_xs; sd_str _t3; } L = {0};` with a
+  generated `SD_STRUCT_TYPE` descriptor listing those fields, call
+  `size_t fm = sd_frame_push(&L, &D_fn_locals)` on entry, and
+  `sd_frame_pop(fm)` before every `return` (before `sd_defer_run`, whose
+  mark is below it). The one invariant: **at every point where a crash or
+  a stop can happen, each field holds either null or a value it owns.**
+  That means three local rules on top of today's code: a field is set to
+  null right after it is released or moved out (`return x`, a store that
+  consumes it, passing it to a consuming runtime function), temporaries
+  live in fields too, and a field is only assigned after its old value has
+  been released (already the order the generator uses).
+- Cost: a frame push and pop (a few stores, no allocation) per call of
+  such a function, and its locals live in memory rather than registers
+  across calls. Functions with only scalars (and `int`s, if left out) pay
+  nothing, so `fib` and the integer loop are unaffected; functions that
+  handle strings or lists already pay for allocation, which dwarfs this.
+  Leaving `int` out means a crash still leaks the big integers held by
+  locals, which are rare.
+- With this in place the leak tests can drop their `.leaks` files, and
+  `sortBy` needs the copy-then-write-back sort described in 1 (the
+  prototype's change to `list_sort` in `seed_list.c`).

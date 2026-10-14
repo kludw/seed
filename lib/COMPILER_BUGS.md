@@ -1,8 +1,25 @@
 # Compiler issues found while writing lib/
 
-None are open. Add an entry here when library code has to work around the
-compiler: a minimal program that shows the problem, what the compiler says,
-what it should do, and the workaround used (with the file it is in).
+Add an entry here when library code has to work around the compiler: a
+minimal program that shows the problem, what the compiler says, what it
+should do, and the workaround used (with the file it is in).
+
+Open:
+
+- **Two typed discards in one declaration are rejected** (found by the
+  library QA pass):
+
+  ```
+  fn three() (string, int, error) { return "a", 1, null }
+  ...
+  string _, int _, error err = three()
+  ```
+
+  says `error: _ is declared twice` (at the second `_`). SPEC.md
+  ("Variables and constants") says `_` discards a value, and the untyped
+  form `_, _, error err = three()` compiles, so the typed one should too:
+  `_` should never be entered as a name. Workaround: the untyped form (the
+  QA programs used it; no library file is affected).
 
 Fixed since the library was first written (each with tests):
 

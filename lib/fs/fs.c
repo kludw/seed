@@ -17,6 +17,38 @@
 
 static sd_err fs_errorf(const char *fn, const char *path, int e) { return sd_errorf("fs.%s: %s: %s", fn, path, sd_strerror(e)); }
 
+/* Paths go to the OS as C strings, which end at the first NUL byte: a path
+ * with a NUL inside would name a different file ("dir/\0x" is "dir/", so
+ * removeAll would remove dir). Such a path is an error, as in Go; the
+ * subject shows each NUL as \x00. */
+static bool fs_has_nul(sd_str s) { return s->len > 0 && memchr(s->data, 0, (size_t)s->len) != NULL; }
+
+static char *fs_show(sd_str s) {
+  char *out = sd_alloc((size_t)s->len * 4 + 1), *q = out;
+  for (int64_t i = 0; i < s->len; i++) {
+    if (s->data[i] == 0) {
+      memcpy(q, "\\x00", 4);
+      q += 4;
+    } else {
+      *q++ = s->data[i];
+    }
+  }
+  *q = 0;
+  return out;
+}
+
+static sd_err fs_nul_error(const char *fn, sd_str path) {
+  char *shown = fs_show(path);
+  sd_err e = sd_errorf("fs.%s: %s: path contains a NUL byte", fn, shown);
+  free(shown);
+  return e;
+}
+
+#define FS_CHECK_PATH(fn, path) \
+  do { \
+    if (fs_has_nul(path)) return fs_nul_error(fn, path); \
+  } while (0)
+
 /* Writes all n bytes to fd, retrying after signals and short writes.
  * Returns 0 or the errno. */
 static int fs_write_all(int fd, const char *p, size_t n) {
@@ -40,9 +72,13 @@ static int fs_open_retry(const char *path, int flags, mode_t mode) {
 
 /* ------------------------------------------------------- whole files */
 
-sd_err sd_lib_fs_read(sd_str path, sd_str *out) { return sd_fs_read(path, out); }
+sd_err sd_lib_fs_read(sd_str path, sd_str *out) {
+  FS_CHECK_PATH("read", path);
+  return sd_fs_read(path, out);
+}
 
 sd_err sd_lib_fs_write(sd_str path, sd_str data) {
+  FS_CHECK_PATH("write", path);
   int fd = fs_open_retry(path->data, O_WRONLY | O_CREAT | O_TRUNC, 0644);
   if (fd < 0) return fs_errorf("write", path->data, errno);
   int e = fs_write_all(fd, data->data, (size_t)data->len);
@@ -57,6 +93,7 @@ sd_err sd_lib_fs_write(sd_str path, sd_str data) {
 static pthread_mutex_t fs_append_mu = PTHREAD_MUTEX_INITIALIZER;
 
 sd_err sd_lib_fs_append(sd_str path, sd_str data) {
+  FS_CHECK_PATH("append", path);
   int fd = fs_open_retry(path->data, O_WRONLY | O_CREAT | O_APPEND, 0644);
   if (fd < 0) return fs_errorf("append", path->data, errno);
   pthread_mutex_lock(&fs_append_mu);
@@ -67,11 +104,12 @@ sd_err sd_lib_fs_append(sd_str path, sd_str data) {
   return SD_ERR_NULL;
 }
 
-bool sd_lib_fs_exists(sd_str path) { return sd_fs_exists(path); }
+bool sd_lib_fs_exists(sd_str path) { return !fs_has_nul(path) && sd_fs_exists(path); }
 
-bool sd_lib_fs_isDir(sd_str path) { return sd_fs_is_dir(path); }
+bool sd_lib_fs_isDir(sd_str path) { return !fs_has_nul(path) && sd_fs_is_dir(path); }
 
 sd_err sd_lib_fs_stat(sd_str path, sd_S_fs_Info *out) {
+  FS_CHECK_PATH("stat", path);
   struct stat st;
   if (stat(path->data, &st) != 0) return fs_errorf("stat", path->data, errno);
 #if defined(__APPLE__)
@@ -87,11 +125,15 @@ sd_err sd_lib_fs_stat(sd_str path, sd_S_fs_Info *out) {
 
 /* ------------------------------------------------------- directories */
 
-sd_err sd_lib_fs_list(sd_str dir, sd_list **out) { return sd_fs_list(dir, out); }
+sd_err sd_lib_fs_list(sd_str dir, sd_list **out) {
+  FS_CHECK_PATH("list", dir);
+  return sd_fs_list(dir, out);
+}
 
 /* Like the runtime's sd_fs_mkdir (error messages included), with the mode
  * docs/stdlib.md gives. */
 sd_err sd_lib_fs_mkdir(sd_str path) {
+  FS_CHECK_PATH("mkdir", path);
   char *cp = sd_alloc((size_t)path->len + 1);
   memcpy(cp, path->data, (size_t)path->len + 1);
   size_t n = strlen(cp);
@@ -114,11 +156,21 @@ sd_err sd_lib_fs_mkdir(sd_str path) {
 }
 
 sd_err sd_lib_fs_rename(sd_str from, sd_str to) {
+  if (fs_has_nul(from) || fs_has_nul(to)) {
+    char *a = fs_show(from), *b = fs_show(to);
+    sd_err e = sd_errorf("fs.rename: %s -> %s: path contains a NUL byte", a, b);
+    free(a);
+    free(b);
+    return e;
+  }
   if (rename(from->data, to->data) != 0) return sd_errorf("fs.rename: %s -> %s: %s", from->data, to->data, sd_strerror(errno));
   return SD_ERR_NULL;
 }
 
-sd_err sd_lib_fs_remove(sd_str path) { return sd_fs_remove(path); }
+sd_err sd_lib_fs_remove(sd_str path) {
+  FS_CHECK_PATH("remove", path);
+  return sd_fs_remove(path);
+}
 
 static char *fs_join(const char *dir, const char *name) {
   size_t a = strlen(dir), b = strlen(name);
@@ -168,11 +220,13 @@ static sd_err fs_remove_tree(const char *path) {
 }
 
 sd_err sd_lib_fs_removeAll(sd_str path) {
+  FS_CHECK_PATH("removeAll", path);
   if (path->len == 0) return SD_ERR_NULL;
   return fs_remove_tree(path->data);
 }
 
 sd_err sd_lib_fs_makeTemp(sd_str prefix, sd_str *out) {
+  FS_CHECK_PATH("makeTemp", prefix);
   const char *dir = getenv("TMPDIR");
   if (!dir || !*dir) dir = "/tmp";
   size_t dl = strlen(dir);
@@ -205,6 +259,7 @@ sd_err sd_lib_fs_makeTemp(sd_str prefix, sd_str *out) {
  * copy of a closed File finds nothing and says "file is closed". */
 
 static sd_err fs_open_file(const char *fn, sd_str path, int flags, bool writing, sd_S_fs_File *out) {
+  FS_CHECK_PATH(fn, path);
   int fd = fs_open_retry(path->data, flags, 0644);
   if (fd < 0) return fs_errorf(fn, path->data, errno);
   if (!writing) {

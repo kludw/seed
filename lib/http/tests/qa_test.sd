@@ -1,0 +1,55 @@
+package http
+
+// Regression tests from the library QA pass (lib/BUGS_FIXED.md).
+
+import "net"
+import "time"
+
+test "expect 100-continue is not carried over to the next request" {
+    MessageReader r = newMessageReader(maxHeadBytes, maxRequestBody)
+    // The body arrives with the head: no 100 Continue is due, before or after.
+    r.feed("POST /a HTTP/1.1\r\nhost: x\r\ncontent-length: 4\r\nexpect: 100-continue\r\n\r\nbody")
+    assert(httpTestReq(r.nextRequest()) == "POST /a {host=x; content-length=4; expect=100-continue} body=body")
+    assert(!r.expectContinue)
+    assert(httpTestReq(r.nextRequest()) == "need more")
+    assert(!r.expectContinue)
+    // Only the head: the server owes a 100 Continue while it waits.
+    r.feed("POST /b HTTP/1.1\r\nhost: x\r\ncontent-length: 2\r\nexpect: 100-continue\r\n\r\n")
+    assert(httpTestReq(r.nextRequest()) == "need more")
+    assert(r.expectContinue)
+}
+
+// Sends a request with its body and "expect: 100-continue" at once on a
+// kept-alive connection, waits, and returns everything the server wrote.
+fn httpQaExpectClient(string base, chan string out) error {
+    net.Conn c = try net.dial(base.slice(7, base.len()), 5 * time.second)
+    defer c.close()
+    c.setTimeout(5 * time.second)
+    try c.write("POST /echo HTTP/1.1\r\nhost: x\r\ncontent-length: 4\r\nexpect: 100-continue\r\n\r\nbody")
+    string got = ""
+    for (; !got.endsWith("body"); ) {
+        string? data = try c.read(65536)
+        if (data == null) {
+            break
+        }
+        got = got + data
+    }
+    // Anything else the server sends now would be a stray response.
+    time.sleep(200 * time.millisecond)
+    try c.write("GET / HTTP/1.1\r\nhost: x\r\nconnection: close\r\n\r\n")
+    for (;;) {
+        string? data = try c.read(65536)
+        if (data == null) {
+            break
+        }
+        got = got + data
+    }
+    out.send(got)
+    return null
+}
+
+test "no stray 100 Continue after a request whose body came with its head" {
+    string got = try httpTestRun(httpQaExpectClient)
+    assert(!got.contains("100 Continue"))
+    assert(got.split("HTTP/1.1 200 OK").len() == 3)
+}

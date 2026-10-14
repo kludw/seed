@@ -1,0 +1,37 @@
+// Maps: insert 1 million string keys, look each up twice, update and
+// delete some.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    map[string]int m = map[string]int{}
+    int n = 1000000
+    for (int i = 0; i < n; i++) {
+        m["key" + i.string()] = i
+    }
+    int sum = 0
+    for (int round = 0; round < 2; round++) {
+        for (int i = 0; i < n; i++) {
+            int? v = m["key" + i.string()]
+            if (v != null) {
+                sum = sum + v % 10
+            }
+        }
+    }
+    for (int i = 0; i < n; i = i + 2) {
+        m.delete("key" + i.string())
+    }
+    map[int]int counts = map[int]int{}
+    for (int i = 0; i < n; i++) {
+        int k = i % 1000
+        int? c = counts[k]
+        if (c == null) {
+            counts[k] = 1
+        } else {
+            counts[k] = c + 1
+        }
+    }
+    fmt.println((sum + m.len() + counts.len()).string())
+    return null
+}

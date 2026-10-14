@@ -115,7 +115,10 @@ sd_err sd_lib_net_listen(sd_str addr, sd_S_net_Listener *out) {
     }
     int one = 1;
     setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
-    if (bind(fd, ai->ai_addr, ai->ai_addrlen) == 0 && listen(fd, 128) == 0) break;
+    /* The longest accept queue the OS allows: it clamps the backlog to its
+     * own limit (kern.ipc.somaxconn on macOS and the BSDs, 128 by default;
+     * net.core.somaxconn on Linux, 4096 on recent kernels), as Go does. */
+    if (bind(fd, ai->ai_addr, ai->ai_addrlen) == 0 && listen(fd, 65535) == 0) break;
     last = errno;
     close(fd);
     fd = -1;
