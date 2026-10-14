@@ -22,9 +22,11 @@ package rand
 // If that is too slow, `next` can become a native method without changing
 // any result.
 //
-// The package functions range, fraction and permutation (the per-goroutine
-// generator seeded from the OS) need the native `nextOs`, which is still to
-// be written (see lib/README.md).
+// The package functions range, fraction and permutation draw from a
+// generator that each goroutine gets automatically: the native `nextOs`
+// (rand.c), a SplitMix64 state per goroutine seeded from the OS the first
+// time it is used. They run the same algorithms as `Source`, on a `Source`
+// whose private `fromOs` field makes `next` call `nextOs`.
 
 import "os"
 
@@ -34,16 +36,22 @@ const int mask64 = 0xffffffffffffffff
 // state, so the copy produces the same numbers from that point on.
 pub type Source struct {
     int state
+    // Set only by the package functions: next draws from nextOs, and crash
+    // messages name rand.range instead of rand.Source.range.
+    bool fromOs
 }
 
 // A new generator. Any int is a valid seed; it is reduced modulo 2^64
 // (so -1 and 2^64 - 1 give the same generator).
 pub fn seeded(int seed) Source {
-    return Source{state: seed & mask64}
+    return Source{state: seed & mask64, fromOs: false}
 }
 
 // The next 64-bit output, 0 <= x < 2^64 (SplitMix64).
 fn (Source s) mut next() int {
+    if (s.fromOs) {
+        return nextOs()
+    }
     s.state = (s.state + 0x9e3779b97f4a7c15) & mask64
     int z = s.state
     z = ((z ^ (z >> 30)) * 0xbf58476d1ce4e5b9) & mask64
@@ -55,7 +63,7 @@ fn (Source s) mut next() int {
 // range. Crashes if lo >= hi.
 pub fn (Source s) mut range(int lo, int hi) int {
     if (lo >= hi) {
-        os.crash("rand.Source.range: lo (" + lo.string() + ") must be less than hi (" + hi.string() + ")")
+        os.crash(s.fnName("range") + ": lo (" + lo.string() + ") must be less than hi (" + hi.string() + ")")
     }
     int n = hi - lo
     int words = 1
@@ -86,7 +94,7 @@ pub fn (Source s) mut fraction() float {
 // negative.
 pub fn (Source s) mut permutation(int n) []int {
     if (n < 0) {
-        os.crash("rand.Source.permutation: n (" + n.string() + ") must not be negative")
+        os.crash(s.fnName("permutation") + ": n (" + n.string() + ") must not be negative")
     }
     []int out = []int{}
     for (int i = 0; i < n; i++) {
@@ -99,4 +107,40 @@ pub fn (Source s) mut permutation(int n) []int {
         out[j] = tmp
     }
     return out
+}
+
+// The name of method `method` for crash messages: rand.Source.range, or
+// rand.range when called through the package function.
+fn (Source s) fnName(string method) string {
+    if (s.fromOs) {
+        return "rand." + method
+    }
+    return "rand.Source." + method
+}
+
+// The next 64-bit output, 0 <= x < 2^64, of the calling goroutine's own
+// generator (SplitMix64, seeded from the OS when the goroutine first uses
+// it).
+fn nextOs() int
+
+// A uniformly distributed int with lo <= n < hi, from the goroutine's
+// generator seeded by the OS. Works for any size of range. Crashes if
+// lo >= hi.
+pub fn range(int lo, int hi) int {
+    Source s = Source{state: 0, fromOs: true}
+    return s.range(lo, hi)
+}
+
+// A uniformly distributed float with 0.0 <= f < 1.0, a multiple of 2^-53,
+// from the goroutine's generator seeded by the OS.
+pub fn fraction() float {
+    Source s = Source{state: 0, fromOs: true}
+    return s.fraction()
+}
+
+// The numbers 0 to n - 1 in a uniformly random order, from the goroutine's
+// generator seeded by the OS. Crashes if n is negative.
+pub fn permutation(int n) []int {
+    Source s = Source{state: 0, fromOs: true}
+    return s.permutation(n)
 }

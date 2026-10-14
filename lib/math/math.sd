@@ -1,10 +1,10 @@
 package math
 
-// Numeric functions and constants (docs/stdlib.md, "math"): the parts that
-// need no C library. The float functions listed under "Native" in
-// lib/README.md (powFloat, sqrt, floor, ceil, round, trunc, sin, cos, tan,
-// asin, acos, atan, atan2, exp, log, log2, log10) are to be added as native
-// functions in math.c (runtime/README.md, "Native functions").
+// Numeric functions and constants (docs/stdlib.md, "math"). The float
+// functions that need the C library (powFloat, sqrt, the rounding
+// functions, trigonometry, exp and the logarithms) are native, in math.c,
+// and follow IEEE 754 and C99: they return nan or an infinity instead of
+// crashing (sqrt(-1.0) is nan, log(0.0) is -inf).
 
 import "os"
 
@@ -35,15 +35,15 @@ pub fn maxInt(int a, int b) int {
     return a
 }
 
-// `base` to the power `exp`, exactly (integers grow). powInt(0, 0) is 1.
-// Crashes if `exp` is negative.
-pub fn powInt(int base, int exp) int {
-    if (exp < 0) {
-        os.crash("math.powInt: exp (" + exp.string() + ") must not be negative")
+// `base` to the power `exponent`, exactly (integers grow). powInt(0, 0) is 1.
+// Crashes if `exponent` is negative.
+pub fn powInt(int base, int exponent) int {
+    if (exponent < 0) {
+        os.crash("math.powInt: exponent (" + exponent.string() + ") must not be negative")
     }
     int result = 1
     int b = base
-    int n = exp
+    int n = exponent
     for (; n > 0; ) {
         if ((n & 1) == 1) {
             result = result * b
@@ -123,3 +123,55 @@ fn nanValue() float {
     float zero = 0.0
     return zero / zero
 }
+
+// C pow: base to the power exponent.
+pub fn powFloat(float base, float exponent) float
+
+// Square root.
+pub fn sqrt(float x) float
+
+// Rounds down.
+pub fn floor(float x) float
+
+// Rounds up.
+pub fn ceil(float x) float
+
+// Rounds to the nearest whole number, halves away from zero: 2.5 gives 3.0,
+// -2.5 gives -3.0.
+pub fn round(float x) float
+
+// Rounds toward zero.
+pub fn trunc(float x) float
+
+// Sine, in radians.
+pub fn sin(float x) float
+
+// Cosine, in radians.
+pub fn cos(float x) float
+
+// Tangent, in radians.
+pub fn tan(float x) float
+
+// Arcsine, in radians.
+pub fn asin(float x) float
+
+// Arccosine, in radians.
+pub fn acos(float x) float
+
+// Arctangent, in radians.
+pub fn atan(float x) float
+
+// The angle of the point (x, y), in -pi..pi.
+pub fn atan2(float y, float x) float
+
+// e to the power x.
+pub fn exp(float x) float
+
+// Natural logarithm.
+pub fn log(float x) float
+
+// Base-2 logarithm.
+pub fn log2(float x) float
+
+// Base-10 logarithm.
+pub fn log10(float x) float

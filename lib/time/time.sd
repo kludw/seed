@@ -1,6 +1,14 @@
-// Package time: durations, sleeping and timeouts. Durations are int
-// nanoseconds: write 5 * time.second.
+// Package time: clocks, durations, sleeping, timeouts and RFC 3339 dates.
+// Durations are int nanoseconds (write 5 * time.second) and points in time
+// are int Unix nanoseconds, always UTC.
+//
+// The calendar functions (date, fromDate, format, parse) are plain Seed on
+// the proleptic Gregorian calendar, with Howard Hinnant's days-from-civil
+// arithmetic; they work for any int, not only 1970 to 2038.
 package time
+
+import "errors"
+import "os"
 
 pub const int nanosecond = 1
 pub const int microsecond = 1000
@@ -9,6 +17,19 @@ pub const int second = 1000000000
 pub const int minute = 60000000000
 pub const int hour = 3600000000000
 
+const int nsPerDay = 86400000000000
+
+// A UTC calendar date and time.
+pub type Date struct {
+    pub int year // e.g. 2026
+    pub int month // 1–12
+    pub int day // 1–31
+    pub int hour // 0–23
+    pub int minute // 0–59
+    pub int second // 0–59 (leap seconds are not represented)
+    pub int nanosecond // 0–999999999
+}
+
 // A channel that receives the current time (Unix nanoseconds) once, d
 // nanoseconds from now, and is then closed. Meant for timeouts in select.
 pub fn after(int d) chan int
@@ -16,3 +37,327 @@ pub fn after(int d) chan int
 // Pauses the goroutine for at least d nanoseconds. Like a channel receive,
 // it is a point where a goroutine whose group failed stops.
 pub fn sleep(int d)
+
+// The current wall-clock time in Unix nanoseconds. It can jump when the
+// system clock is changed.
+pub fn now() int
+
+// Nanoseconds since an arbitrary fixed point, from a clock that never goes
+// backwards. Only differences between two readings mean anything.
+pub fn monotonic() int
+
+// The UTC calendar date and time of t. Works for any t, including before
+// 1970 (proleptic Gregorian calendar).
+pub fn date(int t) Date {
+    int days = floorDiv(t, nsPerDay)
+    int rem = t - days * nsPerDay
+    int z = days + 719468
+    int era = floorDiv(z, 146097)
+    int doe = z - era * 146097
+    int yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365
+    int doy = doe - (365 * yoe + yoe / 4 - yoe / 100)
+    int mp = (5 * doy + 2) / 153
+    int d = doy - (153 * mp + 2) / 5 + 1
+    int m = mp + 3
+    if (mp >= 10) {
+        m = mp - 9
+    }
+    int y = yoe + era * 400
+    if (m <= 2) {
+        y++
+    }
+    return Date{
+        year: y,
+        month: m,
+        day: d,
+        hour: rem / hour,
+        minute: rem / minute % 60,
+        second: rem / second % 60,
+        nanosecond: rem % second,
+    }
+}
+
+// The Unix time of a UTC date. Fails if any field is out of range,
+// including days that don't exist (February 30):
+// "time.fromDate: 2026-02-30T00:00:00Z: day out of range".
+pub fn fromDate(Date d) (int, error) {
+    string problem = dateProblem(d)
+    if (problem != "") {
+        return 0, errors.new("time.fromDate: " + rawDate(d) + ": " + problem)
+    }
+    return unixOf(d), null
+}
+
+// t in RFC 3339, in UTC: "2026-10-13T08:30:00Z". Fractional seconds appear
+// only when non-zero, without trailing zeros: "2026-10-13T08:30:00.25Z".
+// Crashes if the year is outside 0–9999.
+pub fn format(int t) string {
+    Date d = date(t)
+    if (d.year < 0 || d.year > 9999) {
+        os.crash("time.format: year (" + d.year.string() + ") must be between 0 and 9999")
+    }
+    return rawDate(d)
+}
+
+// Reads an RFC 3339 date-time, YYYY-MM-DDTHH:MM:SS[.fraction](Z|±HH:MM),
+// and returns its Unix time. T may also be t or a space, Z may be z. Up to 9
+// fraction digits. Offsets are applied, so "2026-10-13T10:30:00+02:00" and
+// "2026-10-13T08:30:00Z" give the same int. Errors name the text and the
+// problem: "time.parse: 2026-13-01T00:00:00Z: month out of range",
+// "time.parse: 2026-10-13: expected 'T' at offset 10".
+pub fn parse(string s) (int, error) {
+    DateParser p = DateParser{text: s, pos: 0, problem: ""}
+    int y = p.digits(4)
+    p.expect('-')
+    int mo = p.digits(2)
+    p.expect('-')
+    int d = p.digits(2)
+    p.separator()
+    int h = p.digits(2)
+    p.expect(':')
+    int mi = p.digits(2)
+    p.expect(':')
+    int sec = p.digits(2)
+    int frac = p.fraction()
+    int offset = p.zone()
+    if (p.problem == "" && p.pos < s.len()) {
+        p.fail("unexpected text")
+    }
+    if (p.problem != "") {
+        return 0, errors.new("time.parse: " + s + ": " + p.problem)
+    }
+    Date dt = Date{year: y, month: mo, day: d, hour: h, minute: mi, second: sec, nanosecond: frac}
+    string problem = dateProblem(dt)
+    if (problem != "") {
+        return 0, errors.new("time.parse: " + s + ": " + problem)
+    }
+    return unixOf(dt) - offset, null
+}
+
+// a / b rounded toward minus infinity (b > 0).
+fn floorDiv(int a, int b) int {
+    int q = a / b
+    if (a % b < 0) {
+        q--
+    }
+    return q
+}
+
+fn isLeap(int y) bool {
+    return (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
+}
+
+fn daysIn(int y, int m) int {
+    if (m == 2) {
+        if (isLeap(y)) {
+            return 29
+        }
+        return 28
+    }
+    if (m == 4 || m == 6 || m == 9 || m == 11) {
+        return 30
+    }
+    return 31
+}
+
+// The first field of d that is out of range, as an error reason, or "".
+fn dateProblem(Date d) string {
+    if (d.month < 1 || d.month > 12) {
+        return "month out of range"
+    }
+    if (d.day < 1 || d.day > daysIn(d.year, d.month)) {
+        return "day out of range"
+    }
+    if (d.hour < 0 || d.hour > 23) {
+        return "hour out of range"
+    }
+    if (d.minute < 0 || d.minute > 59) {
+        return "minute out of range"
+    }
+    if (d.second < 0 || d.second > 59) {
+        return "second out of range"
+    }
+    if (d.nanosecond < 0 || d.nanosecond > 999999999) {
+        return "nanosecond out of range"
+    }
+    return ""
+}
+
+// The Unix time of a valid date (days-from-civil).
+fn unixOf(Date d) int {
+    int y = d.year
+    int mp = d.month - 3
+    if (d.month <= 2) {
+        y--
+        mp = d.month + 9
+    }
+    int era = floorDiv(y, 400)
+    int yoe = y - era * 400
+    int doy = (153 * mp + 2) / 5 + d.day - 1
+    int doe = yoe * 365 + yoe / 4 - yoe / 100 + doy
+    int days = era * 146097 + doe - 719468
+    return days * nsPerDay + d.hour * hour + d.minute * minute + d.second * second + d.nanosecond
+}
+
+// d in the RFC 3339 layout, fields as they are (also when out of range):
+// the fraction only when the nanoseconds are not zero, without trailing
+// zeros.
+fn rawDate(Date d) string {
+    []string out = []string{
+        pad(d.year, 4),
+        "-",
+        pad(d.month, 2),
+        "-",
+        pad(d.day, 2),
+        "T",
+        pad(d.hour, 2),
+        ":",
+        pad(d.minute, 2),
+        ":",
+        pad(d.second, 2),
+    }
+    if (d.nanosecond != 0) {
+        string frac = pad(d.nanosecond, 9)
+        int end = frac.len()
+        for (; end > 1 && frac[end - 1] == '0'; ) {
+            end--
+        }
+        out.push(".")
+        out.push(frac.slice(0, end))
+    }
+    out.push("Z")
+    return out.join("")
+}
+
+// n in decimal with leading zeros to at least width digits.
+fn pad(int n, int width) string {
+    if (n < 0) {
+        return "-" + pad(-n, width)
+    }
+    string s = n.string()
+    for (; s.len() < width; ) {
+        s = "0" + s
+    }
+    return s
+}
+
+// The state of parse: the text, the position, and the first problem found
+// ("" while there is none). Every step does nothing once there is a
+// problem.
+type DateParser struct {
+    string text
+    int pos
+    string problem
+}
+
+fn (DateParser p) mut fail(string what) {
+    if (p.problem == "") {
+        p.problem = what + " at offset " + p.pos.string()
+    }
+}
+
+fn (DateParser p) atDigit() bool {
+    return p.pos < p.text.len() && p.text[p.pos] >= '0' && p.text[p.pos] <= '9'
+}
+
+// The value of the next n digits.
+fn (DateParser p) mut digits(int n) int {
+    int v = 0
+    for (int i = 0; i < n && p.problem == ""; i++) {
+        if (!p.atDigit()) {
+            p.fail("expected a digit")
+            return 0
+        }
+        v = v * 10 + int(p.text[p.pos]) - int('0')
+        p.pos++
+    }
+    return v
+}
+
+fn (DateParser p) mut expect(byte b) {
+    if (p.problem != "") {
+        return
+    }
+    if (p.pos >= p.text.len() || p.text[p.pos] != b) {
+        p.fail("expected '" + string([]byte{b}) + "'")
+        return
+    }
+    p.pos++
+}
+
+// The date and time separator: T, t or a space.
+fn (DateParser p) mut separator() {
+    if (p.problem != "") {
+        return
+    }
+    if (p.pos < p.text.len() && (p.text[p.pos] == 'T' || p.text[p.pos] == 't' || p.text[p.pos] == ' ')) {
+        p.pos++
+        return
+    }
+    p.fail("expected 'T'")
+}
+
+// An optional fraction of a second, "." and 1 to 9 digits, in nanoseconds.
+fn (DateParser p) mut fraction() int {
+    if (p.problem != "" || p.pos >= p.text.len() || p.text[p.pos] != '.') {
+        return 0
+    }
+    p.pos++
+    if (!p.atDigit()) {
+        p.fail("expected a digit after '.'")
+        return 0
+    }
+    int v = 0
+    int count = 0
+    for (; p.atDigit(); ) {
+        if (count == 9) {
+            p.fail("more than 9 fraction digits")
+            return 0
+        }
+        v = v * 10 + int(p.text[p.pos]) - int('0')
+        count++
+        p.pos++
+    }
+    for (; count < 9; count++) {
+        v = v * 10
+    }
+    return v
+}
+
+// The zone, Z, z or ±HH:MM, as an offset from UTC in nanoseconds.
+fn (DateParser p) mut zone() int {
+    if (p.problem != "") {
+        return 0
+    }
+    if (p.pos >= p.text.len()) {
+        p.fail("expected 'Z' or an offset like +02:00")
+        return 0
+    }
+    byte b = p.text[p.pos]
+    if (b == 'Z' || b == 'z') {
+        p.pos++
+        return 0
+    }
+    if (b != '+' && b != '-') {
+        p.fail("expected 'Z' or an offset like +02:00")
+        return 0
+    }
+    p.pos++
+    int start = p.pos
+    int h = p.digits(2)
+    p.expect(':')
+    int m = p.digits(2)
+    if (p.problem != "") {
+        return 0
+    }
+    if (h > 23 || m > 59) {
+        p.pos = start
+        p.fail("offset out of range")
+        return 0
+    }
+    int offset = h * hour + m * minute
+    if (b == '-') {
+        return -offset
+    }
+    return offset
+}

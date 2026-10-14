@@ -1,28 +1,98 @@
 // Package fs reads and writes files and directories. Paths are passed to
 // the OS unchanged; relative paths are relative to the current directory.
 // Errors look like "fs.read: notes.txt: no such file or directory".
+//
+// Most programs only need the whole-file functions; File is for files too
+// large to read at once and for writing a file piece by piece. Everything is
+// native (fs.c).
 package fs
 
-// The whole file.
+// What stat reports about a file or directory.
+pub type Info struct {
+    pub int size // in bytes; for a directory, whatever the OS reports
+    pub bool isDir
+    pub int modified // last modification, Unix nanoseconds
+}
+
+// An open file: a handle, the id of an entry in fs.c's table of open
+// files. Copying a File copies the id, not the file: both copies refer to
+// the same open file, and close() closes it for every copy. Ids are never
+// reused. Each operation on a File is atomic.
+pub type File struct {
+    int id
+    string path // for error messages
+}
+
+// The whole file. Fails on a directory with "is a directory".
 pub fn read(string path) (string, error)
 
-// Creates the file or replaces its contents.
+// Creates the file or replaces its contents. New files get mode 0644.
 pub fn write(string path, string data) error
 
-// Whether anything exists at path (following symbolic links).
+// Adds data to the end of the file, creating it (mode 0644) if needed. One
+// append call is never interleaved with another from the same program, and
+// on a local file system not with one from another program either.
+pub fn append(string path, string data) error
+
+// Whether anything exists at path (following symbolic links, so a broken
+// link does not exist).
 pub fn exists(string path) bool
 
 // Whether path is a directory (following symbolic links); false if nothing
 // is there.
 pub fn isDir(string path) bool
 
+// Size, kind and modification time, following symbolic links.
+pub fn stat(string path) (Info, error)
+
 // The names (not paths) of the entries of a directory, sorted by bytes,
 // without . and ..
 pub fn list(string dir) ([]string, error)
 
-// Creates the directory and any missing parents. Succeeds if it already
-// exists as a directory.
+// Creates the directory and any missing parents, with mode 0755. Succeeds
+// if it already exists as a directory.
 pub fn mkdir(string path) error
 
-// Removes a file or an empty directory.
+// Moves or renames, replacing `to` if it is a file. Both must be on the
+// same file system. Errors name both paths:
+// "fs.rename: a.txt -> b/a.txt: no such file or directory".
+pub fn rename(string from, string to) error
+
+// Removes a file or an empty directory. Fails if nothing is there.
 pub fn remove(string path) error
+
+// Removes path and everything inside it. Does not follow symbolic links: a
+// link is removed, not what it points to. Succeeds if nothing is there. An
+// error names the entry that could not be removed.
+pub fn removeAll(string path) error
+
+// Creates a new, empty directory in $TMPDIR (or /tmp when it is unset or
+// empty), named prefix followed by random characters, and returns its path.
+// The caller removes it with removeAll.
+pub fn makeTemp(string prefix) (string, error)
+
+// Opens an existing file for reading. Fails on a directory with "is a
+// directory".
+pub fn open(string path) (File, error)
+
+// Creates a file, or empties an existing one, and opens it for writing. New
+// files get mode 0644.
+pub fn create(string path) (File, error)
+
+// The next line without its line ending, or null at the end. A line ends at
+// "\n"; a "\r" directly before it is removed too. The last line is returned
+// even if it has no "\n". readLine and read share a buffer, so they can be
+// mixed.
+pub fn (File f) readLine() (string?, error)
+
+// Between 1 and max bytes, or null at the end. Crashes if max < 1.
+pub fn (File f) read(int max) (string?, error)
+
+// Writes all of data. Writes are not buffered, so once write returns, the
+// data is with the OS.
+pub fn (File f) write(string data) error
+
+// Closes the file, for every copy of the handle. Closing again does
+// nothing. Every other operation after close returns an error ending in
+// "file is closed".
+pub fn (File f) close()

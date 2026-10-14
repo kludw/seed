@@ -73,3 +73,51 @@ test "hmac sha256 edge keys" {
     // A key of exactly one block is used as it is, not hashed.
     assert(cryptoTestHex(hmacSha256(cryptoTestBytes(64, 107), "exact block key")) == "b563f92fb1a114877408fa27ee56cdc4a0b2dd30807de9559d4bff27f5a2c1fb")
 }
+
+test "random bytes" {
+    assert(randomBytes(0) == "")
+    assert(randomBytes(1).len() == 1)
+    string a = randomBytes(32)
+    string b = randomBytes(32)
+    assert(a.len() == 32)
+    assert(a != b)
+    // More than getentropy's 256-byte limit per call: every byte value
+    // should appear in 64 KiB (the chance of one missing is about 2^-360).
+    string big = randomBytes(65536)
+    assert(big.len() == 65536)
+    []bool seen = []bool{}
+    for (int i = 0; i < 256; i++) {
+        seen.push(false)
+    }
+    for (int i = 0; i < big.len(); i++) {
+        seen[int(big[i])] = true
+    }
+    for (int i = 0; i < 256; i++) {
+        assert(seen[i])
+    }
+}
+
+fn cryptoTestCrashRandom() {
+    _ = randomBytes(-1)
+}
+
+test "random bytes negative crashes" {
+    error err = group {
+        spawn cryptoTestCrashRandom()
+    }
+    assert(err != null)
+    assert(err.message() == "crash: crypto.randomBytes: n (-1) must not be negative")
+}
+
+test "constant time equal" {
+    assert(equal("", ""))
+    assert(equal("abc", "abc"))
+    assert(!equal("abc", "abd"))
+    assert(!equal("abc", "ab"))
+    assert(!equal("", "a"))
+    assert(equal("a\x00b", "a\x00b"))
+    assert(!equal("a\x00b", "a\x00c"))
+    string mac = hmacSha256("k", "m")
+    assert(equal(mac, hmacSha256("k", "m")))
+    assert(!equal(mac, hmacSha256("k", "n")))
+}

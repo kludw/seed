@@ -76,5 +76,81 @@ test "pow int negative crashes" {
         spawn crashPowIntNegative()
     }
     assert(err != null)
-    assert(err.message() == "crash: math.powInt: exp (-1) must not be negative")
+    assert(err.message() == "crash: math.powInt: exponent (-1) must not be negative")
+}
+
+test "pow float and sqrt" {
+    assert(powFloat(2.0, 10.0) == 1024.0)
+    assert(powFloat(2.0, -1.0) == 0.5)
+    assert(powFloat(0.0, 0.0) == 1.0)
+    assert(powFloat(nanValue(), 0.0) == 1.0)
+    assert(isNan(powFloat(-8.0, 1.0 / 3.0)))
+    assert(powFloat(0.0, -1.0) == inf())
+    assert(sqrt(16.0) == 4.0)
+    assert(sqrt(2.0).string() == "1.4142135623730951")
+    assert(isNan(sqrt(-1.0)))
+    assert(sqrt(-0.0).string() == "-0.0")
+    assert(sqrt(inf()) == inf())
+}
+
+test "rounding" {
+    assert(floor(2.7) == 2.0)
+    assert(floor(-2.2) == -3.0)
+    assert(ceil(2.2) == 3.0)
+    assert(ceil(-2.7) == -2.0)
+    assert(ceil(-0.5).string() == "-0.0")
+    assert(round(2.5) == 3.0)
+    assert(round(-2.5) == -3.0)
+    assert(round(2.4999) == 2.0)
+    assert(round(0.5) == 1.0)
+    assert(round(-0.4).string() == "-0.0")
+    assert(trunc(2.7) == 2.0)
+    assert(trunc(-2.7) == -2.0)
+    assert(floor(1.0e300) == 1.0e300)
+    assert(floor(inf()) == inf())
+    assert(round(-inf()) == -inf())
+    assert(isNan(trunc(nanValue())))
+    assert(int(round(1.0e20)) == 100000000000000000000)
+}
+
+test "trigonometry" {
+    assert(sin(0.0) == 0.0)
+    assert(absFloat(sin(pi / 2.0) - 1.0) < 1.0e-15)
+    assert(cos(0.0) == 1.0)
+    assert(absFloat(cos(pi) + 1.0) < 1.0e-15)
+    assert(absFloat(tan(pi / 4.0) - 1.0) < 1.0e-15)
+    assert(absFloat(asin(1.0) - pi / 2.0) < 1.0e-15)
+    assert(absFloat(acos(-1.0) - pi) < 1.0e-15)
+    assert(absFloat(atan(1.0) - pi / 4.0) < 1.0e-15)
+    assert(isNan(asin(2.0)))
+    assert(isNan(acos(-1.5)))
+    assert(isNan(sin(inf())))
+    assert(atan(inf()) == pi / 2.0)
+}
+
+test "atan2 quadrants" {
+    assert(atan2(0.0, 1.0) == 0.0)
+    assert(atan2(1.0, 0.0) == pi / 2.0)
+    assert(atan2(0.0, -1.0) == pi)
+    assert(atan2(-0.0, -1.0) == -pi)
+    assert(atan2(-1.0, 0.0) == -pi / 2.0)
+    assert(absFloat(atan2(1.0, 1.0) - pi / 4.0) < 1.0e-15)
+    assert(absFloat(atan2(-1.0, -1.0) + 3.0 * pi / 4.0) < 1.0e-15)
+}
+
+test "exp and logarithms" {
+    assert(exp(0.0) == 1.0)
+    assert(exp(1.0) == e)
+    assert(exp(-inf()) == 0.0)
+    assert(exp(1000.0) == inf())
+    assert(log(1.0) == 0.0)
+    assert(log(e) == 1.0)
+    assert(log(0.0) == -inf())
+    assert(isNan(log(-1.0)))
+    assert(log2(1024.0) == 10.0)
+    assert(log2(0.5) == -1.0)
+    assert(log10(1000.0) == 3.0)
+    assert(log10(0.001) == -3.0)
+    assert(log10(0.0) == -inf())
+    assert(isNan(log10(-1.0)))
 }

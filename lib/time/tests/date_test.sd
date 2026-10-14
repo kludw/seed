@@ -1,0 +1,175 @@
+package time
+
+fn timeTestDate(int y, int mo, int d, int h, int mi, int s, int ns) Date {
+    return Date{year: y, month: mo, day: d, hour: h, minute: mi, second: s, nanosecond: ns}
+}
+
+test "now and monotonic" {
+    int t = now()
+    // Later than 2020-01-01 and earlier than 2200-01-01.
+    assert(t > 1577836800 * second)
+    assert(t < 7258118400 * second)
+    int a = monotonic()
+    sleep(2 * millisecond)
+    int b = monotonic()
+    assert(b - a >= 2 * millisecond)
+    assert(b - a < 10 * second)
+    int t2 = now()
+    assert(t2 >= t)
+}
+
+test "date of known times" {
+    assert(date(0) == timeTestDate(1970, 1, 1, 0, 0, 0, 0))
+    assert(date(1791880200 * second) == timeTestDate(2026, 10, 13, 8, 30, 0, 0))
+    assert(date(951868799 * second + 999999999) == timeTestDate(2000, 2, 29, 23, 59, 59, 999999999))
+    assert(date(-1) == timeTestDate(1969, 12, 31, 23, 59, 59, 999999999))
+    assert(date(-14182940 * second) == timeTestDate(1969, 7, 20, 20, 17, 40, 0))
+    assert(date(-11670912000 * second) == timeTestDate(1600, 3, 1, 0, 0, 0, 0))
+    assert(date(-62135596800 * second) == timeTestDate(1, 1, 1, 0, 0, 0, 0))
+    assert(date(-62167219200 * second) == timeTestDate(0, 1, 1, 0, 0, 0, 0))
+    assert(date(-62167219200 * second - 1) == timeTestDate(-1, 12, 31, 23, 59, 59, 999999999))
+    assert(date(253402300799 * second) == timeTestDate(9999, 12, 31, 23, 59, 59, 0))
+}
+
+test "date of huge times" {
+    Date d = date(1000000000000 * 365 * 86400 * second)
+    assert(d.year > 999000000000)
+    int back = try fromDate(d)
+    assert(back == 1000000000000 * 365 * 86400 * second)
+}
+
+test "fromDate inverts date" {
+    // A simple LCG walks over 3000 years either side of 1970.
+    int x = 12345
+    for (int i = 0; i < 2000; i++) {
+        x = (x * 6364136223846793005 + 1442695040888963407) & 0xffffffffffffffff
+        int t = x % (2 * 3000 * 366 * 86400 * second) - 3000 * 366 * 86400 * second
+        int back = try fromDate(date(t))
+        assert(back == t)
+    }
+}
+
+test "fromDate checks every field" {
+    int t = try fromDate(timeTestDate(2024, 2, 29, 12, 0, 0, 0))
+    assert(t == 1709208000 * second)
+    int y0 = try fromDate(timeTestDate(0, 2, 29, 0, 0, 0, 0))
+    assert(date(y0).day == 29)
+    _, error e1 = fromDate(timeTestDate(2026, 2, 29, 0, 0, 0, 0))
+    assert(e1 != null)
+    assert(e1.message() == "time.fromDate: 2026-02-29T00:00:00Z: day out of range")
+    _, error e2 = fromDate(timeTestDate(1900, 2, 29, 0, 0, 0, 0))
+    assert(e2 != null)
+    assert(e2.message() == "time.fromDate: 1900-02-29T00:00:00Z: day out of range")
+    _, error e3 = fromDate(timeTestDate(2026, 13, 1, 0, 0, 0, 0))
+    assert(e3 != null)
+    assert(e3.message() == "time.fromDate: 2026-13-01T00:00:00Z: month out of range")
+    _, error e4 = fromDate(timeTestDate(2026, 0, 1, 0, 0, 0, 0))
+    assert(e4 != null)
+    assert(e4.message() == "time.fromDate: 2026-00-01T00:00:00Z: month out of range")
+    _, error e5 = fromDate(timeTestDate(2026, 4, 31, 0, 0, 0, 0))
+    assert(e5 != null)
+    assert(e5.message() == "time.fromDate: 2026-04-31T00:00:00Z: day out of range")
+    _, error e6 = fromDate(timeTestDate(2026, 4, 1, 24, 0, 0, 0))
+    assert(e6 != null)
+    assert(e6.message() == "time.fromDate: 2026-04-01T24:00:00Z: hour out of range")
+    _, error e7 = fromDate(timeTestDate(2026, 4, 1, 0, -1, 0, 0))
+    assert(e7 != null)
+    assert(e7.message() == "time.fromDate: 2026-04-01T00:-01:00Z: minute out of range")
+    _, error e8 = fromDate(timeTestDate(2026, 4, 1, 0, 0, 60, 0))
+    assert(e8 != null)
+    assert(e8.message() == "time.fromDate: 2026-04-01T00:00:60Z: second out of range")
+    _, error e9 = fromDate(timeTestDate(2026, 4, 1, 0, 0, 0, 1000000000))
+    assert(e9 != null)
+    assert(e9.message() == "time.fromDate: 2026-04-01T00:00:00.1Z: nanosecond out of range")
+}
+
+test "format" {
+    assert(format(0) == "1970-01-01T00:00:00Z")
+    assert(format(1791880200 * second) == "2026-10-13T08:30:00Z")
+    assert(format(1791880200 * second + 250 * millisecond) == "2026-10-13T08:30:00.25Z")
+    assert(format(1791880200 * second + 1) == "2026-10-13T08:30:00.000000001Z")
+    assert(format(-1) == "1969-12-31T23:59:59.999999999Z")
+    assert(format(-62167219200 * second) == "0000-01-01T00:00:00Z")
+    assert(format(253402300799 * second + 999999999) == "9999-12-31T23:59:59.999999999Z")
+}
+
+fn timeTestFormat(int t) {
+    sleep(format(t).len())
+}
+
+test "format crashes outside years 0 to 9999" {
+    error err = group {
+        spawn timeTestFormat(253402300800 * second)
+    }
+    assert(err != null)
+    assert(err.message() == "crash: time.format: year (10000) must be between 0 and 9999")
+    error err2 = group {
+        spawn timeTestFormat(-62167219200 * second - 1)
+    }
+    assert(err2 != null)
+    assert(err2.message() == "crash: time.format: year (-1) must be between 0 and 9999")
+}
+
+test "parse" {
+    int t = 1791880200 * second
+    assert(try parse("2026-10-13T08:30:00Z") == t)
+    assert(try parse("2026-10-13t08:30:00z") == t)
+    assert(try parse("2026-10-13 08:30:00Z") == t)
+    assert(try parse("2026-10-13T10:30:00+02:00") == t)
+    assert(try parse("2026-10-13T03:00:00-05:30") == t)
+    assert(try parse("2026-10-13T08:30:00-00:00") == t)
+    assert(try parse("2026-10-13T08:30:00.25Z") == t + 250 * millisecond)
+    assert(try parse("2026-10-13T08:30:00.000000001Z") == t + 1)
+    assert(try parse("2026-10-13T08:30:00.123456789+01:00") == t + 123456789 - hour)
+    assert(try parse("0000-01-01T00:00:00Z") == -62167219200 * second)
+    assert(try parse("0000-01-01T00:00:00+00:01") == -62167219200 * second - minute)
+    assert(try parse("9999-12-31T23:59:59Z") == 253402300799 * second)
+    assert(try parse("2024-02-29T00:00:00Z") == 1709164800 * second)
+}
+
+test "parse and format round trip" {
+    []string texts = []string{
+        "1970-01-01T00:00:00Z",
+        "1969-07-20T20:17:40Z",
+        "2000-02-29T23:59:59.999Z",
+        "2026-10-13T08:30:00.000001Z",
+        "1600-03-01T00:00:00Z",
+    }
+    for (int i = 0; i < texts.len(); i++) {
+        assert(format(try parse(texts[i])) == texts[i])
+    }
+}
+
+fn timeTestParseError(string s) string {
+    _, error err = parse(s)
+    if (err == null) {
+        return "no error"
+    }
+    return err.message()
+}
+
+test "parse errors" {
+    assert(timeTestParseError("2026-13-01T00:00:00Z") == "time.parse: 2026-13-01T00:00:00Z: month out of range")
+    assert(timeTestParseError("2026-02-30T00:00:00Z") == "time.parse: 2026-02-30T00:00:00Z: day out of range")
+    assert(timeTestParseError("2026-10-00T00:00:00Z") == "time.parse: 2026-10-00T00:00:00Z: day out of range")
+    assert(timeTestParseError("2026-10-13T24:00:00Z") == "time.parse: 2026-10-13T24:00:00Z: hour out of range")
+    assert(timeTestParseError("2026-10-13T23:60:00Z") == "time.parse: 2026-10-13T23:60:00Z: minute out of range")
+    assert(timeTestParseError("2026-12-31T23:59:60Z") == "time.parse: 2026-12-31T23:59:60Z: second out of range")
+    assert(timeTestParseError("") == "time.parse: : expected a digit at offset 0")
+    assert(timeTestParseError("26-10-13T08:30:00Z") == "time.parse: 26-10-13T08:30:00Z: expected a digit at offset 2")
+    assert(timeTestParseError("2026/10/13T08:30:00Z") == "time.parse: 2026/10/13T08:30:00Z: expected '-' at offset 4")
+    assert(timeTestParseError("2026-10-13") == "time.parse: 2026-10-13: expected 'T' at offset 10")
+    assert(timeTestParseError("2026-10-13_08:30:00Z") == "time.parse: 2026-10-13_08:30:00Z: expected 'T' at offset 10")
+    assert(timeTestParseError("2026-10-13T08:30Z") == "time.parse: 2026-10-13T08:30Z: expected ':' at offset 16")
+    assert(timeTestParseError("2026-10-13T8:30:00Z") == "time.parse: 2026-10-13T8:30:00Z: expected a digit at offset 12")
+    assert(timeTestParseError("2026-10-13T08:30:00") == "time.parse: 2026-10-13T08:30:00: expected 'Z' or an offset like +02:00 at offset 19")
+    assert(timeTestParseError("2026-10-13T08:30:00 UTC") == "time.parse: 2026-10-13T08:30:00 UTC: expected 'Z' or an offset like +02:00 at offset 19")
+    assert(timeTestParseError("2026-10-13T08:30:00.Z") == "time.parse: 2026-10-13T08:30:00.Z: expected a digit after '.' at offset 20")
+    assert(timeTestParseError("2026-10-13T08:30:00.1234567890Z") == "time.parse: 2026-10-13T08:30:00.1234567890Z: more than 9 fraction digits at offset 29")
+    assert(timeTestParseError("2026-10-13T08:30:00+0200") == "time.parse: 2026-10-13T08:30:00+0200: expected ':' at offset 22")
+    assert(timeTestParseError("2026-10-13T08:30:00+24:00") == "time.parse: 2026-10-13T08:30:00+24:00: offset out of range at offset 20")
+    assert(timeTestParseError("2026-10-13T08:30:00+01:60") == "time.parse: 2026-10-13T08:30:00+01:60: offset out of range at offset 20")
+    assert(timeTestParseError("2026-10-13T08:30:00Zjunk") == "time.parse: 2026-10-13T08:30:00Zjunk: unexpected text at offset 20")
+    assert(timeTestParseError("2026-10-13T08:30:00Z ") == "time.parse: 2026-10-13T08:30:00Z : unexpected text at offset 20")
+    assert(timeTestParseError("+2026-10-13T08:30:00Z") == "time.parse: +2026-10-13T08:30:00Z: expected a digit at offset 0")
+}

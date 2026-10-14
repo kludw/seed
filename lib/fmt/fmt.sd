@@ -18,3 +18,10 @@ pub fn eprint(string s)
 
 // Writes s and a newline to stderr.
 pub fn eprintln(string s)
+
+// f with exactly places digits after the point, correctly rounded from the
+// exact binary value: fixed(3.14159, 2) is "3.14", fixed(2.5, 0) is "2"
+// (2.5 is exactly halfway, and ties go to the even digit), fixed(-0.001, 2)
+// is "-0.00". nan, inf and -inf come out as those words. Crashes if places
+// is negative or more than 100.
+pub fn fixed(float f, int places) string

@@ -1,0 +1,57 @@
+package fmt
+
+test "fixed rounds correctly" {
+    assert(fixed(3.14159, 2) == "3.14")
+    assert(fixed(2.5, 0) == "2")
+    assert(fixed(3.5, 0) == "4")
+    assert(fixed(-2.5, 0) == "-2")
+    assert(fixed(-0.001, 2) == "-0.00")
+    assert(fixed(0.0, 3) == "0.000")
+    assert(fixed(-0.0, 1) == "-0.0")
+    assert(fixed(1.005, 2) == "1.00")
+    assert(fixed(0.125, 2) == "0.12")
+    assert(fixed(0.375, 2) == "0.38")
+    assert(fixed(99.95, 1) == "100.0")
+    assert(fixed(123.0, 0) == "123")
+    assert(fixed(1.0e21, 0) == "1000000000000000000000")
+    assert(fixed(0.1, 20) == "0.10000000000000000555")
+}
+
+test "fixed of nan and infinities" {
+    float zero = 0.0
+    assert(fixed(zero / zero, 2) == "nan")
+    assert(fixed(-(zero / zero), 2) == "nan")
+    assert(fixed(1.0 / zero, 2) == "inf")
+    assert(fixed(-1.0 / zero, 0) == "-inf")
+}
+
+test "fixed with 100 places" {
+    string s = fixed(1.0, 100)
+    assert(s.len() == 102)
+    assert(s.startsWith("1.000"))
+    string big = fixed(1.0e308, 0)
+    assert(big.len() == 309)
+    assert(big.startsWith("1000000000000000010979"))
+}
+
+fn crashFixed(int places) {
+    println(fixed(1.0, places))
+}
+
+test "fixed crashes on bad places" {
+    error err = group {
+        spawn crashFixed(-1)
+    }
+    assert(err != null)
+    assert(err.message() == "crash: fmt.fixed: places (-1) must be between 0 and 100")
+    error err2 = group {
+        spawn crashFixed(101)
+    }
+    assert(err2 != null)
+    assert(err2.message() == "crash: fmt.fixed: places (101) must be between 0 and 100")
+    error err3 = group {
+        spawn crashFixed(100000000000000000000000)
+    }
+    assert(err3 != null)
+    assert(err3.message() == "crash: fmt.fixed: places (100000000000000000000000) must be between 0 and 100")
+}

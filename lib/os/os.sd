@@ -30,3 +30,13 @@ pub fn executable() string
 
 // The absolute path of the current directory.
 pub fn cwd() (string, error)
+
+// Like run, but captures the child's stdout and returns it with the exit
+// code. The child inherits stdin and stderr. The error is set only when the
+// program could not be started (or its output could not be read):
+// "os.output: frobnicate: no such file or directory". Crashes if argv is
+// empty.
+pub fn output([]string argv) (string, int, error)
+
+// The machine's host name.
+pub fn hostname() (string, error)
