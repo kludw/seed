@@ -2843,9 +2843,10 @@ struct sd_task {
   char *arena;
   size_t arena_len, arena_cap;
 
-  pthread_mutex_t mu; /* protects wake, sleeping, sel, waiting_group, blocking */
+  pthread_mutex_t mu; /* protects wake (written under it; park may also spin on it), sleeping, sel, waiting_group, blocking */
   pthread_cond_t cv;
-  bool wake, sleeping;
+  _Atomic(void *) wake; /* non-NULL: woken (a pointer, so that spin_until can watch it) */
+  bool sleeping;
   sd_sel *sel;
   sd_group *waiting_group;
   atomic_int cancelled;
@@ -2856,7 +2857,6 @@ struct sd_task {
 
   sd_group *group;          /* the group this goroutine belongs to (NULL for main) */
   sd_task *next, *prev;     /* the other running members of that group */
-  pthread_t thread;
   sd_task_fn body;
   void *args;
   const sd_type *args_type;
@@ -2928,11 +2928,22 @@ static sd_task *task_new(void) {
   pthread_mutex_init(&t->mu, NULL);
   pthread_cond_init(&t->cv, NULL);
   atomic_init(&t->cancelled, 0);
+  atomic_init(&t->wake, NULL);
   t->wake_r = t->wake_w = -1;
-  struct timespec ts;
-  clock_gettime(CLOCK_MONOTONIC, &ts);
-  t->rng = ((uint64_t)ts.tv_nsec * 0x9E3779B97F4A7C15ULL) ^ ((uint64_t)(uintptr_t)t << 7) ^
-           (atomic_fetch_add(&sd_seed_counter, 1) * 0xBF58476D1CE4E5B9ULL);
+  /* The select generator's seed: a per-process base (the clock, read
+   * once) and a counter, so that no clock is read per goroutine. */
+  static _Atomic uint64_t seed_base;
+  uint64_t base = atomic_load_explicit(&seed_base, memory_order_relaxed);
+  if (!base) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    base = ((uint64_t)ts.tv_sec * 1000000000u + (uint64_t)ts.tv_nsec) * 0x9E3779B97F4A7C15ULL | 1;
+    atomic_store_explicit(&seed_base, base, memory_order_relaxed);
+  }
+  uint64_t x = base ^ ((uint64_t)(uintptr_t)t << 7) ^ (atomic_fetch_add(&sd_seed_counter, 1) * 0xBF58476D1CE4E5B9ULL);
+  x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ULL;
+  x = (x ^ (x >> 27)) * 0x94d049bb133111ebULL;
+  t->rng = x ^ (x >> 31);
   if (!t->rng) t->rng = 0x853c49e6748fea9bULL;
   return t;
 }
@@ -2976,20 +2987,96 @@ static void running_dec(void) {
   if (atomic_fetch_sub(&sd_running, 1) == 1) sd_deadlock();
 }
 
+/* Spinning before sleeping: a goroutine about to park first watches its
+ * wake flag for a few microseconds, as long as there are idle CPUs for the
+ * goroutine that will wake it. A wake-up that arrives while it spins costs
+ * no condition-variable signal and no OS thread wake-up (several
+ * microseconds each on macOS), which is most of the cost of an unbuffered
+ * channel hand-off. */
+#define SD_SPIN_NS 20000
+static int sd_ncpu = -1; /* written once, racily but always with the same value */
+
+static int ncpu(void) {
+  int n = __atomic_load_n(&sd_ncpu, __ATOMIC_RELAXED);
+  if (n < 0) {
+    long c = sysconf(_SC_NPROCESSORS_ONLN);
+    n = c > 0 ? (int)c : 1;
+    __atomic_store_n(&sd_ncpu, n, __ATOMIC_RELAXED);
+  }
+  return n;
+}
+
+static inline void cpu_relax(void) {
+#if defined(__aarch64__) || defined(__arm__)
+  __asm__ __volatile__("yield");
+#elif defined(__x86_64__) || defined(__i386__)
+  __asm__ __volatile__("pause");
+#endif
+}
+
+static int64_t mono_ns(void);
+
+/* Locks m, trying for a short while before blocking: the group and pool
+ * locks are held for a few instructions at a time, but by many threads at
+ * once when goroutines start and end in bursts, and a blocked
+ * pthread_mutex_lock costs a system call to sleep and another to wake. */
+static void lock_briefly(pthread_mutex_t *m) {
+  for (int i = 0; i < 100; i++) {
+    if (pthread_mutex_trylock(m) == 0) return;
+    cpu_relax();
+  }
+  pthread_mutex_lock(m);
+}
+
+/* Threads spinning now (in spin_until), at most half the CPUs, so that
+ * spinning never takes more than half the machine from running goroutines,
+ * however many goroutines block and wake at once. */
+static atomic_int sd_spinners;
+
+/* Spins until *flag is non-zero (returning true), for at most ns
+ * nanoseconds. Does nothing (returns false) on a single CPU, when more
+ * goroutines are running than there are CPUs, or when enough threads are
+ * spinning already. */
+static bool spin_until(_Atomic(void *) *flag, int64_t ns) {
+  int n = ncpu();
+  if (n < 2 || atomic_load_explicit(&sd_running, memory_order_relaxed) > n) return false;
+  int spinning = atomic_load_explicit(&sd_spinners, memory_order_relaxed);
+  do {
+    if (spinning >= n / 2) return false;
+  } while (!atomic_compare_exchange_weak(&sd_spinners, &spinning, spinning + 1));
+  bool got = false;
+  int64_t start = 0;
+  for (int i = 1;; i++) {
+    if (atomic_load_explicit(flag, memory_order_acquire)) {
+      got = true;
+      break;
+    }
+    cpu_relax();
+    if ((i & 255) == 0) {
+      int64_t now = mono_ns();
+      if (!start) start = now;
+      else if (now - start > ns) break;
+    }
+  }
+  atomic_fetch_sub(&sd_spinners, 1);
+  return got;
+}
+
 /* Blocks until someone calls unpark. The caller resets t->wake (under
  * t->mu) before making itself findable by wakers. */
 static void park(sd_task *t) {
+  (void)spin_until(&t->wake, SD_SPIN_NS);
   pthread_mutex_lock(&t->mu);
-  if (!t->wake) {
+  if (!atomic_load_explicit(&t->wake, memory_order_relaxed)) {
     t->sleeping = true;
     running_dec();
-    while (!t->wake) pthread_cond_wait(&t->cv, &t->mu);
+    while (!atomic_load_explicit(&t->wake, memory_order_relaxed)) pthread_cond_wait(&t->cv, &t->mu);
   }
   pthread_mutex_unlock(&t->mu);
 }
 
 static void unpark_locked(sd_task *t) {
-  t->wake = true;
+  atomic_store_explicit(&t->wake, (void *)t, memory_order_release);
   if (t->sleeping) {
     t->sleeping = false;
     atomic_fetch_add(&sd_running, 1);
@@ -3005,7 +3092,7 @@ static void unpark(sd_task *t) {
 
 static void reset_wake(sd_task *t) {
   pthread_mutex_lock(&t->mu);
-  t->wake = false;
+  atomic_store_explicit(&t->wake, NULL, memory_order_relaxed);
   pthread_mutex_unlock(&t->mu);
 }
 
@@ -3199,31 +3286,38 @@ static void run_body(void *p) {
   *bc->result = bc->t->body(bc->t->args);
 }
 
-static void setup_altstack(sd_task *t) {
-  if (!sd_fault_installed) return;
+/* The calling thread's alternate signal stack, where the fault handler
+ * runs (so that it can report a stack overflow); NULL without the handler. */
+static void *altstack_on(void) {
+  if (!sd_fault_installed) return NULL;
   size_t sz = 64 * 1024;
-  t->altstack = sd_alloc(sz);
+  void *p = sd_alloc(sz);
   stack_t ss;
   memset(&ss, 0, sizeof ss);
-  ss.ss_sp = t->altstack;
+  ss.ss_sp = p;
   ss.ss_size = sz;
   sigaltstack(&ss, NULL);
+  return p;
 }
 
-static void teardown_altstack(sd_task *t) {
-  if (!t->altstack) return;
+static void altstack_off(void *p) {
+  if (!p) return;
   stack_t ss;
   memset(&ss, 0, sizeof ss);
   ss.ss_flags = SS_DISABLE;
   sigaltstack(&ss, NULL);
-  free(t->altstack);
-  t->altstack = NULL;
+  free(p);
 }
 
-static void *thread_main(void *p) {
-  sd_task *t = p;
+static void setup_altstack(sd_task *t) { t->altstack = altstack_on(); }
+
+/* Runs goroutine t on the calling thread, to its end: its body, then the
+ * release of its arguments and its sd_goroutine_atexit functions, then the
+ * report to its group. Returns true if the body returned (an error or
+ * not), false if it crashed or was stopped. t must not be used afterwards:
+ * once it is on its group's dead list, the group may free it. */
+static bool run_goroutine(sd_task *t) {
   sd_cur = t;
-  setup_altstack(t);
   sd_err result = SD_ERR_NULL;
   body_call bc = {t, &result};
   int r = protect(t, run_body, &bc);
@@ -3240,7 +3334,7 @@ static void *thread_main(void *p) {
   }
   while (t->natexit > 0) t->atexit_fns[--t->natexit]();
   sd_group *g = t->group;
-  pthread_mutex_lock(&g->mu);
+  lock_briefly(&g->mu);
   if (!sd_err_is_null(result)) {
     if (sd_err_is_null(g->err)) {
       g->err = result;
@@ -3249,8 +3343,8 @@ static void *thread_main(void *p) {
     group_cancel_locked(g);
   }
   /* Move to the dead list: the next spawn in the group (or the group's wait)
-   * joins the thread and frees the task, so a long-lived group (a server)
-   * doesn't keep every finished goroutine. */
+   * frees the task, so a long-lived group (a server) doesn't keep every
+   * finished goroutine. This is the last use of t. */
   if (t->prev) t->prev->next = t->next;
   else g->members = t->next;
   if (t->next) t->next->prev = t->prev;
@@ -3265,28 +3359,152 @@ static void *thread_main(void *p) {
   pthread_mutex_unlock(&g->mu);
   sd_err_release(result);
   if (w) unpark(w);
-  teardown_altstack(t);
   sd_cur = NULL;
   running_dec();
+  return r == SD_RAISE_NONE;
+}
+
+/* ------------------------------------------------------- worker threads
+ *
+ * Goroutines run on worker threads that are kept for reuse: when a
+ * goroutine returns, its thread waits (spinning briefly, then on a
+ * condition variable) for the next sd_spawn, and ends after
+ * SD_POOL_IDLE_NS without work, or at once when SD_POOL_MAX threads are
+ * idle already. Starting a goroutine on an idle worker costs a hand-off
+ * instead of a pthread_create, and the stack and alternate signal stack are
+ * reused. A thread whose goroutine crashed or was stopped is not reused: it
+ * ends, so that no state a crash may have left in thread-local storage (a
+ * package constant half computed, say) reaches another goroutine. Other
+ * thread-local caches are released by sd_goroutine_atexit functions, which
+ * run at the end of every goroutine. */
+
+#define SD_POOL_MAX 1024
+#define SD_POOL_IDLE_NS ((int64_t)2000000000)
+#define SD_POOL_SPIN_NS 20000
+
+typedef struct sd_worker {
+  pthread_mutex_t mu;
+  pthread_cond_t cv;
+  _Atomic(void *) task;    /* the goroutine (sd_task *) to run; NULL while idle */
+  bool sleeping;           /* waiting on cv (under mu) */
+  struct sd_worker *next;  /* in the idle list (under pool_mu) */
+  void *altstack;
+} sd_worker;
+
+static pthread_mutex_t pool_mu = PTHREAD_MUTEX_INITIALIZER;
+static sd_worker *pool_idle;
+static int pool_nidle;
+
+/* Waits for the next goroutine. Returns NULL when the worker should end
+ * (it has then been taken out of the idle list). */
+static sd_task *worker_wait(sd_worker *w) {
+  if (spin_until(&w->task, SD_POOL_SPIN_NS)) return atomic_load_explicit(&w->task, memory_order_acquire);
+  int64_t deadline = mono_ns() + SD_POOL_IDLE_NS;
+  pthread_mutex_lock(&w->mu);
+  for (;;) {
+    sd_task *t = atomic_load_explicit(&w->task, memory_order_acquire);
+    if (t) {
+      pthread_mutex_unlock(&w->mu);
+      return t;
+    }
+    int64_t left = deadline - mono_ns();
+    if (left <= 0) break;
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    int64_t ns = ts.tv_nsec + left % 1000000000;
+    ts.tv_sec += (time_t)(left / 1000000000 + ns / 1000000000);
+    ts.tv_nsec = (long)(ns % 1000000000);
+    w->sleeping = true;
+    pthread_cond_timedwait(&w->cv, &w->mu, &ts);
+    w->sleeping = false;
+  }
+  pthread_mutex_unlock(&w->mu);
+  /* Idle for too long: leave the idle list, unless a spawn took this worker
+   * in the meantime (lock order: pool_mu, then w->mu). */
+  pthread_mutex_lock(&pool_mu);
+  pthread_mutex_lock(&w->mu);
+  sd_task *t = atomic_load_explicit(&w->task, memory_order_acquire);
+  if (!t) {
+    for (sd_worker **p = &pool_idle; *p; p = &(*p)->next) {
+      if (*p == w) {
+        *p = w->next;
+        pool_nidle--;
+        break;
+      }
+    }
+  }
+  pthread_mutex_unlock(&w->mu);
+  pthread_mutex_unlock(&pool_mu);
+  return t;
+}
+
+static void *worker_main(void *p) {
+  sd_worker *w = p;
+  w->altstack = altstack_on();
+  sd_task *t = atomic_load_explicit(&w->task, memory_order_acquire);
+  while (t) {
+    if (!run_goroutine(t)) break;
+    atomic_store_explicit(&w->task, NULL, memory_order_relaxed);
+    lock_briefly(&pool_mu);
+    bool keep = pool_nidle < SD_POOL_MAX;
+    if (keep) {
+      w->next = pool_idle;
+      pool_idle = w;
+      pool_nidle++;
+    }
+    pthread_mutex_unlock(&pool_mu);
+    if (!keep) break;
+    t = worker_wait(w);
+  }
+  altstack_off(w->altstack);
+  pthread_mutex_destroy(&w->mu);
+  pthread_cond_destroy(&w->cv);
+  free(w);
   return NULL;
 }
 
-/* Joins and frees a list of finished goroutines (linked by next). */
+/* Runs goroutine c on an idle worker, or on a new thread. */
+static void start_goroutine(sd_task *c) {
+  lock_briefly(&pool_mu);
+  sd_worker *w = pool_idle;
+  if (w) {
+    pool_idle = w->next;
+    pool_nidle--;
+  }
+  pthread_mutex_unlock(&pool_mu);
+  if (w) {
+    pthread_mutex_lock(&w->mu);
+    atomic_store_explicit(&w->task, c, memory_order_release);
+    if (w->sleeping) pthread_cond_signal(&w->cv);
+    pthread_mutex_unlock(&w->mu);
+    return;
+  }
+  w = calloc(1, sizeof *w);
+  if (!w) sd_fatal("out of memory");
+  pthread_mutex_init(&w->mu, NULL);
+  pthread_cond_init(&w->cv, NULL);
+  atomic_init(&w->task, c);
+  pthread_attr_t attr;
+  pthread_attr_init(&attr);
+  pthread_attr_setstacksize(&attr, SD_GOROUTINE_STACK);
+  pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+  pthread_t th;
+  int err = pthread_create(&th, &attr, worker_main, w);
+  pthread_attr_destroy(&attr);
+  if (err) sd_fatal("cannot start a goroutine (out of threads)");
+}
+
+/* Frees a list of finished goroutines (linked by next). Their threads no
+ * longer use them: run_goroutine's last use is under the group's lock. */
 static void reap(sd_task *m) {
   for (sd_task *next; m; m = next) {
     next = m->next;
-    pthread_join(m->thread, NULL);
     task_free(m);
   }
 }
 
 void sd_spawn(sd_group *g, sd_task_fn body, const sd_type *args_type, const void *args) {
   sd_task *parent = task_current();
-  pthread_mutex_lock(&g->mu);
-  sd_task *dead = g->dead;
-  g->dead = NULL;
-  pthread_mutex_unlock(&g->mu);
-  reap(dead);
   sd_task *c = task_new();
   c->body = body;
   c->group = g;
@@ -3295,10 +3513,21 @@ void sd_spawn(sd_group *g, sd_task_fn body, const sd_type *args_type, const void
     c->args = sd_alloc(args_type->size);
     sd_clone_deep(args_type, c->args, args);
   }
-  pthread_mutex_lock(&g->mu);
-  if (g->failed || atomic_load(&parent->cancelled)) {
+  lock_briefly(&g->mu);
+  /* Finished goroutines of the group are freed here (outside the lock). */
+  sd_task *dead = g->dead;
+  g->dead = NULL;
+  bool start = !g->failed && !atomic_load(&parent->cancelled);
+  if (start) {
+    c->next = g->members;
+    if (c->next) c->next->prev = c;
+    g->members = c;
+    g->running++;
+  }
+  pthread_mutex_unlock(&g->mu);
+  reap(dead);
+  if (!start) {
     /* The group is already failing: the goroutine is not started. */
-    pthread_mutex_unlock(&g->mu);
     if (args_type) {
       sd_release(args_type, c->args);
       free(c->args);
@@ -3306,18 +3535,8 @@ void sd_spawn(sd_group *g, sd_task_fn body, const sd_type *args_type, const void
     task_free(c);
     return;
   }
-  c->next = g->members;
-  if (c->next) c->next->prev = c;
-  g->members = c;
-  g->running++;
-  pthread_mutex_unlock(&g->mu);
   atomic_fetch_add(&sd_running, 1);
-  pthread_attr_t attr;
-  pthread_attr_init(&attr);
-  pthread_attr_setstacksize(&attr, SD_GOROUTINE_STACK);
-  int err = pthread_create(&c->thread, &attr, thread_main, c);
-  pthread_attr_destroy(&attr);
-  if (err) sd_fatal("cannot start a goroutine (out of threads)");
+  start_goroutine(c);
 }
 
 /* Waits until every goroutine of g has finished, joins their threads and
@@ -3582,7 +3801,7 @@ int sd_select(sd_select_case *cases, int n) {
     }
     pthread_mutex_lock(&t->mu);
     t->sel = &sel;
-    t->wake = false;
+    atomic_store_explicit(&t->wake, NULL, memory_order_relaxed);
     pthread_mutex_unlock(&t->mu);
     unlock_all(chans, nc);
 
@@ -6060,6 +6279,38 @@ static inline __attribute__((unused)) void sd_rl_S5Types(sd_S_Types v);
 
 static sd_err fs_errorf(const char *fn, const char *path, int e) { return sd_errorf("fs.%s: %s: %s", fn, path, sd_strerror(e)); }
 
+/* Paths go to the OS as C strings, which end at the first NUL byte: a path
+ * with a NUL inside would name a different file ("dir/\0x" is "dir/", so
+ * removeAll would remove dir). Such a path is an error, as in Go; the
+ * subject shows each NUL as \x00. */
+static bool fs_has_nul(sd_str s) { return s->len > 0 && memchr(s->data, 0, (size_t)s->len) != NULL; }
+
+static char *fs_show(sd_str s) {
+  char *out = sd_alloc((size_t)s->len * 4 + 1), *q = out;
+  for (int64_t i = 0; i < s->len; i++) {
+    if (s->data[i] == 0) {
+      memcpy(q, "\\x00", 4);
+      q += 4;
+    } else {
+      *q++ = s->data[i];
+    }
+  }
+  *q = 0;
+  return out;
+}
+
+static sd_err fs_nul_error(const char *fn, sd_str path) {
+  char *shown = fs_show(path);
+  sd_err e = sd_errorf("fs.%s: %s: path contains a NUL byte", fn, shown);
+  free(shown);
+  return e;
+}
+
+#define FS_CHECK_PATH(fn, path) \
+  do { \
+    if (fs_has_nul(path)) return fs_nul_error(fn, path); \
+  } while (0)
+
 /* Writes all n bytes to fd, retrying after signals and short writes.
  * Returns 0 or the errno. */
 static int fs_write_all(int fd, const char *p, size_t n) {
@@ -6083,9 +6334,13 @@ static int fs_open_retry(const char *path, int flags, mode_t mode) {
 
 /* ------------------------------------------------------- whole files */
 
-sd_err sd_lib_fs_read(sd_str path, sd_str *out) { return sd_fs_read(path, out); }
+sd_err sd_lib_fs_read(sd_str path, sd_str *out) {
+  FS_CHECK_PATH("read", path);
+  return sd_fs_read(path, out);
+}
 
 sd_err sd_lib_fs_write(sd_str path, sd_str data) {
+  FS_CHECK_PATH("write", path);
   int fd = fs_open_retry(path->data, O_WRONLY | O_CREAT | O_TRUNC, 0644);
   if (fd < 0) return fs_errorf("write", path->data, errno);
   int e = fs_write_all(fd, data->data, (size_t)data->len);
@@ -6100,6 +6355,7 @@ sd_err sd_lib_fs_write(sd_str path, sd_str data) {
 static pthread_mutex_t fs_append_mu = PTHREAD_MUTEX_INITIALIZER;
 
 sd_err sd_lib_fs_append(sd_str path, sd_str data) {
+  FS_CHECK_PATH("append", path);
   int fd = fs_open_retry(path->data, O_WRONLY | O_CREAT | O_APPEND, 0644);
   if (fd < 0) return fs_errorf("append", path->data, errno);
   pthread_mutex_lock(&fs_append_mu);
@@ -6110,11 +6366,12 @@ sd_err sd_lib_fs_append(sd_str path, sd_str data) {
   return SD_ERR_NULL;
 }
 
-bool sd_lib_fs_exists(sd_str path) { return sd_fs_exists(path); }
+bool sd_lib_fs_exists(sd_str path) { return !fs_has_nul(path) && sd_fs_exists(path); }
 
-bool sd_lib_fs_isDir(sd_str path) { return sd_fs_is_dir(path); }
+bool sd_lib_fs_isDir(sd_str path) { return !fs_has_nul(path) && sd_fs_is_dir(path); }
 
 sd_err sd_lib_fs_stat(sd_str path, sd_S_fs_Info *out) {
+  FS_CHECK_PATH("stat", path);
   struct stat st;
   if (stat(path->data, &st) != 0) return fs_errorf("stat", path->data, errno);
 #if defined(__APPLE__)
@@ -6130,11 +6387,15 @@ sd_err sd_lib_fs_stat(sd_str path, sd_S_fs_Info *out) {
 
 /* ------------------------------------------------------- directories */
 
-sd_err sd_lib_fs_list(sd_str dir, sd_list **out) { return sd_fs_list(dir, out); }
+sd_err sd_lib_fs_list(sd_str dir, sd_list **out) {
+  FS_CHECK_PATH("list", dir);
+  return sd_fs_list(dir, out);
+}
 
 /* Like the runtime's sd_fs_mkdir (error messages included), with the mode
  * docs/stdlib.md gives. */
 sd_err sd_lib_fs_mkdir(sd_str path) {
+  FS_CHECK_PATH("mkdir", path);
   char *cp = sd_alloc((size_t)path->len + 1);
   memcpy(cp, path->data, (size_t)path->len + 1);
   size_t n = strlen(cp);
@@ -6157,11 +6418,21 @@ sd_err sd_lib_fs_mkdir(sd_str path) {
 }
 
 sd_err sd_lib_fs_rename(sd_str from, sd_str to) {
+  if (fs_has_nul(from) || fs_has_nul(to)) {
+    char *a = fs_show(from), *b = fs_show(to);
+    sd_err e = sd_errorf("fs.rename: %s -> %s: path contains a NUL byte", a, b);
+    free(a);
+    free(b);
+    return e;
+  }
   if (rename(from->data, to->data) != 0) return sd_errorf("fs.rename: %s -> %s: %s", from->data, to->data, sd_strerror(errno));
   return SD_ERR_NULL;
 }
 
-sd_err sd_lib_fs_remove(sd_str path) { return sd_fs_remove(path); }
+sd_err sd_lib_fs_remove(sd_str path) {
+  FS_CHECK_PATH("remove", path);
+  return sd_fs_remove(path);
+}
 
 static char *fs_join(const char *dir, const char *name) {
   size_t a = strlen(dir), b = strlen(name);
@@ -6211,11 +6482,13 @@ static sd_err fs_remove_tree(const char *path) {
 }
 
 sd_err sd_lib_fs_removeAll(sd_str path) {
+  FS_CHECK_PATH("removeAll", path);
   if (path->len == 0) return SD_ERR_NULL;
   return fs_remove_tree(path->data);
 }
 
 sd_err sd_lib_fs_makeTemp(sd_str prefix, sd_str *out) {
+  FS_CHECK_PATH("makeTemp", prefix);
   const char *dir = getenv("TMPDIR");
   if (!dir || !*dir) dir = "/tmp";
   size_t dl = strlen(dir);
@@ -6248,6 +6521,7 @@ sd_err sd_lib_fs_makeTemp(sd_str prefix, sd_str *out) {
  * copy of a closed File finds nothing and says "file is closed". */
 
 static sd_err fs_open_file(const char *fn, sd_str path, int flags, bool writing, sd_S_fs_File *out) {
+  FS_CHECK_PATH(fn, path);
   int fd = fs_open_retry(path->data, flags, 0644);
   if (fd < 0) return fs_errorf(fn, path->data, errno);
   if (!writing) {
@@ -6390,7 +6664,40 @@ void sd_lib_os_crash(sd_str message) { sd_os_crash(message); }
 
 sd_str sd_lib_os_env(sd_str name) { return sd_os_env(name); }
 
-sd_err sd_lib_os_run(sd_list *argv, sd_int *code) { return sd_os_run(argv, code); }
+/* Arguments go to the OS as C strings, which end at the first NUL byte, so
+ * an argument with a NUL inside would silently become a different one
+ * ("rm\0 -rf" would run rm). That is an error, before anything starts; the
+ * program is shown with each NUL as \x00. */
+static sd_err os_check_argv(const char *fn, const sd_list *argv) {
+  sd_str const *xs = sd_list_data(argv);
+  for (int64_t i = 0; i < argv->len; i++) {
+    if (xs[i]->len == 0 || !memchr(xs[i]->data, 0, (size_t)xs[i]->len)) continue;
+    sd_str p = xs[0];
+    char *shown = sd_alloc((size_t)p->len * 4 + 1), *q = shown;
+    for (int64_t j = 0; j < p->len; j++) {
+      if (p->data[j] == 0) {
+        memcpy(q, "\\x00", 4);
+        q += 4;
+      } else {
+        *q++ = p->data[j];
+      }
+    }
+    *q = 0;
+    sd_err e = i == 0 ? sd_errorf("%s: %s: program name contains a NUL byte", fn, shown)
+                      : sd_errorf("%s: %s: argument %lld contains a NUL byte", fn, shown, (long long)i);
+    free(shown);
+    return e;
+  }
+  return SD_ERR_NULL;
+}
+
+sd_err sd_lib_os_run(sd_list *argv, sd_int *code) {
+  if (argv->len > 0) {
+    sd_err e = os_check_argv("os.run", argv);
+    if (!sd_err_is_null(e)) return e;
+  }
+  return sd_os_run(argv, code);
+}
 
 sd_str sd_lib_os_executable(void) { return sd_os_executable(); }
 
@@ -6403,6 +6710,8 @@ sd_err sd_lib_os_cwd(sd_str *out) { return sd_os_cwd(out); }
  * a stopped goroutine kills and reaps the child. */
 sd_err sd_lib_os_output(sd_list *argv, sd_str *out, sd_int *code) {
   if (argv->len == 0) sd_crash("os.output: argv is empty");
+  sd_err bad = os_check_argv("os.output", argv);
+  if (!sd_err_is_null(bad)) return bad;
   sd_str const *xs = sd_list_data(argv);
   char **av = sd_alloc((size_t)(argv->len + 1) * sizeof(char *));
   for (int64_t i = 0; i < argv->len; i++) av[i] = (char *)xs[i]->data;
