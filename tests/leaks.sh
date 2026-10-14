@@ -14,7 +14,10 @@
 CC=${CC:-cc}
 compile=$1; shift
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/seedleaks.XXXXXX")
-if [ "$(uname)" = Darwin ]; then checker=leaks; sanflags=; else checker=lsan; sanflags="-fsanitize=leak -DSD_LEAK_CHECK"; fi
+# SD_PLAIN_MALLOC (implied by SD_LEAK_CHECK): every object is its own
+# malloc block, which the checkers can see (the runtime's small-object
+# allocator would hide them; runtime/README.md, section 15).
+if [ "$(uname)" = Darwin ]; then checker=leaks; sanflags=-DSD_PLAIN_MALLOC; else checker=lsan; sanflags="-fsanitize=leak -DSD_LEAK_CHECK"; fi
 trap 'rm -rf "$tmp"' EXIT
 clean=0; leaky=0; expected=0
 for dir in "$@"; do

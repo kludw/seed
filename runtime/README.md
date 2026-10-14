@@ -73,7 +73,8 @@ the `SD_STR_LIT` and `SD_INT_BIGLIT` macros. It builds warning-free with
 | Macro | Effect |
 |---|---|
 | `SD_COUNT_OBJECTS` | Count live heap objects (`sd_live_objects()`); the tests use it to find leaks. |
-| `SD_LEAK_CHECK` | Run LeakSanitizer's check in `sd_exit_process` (programs end with `_exit`, which skips its own); for `-fsanitize=leak` builds (`tests/leaks.sh` on Linux). |
+| `SD_LEAK_CHECK` | Run LeakSanitizer's check in `sd_exit_process` (programs end with `_exit`, which skips its own); for `-fsanitize=leak` builds (`tests/leaks.sh` on Linux). Implies `SD_PLAIN_MALLOC`. |
+| `SD_PLAIN_MALLOC` | Allocate counted objects with `malloc`/`free` instead of the runtime's small-object allocator (section 15), so that leak checkers and sanitizers see each object. Automatic under ASan and TSan. |
 | `SD_GOROUTINE_STACK` | Stack size of goroutine threads in bytes (default 8 MB). |
 
 ## 2. Representation of every Seed type
@@ -1108,7 +1109,7 @@ runtime/tests/run.sh asan     # or tsan, plain, bench
 |---|---|
 | `test_int.c` | factorial 30, 2^100, tests/full/bigint_arith values, ~400 Python-generated vectors (`int_vectors.h`: + - * / % & \| ^ << >> and float conversion with negatives and every boundary around 2^31, 2^32, 2^62, 2^63, 2^64), 200,000 random differential checks against `__int128`, algebraic identities on random 400-bit values, crash messages |
 | `test_str.c` | every string method, `chars` on UTF-8 and invalid UTF-8, float formatting (20,000 random doubles compared with seed0's formatter, kept in `ref_float.c`) |
-| `test_mem.c` | lists, maps, boxes, enums, struct descriptors, copy-on-write through nested places, stable `sortBy`, interfaces and user error types, deep copies share nothing, cleanup frames released by a crash (nested, and a crash contained by an inner `sd_catch`), a `sortBy` whose `less` crashes leaving the list unchanged, no leaks (live object count), and a stress test: 2M rounds / 54M allocations freed with flat resident memory |
+| `test_mem.c` | lists, maps, boxes, enums, struct descriptors, copy-on-write through nested places, stable `sortBy`, interfaces and user error types, deep copies share nothing, cleanup frames released by a crash (nested, and a crash contained by an inner `sd_catch`), a `sortBy` whose `less` crashes leaving the list unchanged, no leaks (live object count), and a stress test: 2M rounds / 54M allocations freed with flat resident memory; objects of every size class allocated on one thread and checked and freed on another, by threads that then end (300 rounds, 6M objects, flat resident memory) |
 | `test_pkg.c` | `os.env`, `os.run` (exit codes, program not found), `fs.*` |
 | `test_block.c` | blocking calls as stop points: cancelling goroutines blocked in `time.sleep`, in `sd_wait_fd` on a pipe, in a handle read on a non-blocking and on a blocking descriptor, in accept, in `os.run` (a `sleep 30` child is killed), and one waiting for another goroutine's operation lock; close waking a reader; read timeouts; line reading (CRLF, empty lines, a last line without newline, a 200 KB line); 3 MB over a socket pair; 20,000 goroutines spawned one after another in one group (freed while it runs) |
 | `test_conc.c` | buffered/unbuffered channels, copy semantics, ping-pong, 1000 goroutines in a group with deep-copied arguments, group error and crash with cancellation and defers (order checked), nested group cancellation, crash inside defers, select fairness (100,000 selects within 45-55%), select send/receive/closed/timeout, cancelling goroutines blocked in select, a 50-stage pipeline, the parallel word count |
@@ -1158,6 +1159,110 @@ fill up. The `group` and worker-pool locks are taken with a short
 `trylock` loop before blocking, since many threads take them at once when
 goroutines start and end in bursts. bench/ and docs/performance.md compare
 whole programs with Go.
+
+### Memory: the small-object allocator
+
+Counted objects (strings, lists, maps with their entry and index arrays,
+boxes, big integers, channels) are allocated with `sd_obj_alloc`, which
+uses the runtime's own allocator (`sd_mem_alloc` / `sd_mem_free` /
+`sd_mem_realloc` in `seed_core.c`) instead of `malloc`. Everything else
+(`sd_alloc`, the natives' buffers, tasks, handles) still uses `malloc`, and
+the two never mix: a block from one is never freed or resized by the
+other. Allocation-heavy programs got 25-45% faster (docs/performance.md,
+"Allocator").
+
+**Blocks and size classes.** Every block has an 8-byte header word just
+before its payload: its size class, or 0 for a large block. Payloads are
+16-byte aligned. There are 24 size classes of slots of 16 to 2048 bytes,
+header included: steps of 16 up to 128, then four per doubling (160, 192,
+224, 256, 320, ...). A request of more than 2040 bytes is large: a `malloc`
+block with the payload 16 bytes into it. Small slots are carved from 1 MB
+chunks (themselves malloc'ed), a batch at a time. A free slot keeps its
+header and links to the next free slot through its first payload word.
+Strings and lists take the whole slot as their capacity (`cap`), so
+appending to a short string or pushing onto a short list often needs no
+reallocation.
+
+**Thread caches and cross-thread frees.** Each thread has a cache: one
+free list per class. `sd_mem_alloc` pops from the calling thread's list and
+`sd_mem_free` pushes onto it, *whichever thread allocated the block*. That
+is how frees from another thread are handled: values move between
+goroutines (a channel's deep copy is made by one side and freed by the
+other; with M:N scheduling a goroutine itself moves), and the block simply
+joins the freeing thread's cache. A list that grows past twice its class's
+batch size (64 blocks for classes up to 128 bytes, fewer for larger ones,
+4 for 2 KB) moves a batch to the central pool; an empty list takes a batch
+from the central pool, or carves a new one. The central pool is a stack of
+batches per class under a mutex, so a producer that allocates and a
+consumer that frees exchange whole batches, with one lock operation per
+batch on each side. When a thread ends, a `pthread_key` destructor gives
+its blocks back to the central pool (full batches, the rest as loose
+blocks) and keeps the cache structure for the next thread.
+
+**Memory stays flat but is not returned.** Chunks are never given back to
+the system. Freed slots are reused by every thread, so a long-running
+program's resident memory is its peak of live small objects plus at most
+two batches per class per thread (about 25 KB per class at most).
+`test_mem` checks this with 2 million rounds of a mixed workload, and with
+300 rounds of 6 threads that each allocate 3,300 strings and lists of every
+class and free another thread's (both stay flat; glibc's `malloc` grows by
+about 4 KB a round on the second).
+
+**The thread-local rule.** The runtime is pasted into the same C file as
+the generated code, so the C compiler can inline runtime functions into
+generated functions. GCC and Clang may compute the address of a
+`_Thread_local` variable once and reuse it for the rest of a function. With
+M:N scheduling, a goroutine can park at a channel operation, a wait or I/O
+and resume on another OS thread, so a reused address would be the old
+thread's cache, and two threads would corrupt one free list. Therefore:
+
+- the thread cache is read only inside `sd_mem_alloc`, `sd_mem_free` and
+  their slow paths. These are `__attribute__((noinline))` (declared so in
+  `seed_internal.h`) and never park, so each call reads its own thread's
+  cache, and no address survives into a caller;
+- the address is passed through an empty `__asm__ volatile("" : "+r"(p))`
+  after it is taken, so that it is never reused even within the allocator's
+  own functions;
+- nothing assumes consecutive calls run on the same thread. A block
+  allocated on one thread and freed on another just joins the second
+  thread's cache;
+- `sd_free_queued_` (the non-recursive free queue, decision 16) is also
+  noinline, for the same reason. Its loop holds the queue's thread-local
+  state while it releases objects, which is safe because releasing never
+  parks. A custom descriptor's `release` must not park either.
+
+Any new per-thread state in the runtime has to follow the same rule:
+access it through a noinline function that does not park, or through an
+asm-laundered pointer that is re-read after every call that may park.
+
+**The free path.** `sd_mem_free` reads the header, the thread pointer and
+the list head, pushes the block, and decrements the list's room counter:
+about 15 instructions, with no lock, atomic operation or call. (On Linux,
+thread-local storage in an executable is one load off `%fs`; on macOS it
+is a call to `tlv_get_addr`.) Boxes, lists and maps whose elements hold
+nothing counted (`t->trivial`) no longer go through the free queue's
+thread-local state at all: they are freed at once.
+
+**Sanitizers and leak checkers.** A custom allocator would hide
+use-after-free from ASan and leaks from LeakSanitizer and macOS `leaks`:
+a leaked object would sit in a chunk that the allocator still points to.
+So with `SD_PLAIN_MALLOC` the `sd_mem_*` functions are plain
+`malloc`/`realloc`/`free`. It is defined automatically under ASan or TSan
+(`__SANITIZE_ADDRESS__`, `__SANITIZE_THREAD__`, or Clang's
+`__has_feature(address_sanitizer / thread_sanitizer / leak_sanitizer /
+memory_sanitizer)`) and with `SD_LEAK_CHECK`. `tests/leaks.sh` defines
+`SD_LEAK_CHECK` for LeakSanitizer and `SD_PLAIN_MALLOC` for `leaks` on
+macOS. A deliberate leak and a deliberate use-after-free were checked to
+be reported under these builds. GCC's `-fsanitize=leak` alone defines no
+macro, so a build that uses it without `SD_LEAK_CHECK` (or
+`SD_PLAIN_MALLOC`) sees no leaks. `SD_COUNT_OBJECTS` counts in
+`sd_obj_alloc`/`sd_obj_free` and works with either allocator.
+
+**Errors.** A header that is not a valid class when a block is freed or
+resized (a double free that reached a recycled block, or a pointer that
+did not come from `sd_mem_alloc`) ends the program with `crash: corrupt
+heap: bad block header`. Most double frees are not detected: run the ASan
+build to find them.
 
 ## 16. Decisions and limitations
 
@@ -1227,6 +1332,21 @@ Decisions made while writing the runtime (nobody was available to ask):
     run afterwards. Their order relative to the defers does not matter:
     defer environments own their values, and goroutines of an aborted group
     have their own copies.
+22. **A small-object allocator with thread caches** (section 15) for
+    counted objects, instead of `malloc`. Blocks freed on another thread
+    join that thread's cache, which is simpler than mimalloc-style
+    remote-free lists and needs no atomic operations on the fast paths.
+    The price is that memory is reused but never returned to the system,
+    and that caches can hold blocks of a class that the thread no longer
+    uses (at most two batches per class per thread).
+23. **No short-string optimisation.** `sd_str` is a pointer to a public
+    struct. Generated code passes it as one word, uses `NULL` for a null
+    `string?`, and builds literals as static structs of that layout
+    (`SD_STR_LIT`). Natives read `s->data` and `s->len` directly. Inlining
+    short strings would change the C type of every string in generated
+    code and every native, so it was not done with the allocator. The
+    allocator makes short strings cheap instead: one header plus one
+    16-48-byte slot from the thread cache.
 
 Limitations and things left for later:
 

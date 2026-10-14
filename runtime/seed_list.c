@@ -5,13 +5,21 @@
 
 static size_t list_bytes(const sd_type *et, int64_t cap) { return sizeof(sd_list) + (size_t)cap * et->size; }
 
+/* The capacity of list l, allocated for cap elements (n bytes): as many
+ * elements as its block holds. */
+static int64_t list_cap(const sd_list *l, int64_t cap, size_t n) {
+  size_t sz = l->et->size, extra = sd_mem_usable(l, n) - n;
+  return sz && extra >= sz ? cap + (int64_t)(extra / sz) : cap;
+}
+
 sd_list *sd_list_new(const sd_type *et, int64_t cap) {
   if (cap < 0) cap = 0;
-  sd_list *l = sd_obj_alloc(list_bytes(et, cap));
+  size_t n = list_bytes(et, cap);
+  sd_list *l = sd_obj_alloc(n);
   l->rc = 1;
   l->len = 0;
-  l->cap = cap;
   l->et = et;
+  l->cap = list_cap(l, cap, n);
   return l;
 }
 
@@ -55,8 +63,9 @@ static sd_list *list_reserve(sd_list **pl, int64_t need) {
   if (need > l->cap) {
     int64_t cap = l->cap ? l->cap * 2 : 4;
     while (cap < need) cap *= 2;
-    l = sd_realloc(l, list_bytes(l->et, cap));
-    l->cap = cap;
+    size_t n = list_bytes(l->et, cap);
+    l = sd_obj_realloc(l, n);
+    l->cap = list_cap(l, cap, n);
     *pl = l;
   }
   return l;
@@ -359,8 +368,8 @@ void sd_map_destroy_(sd_map *m) {
       sd_release(m->vt, EVAL(m, e));
     }
   }
-  free(m->entries);
-  free(m->index);
+  sd_mem_free(m->entries);
+  sd_mem_free(m->index);
   sd_obj_free(m);
 }
 
@@ -404,7 +413,7 @@ static void map_index_add(sd_map *m, int64_t k) {
 /* Compacts the live entries into arrays of ncap entries and rebuilds the index. */
 static void map_rebuild(sd_map *m, int64_t ncap) {
   if (ncap > ((int64_t)1 << 29)) sd_crash("map too large");
-  char *ne = sd_alloc((size_t)ncap * (size_t)m->esz);
+  char *ne = sd_mem_alloc((size_t)ncap * (size_t)m->esz);
   int64_t j = 0;
   for (int64_t i = 0; i < m->n; i++) {
     char *e = ENT(m, i);
@@ -412,14 +421,14 @@ static void map_rebuild(sd_map *m, int64_t ncap) {
     memcpy(ne + (size_t)j * (size_t)m->esz, e, (size_t)m->esz);
     j++;
   }
-  free(m->entries);
-  free(m->index);
+  sd_mem_free(m->entries);
+  sd_mem_free(m->index);
   m->entries = ne;
   m->n = j;
   m->cap = ncap;
   m->icap = ncap * 2;
-  m->index = calloc((size_t)m->icap, sizeof(int32_t));
-  if (!m->index) sd_fatal("out of memory");
+  m->index = sd_mem_alloc((size_t)m->icap * sizeof(int32_t));
+  memset(m->index, 0, (size_t)m->icap * sizeof(int32_t));
   for (int64_t i = 0; i < j; i++) map_index_add(m, i);
 }
 
@@ -430,9 +439,9 @@ static sd_map *map_copy(const sd_map *m) {
   c->entries = NULL;
   c->index = NULL;
   if (m->cap) {
-    c->entries = sd_alloc((size_t)m->cap * (size_t)m->esz);
+    c->entries = sd_mem_alloc((size_t)m->cap * (size_t)m->esz);
     memcpy(c->entries, m->entries, (size_t)m->n * (size_t)m->esz);
-    c->index = sd_alloc((size_t)m->icap * sizeof(int32_t));
+    c->index = sd_mem_alloc((size_t)m->icap * sizeof(int32_t));
     memcpy(c->index, m->index, (size_t)m->icap * sizeof(int32_t));
   }
   if (!m->kt->trivial || !m->vt->trivial) {
@@ -561,7 +570,7 @@ sd_map *sd_map_clone_deep(const sd_map *m) {
   if (m->len) {
     int64_t cap = 8;
     while (cap < m->len) cap *= 2;
-    c->entries = sd_alloc((size_t)cap * (size_t)m->esz);
+    c->entries = sd_mem_alloc((size_t)cap * (size_t)m->esz);
     c->cap = cap;
     for (int64_t i = 0; i < m->n; i++) {
       char *e = ENT(m, i);
@@ -575,8 +584,8 @@ sd_map *sd_map_clone_deep(const sd_map *m) {
     }
     c->len = c->n;
     c->icap = cap * 2;
-    c->index = calloc((size_t)c->icap, sizeof(int32_t));
-    if (!c->index) sd_fatal("out of memory");
+    c->index = sd_mem_alloc((size_t)c->icap * sizeof(int32_t));
+    memset(c->index, 0, (size_t)c->icap * sizeof(int32_t));
     for (int64_t i = 0; i < c->n; i++) map_index_add(c, i);
   }
   return c;
