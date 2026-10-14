@@ -4,6 +4,7 @@
 #include "check.h"
 
 #include <sys/resource.h>
+#include <unistd.h>
 #if defined(__APPLE__)
 #include <mach/mach.h>
 #endif

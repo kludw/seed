@@ -24,7 +24,10 @@ static void log_reset(void) {
 }
 static void log_get(char *out, size_t n) {
   pthread_mutex_lock(&log_mu);
-  snprintf(out, n, "%s", event_log);
+  size_t k = strlen(event_log);
+  if (k >= n) k = n - 1;
+  memcpy(out, event_log, k);
+  out[k] = 0;
   pthread_mutex_unlock(&log_mu);
 }
 
@@ -90,17 +93,30 @@ static void test_buffered_basic(void) {
   sd_chan_release(c);
 }
 
+/* A frame holding one channel, as generated code keeps its locals: released
+ * by the runtime when the goroutine crashes or is stopped. */
+typedef struct { sd_lframe h; sd_chan *c; } L_chan;
+static void lr_chan(sd_lframe *p) { sd_chan_release(((L_chan *)p)->c); }
+
 static sd_err send_closed_body(void *p) {
-  sd_chan *c = sd_chan_new(&sd_type_int, SD_INT(1));
-  sd_chan_close(c);
-  sd_chan_send(c, (sd_int[]){SD_INT(1)}); /* crashes; c leaks (crash) */
+  L_chan L = {{0}};
+  SD_LF_ENTER(L, lr_chan);
+  L.c = sd_chan_new(&sd_type_int, SD_INT(1));
+  sd_chan_close(L.c);
+  sd_chan_send(L.c, (sd_int[]){SD_INT(1)}); /* crashes; the frame releases c */
+  SD_LF_LEAVE(L);
+  sd_chan_release(L.c);
   return SD_ERR_NULL;
 }
 
 static sd_err close_twice_body(void *p) {
-  sd_chan *c = sd_chan_new(&sd_type_int, SD_INT(0));
-  sd_chan_close(c);
-  sd_chan_close(c);
+  L_chan L = {{0}};
+  SD_LF_ENTER(L, lr_chan);
+  L.c = sd_chan_new(&sd_type_int, SD_INT(0));
+  sd_chan_close(L.c);
+  sd_chan_close(L.c);
+  SD_LF_LEAVE(L);
+  sd_chan_release(L.c);
   return SD_ERR_NULL;
 }
 
@@ -258,11 +274,18 @@ static sd_err failing(void *p) {
   return sd_errorf("worker failed after %lld", (long long)sd_int_small_value(a->n));
 }
 
+typedef struct { sd_lframe h; sd_list *xs; } L_list;
+static void lr_list(sd_lframe *p) { sd_list_release(((L_list *)p)->xs); }
+
 static sd_err crasher(void *p) {
   size_t mark = sd_defer_mark();
   sd_defer_push(defer_count, NULL, 0);
-  sd_list *xs = sd_list_new(&sd_type_int, 0);
-  sd_int v = SD_LIST_GET(xs, sd_int, SD_INT(10));
+  L_list L = {{0}};
+  SD_LF_ENTER(L, lr_list);
+  L.xs = sd_list_new(&sd_type_int, 0);
+  sd_int v = SD_LIST_GET(L.xs, sd_int, SD_INT(10));
+  SD_LF_LEAVE(L);
+  sd_list_release(L.xs);
   sd_defer_run(mark);
   return sd_int_is_null(v) ? SD_ERR_NULL : SD_ERR_NULL;
 }
@@ -451,15 +474,26 @@ static void test_select_goroutines(void) {
 
 /* A goroutine blocked in a select (with a send case holding a value) is
  * cancelled; its defers run. */
+typedef struct { sd_lframe h; sd_chan *lists; sd_list *payload; } L_select_blocker;
+static void lr_select_blocker(sd_lframe *p) {
+  L_select_blocker *L = (L_select_blocker *)p;
+  sd_chan_release(L->lists);
+  sd_list_release(L->payload);
+}
+
 static sd_err select_blocker(void *p) {
   A_chan2_n *a = p; /* a: never (int), b: ready (int); sends a list on a list channel */
   sd_defer_push(defer_count, NULL, 0);
-  sd_chan *lists = sd_chan_new(&sd_type_list, SD_INT(0));
-  sd_list *payload = sd_str_split(SD_STR_LIT("a b c"), SD_STR_LIT(" "));
+  L_select_blocker L = {{0}};
+  SD_LF_ENTER(L, lr_select_blocker);
+  L.lists = sd_chan_new(&sd_type_list, SD_INT(0));
+  L.payload = sd_str_split(SD_STR_LIT("a b c"), SD_STR_LIT(" "));
   sd_chan_send(a->b, (sd_int[]){SD_INT(1)});
   sd_int x;
-  sd_select_case cs[2] = {{a->a, SD_RECV, &x, false}, {lists, SD_SEND, &payload, false}};
-  sd_select(cs, 2);
+  sd_select_case cs[2] = {{a->a, SD_RECV, &x, false}, {L.lists, SD_SEND, &L.payload, false}};
+  sd_select(cs, 2); /* stopped here; the frame releases lists and payload */
+  SD_LF_LEAVE(L);
+  lr_select_blocker(&L.h);
   return sd_errorf("select returned");
 }
 
@@ -603,9 +637,10 @@ int main(int argc, char **argv) {
   test_pipeline();
   test_word_count();
   int64_t live1 = sd_live_objects();
-  /* Crashed and cancelled goroutines leak the objects their frames held
-   * (unwinding is a longjmp): 2 per cancelled select_blocker, 1 for crasher. */
-  if (live0 >= 0) CHECK(live1 - live0 == 200 * 2 + 1);
+  /* Crashed and cancelled goroutines leak nothing: their cleanup frames
+   * release what the unwound locals held. */
+  if (live0 >= 0) CHECK(live1 == live0);
   test_channel_crashes();
+  if (live0 >= 0) CHECK(sd_live_objects() == live0);
   return check_done("test_conc");
 }

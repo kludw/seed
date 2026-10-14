@@ -149,15 +149,21 @@ static sd_err blocked_accept(void *p) {
   return SD_ERR_NULL;
 }
 
+typedef struct { sd_lframe h; sd_list *argv; } L_argv;
+static void lr_argv(sd_lframe *p) { sd_list_release(((L_argv *)p)->argv); }
+
 static sd_err blocked_child(void *p) {
   sd_defer_push(count_defer, NULL, 0);
-  sd_list *argv = sd_list_new(&sd_type_str, 2);
-  SD_LIST_PUSH(&argv, sd_str, sd_str_from_cstr("sleep"));
-  SD_LIST_PUSH(&argv, sd_str, sd_str_from_cstr("30"));
+  L_argv L = {{0}};
+  SD_LF_ENTER(L, lr_argv);
+  L.argv = sd_list_new(&sd_type_str, 2);
+  SD_LIST_PUSH(&L.argv, sd_str, sd_str_from_cstr("sleep"));
+  SD_LIST_PUSH(&L.argv, sd_str, sd_str_from_cstr("30"));
   sd_int code;
-  sd_err e = sd_os_run(argv, &code); /* stops; argv leaks like any local of an unwound frame */
+  sd_err e = sd_os_run(L.argv, &code); /* stops; the frame releases argv */
+  SD_LF_LEAVE(L);
   sd_err_release(e);
-  sd_list_release(argv);
+  sd_list_release(L.argv);
   atomic_store(&reached_after_wait, 1);
   return SD_ERR_NULL;
 }

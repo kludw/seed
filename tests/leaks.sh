@@ -1,6 +1,7 @@
 #!/bin/sh
-# Run Seed test programs under macOS `leaks --atExit` and report every
-# program that leaks.
+# Run Seed test programs under a leak checker and report every program that
+# leaks: macOS `leaks --atExit`, or LeakSanitizer (-fsanitize=leak)
+# elsewhere.
 #
 #   tests/leaks.sh "<compile command>" <dir>...
 #
@@ -13,6 +14,7 @@
 CC=${CC:-cc}
 compile=$1; shift
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/seedleaks.XXXXXX")
+if [ "$(uname)" = Darwin ]; then checker=leaks; sanflags=; else checker=lsan; sanflags="-fsanitize=leak -DSD_LEAK_CHECK"; fi
 trap 'rm -rf "$tmp"' EXIT
 clean=0; leaky=0; expected=0
 for dir in "$@"; do
@@ -23,10 +25,17 @@ for dir in "$@"; do
       *) name=${src%.sd} ;;
     esac
     $compile "$src" > "$tmp/t.c" 2> /dev/null || continue
-    $CC -std=c11 -O1 -g -w -o "$tmp/t" "$tmp/t.c" -lm -lpthread || continue
+    $CC -std=c11 -O1 -g -w $sanflags -o "$tmp/t" "$tmp/t.c" -lm -lpthread || continue
     input=/dev/null; [ -f "$name.in" ] && input="$name.in"
-    MallocStackLogging=1 leaks --atExit -- "$tmp/t" < "$input" > "$tmp/report" 2>&1
-    summary=$(grep -E 'leaks? for' "$tmp/report")
+    if [ $checker = leaks ]; then
+      MallocStackLogging=1 leaks --atExit -- "$tmp/t" < "$input" > "$tmp/report" 2>&1
+      summary=$(grep -E 'leaks? for' "$tmp/report")
+    else
+      LSAN_OPTIONS=exitcode=0 "$tmp/t" < "$input" > "$tmp/report" 2>&1
+      # A leak report, or LeakSanitizer itself failing (it needs ptrace).
+      summary=$(grep -E 'LeakSanitizer' "$tmp/report" | tail -1)
+      [ -z "$summary" ] && summary=" 0 leaks for $src"
+    fi
     case "$summary" in
       *" 0 leaks for"*) clean=$((clean+1)) ;;
       *)

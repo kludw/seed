@@ -1848,9 +1848,18 @@ sd_err sd_handle_error(const char *fn, const sd_handle *h, int kind, int result,
 
 /* ------------------------------------------------------- program entry */
 
+#if defined(SD_LEAK_CHECK)
+/* -fsanitize=leak (tests/leaks.sh on Linux): _exit skips LeakSanitizer's
+ * own check at exit, so it runs here. */
+void __lsan_do_leak_check(void);
+#endif
+
 void sd_exit_process(int code) {
   fflush(stdout);
   fflush(stderr);
+#if defined(SD_LEAK_CHECK)
+  __lsan_do_leak_check();
+#endif
   _exit(code);
 }
 

@@ -68,7 +68,8 @@ with stdin from `/dev/null`, compares the results and prints a pass/fail
 summary. It exits non-zero if anything failed.
 
 `tests/leaks.sh` takes the same arguments and runs every program under
-macOS `leaks --atExit` (`make test-leaks`); every program must be free of
+macOS `leaks --atExit`, or elsewhere built with LeakSanitizer
+(`-fsanitize=leak -DSD_LEAK_CHECK`) (`make test-leaks`); every program must be free of
 leaks, also the ones that crash (only one with a `NAME.leaks` file would be
 reported as expected to leak). `full/crash_frames.sd` crashes and stops
 goroutines at many kinds of points for this check.
@@ -103,7 +104,7 @@ goroutines at many kinds of points for this check.
   that no temporary directory is left behind, the runtime cache (and its
   `$TMPDIR` fallback when the root is read-only), stdout on a terminal
   (`testcmd/tty_flush.sd` under `script`: line-buffered, and flushed before
-  reading stdin; macOS only), and `make install` / `make uninstall` into a
+  reading stdin), and `make install` / `make uninstall` into a
   temporary `PREFIX`. For `spec/` it also runs the `spec/testcmd/`
   projects, `seed test` without a directory, `seed run` with `--`, `seed fmt
   --check` (its output and exit codes) and `seed fmt` on a file with syntax

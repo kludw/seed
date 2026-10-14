@@ -78,7 +78,8 @@ test-full: build/seed2
 	tests/run.sh "build/seed2 c" tests/full tests/spec
 	tests/test_cmd.sh build/seed2
 
-# Every test program under macOS `leaks --atExit` (slow: about 3 minutes).
+# Every test program under a leak checker: macOS `leaks --atExit`, or
+# LeakSanitizer elsewhere (slow: a few minutes).
 test-leaks: build/seed2
 	tests/leaks.sh "build/seed2 c" tests/lang tests/core tests/full
 

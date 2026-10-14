@@ -256,7 +256,10 @@ ln -s "$root/runtime" "$tmp/fakeroot/runtime"
 ln -s "$root/lib" "$tmp/fakeroot/lib"
 chmod 555 "$tmp/fakeroot/build"
 out=$(SEED_ROOT="$tmp/fakeroot" TMPDIR="$tmp/tmp2" USER=seedtest "$seed" run "$tmp/same/a/prog.sd" 2>&1)
-if [ "$out" = a ] && ls "$tmp"/tmp2/seed-cache-seedtest/runtime-*.o > /dev/null 2>&1; then
+if [ -w "$tmp/fakeroot/build" ]; then
+  # root ignores the mode: build/ stays writable, so there is no fallback to see
+  pass=$((pass+1))
+elif [ "$out" = a ] && ls "$tmp"/tmp2/seed-cache-seedtest/runtime-*.o > /dev/null 2>&1; then
   pass=$((pass+1))
 else
   failed "runtime cache fallback" "$out; $(ls -R "$tmp/tmp2")"
@@ -267,7 +270,7 @@ chmod 755 "$tmp/fakeroot/build"
 # testcmd/tty_flush.sd runs under script (a pseudo-terminal); "tick" must
 # show while it sleeps, and its prompt while it waits for a line. The
 # feeder watches the typescript, records what it saw in time, then types
-# the line. (macOS script; skipped elsewhere.)
+# the line. (BSD script on macOS, util-linux script elsewhere.)
 tty_feeder() { # TYPESCRIPT RESULT
   : > "$2"
   for want in "tick 15" "name? 30"; do
@@ -280,9 +283,12 @@ tty_feeder() { # TYPESCRIPT RESULT
   done
   echo Ada
 }
-if [ "$(uname)" = Darwin ] && command -v script > /dev/null 2>&1; then
+tty_script() { # TYPESCRIPT PROGRAM
+  if [ "$(uname)" = Darwin ]; then script -q -F "$1" "$2"; else script -q -f -e -c "$2" "$1"; fi
+}
+if command -v script > /dev/null 2>&1; then
   if "$seed" build -o "$tmp/tty_flush" "$here/testcmd/tty_flush.sd" > "$tmp/tty.err" 2>&1; then
-    tty_feeder "$tmp/tty.out" "$tmp/tty.result" | script -q -F "$tmp/tty.out" "$tmp/tty_flush" > /dev/null 2>&1
+    tty_feeder "$tmp/tty.out" "$tmp/tty.result" | tty_script "$tmp/tty.out" "$tmp/tty_flush" > /dev/null 2>&1
     if [ ! -s "$tmp/tty.result" ] && grep -qF "hello Ada" "$tmp/tty.out"; then
       pass=$((pass+1))
     else

@@ -73,6 +73,7 @@ the `SD_STR_LIT` and `SD_INT_BIGLIT` macros. It builds warning-free with
 | Macro | Effect |
 |---|---|
 | `SD_COUNT_OBJECTS` | Count live heap objects (`sd_live_objects()`); the tests use it to find leaks. |
+| `SD_LEAK_CHECK` | Run LeakSanitizer's check in `sd_exit_process` (programs end with `_exit`, which skips its own); for `-fsanitize=leak` builds (`tests/leaks.sh` on Linux). |
 | `SD_GOROUTINE_STACK` | Stack size of goroutine threads in bytes (default 8 MB). |
 
 ## 2. Representation of every Seed type
@@ -1244,10 +1245,10 @@ Limitations and things left for later:
   memory (section 12).
 - Two goroutines using one handle at once take turns on its operation lock;
   the one waiting checks for a stop every 20 ms rather than being woken.
-- Tested on macOS (arm64, Apple clang). The code uses only C11 and POSIX
-  (`pthread`, `posix_spawnp`, `sigaltstack`, `clock_gettime`); Linux was not
-  available for testing. On glibc, `posix_spawnp` may report a missing program
-  as exit status 127 rather than an error.
+- Tested on macOS (arm64, Apple clang) and Linux (x86_64, glibc, GCC). The
+  code uses only C11 and POSIX (`pthread`, `posix_spawnp`, `sigaltstack`,
+  `clock_gettime`). On glibc, `posix_spawnp` may report a missing program as
+  exit status 127 rather than an error.
 
 ## 17. Future work
 

@@ -78,7 +78,7 @@ The full rules are in [SPEC.md](SPEC.md).
 
 ## Quick start
 
-You need a C compiler (`cc`) and `make`. Seed has been tested on macOS (arm64).
+You need a C compiler (`cc`) and `make`. Seed is tested on macOS (arm64, Apple clang) and Linux (x86_64, glibc, GCC).
 
 ```
 make                                        # builds build/seed2, the seed toolchain
@@ -120,7 +120,7 @@ The Makefile has the development targets:
 | `make test-lib` | The standard library's tests. |
 | `make test-fmt` | The formatter's self-checks and golden tests. |
 | `make test-examples` | Builds every example and checks its output, its tests and its formatting. |
-| `make test-leaks` | Every test program under macOS `leaks` (slow). |
+| `make test-leaks` | Every test program under a leak checker: macOS `leaks`, LeakSanitizer on Linux (slow). |
 | `docs/guide/check.sh` | Every example of the guide, against its expected output. |
 | `runtime/tests/run.sh` | The runtime's own C tests, under the address, undefined-behaviour and thread sanitizers. |
 
@@ -159,7 +159,7 @@ The documentation:
 - File I/O other than reading an `fs.File` is not a stop point, so a goroutine blocked in it (opening or writing a FIFO, for example) is stopped only when the call returns.
 - A `select` case can only receive into a new variable.
 - Big integers use quadratic algorithms, so converting a number with millions of digits to text is slow.
-- Only tested on macOS (arm64, Apple clang). The runtime is C11 and POSIX, but Linux is untested.
+- Tested on macOS (arm64) and Linux (x86_64, glibc). Other POSIX systems are untested.
 - The parser reports at most one syntax error per statement.
 - There is no language server and no debugger; generated programs are C, so `lldb` works on them.
 

@@ -161,11 +161,11 @@ test "removeAll reports what it cannot remove" {
     int code = try os.run([]string{"chmod", "555", dir + "/locked/inner"})
     assert(code == 0)
     error err = removeAll(dir + "/locked")
-    int code2 = try os.run([]string{"chmod", "755", dir + "/locked/inner"})
-    assert(code2 == 0)
     // Root may remove anything; everybody else gets permission denied.
     if (err != null) {
         assert(err.message() == "fs.removeAll: " + dir + "/locked/inner/f: permission denied")
+        int code2 = try os.run([]string{"chmod", "755", dir + "/locked/inner"})
+        assert(code2 == 0)
     }
 }
 

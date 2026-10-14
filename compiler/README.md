@@ -21,7 +21,7 @@ make release    # verify, then write stage3.c to bootstrap/seed.c (and bootstrap
 make test       # tests/lang and tests/core with build/seed2
 make test-full  # tests/full (programs and packages) and tests/test_cmd.sh (seed test, build, run, install)
 make test-lib   # the standard library's tests: build/seed2 test lib
-make test-leaks # every test program under macOS leaks --atExit
+make test-leaks # every test program under a leak checker (leaks or LeakSanitizer)
 make test-fmt   # seed fmt: self-checks on every .sd file, tests/fmt goldens
 make test-examples  # tests/examples.sh and examples/run.sh: every example built, run and checked
 make install    # links $(PREFIX)/bin/seed (PREFIX=/usr/local) to build/seed2; make uninstall removes it
