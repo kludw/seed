@@ -1,0 +1,27 @@
+// A JSON HTTP API for a to-do list (package api has the routes).
+//
+//     seed run examples/httpapi [addr]        (default 127.0.0.1:8080)
+//
+//     curl -d '{"title": "buy milk"}' localhost:8080/todos
+//     curl localhost:8080/todos
+//     curl -X PATCH -d '{"done": true}' localhost:8080/todos/1
+//     curl 'localhost:8080/todos?done=false'
+//     curl -X DELETE localhost:8080/todos/1
+//
+//     seed test examples/httpapi      (starts the server on a free port and
+//                                      calls it with the http client)
+package main
+
+import "api"
+import "fmt"
+import "net"
+
+fn main([]string args) error {
+    string addr = "127.0.0.1:8080"
+    if (args.len() > 1) {
+        addr = args[1]
+    }
+    net.Listener ln = try net.listen(addr)
+    fmt.eprintln("listening on http://" + ln.addr())
+    return api.run(ln)
+}

@@ -1,0 +1,207 @@
+// The evaluator, and Session, which keeps variables and functions between
+// lines.
+package expr
+
+import "errors"
+import "math"
+
+const int maxDepth = 400 // nested function calls
+const int maxExponent = 100000
+
+pub type Func struct {
+    []string params
+    Expr body
+}
+
+pub type Session struct {
+    map[string]int vars
+    map[string]Func funcs
+    int depth
+    // The byte offset in the last line that the last error is about, or -1.
+    pub int errorPos
+}
+
+pub fn newSession() Session {
+    return Session{vars: map[string]int{}, funcs: map[string]Func{}, depth: 0, errorPos: -1}
+}
+
+// Runs one line and returns what to print: the value of an expression, or
+// a note about what was defined. A blank line gives "".
+pub fn (Session s) mut run(string line) (string, error) {
+    s.errorPos = -1
+    s.depth = 0
+    if (line.trim() == "") {
+        return "", null
+    }
+    Parser p = newParser(line)
+    Stmt stmt, error err = p.statement()
+    if (err != null) {
+        s.errorPos = p.errorPos
+        return null, err
+    }
+    switch (stmt) {
+    case Stmt.Let(string name, Expr value):
+        int v = try s.eval(value, map[string]int{})
+        s.vars[name] = v
+        return name + " = " + v.string(), null
+    case Stmt.Def(string name, []string params, Expr body):
+        for (int i = 0; i < params.len(); i++) {
+            if (params.slice(0, i).contains(params[i])) {
+                return null, errors.new(name + ": parameter " + params[i] + " is listed twice")
+            }
+        }
+        s.funcs[name] = Func{params: params, body: body}
+        return "defined " + name + "(" + params.join(", ") + ")", null
+    case Stmt.Eval(Expr value):
+        int v = try s.eval(value, map[string]int{})
+        s.vars["ans"] = v
+        return v.string(), null
+    }
+}
+
+// The names defined so far, for the REPL's :vars command.
+pub fn (Session s) names() []string {
+    []string out = []string{}
+    []string vars = s.vars.keys()
+    for (int i = 0; i < vars.len(); i++) {
+        int? v = s.vars[vars[i]]
+        if (v != null) {
+            out.push(vars[i] + " = " + v.string())
+        }
+    }
+    []string funcs = s.funcs.keys()
+    for (int i = 0; i < funcs.len(); i++) {
+        Func? f = s.funcs[funcs[i]]
+        if (f != null) {
+            out.push(funcs[i] + "(" + f.params.join(", ") + ") = " + f.body.string())
+        }
+    }
+    return out
+}
+
+fn (Session s) mut fail(int pos, string message) error {
+    s.errorPos = pos
+    return errors.new(message)
+}
+
+fn truth(bool b) int {
+    if (b) {
+        return 1
+    }
+    return 0
+}
+
+// Evaluates e. locals holds the parameters of the function being run, and
+// hides global variables with the same names.
+fn (Session s) mut eval(Expr e, map[string]int locals) (int, error) {
+    switch (e) {
+    case Expr.Num(int value):
+        return value, null
+    case Expr.Var(string name, int pos):
+        int? local = locals[name]
+        if (local != null) {
+            return local, null
+        }
+        int? global = s.vars[name]
+        if (global != null) {
+            return global, null
+        }
+        return null, s.fail(pos, "unknown variable " + name)
+    case Expr.Neg(Expr operand):
+        return -(try s.eval(operand, locals)), null
+    case Expr.Binary(string op, Expr left, Expr right, int pos):
+        int a = try s.eval(left, locals)
+        int b = try s.eval(right, locals)
+        return s.binary(op, a, b, pos)
+    case Expr.Call(string name, []Expr args, int pos):
+        []int values = []int{}
+        for (int i = 0; i < args.len(); i++) {
+            values.push(try s.eval(args[i], locals))
+        }
+        return s.call(name, values, pos)
+    case Expr.If(Expr cond, Expr then, Expr otherwise):
+        // Only the branch that is taken is evaluated, which is what lets a
+        // recursive function stop.
+        if (try s.eval(cond, locals) != 0) {
+            return s.eval(then, locals)
+        }
+        return s.eval(otherwise, locals)
+    }
+}
+
+fn (Session s) mut binary(string op, int a, int b, int pos) (int, error) {
+    switch (op) {
+    case "+":
+        return a + b, null
+    case "-":
+        return a - b, null
+    case "*":
+        return a * b, null
+    case "/", "%":
+        if (b == 0) {
+            return null, s.fail(pos, "division by zero")
+        }
+        if (op == "/") {
+            return a / b, null
+        }
+        return a % b, null
+    case "^":
+        if (b < 0) {
+            return null, s.fail(pos, "negative exponent " + b.string())
+        }
+        if (b > maxExponent) {
+            return null, s.fail(pos, "exponent " + b.string() + " is too large (the limit is " + maxExponent.string() + ")")
+        }
+        return math.powInt(a, b), null
+    case "==":
+        return truth(a == b), null
+    case "!=":
+        return truth(a != b), null
+    case "<":
+        return truth(a < b), null
+    case "<=":
+        return truth(a <= b), null
+    case ">":
+        return truth(a > b), null
+    case ">=":
+        return truth(a >= b), null
+    default:
+        return null, s.fail(pos, "unknown operator " + op)
+    }
+}
+
+fn (Session s) mut call(string name, []int args, int pos) (int, error) {
+    if (name == "abs" && args.len() == 1) {
+        return math.absInt(args[0]), null
+    }
+    if ((name == "min" || name == "max") && args.len() == 2) {
+        if (name == "min") {
+            return math.minInt(args[0], args[1]), null
+        }
+        return math.maxInt(args[0], args[1]), null
+    }
+    Func? f = s.funcs[name]
+    if (f == null) {
+        return null, s.fail(pos, "unknown function " + name)
+    }
+    if (args.len() != f.params.len()) {
+        return null, s.fail(pos, name + " takes " + f.params.len().string() + " argument(s), got " + args.len().string())
+    }
+    if (s.depth >= maxDepth) {
+        return null, s.fail(pos, "too many nested calls (more than " + maxDepth.string() + ")")
+    }
+    map[string]int locals = map[string]int{}
+    for (int i = 0; i < args.len(); i++) {
+        locals[f.params[i]] = args[i]
+    }
+    s.depth++
+    int result, error err = s.eval(f.body, locals)
+    if (err != null) {
+        // A position inside the body is a column of the line that defined
+        // the function, so point at the call in this line instead.
+        s.errorPos = pos
+        return null, err
+    }
+    s.depth--
+    return result, null
+}

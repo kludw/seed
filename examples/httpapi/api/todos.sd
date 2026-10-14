@@ -1,0 +1,108 @@
+// Package api is a JSON HTTP API for a to-do list.
+//
+// HTTP handlers run in a goroutine per connection and get a copy of the
+// handler value, so they can't share a list. The list is owned by one
+// goroutine, keep, and handlers send it operations, each with a channel
+// for the answer.
+package api
+
+import "json"
+
+pub type Todo struct {
+    pub int id
+    pub string title
+    pub bool done
+}
+
+pub fn (Todo t) json() json.Value {
+    return json.Value.Object(map[string]json.Value{
+        "id": json.Value.Number(float(t.id)),
+        "title": json.Value.String(t.title),
+        "done": json.Value.Bool(t.done),
+    })
+}
+
+// A change to a todo: only the fields that are not null change.
+pub type Patch struct {
+    pub string? title
+    pub bool? done
+}
+
+pub type Op enum {
+    List(bool? done, chan Answer reply)
+    Add(string title, chan Answer reply)
+    Get(int id, chan Answer reply)
+    Update(int id, Patch patch, chan Answer reply)
+    Delete(int id, chan Answer reply)
+}
+
+pub type Answer enum {
+    One(Todo todo)
+    Many([]Todo todos)
+    NotFound
+    Deleted
+}
+
+// Owns the list until the channel is closed. Ids count up from 1 and are
+// never reused.
+pub fn keep(chan Op ops) error {
+    []Todo todos = []Todo{}
+    int nextId = 1
+    for (;;) {
+        Op? op = ops.receive()
+        if (op == null) {
+            return null
+        }
+        switch (op) {
+        case Op.List(bool? done, chan Answer reply):
+            []Todo found = []Todo{}
+            for (int i = 0; i < todos.len(); i++) {
+                if (done == null || todos[i].done == done) {
+                    found.push(todos[i])
+                }
+            }
+            reply.send(Answer.Many(found))
+        case Op.Add(string title, chan Answer reply):
+            todos.push(Todo{id: nextId, title: title, done: false})
+            nextId++
+            reply.send(Answer.One(todos[todos.len() - 1]))
+        case Op.Get(int id, chan Answer reply):
+            int? at = find(todos, id)
+            if (at == null) {
+                reply.send(Answer.NotFound)
+            } else {
+                reply.send(Answer.One(todos[at]))
+            }
+        case Op.Update(int id, Patch patch, chan Answer reply):
+            int? at = find(todos, id)
+            if (at == null) {
+                reply.send(Answer.NotFound)
+                continue
+            }
+            if (patch.title != null) {
+                todos[at].title = patch.title
+            }
+            if (patch.done != null) {
+                todos[at].done = patch.done
+            }
+            reply.send(Answer.One(todos[at]))
+        case Op.Delete(int id, chan Answer reply):
+            int? at = find(todos, id)
+            if (at == null) {
+                reply.send(Answer.NotFound)
+            } else {
+                todos.remove(at)
+                reply.send(Answer.Deleted)
+            }
+        }
+    }
+}
+
+fn find([]Todo todos, int id) int? {
+    for (int i = 0; i < todos.len(); i++) {
+        if (todos[i].id == id) {
+            return i
+        }
+    }
+    return null
+}

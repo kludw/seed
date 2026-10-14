@@ -1,0 +1,14 @@
+all good (6 jobs, 3 workers)
+  job 1:     27 takes 111 steps
+  job 2:     97 takes 118 steps
+  job 3:    871 takes 178 steps
+  job 4:   6171 takes 261 steps
+  job 5:  77031 takes 350 steps
+  job 6: 837799 takes 524 steps
+  finished in under 10 s
+one bad input (6 jobs, 3 workers)
+  failed: job 3: string.toInt: "eight": invalid integer
+  finished in under 10 s
+one job hangs (6 jobs, 3 workers)
+  failed: timed out after 2000 ms with 5 of 6 results
+  finished in under 10 s

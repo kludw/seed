@@ -1,0 +1,5 @@
+testdata/harbour.txt
+testdata/notes.txt
+--- stderr
+grep: fs.open: testdata/missing.txt: no such file or directory
+--- exit 2

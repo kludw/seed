@@ -1,0 +1,127 @@
+// Package store is an in-memory key-value store owned by one goroutine.
+//
+// "Don't communicate by sharing memory; share memory by communicating."
+// The map lives in serve, and nothing else can reach it: other goroutines
+// send it requests, each carrying a channel for the reply. Requests are
+// handled one at a time, so there is nothing to lock and no update can be
+// lost.
+package store
+
+import "errors"
+import "fs"
+import "json"
+
+pub type Request enum {
+    Get(string key, chan Reply reply)
+    Set(string key, string value, chan Reply reply)
+    Delete(string key, chan Reply reply)
+    Incr(string key, int by, chan Reply reply)
+    Keys(chan Reply reply)
+    Save(chan Reply reply)
+}
+
+pub type Reply enum {
+    Value(string value)
+    Missing
+    List([]string keys)
+    Done
+    Failed(string message)
+}
+
+// Serves requests until the channel is closed, then writes a last
+// snapshot. The data starts from the snapshot at path, if there is one.
+pub fn serve(string path, chan Request requests) error {
+    map[string]string data = try load(path)
+    for (;;) {
+        Request? r = requests.receive()
+        if (r == null) {
+            return save(path, data)
+        }
+        switch (r) {
+        case Request.Get(string key, chan Reply reply):
+            string? value = data[key]
+            if (value == null) {
+                reply.send(Reply.Missing)
+            } else {
+                reply.send(Reply.Value(value))
+            }
+        case Request.Set(string key, string value, chan Reply reply):
+            data[key] = value
+            reply.send(Reply.Done)
+        case Request.Delete(string key, chan Reply reply):
+            if (data[key] == null) {
+                reply.send(Reply.Missing)
+            } else {
+                data.delete(key)
+                reply.send(Reply.Done)
+            }
+        case Request.Incr(string key, int by, chan Reply reply):
+            int n = 0
+            string? old = data[key]
+            if (old != null) {
+                int parsed, error err = old.toInt()
+                if (err != null) {
+                    reply.send(Reply.Failed(key + " holds " + old + ", not a whole number"))
+                    continue
+                }
+                n = parsed
+            }
+            data[key] = (n + by).string()
+            reply.send(Reply.Value((n + by).string()))
+        case Request.Keys(chan Reply reply):
+            []string keys = data.keys()
+            keys.sort()
+            reply.send(Reply.List(keys))
+        case Request.Save(chan Reply reply):
+            error err = save(path, data)
+            if (err != null) {
+                reply.send(Reply.Failed(err.message()))
+            } else {
+                reply.send(Reply.Done)
+            }
+        }
+    }
+}
+
+// Reads a snapshot: a JSON object whose values are strings. A missing file
+// is an empty store.
+fn load(string path) (map[string]string, error) {
+    map[string]string data = map[string]string{}
+    if (!fs.exists(path)) {
+        return data, null
+    }
+    string text = try fs.read(path)
+    json.Value doc, error err = json.parse(text)
+    if (err != null) {
+        return null, errors.wrap(err, "loading " + path)
+    }
+    map[string]json.Value? fields = doc.asObject()
+    if (fields == null) {
+        return null, errors.new("loading " + path + ": expected a JSON object")
+    }
+    []string keys = fields.keys()
+    for (int i = 0; i < keys.len(); i++) {
+        string? value = doc.get(keys[i]).asString()
+        if (value == null) {
+            return null, errors.new("loading " + path + ": the value of " + keys[i] + " is not a string")
+        }
+        data[keys[i]] = value
+    }
+    return data, null
+}
+
+// Writes the snapshot to a temporary file and renames it over the old one,
+// so a crash in the middle never leaves half a snapshot behind.
+fn save(string path, map[string]string data) error {
+    map[string]json.Value fields = map[string]json.Value{}
+    []string keys = data.keys()
+    for (int i = 0; i < keys.len(); i++) {
+        string? value = data[keys[i]]
+        if (value != null) {
+            fields[keys[i]] = json.Value.String(value)
+        }
+    }
+    string tmp = path + ".tmp"
+    try fs.write(tmp, json.Value.Object(fields).pretty() + "\n")
+    return fs.rename(tmp, path)
+}

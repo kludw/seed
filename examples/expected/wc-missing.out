@@ -1,0 +1,3 @@
+--- stderr
+error: testdata/nope: no such file or directory
+--- exit 1

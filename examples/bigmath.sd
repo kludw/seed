@@ -1,0 +1,140 @@
+// Seed has one integer type, int, and it grows as needed: there is no
+// overflow, no int64 versus big.Int, and no special syntax for big numbers.
+//
+//     seed run examples/bigmath.sd
+//
+// Factorials, Fibonacci(500), modular exponentiation, a toy RSA round trip
+// and the Lucas-Lehmer test for Mersenne primes, all with plain ints.
+package main
+
+import "errors"
+import "fmt"
+import "math"
+import "strings"
+
+fn factorial(int n) int {
+    int result = 1
+    for (int i = 2; i <= n; i++) {
+        result = result * i
+    }
+    return result
+}
+
+fn fibonacci(int n) int {
+    int a = 0
+    int b = 1
+    for (int i = 0; i < n; i++) {
+        int next = a + b
+        a = b
+        b = next
+    }
+    return a
+}
+
+// base^exponent mod m by repeated squaring: the numbers never grow beyond
+// m*m, however large the exponent.
+fn modPow(int base, int exponent, int m) int {
+    int result = 1
+    int b = base % m
+    for (int e = exponent; e > 0; e = e / 2) {
+        if (e % 2 == 1) {
+            result = result * b % m
+        }
+        b = b * b % m
+    }
+    return result
+}
+
+// The x with a*x = 1 (mod m), by the extended Euclidean algorithm.
+fn modInverse(int a, int m) (int, error) {
+    int oldR = a
+    int r = m
+    int oldS = 1
+    int s = 0
+    for (; r != 0; ) {
+        int q = oldR / r
+        int nextR = oldR - q * r
+        oldR = r
+        r = nextR
+        int nextS = oldS - q * s
+        oldS = s
+        s = nextS
+    }
+    if (oldR != 1) {
+        return null, errors.new(a.string() + " has no inverse modulo " + m.string())
+    }
+    return (oldS % m + m) % m, null
+}
+
+// 2^p - 1 is prime exactly when the Lucas-Lehmer sequence reaches 0
+// (p must be an odd prime).
+fn isMersennePrime(int p) bool {
+    int m = math.powInt(2, p) - 1
+    int s = 4
+    for (int i = 0; i < p - 2; i++) {
+        s = (s * s - 2) % m
+    }
+    return s == 0
+}
+
+fn digitSum(int n) int {
+    string digits = n.string()
+    int sum = 0
+    for (int i = 0; i < digits.len(); i++) {
+        sum = sum + int(digits[i]) - int('0')
+    }
+    return sum
+}
+
+// Breaks a long number into lines of at most width digits.
+fn wrap(string digits, int width) string {
+    []string lines = []string{}
+    for (int i = 0; i < digits.len(); i = i + width) {
+        lines.push("    " + digits.slice(i, math.minInt(i + width, digits.len())))
+    }
+    return lines.join("\n")
+}
+
+fn main([]string args) error {
+    fmt.println("factorials:")
+    for (int n = 5; n <= 30; n = n + 5) {
+        fmt.println(strings.padLeft(n.string(), 4, ' ') + "! = " + factorial(n).string())
+    }
+    int f100 = factorial(100)
+    fmt.println("100! has " + f100.string().len().string() + " digits, digit sum " + digitSum(f100).string())
+
+    string fib = fibonacci(500).string()
+    fmt.println("")
+    fmt.println("fibonacci(500), " + fib.len().string() + " digits:")
+    fmt.println(wrap(fib, 60))
+
+    fmt.println("")
+    fmt.println("3^1000000 mod 1000000007 = " + modPow(3, 1000000, 1000000007).string())
+    fmt.println("2^(2^100) mod 97 = " + modPow(2, math.powInt(2, 100), 97).string())
+    fmt.println("last 20 digits of 7^7^7: " + modPow(7, math.powInt(7, 7), math.powInt(10, 20)).string())
+
+    // A toy RSA key from two Mersenne primes.
+    int p = math.powInt(2, 61) - 1
+    int q = math.powInt(2, 89) - 1
+    int n = p * q
+    int e = 65537
+    int d = try modInverse(e, (p - 1) * (q - 1))
+    int message = 42424242424242424242
+    int secret = modPow(message, e, n)
+    fmt.println("")
+    fmt.println("rsa: n = " + n.string())
+    fmt.println("rsa: encrypted = " + secret.string())
+    fmt.println("rsa: decrypted = " + modPow(secret, d, n).string())
+
+    []string found = []string{}
+    []int candidates = []int{3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 61, 89, 107, 127}
+    for (int i = 0; i < candidates.len(); i++) {
+        if (isMersennePrime(candidates[i])) {
+            found.push(candidates[i].string())
+        }
+    }
+    fmt.println("")
+    fmt.println("2^p - 1 is prime for p in " + found.join(", "))
+    fmt.println("2^127 - 1 = " + (math.powInt(2, 127) - 1).string())
+    return null
+}

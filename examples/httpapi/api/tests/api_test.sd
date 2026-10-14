@@ -1,0 +1,107 @@
+package api
+
+import "errors"
+import "http"
+import "net"
+
+// Starts the API on a free port, runs the scenario against it, and then
+// closes the listener, which stops the server and the list's owner. The
+// scenario returns one line per call, which the test compares.
+fn withServer(fn(string) ([]string, error) scenario) (string, error) {
+    net.Listener ln = try net.listen("127.0.0.1:0")
+    chan string out = chan string(1)
+    try group {
+        spawn run(ln)
+        spawn client(ln, scenario, out)
+    }
+    string? transcript = out.receive()
+    if (transcript == null) {
+        return null, errors.new("the scenario sent nothing")
+    }
+    return transcript, null
+}
+
+fn client(net.Listener ln, fn(string) ([]string, error) scenario, chan string out) error {
+    defer ln.close()
+    []string lines = try scenario("http://" + ln.addr())
+    out.send(lines.join("\n"))
+    return null
+}
+
+// Sends a request and shows the response as "STATUS BODY".
+fn call(string method, string url, string body) (string, error) {
+    http.Response resp = try http.send(http.Request{method: method, url: url, headers: map[string]string{}, body: body})
+    return resp.status.string() + " " + resp.body, null
+}
+
+fn crud(string base) ([]string, error) {
+    []string got = []string{}
+    got.push(try call("GET", base + "/todos", ""))
+    got.push(try call("POST", base + "/todos", "{\"title\": \"buy milk\"}"))
+    got.push(try call("POST", base + "/todos", "{\"title\": \"  call mom  \"}"))
+    got.push(try call("PATCH", base + "/todos/1", "{\"done\": true}"))
+    got.push(try call("GET", base + "/todos/1", ""))
+    got.push(try call("GET", base + "/todos?done=false", ""))
+    got.push(try call("DELETE", base + "/todos/1", ""))
+    got.push(try call("GET", base + "/todos", ""))
+    got.push(try call("POST", base + "/todos", "{\"title\": \"water plants\"}"))
+    return got, null
+}
+
+fn mistakes(string base) ([]string, error) {
+    []string got = []string{}
+    got.push(try call("GET", base + "/todos/7", ""))
+    got.push(try call("DELETE", base + "/todos/7", ""))
+    got.push(try call("POST", base + "/todos", "{\"title\": \"\"}"))
+    got.push(try call("POST", base + "/todos", "{\"title\": 5}"))
+    got.push(try call("POST", base + "/todos", "not json"))
+    got.push(try call("PUT", base + "/todos", ""))
+    got.push(try call("GET", base + "/todos?done=maybe", ""))
+    got.push(try call("POST", base + "/todos", "{\"title\": \"x\"}"))
+    got.push(try call("PATCH", base + "/todos/1", "{\"done\": \"yes\"}"))
+    got.push(try call("PATCH", base + "/todos/1", "[]"))
+    got.push(try call("GET", base + "/todos/abc", ""))
+    got.push(try call("GET", base + "/elsewhere", ""))
+    return got, null
+}
+
+test "create, read, update and delete" {
+    string got = try withServer(crud)
+    []string want = []string{
+        "200 []",
+        "201 {\"id\":1,\"title\":\"buy milk\",\"done\":false}",
+        "201 {\"id\":2,\"title\":\"call mom\",\"done\":false}",
+        "200 {\"id\":1,\"title\":\"buy milk\",\"done\":true}",
+        "200 {\"id\":1,\"title\":\"buy milk\",\"done\":true}",
+        "200 [{\"id\":2,\"title\":\"call mom\",\"done\":false}]",
+        "204 ",
+        "200 [{\"id\":2,\"title\":\"call mom\",\"done\":false}]",
+        "201 {\"id\":3,\"title\":\"water plants\",\"done\":false}",
+    }
+    assert(got == want.join("\n"))
+}
+
+test "bad requests get JSON errors" {
+    string got = try withServer(mistakes)
+    []string want = []string{
+        "404 {\"error\":\"no such todo\"}",
+        "404 {\"error\":\"no such todo\"}",
+        "400 {\"error\":\"title must be a non-empty string\"}",
+        "400 {\"error\":\"title must be a non-empty string\"}",
+        "400 {\"error\":\"json.parse: line 1, column 1: invalid literal (expected null)\"}",
+        "405 {\"error\":\"use GET or POST on /todos\"}",
+        "400 {\"error\":\"done must be true or false\"}",
+        "201 {\"id\":1,\"title\":\"x\",\"done\":false}",
+        "400 {\"error\":\"done must be true or false\"}",
+        "400 {\"error\":\"expected a JSON object\"}",
+        "404 {\"error\":\"no route for /todos/abc\"}",
+        "404 {\"error\":\"no route for /elsewhere\"}",
+    }
+    assert(got == want.join("\n"))
+}
+
+test "each server starts with an empty list" {
+    string first = try withServer(crud)
+    string second = try withServer(crud)
+    assert(first == second)
+}

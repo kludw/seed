@@ -1,0 +1,65 @@
+// The kinds of account. An account holds its Plan as an interface value,
+// so the account code doesn't know or care which plan it has.
+package bank
+
+pub type Plan interface {
+    name() string
+    // How far below zero the balance may go, in cents.
+    overdraftLimit() int
+    // The transactions due at the end of a month, given the balance.
+    monthEnd(int balance) []Transaction
+}
+
+// A checking account: an overdraft, a monthly fee unless the balance is
+// high enough, and interest charged on an overdrawn balance.
+pub type Checking struct implements Plan {
+    pub int overdraft
+    pub int fee
+    pub int feeWaivedFrom
+}
+
+pub fn standardChecking() Checking {
+    return Checking{overdraft: 50000, fee: 500, feeWaivedFrom: 100000}
+}
+
+fn (Checking c) name() string {
+    return "checking"
+}
+
+fn (Checking c) overdraftLimit() int {
+    return c.overdraft
+}
+
+fn (Checking c) monthEnd(int balance) []Transaction {
+    []Transaction due = []Transaction{}
+    if (balance < c.feeWaivedFrom) {
+        due.push(Transaction.Fee(c.fee, "monthly account fee"))
+    }
+    if (balance < 0) {
+        // 2% a month on the overdrawn amount, rounded up to a whole cent.
+        due.push(Transaction.Fee((-balance * 2 + 99) / 100, "overdraft interest"))
+    }
+    return due
+}
+
+// A savings account: no overdraft, and interest in basis points (1/100 of
+// a percent) per month, rounded down to a whole cent.
+pub type Savings struct implements Plan {
+    pub int basisPoints
+}
+
+fn (Savings s) name() string {
+    return "savings"
+}
+
+fn (Savings s) overdraftLimit() int {
+    return 0
+}
+
+fn (Savings s) monthEnd(int balance) []Transaction {
+    int interest = balance * s.basisPoints / 10000
+    if (interest <= 0) {
+        return []Transaction{}
+    }
+    return []Transaction{Transaction.Interest(interest)}
+}

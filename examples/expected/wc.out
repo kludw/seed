@@ -1,0 +1,12 @@
+   lines    words    bytes  file
+       5       10       56  testdata/bad.json
+      32      136      455  testdata/calc.txt
+       7       43      220  testdata/harbour.txt
+      15       48      260  testdata/kv1.txt
+       5       19      105  testdata/kv2.txt
+       5       23      114  testdata/notes.txt
+       4       32      267  testdata/order.json
+      73      311     1477  total, 7 files
+
+       9       42      323  .json, 2 files
+      64      269     1154  .txt, 5 files

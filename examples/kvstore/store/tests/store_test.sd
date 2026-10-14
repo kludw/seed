@@ -1,0 +1,121 @@
+package store
+
+import "errors"
+import "fs"
+import "json"
+import "path"
+
+// Runs a scenario as a client of a store that keeps its snapshot in a
+// temporary directory, and returns the snapshot file left at the end.
+fn withStore(fn(Client) error scenario, string snapshot) (string, error) {
+    string dir = try fs.makeTemp("kvstore-test-")
+    defer _ = fs.removeAll(dir)
+    string file = path.join([]string{dir, "kv.json"})
+    if (snapshot != "") {
+        try fs.write(file, snapshot)
+    }
+    chan Request requests = chan Request(0)
+    try group {
+        spawn serve(file, requests)
+        spawn runScenario(scenario, newClient(requests))
+    }
+    return fs.read(file)
+}
+
+fn runScenario(fn(Client) error scenario, Client c) error {
+    defer c.close()
+    return scenario(c)
+}
+
+fn basics(Client c) error {
+    string? v = try c.get("a")
+    if (v != null) {
+        return errors.new("a should not be set yet")
+    }
+    try c.set("a", "1")
+    try c.set("b", "two")
+    v = try c.get("a")
+    if (v == null || v != "1") {
+        return errors.new("get a after set")
+    }
+    bool deleted = try c.delete("b")
+    bool again = try c.delete("b")
+    if (!deleted || again) {
+        return errors.new("delete should report whether the key was there")
+    }
+    return null
+}
+
+fn counting(Client c) error {
+    int n = try c.incr("n", 5)
+    n = try c.incr("n", -2)
+    if (n != 3) {
+        return errors.new("incr: got " + n.string())
+    }
+    try c.set("word", "abc")
+    _, error err = c.incr("word", 1)
+    if (err == null || err.message() != "store: word holds abc, not a whole number") {
+        return errors.new("incr on text should fail")
+    }
+    return null
+}
+
+fn incrMany(Client c, int times) error {
+    for (int i = 0; i < times; i++) {
+        _ = try c.incr("hits", 1)
+    }
+    return null
+}
+
+// Ten goroutines share one Client value: they all talk to the same store,
+// and none of their increments is lost.
+fn concurrent(Client c) error {
+    try group {
+        for (int i = 0; i < 10; i++) {
+            spawn incrMany(c, 100)
+        }
+    }
+    string? hits = try c.get("hits")
+    if (hits == null || hits != "1000") {
+        return errors.new("lost updates")
+    }
+    return null
+}
+
+fn listKeys(Client c) error {
+    []string keys = try c.keys()
+    if (keys != []string{"apple", "zebra"}) {
+        return errors.new("keys: " + keys.join(","))
+    }
+    return null
+}
+
+test "get, set and delete" {
+    string saved = try withStore(basics, "")
+    json.Value doc = try json.parse(saved)
+    assert(doc.get("a") == json.Value.String("1"))
+    assert(doc.get("b").isNull())
+}
+
+test "incr counts and refuses text" {
+    _ = try withStore(counting, "")
+}
+
+test "concurrent clients lose no updates" {
+    string saved = try withStore(concurrent, "")
+    json.Value doc = try json.parse(saved)
+    assert(doc.get("hits") == json.Value.String("1000"))
+}
+
+test "the store starts from its snapshot and lists keys sorted" {
+    _ = try withStore(listKeys, "{\"zebra\": \"z\", \"apple\": \"a\"}")
+}
+
+test "a broken snapshot is an error naming the file" {
+    _, error err = withStore(listKeys, "{\"zebra\": 1}")
+    assert(err != null)
+    assert(err.message().endsWith("kv.json: the value of zebra is not a string"))
+    _, err = withStore(listKeys, "[1, 2")
+    assert(err != null)
+    assert(err.message().contains("kv.json: json.parse: line 1, column 6"))
+}

@@ -1,0 +1,120 @@
+// Package expr is a small expression language: integers that never
+// overflow, variables, comparisons, `if ... then ... else`, and functions
+// defined with `def`, which may be recursive.
+//
+// This file turns a line of text into tokens.
+package expr
+
+import "strings"
+
+pub type Token enum {
+    Num(int value)
+    Name(string name)
+    Op(string symbol) // + - * / % ^ = == != < <= > >= ( ) ,
+    Keyword(string word) // let def if then else
+    Bad(string message) // a character the language doesn't use
+    End
+}
+
+// A token and the byte offset where it starts, for error messages.
+pub type Tok struct {
+    pub Token token
+    pub int pos
+}
+
+const string keywords = " let def if then else "
+
+// Two-character operators are tried before one-character ones, so "<=" is
+// not read as "<" followed by "=".
+fn operatorAt(string line, int i) string? {
+    if (i + 1 < line.len()) {
+        string two = line.slice(i, i + 2)
+        if (two == "==" || two == "!=" || two == "<=" || two == ">=") {
+            return two
+        }
+    }
+    string one = line.slice(i, i + 1)
+    if ("+-*/%^=<>(),".contains(one)) {
+        return one
+    }
+    return null
+}
+
+fn digitsEnd(string line, int start) int {
+    int i = start
+    for (; i < line.len() && strings.isDigit(line[i]); ) {
+        i++
+    }
+    return i
+}
+
+fn wordEnd(string line, int start) int {
+    int i = start
+    for (; i < line.len(); i++) {
+        byte c = line[i]
+        if (!strings.isLetter(c) && !strings.isDigit(c) && c != '_') {
+            break
+        }
+    }
+    return i
+}
+
+// Splits a line into tokens. It never fails: an unknown character becomes
+// a Bad token, which the parser reports when it reaches it, so every error
+// is reported in one place with its position. The list always ends with
+// Token.End.
+pub fn tokenize(string line) []Tok {
+    []Tok toks = []Tok{}
+    int i = 0
+    for (; i < line.len(); ) {
+        byte c = line[i]
+        int start = i
+        if (strings.isSpace(c)) {
+            i++
+        } else if (strings.isDigit(c)) {
+            i = digitsEnd(line, i)
+            // A run of digits is always a valid int.
+            int? value, _ = line.slice(start, i).toInt()
+            if (value != null) {
+                toks.push(Tok{token: Token.Num(value), pos: start})
+            }
+        } else if (strings.isLetter(c) || c == '_') {
+            i = wordEnd(line, i)
+            string word = line.slice(start, i)
+            if (keywords.contains(" " + word + " ")) {
+                toks.push(Tok{token: Token.Keyword(word), pos: start})
+            } else {
+                toks.push(Tok{token: Token.Name(word), pos: start})
+            }
+        } else {
+            string? op = operatorAt(line, i)
+            if (op == null) {
+                toks.push(Tok{token: Token.Bad("unexpected character '" + line.slice(i, i + 1) + "'"), pos: start})
+                i++
+            } else {
+                toks.push(Tok{token: Token.Op(op), pos: start})
+                i = i + op.len()
+            }
+        }
+    }
+    toks.push(Tok{token: Token.End, pos: line.len()})
+    return toks
+}
+
+// How a token is named in error messages.
+pub fn (Token t) describe() string {
+    switch (t) {
+    case Token.Num(int value):
+        return "the number " + value.string()
+    case Token.Name(string name):
+        return "the name " + name
+    case Token.Op(string symbol):
+        return "'" + symbol + "'"
+    case Token.Keyword(string word):
+        return "'" + word + "'"
+    case Token.Bad(string message):
+        return message
+    case Token.End:
+        return "the end of the line"
+    }
+}

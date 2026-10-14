@@ -1,0 +1,15 @@
+# The first session starts with no snapshot.
+get greeting
+set greeting hello   world
+get greeting
+set city Lisbon
+incr visits
+incr visits 41
+incr city
+bench 8 250
+keys
+del city
+del city
+fly away
+save
+set note written after the save, kept by the final snapshot

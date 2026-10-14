@@ -1,0 +1,143 @@
+// Routing, request parsing and responses.
+//
+//     GET    /todos             every todo; ?done=true or ?done=false filters
+//     POST   /todos             {"title": "..."}            -> 201 and the todo
+//     GET    /todos/ID          one todo
+//     PATCH  /todos/ID          {"title": "...", "done": true} (either field)
+//     DELETE /todos/ID          -> 204
+//
+// Errors are JSON too: {"error": "..."} with 400, 404 or 405.
+package api
+
+import "errors"
+import "http"
+import "json"
+import "net"
+
+// The handler. Every request gets its own copy, which is fine: all it
+// holds is the channel to the goroutine that owns the list.
+pub type Api struct implements http.Handler {
+    chan Op ops
+}
+
+// Serves the API on ln until ln is closed, then stops the list's owner too.
+pub fn run(net.Listener ln) error {
+    chan Op ops = chan Op(16)
+    return group {
+        spawn keep(ops)
+        spawn serveThenStop(ln, ops)
+    }
+}
+
+fn serveThenStop(net.Listener ln, chan Op ops) error {
+    defer ops.close()
+    return http.serveListener(ln, Api{ops: ops})
+}
+
+fn problem(int status, string message) http.Response {
+    return http.jsonResponse(status, json.Value.Object(map[string]json.Value{"error": json.Value.String(message)}))
+}
+
+fn (Api a) ask(Op op, chan Answer reply) (Answer, error) {
+    a.ops.send(op)
+    Answer? answer = reply.receive()
+    if (answer == null) {
+        return null, errors.new("the todo list has stopped")
+    }
+    return answer, null
+}
+
+fn respond(Answer answer, int status) http.Response {
+    switch (answer) {
+    case Answer.One(Todo todo):
+        return http.jsonResponse(status, todo.json())
+    case Answer.Many([]Todo todos):
+        []json.Value items = []json.Value{}
+        for (int i = 0; i < todos.len(); i++) {
+            items.push(todos[i].json())
+        }
+        return http.jsonResponse(status, json.Value.Array(items))
+    case Answer.NotFound:
+        return problem(http.statusNotFound, "no such todo")
+    case Answer.Deleted:
+        return http.Response{status: http.statusNoContent, headers: map[string]string{}, body: ""}
+    }
+}
+
+fn (Api a) handle(http.Request req) (http.Response, error) {
+    string p = req.path()
+    chan Answer reply = chan Answer(1)
+    if (p == "/todos" || p == "/todos/") {
+        switch (req.method) {
+        case "GET":
+            bool? done = null
+            string? filter = req.query()["done"]
+            if (filter != null) {
+                if (filter != "true" && filter != "false") {
+                    return problem(http.statusBadRequest, "done must be true or false"), null
+                }
+                done = filter == "true"
+            }
+            return respond(try a.ask(Op.List(done, reply), reply), http.statusOk), null
+        case "POST":
+            json.Value body, error err = json.parse(req.body)
+            if (err != null) {
+                return problem(http.statusBadRequest, err.message()), null
+            }
+            string? title = body.get("title").asString()
+            if (title == null || title.trim() == "") {
+                return problem(http.statusBadRequest, "title must be a non-empty string"), null
+            }
+            return respond(try a.ask(Op.Add(title.trim(), reply), reply), http.statusCreated), null
+        default:
+            return problem(http.statusMethodNotAllowed, "use GET or POST on /todos"), null
+        }
+    }
+    if (!p.startsWith("/todos/")) {
+        return problem(http.statusNotFound, "no route for " + p), null
+    }
+    int id, error err = p.slice(7, p.len()).toInt()
+    if (err != null) {
+        return problem(http.statusNotFound, "no route for " + p), null
+    }
+    switch (req.method) {
+    case "GET":
+        return respond(try a.ask(Op.Get(id, reply), reply), http.statusOk), null
+    case "PATCH":
+        Patch patch, error bad = parsePatch(req.body)
+        if (bad != null) {
+            return problem(http.statusBadRequest, bad.message()), null
+        }
+        return respond(try a.ask(Op.Update(id, patch, reply), reply), http.statusOk), null
+    case "DELETE":
+        return respond(try a.ask(Op.Delete(id, reply), reply), http.statusNoContent), null
+    default:
+        return problem(http.statusMethodNotAllowed, "use GET, PATCH or DELETE on /todos/ID"), null
+    }
+}
+
+// Reads {"title": "...", "done": true}. A field that is there must have
+// the right type; a field that is missing is left unchanged.
+fn parsePatch(string text) (Patch, error) {
+    json.Value body = try json.parse(text)
+    map[string]json.Value? fields = body.asObject()
+    if (fields == null) {
+        return null, errors.new("expected a JSON object")
+    }
+    Patch patch = Patch{title: null, done: null}
+    json.Value? title = fields["title"]
+    if (title != null) {
+        patch.title = title.asString()
+        if (patch.title == null) {
+            return null, errors.new("title must be a string")
+        }
+    }
+    json.Value? done = fields["done"]
+    if (done != null) {
+        patch.done = done.asBool()
+        if (patch.done == null) {
+            return null, errors.new("done must be true or false")
+        }
+    }
+    return patch, null
+}

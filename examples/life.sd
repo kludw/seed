@@ -1,0 +1,120 @@
+// Conway's Game of Life on a small wrapping board, printed for a number of
+// generations.
+//
+//     seed run examples/life.sd [generations]
+//
+// The board is a struct holding a [][]bool. step() builds the next
+// generation as a new board while reading the old one: values never change
+// behind your back, so no double buffering is needed.
+package main
+
+import "errors"
+import "fmt"
+
+type Board struct {
+    int width
+    int height
+    [][]bool cells
+}
+
+fn emptyBoard(int width, int height) Board {
+    [][]bool cells = [][]bool{}
+    for (int y = 0; y < height; y++) {
+        []bool row = []bool{}
+        for (int x = 0; x < width; x++) {
+            row.push(false)
+        }
+        cells.push(row)
+    }
+    return Board{width: width, height: height, cells: cells}
+}
+
+// Reads a picture where '#' is alive, placed with its top left corner at
+// (left, top).
+fn (Board b) mut place(int left, int top, []string picture) {
+    for (int y = 0; y < picture.len(); y++) {
+        for (int x = 0; x < picture[y].len(); x++) {
+            b.cells[top + y][left + x] = picture[y][x] == '#'
+        }
+    }
+}
+
+// The board wraps around: the left edge touches the right edge, and the top
+// touches the bottom.
+fn (Board b) alive(int x, int y) bool {
+    return b.cells[(y + b.height) % b.height][(x + b.width) % b.width]
+}
+
+fn (Board b) neighbours(int x, int y) int {
+    int n = 0
+    for (int dy = -1; dy <= 1; dy++) {
+        for (int dx = -1; dx <= 1; dx++) {
+            if ((dx != 0 || dy != 0) && b.alive(x + dx, y + dy)) {
+                n++
+            }
+        }
+    }
+    return n
+}
+
+fn (Board b) step() Board {
+    Board next = emptyBoard(b.width, b.height)
+    for (int y = 0; y < b.height; y++) {
+        for (int x = 0; x < b.width; x++) {
+            int n = b.neighbours(x, y)
+            next.cells[y][x] = n == 3 || (n == 2 && b.cells[y][x])
+        }
+    }
+    return next
+}
+
+fn (Board b) population() int {
+    int count = 0
+    for (int y = 0; y < b.height; y++) {
+        for (int x = 0; x < b.width; x++) {
+            if (b.cells[y][x]) {
+                count++
+            }
+        }
+    }
+    return count
+}
+
+fn (Board b) string() string {
+    []string lines = []string{}
+    for (int y = 0; y < b.height; y++) {
+        []byte line = []byte{}
+        for (int x = 0; x < b.width; x++) {
+            if (b.cells[y][x]) {
+                line.push('#')
+            } else {
+                line.push('.')
+            }
+        }
+        lines.push(string(line))
+    }
+    return lines.join("\n")
+}
+
+fn main([]string args) error {
+    int generations = 4
+    if (args.len() > 2) {
+        return errors.new("usage: life [generations]")
+    }
+    if (args.len() == 2) {
+        generations = try args[1].toInt()
+    }
+    Board board = emptyBoard(20, 10)
+    board.place(1, 1, []string{".#.", "..#", "###"}) // a glider
+    board.place(12, 2, []string{"###"}) // a blinker
+    board.place(14, 6, []string{"##", "##"}) // a block
+    for (int g = 0; g <= generations; g++) {
+        if (g > 0) {
+            board = board.step()
+            fmt.println("")
+        }
+        fmt.println("generation " + g.string() + ", population " + board.population().string())
+        fmt.println(board.string())
+    }
+    return null
+}

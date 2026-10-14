@@ -1,0 +1,27 @@
+ok: rent
+ok: savings
+refused: ACC-2: withdrawal: car: insufficient funds (balance 300.00, checking overdraft limit 500.00)
+ok: Bob's bike
+refused: transfer: ACC-3: transfer to ACC-2: insufficient funds (balance 1,000.00, savings overdraft limit 0.00)
+refused: no account ACC-99
+refused: ACC-1: cannot deposit a negative amount
+copy has 10,300.00, the bank has 300.00
+
+ACC-1 (Ada, checking)
+  deposit: salary                     2,500.00
+  withdrawal: rent                   -1,200.00
+  transfer to ACC-3                  -1,000.00
+  fee: monthly account fee               -5.00
+  balance                               295.00
+ACC-2 (Bob, checking)
+  deposit: salary                       300.00
+  withdrawal: bike                     -750.00
+  fee: monthly account fee               -5.00
+  fee: overdraft interest                -9.00
+  balance                              -464.00
+ACC-3 (Ada, savings)
+  transfer from ACC-1                 1,000.00
+  interest                               12.50
+  balance                             1,012.50
+
+Seed Savings & Loan holds 843.50 in 3 accounts

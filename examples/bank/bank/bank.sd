@@ -1,0 +1,105 @@
+// The bank owns every account. Other code refers to an account by its id,
+// and every change goes through a mut method of Bank.
+package bank
+
+import "errors"
+
+pub type Bank struct {
+    pub string name
+    map[string]Account accounts
+    int nextId
+}
+
+pub fn newBank(string name) Bank {
+    return Bank{name: name, accounts: map[string]Account{}, nextId: 1}
+}
+
+// Opens an account and returns its id: "ACC-1", "ACC-2", ...
+pub fn (Bank b) mut open(string owner, Plan plan) string {
+    string id = "ACC-" + b.nextId.string()
+    b.nextId++
+    b.accounts[id] = newAccount(id, owner, plan)
+    return id
+}
+
+// A copy of the account. Changing the copy changes nothing in the bank.
+pub fn (Bank b) account(string id) (Account, error) {
+    Account? a = b.accounts[id]
+    if (a == null) {
+        return null, errors.new("no account " + id)
+    }
+    return a, null
+}
+
+pub fn (Bank b) ids() []string {
+    return b.accounts.keys()
+}
+
+pub fn (Bank b) mut deposit(string id, int cents, string memo) error {
+    Account a = try b.account(id)
+    try a.deposit(cents, memo)
+    b.accounts[id] = a
+    return null
+}
+
+pub fn (Bank b) mut withdraw(string id, int cents, string memo) error {
+    Account a = try b.account(id)
+    try a.withdraw(cents, memo)
+    b.accounts[id] = a
+    return null
+}
+
+// Moves money between two accounts, or fails and changes neither. Both
+// accounts are changed as local copies first, and only stored once both
+// changes have succeeded: there is nothing to roll back.
+pub fn (Bank b) mut transfer(string from, string to, int cents) error {
+    if (from == to) {
+        return errors.new("transfer: " + from + ": cannot transfer to the same account")
+    }
+    if (cents <= 0) {
+        return errors.new("transfer: the amount must be positive")
+    }
+    Account source = try b.account(from)
+    Account target = try b.account(to)
+    error err = source.apply(Transaction.TransferOut(to, cents))
+    if (err != null) {
+        return errors.wrap(err, "transfer")
+    }
+    try target.apply(Transaction.TransferIn(from, cents))
+    b.accounts[from] = source
+    b.accounts[to] = target
+    return null
+}
+
+// Closes the month for every account. An account whose fees it cannot pay
+// is reported, and the others are still closed.
+pub fn (Bank b) mut closeMonth() []error {
+    []error problems = []error{}
+    []string ids = b.accounts.keys()
+    for (int i = 0; i < ids.len(); i++) {
+        Account? a = b.accounts[ids[i]]
+        if (a == null) {
+            continue
+        }
+        error err = a.closeMonth()
+        if (err != null) {
+            problems.push(errors.wrap(err, "month end"))
+            continue
+        }
+        b.accounts[ids[i]] = a
+    }
+    return problems
+}
+
+// The total of every balance: what the bank owes its customers.
+pub fn (Bank b) deposits() int {
+    int total = 0
+    []string ids = b.accounts.keys()
+    for (int i = 0; i < ids.len(); i++) {
+        Account? a = b.accounts[ids[i]]
+        if (a != null) {
+            total = total + a.balance()
+        }
+    }
+    return total
+}

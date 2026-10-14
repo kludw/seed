@@ -1,0 +1,28 @@
+> get greeting
+(not set)
+> set greeting hello   world
+ok
+> get greeting
+hello world
+> set city Lisbon
+ok
+> incr visits
+1
+> incr visits 41
+42
+> incr city
+error: store: city holds Lisbon, not a whole number
+> bench 8 250
+hits = 2000
+> keys
+4 keys: city, greeting, hits, visits
+> del city
+deleted
+> del city
+(not set)
+> fly away
+error: commands: get KEY | set KEY VALUE... | del KEY | incr KEY [N] | keys | save | bench CLIENTS TIMES
+> save
+saved
+> set note written after the save, kept by the final snapshot
+ok
