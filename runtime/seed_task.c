@@ -880,7 +880,14 @@ static sd_task *task_current(void) {
 
 void sd_task_set_name_(const char *name) { task_current()->name = name; }
 
-sd_lframe **sd_lf_top_(void) { return &task_current()->lf_top; }
+/* Called by every generated function with a cleanup frame: reads the TLS
+ * itself (noinline, never parks) rather than through tls_task. */
+SD_NOINLINE sd_lframe **sd_lf_top_(void) {
+  SD_TLS_FENCE();
+  sd_task *t = sd_cur_;
+  if (SD_UNLIKELY(!t)) t = task_current();
+  return &t->lf_top;
+}
 
 /* ------------------------------------------------- deadlocks */
 
