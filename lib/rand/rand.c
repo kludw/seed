@@ -16,6 +16,10 @@
 static _Thread_local bool rand_seeded;
 static _Thread_local uint64_t rand_state;
 
+/* Threads are reused by later goroutines (runtime/README.md, section 10):
+ * the next goroutine on this thread seeds its own generator. */
+static void rand_forget(void) { rand_seeded = false; }
+
 static void rand_seed_from_os(void) {
   uint64_t seed;
   if (getentropy(&seed, sizeof seed) != 0) {
@@ -30,6 +34,7 @@ static void rand_seed_from_os(void) {
   }
   rand_state = seed;
   rand_seeded = true;
+  sd_goroutine_atexit(rand_forget);
 }
 
 sd_int sd_lib_rand_nextOs(void) {

@@ -1,0 +1,28 @@
+// Goroutines: 20,000 goroutines in batches of 1,000 (each batch one
+// group), each sending a result on a channel.
+package main
+
+import "fmt"
+
+fn square(int i, chan int out) error {
+    out.send(i * i % 1000)
+    return null
+}
+
+fn main([]string args) error {
+    int total = 0
+    for (int batch = 0; batch < 20; batch++) {
+        chan int out = chan int(1000)
+        try group {
+            for (int i = 0; i < 1000; i++) {
+                spawn square(batch * 1000 + i, out)
+            }
+        }
+        out.close()
+        for (int? v = out.receive(); v != null; v = out.receive()) {
+            total = total + v
+        }
+    }
+    fmt.println(total.string())
+    return null
+}

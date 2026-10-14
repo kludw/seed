@@ -1,0 +1,14 @@
+// Integer arithmetic in a tight loop: small ints only.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    int n = 300000000
+    int sum = 0
+    for (int i = 0; i < n; i++) {
+        sum = sum + (i * i) % 7 + (i & 3)
+    }
+    fmt.println(sum.string())
+    return null
+}

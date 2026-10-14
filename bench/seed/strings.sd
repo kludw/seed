@@ -1,0 +1,27 @@
+// String building: int.string(), concatenation, appending in a loop,
+// join, split and contains.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    int total = 0
+    for (int round = 0; round < 60; round++) {
+        []string parts = []string{}
+        for (int i = 0; i < 100000; i++) {
+            parts.push("item-" + i.string())
+        }
+        string joined = parts.join(",")
+        []string back = joined.split(",")
+        string acc = ""
+        for (int i = 0; i < back.len(); i++) {
+            acc = acc + back[i]
+            if (back[i].contains("99")) {
+                total++
+            }
+        }
+        total = total + acc.len() + joined.len()
+    }
+    fmt.println(total.string())
+    return null
+}

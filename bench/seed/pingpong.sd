@@ -1,0 +1,68 @@
+// Channels: 100,000 round trips between two goroutines over unbuffered
+// channels, then 1 million values through a buffered channel.
+package main
+
+import "fmt"
+
+fn ponger(chan int ping, chan int pong) error {
+    for (;;) {
+        int? v = ping.receive()
+        if (v == null) {
+            pong.close()
+            return null
+        }
+        pong.send(v + 1)
+    }
+}
+
+fn producer(int n, chan int out) error {
+    for (int i = 0; i < n; i++) {
+        out.send(i)
+    }
+    out.close()
+    return null
+}
+
+fn pinger(int n, chan int ping, chan int pong, chan int result) error {
+    int sum = 0
+    for (int i = 0; i < n; i++) {
+        ping.send(i)
+        int? v = pong.receive()
+        if (v != null) {
+            sum = sum + v
+        }
+    }
+    ping.close()
+    result.send(sum)
+    return null
+}
+
+fn consumer(chan int in, chan int result) error {
+    int sum = 0
+    for (int? v = in.receive(); v != null; v = in.receive()) {
+        sum = sum + v
+    }
+    result.send(sum)
+    return null
+}
+
+fn main([]string args) error {
+    chan int ping = chan int(0)
+    chan int pong = chan int(0)
+    chan int results = chan int(2)
+    try group {
+        spawn ponger(ping, pong)
+        spawn pinger(100000, ping, pong, results)
+    }
+    chan int buffered = chan int(1024)
+    try group {
+        spawn producer(1000000, buffered)
+        spawn consumer(buffered, results)
+    }
+    int? a = results.receive()
+    int? b = results.receive()
+    if (a != null && b != null) {
+        fmt.println((a + b).string())
+    }
+    return null
+}

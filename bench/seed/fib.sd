@@ -1,0 +1,16 @@
+// Recursive calls: fib(40).
+package main
+
+import "fmt"
+
+fn fib(int n) int {
+    if (n < 2) {
+        return n
+    }
+    return fib(n - 1) + fib(n - 2)
+}
+
+fn main([]string args) error {
+    fmt.println(fib(40).string())
+    return null
+}
