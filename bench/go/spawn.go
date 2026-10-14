@@ -1,4 +1,4 @@
-// Goroutines: 20,000 goroutines in batches of 1,000 (each batch one
+// Goroutines: 100,000 goroutines in batches of 1,000 (each batch one
 // WaitGroup), each sending a result on a channel.
 package main
 
@@ -9,7 +9,7 @@ import (
 
 func main() {
 	total := 0
-	for batch := 0; batch < 20; batch++ {
+	for batch := 0; batch < 100; batch++ {
 		out := make(chan int, 1000)
 		var wg sync.WaitGroup
 		for i := 0; i < 1000; i++ {

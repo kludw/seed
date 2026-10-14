@@ -69,7 +69,7 @@ struct sd_task {
 
   pthread_mutex_t mu; /* protects wake (written under it; park may also spin on it), sleeping, sel, waiting_group, blocking */
   pthread_cond_t cv;
-  atomic_bool wake;
+  _Atomic(void *) wake; /* non-NULL: woken (a pointer, so that spin_until can watch it) */
   bool sleeping;
   sd_sel *sel;
   sd_group *waiting_group;
@@ -152,12 +152,22 @@ static sd_task *task_new(void) {
   pthread_mutex_init(&t->mu, NULL);
   pthread_cond_init(&t->cv, NULL);
   atomic_init(&t->cancelled, 0);
-  atomic_init(&t->wake, false);
+  atomic_init(&t->wake, NULL);
   t->wake_r = t->wake_w = -1;
-  struct timespec ts;
-  clock_gettime(CLOCK_MONOTONIC, &ts);
-  t->rng = ((uint64_t)ts.tv_nsec * 0x9E3779B97F4A7C15ULL) ^ ((uint64_t)(uintptr_t)t << 7) ^
-           (atomic_fetch_add(&sd_seed_counter, 1) * 0xBF58476D1CE4E5B9ULL);
+  /* The select generator's seed: a per-process base (the clock, read
+   * once) and a counter, so that no clock is read per goroutine. */
+  static _Atomic uint64_t seed_base;
+  uint64_t base = atomic_load_explicit(&seed_base, memory_order_relaxed);
+  if (!base) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    base = ((uint64_t)ts.tv_sec * 1000000000u + (uint64_t)ts.tv_nsec) * 0x9E3779B97F4A7C15ULL | 1;
+    atomic_store_explicit(&seed_base, base, memory_order_relaxed);
+  }
+  uint64_t x = base ^ ((uint64_t)(uintptr_t)t << 7) ^ (atomic_fetch_add(&sd_seed_counter, 1) * 0xBF58476D1CE4E5B9ULL);
+  x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ULL;
+  x = (x ^ (x >> 27)) * 0x94d049bb133111ebULL;
+  t->rng = x ^ (x >> 31);
   if (!t->rng) t->rng = 0x853c49e6748fea9bULL;
   return t;
 }
@@ -230,27 +240,56 @@ static inline void cpu_relax(void) {
 
 static int64_t mono_ns(void);
 
-/* Spins while t->wake is false, for at most SD_SPIN_NS. Does nothing on a
- * single CPU, or when more goroutines are running than there are CPUs. */
-static void spin_for_wake(sd_task *t) {
+/* Locks m, trying for a short while before blocking: the group and pool
+ * locks are held for a few instructions at a time, but by many threads at
+ * once when goroutines start and end in bursts, and a blocked
+ * pthread_mutex_lock costs a system call to sleep and another to wake. */
+static void lock_briefly(pthread_mutex_t *m) {
+  for (int i = 0; i < 100; i++) {
+    if (pthread_mutex_trylock(m) == 0) return;
+    cpu_relax();
+  }
+  pthread_mutex_lock(m);
+}
+
+/* Threads spinning now (in spin_until), at most half the CPUs, so that
+ * spinning never takes more than half the machine from running goroutines,
+ * however many goroutines block and wake at once. */
+static atomic_int sd_spinners;
+
+/* Spins until *flag is non-zero (returning true), for at most ns
+ * nanoseconds. Does nothing (returns false) on a single CPU, when more
+ * goroutines are running than there are CPUs, or when enough threads are
+ * spinning already. */
+static bool spin_until(_Atomic(void *) *flag, int64_t ns) {
   int n = ncpu();
-  if (n < 2 || atomic_load_explicit(&sd_running, memory_order_relaxed) > n) return;
+  if (n < 2 || atomic_load_explicit(&sd_running, memory_order_relaxed) > n) return false;
+  int spinning = atomic_load_explicit(&sd_spinners, memory_order_relaxed);
+  do {
+    if (spinning >= n / 2) return false;
+  } while (!atomic_compare_exchange_weak(&sd_spinners, &spinning, spinning + 1));
+  bool got = false;
   int64_t start = 0;
   for (int i = 1;; i++) {
-    if (atomic_load_explicit(&t->wake, memory_order_acquire)) return;
+    if (atomic_load_explicit(flag, memory_order_acquire)) {
+      got = true;
+      break;
+    }
     cpu_relax();
     if ((i & 255) == 0) {
       int64_t now = mono_ns();
       if (!start) start = now;
-      else if (now - start > SD_SPIN_NS) return;
+      else if (now - start > ns) break;
     }
   }
+  atomic_fetch_sub(&sd_spinners, 1);
+  return got;
 }
 
 /* Blocks until someone calls unpark. The caller resets t->wake (under
  * t->mu) before making itself findable by wakers. */
 static void park(sd_task *t) {
-  spin_for_wake(t);
+  (void)spin_until(&t->wake, SD_SPIN_NS);
   pthread_mutex_lock(&t->mu);
   if (!atomic_load_explicit(&t->wake, memory_order_relaxed)) {
     t->sleeping = true;
@@ -261,7 +300,7 @@ static void park(sd_task *t) {
 }
 
 static void unpark_locked(sd_task *t) {
-  atomic_store_explicit(&t->wake, true, memory_order_release);
+  atomic_store_explicit(&t->wake, (void *)t, memory_order_release);
   if (t->sleeping) {
     t->sleeping = false;
     atomic_fetch_add(&sd_running, 1);
@@ -277,7 +316,7 @@ static void unpark(sd_task *t) {
 
 static void reset_wake(sd_task *t) {
   pthread_mutex_lock(&t->mu);
-  atomic_store_explicit(&t->wake, false, memory_order_relaxed);
+  atomic_store_explicit(&t->wake, NULL, memory_order_relaxed);
   pthread_mutex_unlock(&t->mu);
 }
 
@@ -519,7 +558,7 @@ static bool run_goroutine(sd_task *t) {
   }
   while (t->natexit > 0) t->atexit_fns[--t->natexit]();
   sd_group *g = t->group;
-  pthread_mutex_lock(&g->mu);
+  lock_briefly(&g->mu);
   if (!sd_err_is_null(result)) {
     if (sd_err_is_null(g->err)) {
       g->err = result;
@@ -565,12 +604,12 @@ static bool run_goroutine(sd_task *t) {
 
 #define SD_POOL_MAX 1024
 #define SD_POOL_IDLE_NS ((int64_t)2000000000)
-#define SD_POOL_SPIN_NS 50000
+#define SD_POOL_SPIN_NS 20000
 
 typedef struct sd_worker {
   pthread_mutex_t mu;
   pthread_cond_t cv;
-  _Atomic(sd_task *) task; /* the goroutine to run; NULL while idle */
+  _Atomic(void *) task;    /* the goroutine (sd_task *) to run; NULL while idle */
   bool sleeping;           /* waiting on cv (under mu) */
   struct sd_worker *next;  /* in the idle list (under pool_mu) */
   void *altstack;
@@ -583,16 +622,8 @@ static int pool_nidle;
 /* Waits for the next goroutine. Returns NULL when the worker should end
  * (it has then been taken out of the idle list). */
 static sd_task *worker_wait(sd_worker *w) {
-  int64_t start = mono_ns();
-  if (ncpu() > 1) {
-    for (int i = 1;; i++) {
-      sd_task *t = atomic_load_explicit(&w->task, memory_order_acquire);
-      if (t) return t;
-      cpu_relax();
-      if ((i & 255) == 0 && mono_ns() - start > SD_POOL_SPIN_NS) break;
-    }
-  }
-  int64_t deadline = start + SD_POOL_IDLE_NS;
+  if (spin_until(&w->task, SD_POOL_SPIN_NS)) return atomic_load_explicit(&w->task, memory_order_acquire);
+  int64_t deadline = mono_ns() + SD_POOL_IDLE_NS;
   pthread_mutex_lock(&w->mu);
   for (;;) {
     sd_task *t = atomic_load_explicit(&w->task, memory_order_acquire);
@@ -638,7 +669,7 @@ static void *worker_main(void *p) {
   while (t) {
     if (!run_goroutine(t)) break;
     atomic_store_explicit(&w->task, NULL, memory_order_relaxed);
-    pthread_mutex_lock(&pool_mu);
+    lock_briefly(&pool_mu);
     bool keep = pool_nidle < SD_POOL_MAX;
     if (keep) {
       w->next = pool_idle;
@@ -658,7 +689,7 @@ static void *worker_main(void *p) {
 
 /* Runs goroutine c on an idle worker, or on a new thread. */
 static void start_goroutine(sd_task *c) {
-  pthread_mutex_lock(&pool_mu);
+  lock_briefly(&pool_mu);
   sd_worker *w = pool_idle;
   if (w) {
     pool_idle = w->next;
@@ -698,11 +729,6 @@ static void reap(sd_task *m) {
 
 void sd_spawn(sd_group *g, sd_task_fn body, const sd_type *args_type, const void *args) {
   sd_task *parent = task_current();
-  pthread_mutex_lock(&g->mu);
-  sd_task *dead = g->dead;
-  g->dead = NULL;
-  pthread_mutex_unlock(&g->mu);
-  reap(dead);
   sd_task *c = task_new();
   c->body = body;
   c->group = g;
@@ -711,10 +737,21 @@ void sd_spawn(sd_group *g, sd_task_fn body, const sd_type *args_type, const void
     c->args = sd_alloc(args_type->size);
     sd_clone_deep(args_type, c->args, args);
   }
-  pthread_mutex_lock(&g->mu);
-  if (g->failed || atomic_load(&parent->cancelled)) {
+  lock_briefly(&g->mu);
+  /* Finished goroutines of the group are freed here (outside the lock). */
+  sd_task *dead = g->dead;
+  g->dead = NULL;
+  bool start = !g->failed && !atomic_load(&parent->cancelled);
+  if (start) {
+    c->next = g->members;
+    if (c->next) c->next->prev = c;
+    g->members = c;
+    g->running++;
+  }
+  pthread_mutex_unlock(&g->mu);
+  reap(dead);
+  if (!start) {
     /* The group is already failing: the goroutine is not started. */
-    pthread_mutex_unlock(&g->mu);
     if (args_type) {
       sd_release(args_type, c->args);
       free(c->args);
@@ -722,11 +759,6 @@ void sd_spawn(sd_group *g, sd_task_fn body, const sd_type *args_type, const void
     task_free(c);
     return;
   }
-  c->next = g->members;
-  if (c->next) c->next->prev = c;
-  g->members = c;
-  g->running++;
-  pthread_mutex_unlock(&g->mu);
   atomic_fetch_add(&sd_running, 1);
   start_goroutine(c);
 }
@@ -993,7 +1025,7 @@ int sd_select(sd_select_case *cases, int n) {
     }
     pthread_mutex_lock(&t->mu);
     t->sel = &sel;
-    atomic_store_explicit(&t->wake, false, memory_order_relaxed);
+    atomic_store_explicit(&t->wake, NULL, memory_order_relaxed);
     pthread_mutex_unlock(&t->mu);
     unlock_all(chans, nc);
 

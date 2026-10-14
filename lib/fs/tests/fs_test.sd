@@ -1,17 +1,10 @@
 package fs
 
-import "os"
-
-fn tempRoot() string {
-    string? t = os.env("TMPDIR")
-    if (t == null || t == "") {
-        return "/tmp/seed-lib-fs-test"
-    }
-    return t + "/seed-lib-fs-test"
-}
-
 test "write, read, list and remove" {
-    string dir = tempRoot() + "/a/b"
+    // A fresh directory, so that test programs running at the same time
+    // never share one (lib/BUGS_FIXED.md).
+    string root = try makeTemp("seed-lib-fs-test-")
+    string dir = root + "/a/b"
     try mkdir(dir)
     assert(isDir(dir))
     try mkdir(dir)
@@ -26,8 +19,8 @@ test "write, read, list and remove" {
     try remove(dir + "/one.txt")
     try remove(dir + "/two.txt")
     try remove(dir)
-    try remove(tempRoot() + "/a")
-    try remove(tempRoot())
+    try remove(root + "/a")
+    try remove(root)
     assert(!exists(dir))
 }
 
