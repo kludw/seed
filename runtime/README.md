@@ -8,6 +8,8 @@ replaces `seed0/runtime.c` (64-bit ints, memory never freed) with:
   maps and boxes, driven by **type descriptors** that generated code supplies,
 - goroutines on OS threads, channels, `select`, groups with Erlang-style
   failure, timers,
+- blocking calls that are stop points (`sd_wait_fd`, `sd_wait_child`) and
+  the process-wide handle table that `io`, `net` and `fs` use,
 - per-goroutine crash handling and a defer stack,
 - interface values, `error`, the OS side of the core packages `fmt`, `os`,
   `fs`, `errors` and `time` (the packages themselves are in `lib/`, with
@@ -499,12 +501,19 @@ sd_err l_err;
   group.
 - **Failure.** When a goroutine returns an error or crashes, the group records
   the first error and cancels every other goroutine in it. A cancelled
-  goroutine stops at its next channel **send, receive or select** (also
-  `time.sleep`), or immediately if it is blocked in one; its defers run.
+  goroutine stops at its next **stop point** (a channel send, receive or
+  select, `time.sleep`, or a blocking call of section 13: reading,
+  accepting, connecting, waiting for a child), or immediately if it is
+  blocked in one; its defers run.
   `close` is not a stopping point (so `defer out.close()` works in a stopped
   goroutine). A `spawn` executed after the group has failed doesn't start the
   goroutine. `sd_group_wait` returns the first error (`crash: <message>` for a
   crash), or null.
+- **Finished goroutines are freed while the group runs.** A goroutine that
+  ends moves itself to its group's dead list; the next `sd_spawn` in the
+  group (or `sd_group_wait`) joins those threads and frees them. A server's
+  group, which spawns a goroutine per connection for as long as it runs,
+  so holds only the connections that are open.
 - **Nesting.** A goroutine may run its own groups. Cancelling a goroutine that
   is waiting in `sd_group_wait` cancels that inner group too, so whole trees
   stop. A group is always waited for: if the goroutine that owns it crashes
@@ -698,11 +707,95 @@ may contain NULs): make them with `sd_str_new(bytes, n)` or
 it does not fit), `sd_int_from_i64(i)`. Lists: `sd_list_new(&sd_type_str,
 cap)`, `SD_LIST_PUSH(&l, sd_str, value)`, `SD_LIST_GET(l, T, i)`.
 
-**Goroutines.** Each goroutine is an OS thread, so a native that blocks
-(reads a socket, waits for a child) blocks only its own goroutine. It is
-not a stop point, though: a goroutine whose group fails is stopped only at
-channel operations and `time.sleep` (section 10). Blocking natives that
-must be stoppable need a runtime hook that does not exist yet.
+**Blocking calls.** Each goroutine is an OS thread, so a native that
+blocks blocks only its own goroutine. To be a **stop point** (SPEC.md,
+DECISIONS.md 23: a goroutine whose group fails must stop there too), a
+native never blocks in the OS directly; it waits through the runtime:
+
+```c
+int sd_wait_fd(int fd, bool for_write, int64_t timeout_ns);  /* <= 0: no limit */
+    /* SD_WAIT_READY, SD_WAIT_TIMEOUT, SD_WAIT_STOP, SD_WAIT_FAILED (errno) */
+int sd_wait_child(pid_t pid, int *status);  /* 0, an errno value, or SD_WAIT_STOP */
+bool sd_stopping(void);
+SD_NORETURN void sd_stop(void);
+```
+
+`sd_wait_fd` `poll`s the descriptor together with the goroutine's
+**wake-up pipe** (made on its first wait, closed when the goroutine is
+freed). Cancelling a goroutine sets its flag and, if it is waiting, writes
+a byte to the pipe, so the wait returns `SD_WAIT_STOP` at once. The native
+then releases what it holds (closes a half-made socket, frees memory) and
+calls `sd_stop()`, which unwinds the goroutine exactly like a cancelled
+channel operation (defers run; C locals of the unwound frames leak, as for
+any crash). A wait in an already cancelled goroutine returns `SD_WAIT_STOP`
+without waiting, so a deferred call of a stopped goroutine that blocks is
+stopped too (as a channel operation would be). `sd_wait_child` waits for a
+child process (a helper thread does the blocking `waitpid` and signals a
+pipe); on `SD_WAIT_STOP` it has already killed the child with `SIGKILL`
+and reaped it. `os.run` uses it, so it is a stop point. A goroutine
+waiting in `poll` counts as running for the deadlock check: something
+outside the program can still wake it. If no descriptors are left for the
+wake-up pipe, waits poll in slices of 50 ms instead and still notice a
+stop. (docs/stdlib.md sketched a pair `sd_block_begin`/`sd_block_end`
+around a native's own wait; a single call that does the waiting is harder
+to get wrong, and a native with an unusual wait can still use `sd_wait_fd`
+on a pipe of its own, as `sd_wait_child` and `net.dial`'s name lookup do.)
+
+```c
+/* a native that waits for a socket to become readable */
+int w = sd_wait_fd(fd, false, timeout_ns);
+if (w == SD_WAIT_STOP) { free(buf); close(fd); sd_stop(); }   /* never returns */
+if (w == SD_WAIT_TIMEOUT) return sd_errorf("net.dial: %s: timeout", addr->data);
+```
+
+**Handles.** Open descriptors that Seed code refers to (connections,
+listeners, files, stdin) live in one process-wide table; the Seed handle
+type holds only the entry's id (`pub type Conn struct { int id }`). Ids
+count up from 1 and are never reused.
+
+```c
+int64_t sd_handle_new(int kind, int fd, const char *name);  /* SD_HANDLE_CONN, _LISTENER, _FILE, _STDIN */
+sd_handle *sd_handle_acquire(int64_t id, int kind);         /* NULL: closed, unknown or another kind */
+void sd_handle_release(sd_handle *h);
+bool sd_handle_close(int64_t id);                           /* false: already closed */
+void sd_handle_set_timeout(int64_t id, int64_t ns);
+sd_str sd_handle_subject(int64_t id);                       /* its name, "" once closed */
+int sd_handle_wait(sd_handle *h, bool for_write);           /* SD_IO_OK, _TIMEOUT, _CLOSED, _ERROR */
+int sd_handle_read(sd_handle *h, int64_t max, sd_str *out, int *err);
+int sd_handle_read_line(sd_handle *h, sd_str *out, int *err);
+int sd_handle_read_all(sd_handle *h, sd_str *out, int *err);
+int sd_handle_write(sd_handle *h, const char *data, int64_t len, int *err);
+sd_err sd_handle_error(const char *fn, const sd_handle *h, int kind, int result, int err);
+```
+
+- `sd_handle_acquire` takes the entry's **operation lock**, so each
+  operation is atomic; a second goroutine using the same handle waits for
+  it (a stop point, checked every 20 ms). Release it with
+  `sd_handle_release` on every path.
+- The I/O functions return `SD_IO_OK` (a read got at least one byte),
+  `SD_IO_EOF` (nothing: end of input), `SD_IO_ERROR` (the errno value in
+  `*err`), `SD_IO_TIMEOUT` (no progress within the handle's timeout) or
+  `SD_IO_CLOSED`. They wait with `sd_handle_wait`, which **stops the
+  goroutine itself** (releasing the handle first) when it is cancelled, so
+  a native must hold nothing else across them. `sd_handle_error` turns a
+  result into the docs/stdlib.md error, `"<fn>: <name>: <reason>"`
+  (`timeout`, `connection is closed`, `listener is closed`, `file is
+  closed`, or `strerror`).
+- Reads go through the entry's buffer, so `read_line`, `read` and
+  `read_all` can be mixed (lines end at `"\n"`, with a `"\r"` before it
+  removed; the last line may lack the `"\n"`). A non-blocking descriptor
+  is read first and polled on `EAGAIN`; a blocking one (stdin, which may
+  be shared with other processes) is always polled first, so that the
+  wait stays a stop point. Writes to a `SD_HANDLE_CONN` use `send` without
+  `SIGPIPE`.
+- `sd_handle_close` marks the entry closed, takes it out of the table and
+  wakes a goroutine waiting on it (through its wake-up pipe), which gets
+  `SD_IO_CLOSED`. The descriptor itself is closed when the last operation
+  using it releases it, so its number is never reused under a running
+  operation. Handles are not closed when the last Seed copy disappears;
+  the process's exit closes them.
+
+`lib/io/io.c` and `lib/net/net.c` are the examples to follow.
 
 **What the compiler knows.** Nothing about natives beyond their
 declarations, except that `os.exit` and `os.crash` never return (for
@@ -858,6 +951,11 @@ Arguments are borrowed and results owned unless marked **consumes** or
 | `int sd_select(sd_select_case *cases, int n)` | |
 | `sd_chan *sd_time_after(sd_int ns)`, `void sd_time_sleep(sd_int ns)`, `sd_int sd_time_now(void)` | |
 | `sd_err sd_catch(sd_err (*fn)(void *), void *arg)` | crash -> error |
+| `int sd_wait_fd(int fd, bool for_write, int64_t timeout_ns)` | stop point: `SD_WAIT_READY`, `_TIMEOUT`, `_STOP`, `_FAILED` |
+| `int sd_wait_child(pid_t pid, int *status)` | stop point; on `SD_WAIT_STOP` the child was killed and reaped |
+| `bool sd_stopping(void)`, `void sd_stop(void)` | the goroutine was cancelled; unwind it (runs defers) |
+| `sd_handle_new`, `_acquire`, `_release`, `_close`, `_set_timeout`, `_subject`, `_fd`, `_name` | the handle table (section 13) |
+| `sd_handle_wait`, `_read`, `_read_line`, `_read_all`, `_write`, `_error` | handle I/O; stop points |
 
 ### Entry, fmt, os, fs
 
@@ -872,7 +970,7 @@ Arguments are borrowed and results owned unless marked **consumes** or
 | `sd_str sd_os_executable(void)` | `os.executable` (symbolic links resolved; `""` if unknown) |
 | `sd_err sd_os_cwd(sd_str *out)` | `os.cwd` |
 | `sd_str sd_os_env(sd_str name)` | `os.env` (NULL when unset) |
-| `sd_err sd_os_run(const sd_list *argv, sd_int *code)` | `os.run`; error when the program can't be started |
+| `sd_err sd_os_run(const sd_list *argv, sd_int *code)` | `os.run`; error when the program can't be started; a stop point (the child is killed) |
 | `sd_err sd_fs_read(path, sd_str *out)`, `sd_fs_write(path, data)` | |
 | `bool sd_fs_exists(path)`, `sd_fs_is_dir(path)` | |
 | `sd_err sd_fs_list(dir, sd_list **out)` | sorted names |
@@ -921,14 +1019,17 @@ runtime/tests/run.sh asan     # or tsan, plain, bench
 | `test_str.c` | every string method, `chars` on UTF-8 and invalid UTF-8, float formatting (20,000 random doubles compared with seed0's formatter via `seed0_float.c`) |
 | `test_mem.c` | lists, maps, boxes, enums, struct descriptors, copy-on-write through nested places, stable `sortBy`, interfaces and user error types, deep copies share nothing, no leaks (live object count), and a stress test: 2M rounds / 54M allocations freed with flat resident memory |
 | `test_pkg.c` | `os.env`, `os.run` (exit codes, program not found), `fs.*` |
+| `test_block.c` | blocking calls as stop points: cancelling goroutines blocked in `time.sleep`, in `sd_wait_fd` on a pipe, in a handle read on a non-blocking and on a blocking descriptor, in accept, in `os.run` (a `sleep 30` child is killed), and one waiting for another goroutine's operation lock; close waking a reader; read timeouts; line reading (CRLF, empty lines, a last line without newline, a 200 KB line); 3 MB over a socket pair; 20,000 goroutines spawned one after another in one group (freed while it runs) |
 | `test_conc.c` | buffered/unbuffered channels, copy semantics, ping-pong, 1000 goroutines in a group with deep-copied arguments, group error and crash with cancellation and defers (order checked), nested group cancellation, crash inside defers, select fairness (100,000 selects within 45-55%), select send/receive/closed/timeout, cancelling goroutines blocked in select, a 50-stage pipeline, the parallel word count |
 | `test_exit.c` + `test_exit.sh` | exit codes and messages: crash in main (defers run), error from main, `os.exit` flushing, deadlock (2 kinds), crash in a group block, stderr/stdout ordering, timers, stack overflow in main and in a goroutine |
 | `example.c` | the hand-lowered program from sections 3-11; output must equal `example.out` and it checks it leaks nothing |
 | `bench.c` | the numbers below |
 
 Sanitizers: everything passes under `-fsanitize=address,undefined` (with
-object counting) and the concurrency tests, the exit tests and the example
-under `-fsanitize=thread`, with no reports.
+object counting) and the concurrency and blocking tests, the exit tests
+and the example under `-fsanitize=thread`, with no reports. The `net` and
+`http` test programs (`seed test lib/net lib/http`) were also run under
+both sanitizers, with no reports.
 
 Performance on an Apple M-series laptop (`-O2`, `run.sh bench`):
 
@@ -973,10 +1074,11 @@ Decisions made while writing the runtime (nobody was available to ask):
    shared instead of copied.
 8. **Goroutines are OS threads** with 8 MB (lazily committed) stacks. The
    runtime keeps a count of running goroutines to detect deadlocks.
-9. **Cancellation points are send, receive, select and sleep**, not `close`;
-   cancelled goroutines run their defers; a channel operation inside a
-   defer of a stopped goroutine stops that deferred call (the other defers
-   still run).
+9. **Cancellation points are send, receive, select, sleep and the blocking
+   calls of section 13** (handle I/O, `sd_wait_fd`, `sd_wait_child`), not
+   `close`; cancelled goroutines run their defers; a channel operation or
+   blocking call inside a defer of a stopped goroutine stops that deferred
+   call (the other defers still run).
 10. **First crash wins** when deferred calls crash during unwinding.
 11. **Crashes unwind with `siglongjmp`**; stack overflow and other memory faults
     are caught with a SIGSEGV/SIGBUS handler on an alternate stack and
@@ -998,6 +1100,13 @@ Decisions made while writing the runtime (nobody was available to ask):
     `seed_core.c`; `test_mem.c` frees a million-node box chain, list nesting
     and map nesting).
 
+17. **Blocking calls wait in `poll` with a per-goroutine wake-up pipe**
+    (section 13) rather than with signals (`pthread_kill` + `EINTR` races
+    with the call being entered) or an event loop (goroutines are threads).
+    It costs two descriptors per goroutine that ever blocks.
+18. **Finished goroutines are reaped at the next spawn** in their group
+    (section 10), so long-running groups don't keep their threads.
+
 Limitations and things left for later:
 
 - **A crash or cancellation leaks the counted values held in the locals of the
@@ -1012,6 +1121,10 @@ Limitations and things left for later:
   thread creation fails.
 - Package-level constants of list/map type must not be cached in shared
   memory (section 12).
+- Two goroutines using one handle at once take turns on its operation lock;
+  the one waiting checks for a stop every 20 ms rather than being woken.
+- A goroutine stopped in a blocking call leaks its C frames' locals, like
+  any crash or cancellation.
 - Tested on macOS (arm64, Apple clang). The code uses only C11 and POSIX
   (`pthread`, `posix_spawnp`, `sigaltstack`, `clock_gettime`); Linux was not
   available for testing. On glibc, `posix_spawnp` may report a missing program

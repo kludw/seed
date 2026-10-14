@@ -1,0 +1,338 @@
+package http
+
+import "errors"
+import "net"
+import "os"
+import "time"
+
+// The handler of the server tests.
+type TestApp struct implements Handler {
+    string greeting
+}
+
+fn (TestApp app) handle(Request req) (Response, error) {
+    switch (req.path()) {
+    case "/":
+        return textResponse(statusOk, app.greeting), null
+    case "/echo":
+        string kind = "none"
+        string? given = req.headers["content-type"]
+        if (given != null) {
+            kind = given
+        }
+        return Response{status: statusOk, headers: map[string]string{"x-method": req.method, "x-type": kind}, body: req.body}, null
+    case "/query":
+        map[string]string q = req.query()
+        []string keys = q.keys()
+        []string parts = []string{}
+        for (int i = 0; i < keys.len(); i++) {
+            string? v = q[keys[i]]
+            if (v != null) {
+                parts.push(keys[i] + "=" + v)
+            }
+        }
+        return textResponse(statusOk, parts.join(",")), null
+    case "/error":
+        return null, errors.new("boom")
+    case "/crash":
+        os.crash("kaboom")
+    case "/slow":
+        time.sleep(30 * time.second)
+        return textResponse(statusOk, "slept"), null
+    default:
+        return textResponse(statusNotFound, "not found: " + req.path()), null
+    }
+}
+
+// Starts a server on a free port, runs `client` against it, then closes the
+// listener, which stops the server. The client's lines come back joined
+// with "\n".
+fn httpTestRun(fn(string, chan string) error client) (string, error) {
+    net.Listener ln = try net.listen("127.0.0.1:0")
+    chan string out = chan string(1)
+    error err = group {
+        spawn serveListener(ln, TestApp{greeting: "hello"})
+        spawn httpTestClient(ln, client, out)
+    }
+    if (err != null) {
+        return null, err
+    }
+    string? got = out.receive()
+    if (got == null) {
+        return null, errors.new("no result")
+    }
+    return got, null
+}
+
+fn httpTestClient(net.Listener ln, fn(string, chan string) error client, chan string out) error {
+    defer ln.close()
+    return client("http://" + ln.addr(), out)
+}
+
+// "<status> <body>" of a response, or the error.
+fn httpTestShow(Response? resp, error err) string {
+    if (err != null || resp == null) {
+        return "error: " + err.message()
+    }
+    return resp.status.string() + " " + resp.body
+}
+
+fn httpTestBasics(string base, chan string out) error {
+    []string lines = []string{}
+    Response resp = try get(base + "/")
+    lines.push(resp.status.string() + " " + resp.body)
+    string? kind = resp.headers["content-type"]
+    string? length = resp.headers["content-length"]
+    if (kind == null || length == null) {
+        return errors.new("missing headers")
+    }
+    lines.push(kind + "; " + length)
+    Response missing = try get(base + "/nope?x=1")
+    lines.push(missing.status.string() + " " + missing.body)
+    Response echoed = try send(Request{method: "POST", url: base + "/echo", headers: map[string]string{"Content-Type": "text/plain"}, body: "some data"})
+    string? method = echoed.headers["x-method"]
+    string? echoedType = echoed.headers["x-type"]
+    if (method == null || echoedType == null) {
+        return errors.new("missing echo headers")
+    }
+    lines.push(echoed.status.string() + " " + echoed.body + " " + method + " " + echoedType)
+    Response q = try get(base + "/query?a=1&b=x+y&c=%41")
+    lines.push(q.status.string() + " " + q.body)
+    Response head = try send(Request{method: "HEAD", url: base + "/", headers: map[string]string{}, body: ""})
+    string? headLength = head.headers["content-length"]
+    if (headLength == null) {
+        return errors.new("HEAD without content-length")
+    }
+    lines.push(head.status.string() + " [" + head.body + "] " + headLength)
+    out.send(lines.join("\n"))
+    return null
+}
+
+test "requests and responses" {
+    string got = try httpTestRun(httpTestBasics)
+    assert(got == "200 hello\ntext/plain; charset=utf-8; 5\n404 not found: /nope\n200 some data POST text/plain\n200 a=1,b=x y,c=A\n200 [] 5")
+}
+
+fn httpTestFailures(string base, chan string out) error {
+    []string lines = []string{}
+    Response e = try get(base + "/error")
+    lines.push(e.status.string() + " " + e.body.trim())
+    Response c = try get(base + "/crash")
+    lines.push(c.status.string() + " " + c.body.trim())
+    // The server carries on.
+    Response ok = try get(base + "/")
+    lines.push(ok.status.string() + " " + ok.body)
+    out.send(lines.join("\n"))
+    return null
+}
+
+test "a handler error or crash is a 500 and the server carries on" {
+    string got = try httpTestRun(httpTestFailures)
+    assert(got == "500 internal server error\n500 internal server error\n200 hello")
+}
+
+// Writes raw bytes to the server and reads everything until it closes the
+// connection (or until `want` bytes arrived, when want > 0).
+fn httpTestRaw(string base, string request, int want) (string, error) {
+    net.Conn c = try net.dial(base.slice(7, base.len()), 5 * time.second)
+    defer c.close()
+    c.setTimeout(5 * time.second)
+    try c.write(request)
+    string got = ""
+    for (; want <= 0 || got.len() < want; ) {
+        string? data = try c.read(65536)
+        if (data == null) {
+            break
+        }
+        got = got + data
+    }
+    return got, null
+}
+
+fn httpTestMalformed(string base, chan string out) error {
+    []string lines = []string{}
+    string bad = try httpTestRaw(base, "NONSENSE\r\n\r\n", 0)
+    lines.push(bad.split("\r\n")[0])
+    string noHost = try httpTestRaw(base, "GET / HTTP/1.1\r\n\r\n", 0)
+    lines.push(noHost.split("\r\n")[0])
+    string version = try httpTestRaw(base, "GET / HTTP/2.0\r\nhost: x\r\n\r\n", 0)
+    lines.push(version.split("\r\n")[0])
+    string big = try httpTestRaw(base, "POST / HTTP/1.1\r\nhost: x\r\ncontent-length: 999999999\r\n\r\n", 0)
+    lines.push(big.split("\r\n")[0])
+    // The server is still fine.
+    Response ok = try get(base + "/")
+    lines.push(ok.status.string() + " " + ok.body)
+    out.send(lines.join("\n"))
+    return null
+}
+
+test "malformed requests get 400 without calling the handler" {
+    string got = try httpTestRun(httpTestMalformed)
+    assert(got == "HTTP/1.1 400 Bad Request\nHTTP/1.1 400 Bad Request\nHTTP/1.1 505 HTTP Version Not Supported\nHTTP/1.1 413 Content Too Large\n200 hello")
+}
+
+fn httpTestKeepAlive(string base, chan string out) error {
+    // Two pipelined requests on one connection, then one that closes it.
+    string req = "GET / HTTP/1.1\r\nhost: x\r\n\r\nPOST /echo HTTP/1.1\r\nhost: x\r\ntransfer-encoding: chunked\r\n\r\n3\r\nabc\r\n2\r\nde\r\n0\r\n\r\nGET /nope HTTP/1.1\r\nhost: x\r\nconnection: close\r\n\r\n"
+    string got = try httpTestRaw(base, req, 0)
+    // The status codes of the responses, in order.
+    []string statuses = []string{}
+    []string parts = got.split("HTTP/1.1 ")
+    for (int i = 1; i < parts.len(); i++) {
+        statuses.push(parts[i].slice(0, 3))
+    }
+    statuses.push(got.contains("\r\n\r\nabcde").string())
+    // HTTP/1.0 closes after one response unless it asks for keep-alive.
+    string old = try httpTestRaw(base, "GET / HTTP/1.0\r\n\r\n", 0)
+    statuses.push(old.split("\r\n")[0])
+    // A client that waits for 100 Continue before sending its body.
+    net.Conn c = try net.dial(base.slice(7, base.len()), 5 * time.second)
+    defer c.close()
+    try c.write("POST /echo HTTP/1.1\r\nhost: x\r\ncontent-length: 4\r\nexpect: 100-continue\r\nconnection: close\r\n\r\n")
+    string? interim = try c.read(100)
+    if (interim == null) {
+        return errors.new("no 100 Continue")
+    }
+    statuses.push(interim.trim())
+    try c.write("body")
+    string rest = ""
+    for (;;) {
+        string? data = try c.read(1000)
+        if (data == null) {
+            break
+        }
+        rest = rest + data
+    }
+    statuses.push(rest.split("\r\n")[0])
+    out.send(statuses.join("\n"))
+    return null
+}
+
+test "keep-alive, pipelining, chunked bodies and 100-continue" {
+    string got = try httpTestRun(httpTestKeepAlive)
+    assert(got == "200\n200\n404\ntrue\nHTTP/1.1 200 OK\nHTTP/1.1 100 Continue\nHTTP/1.1 200 OK")
+}
+
+fn httpTestParallelClient(string base, int n, chan int done) error {
+    for (int i = 0; i < 10; i++) {
+        Response resp = try send(Request{method: "POST", url: base + "/echo", headers: map[string]string{}, body: "client " + n.string() + " request " + i.string()})
+        if (resp.body != "client " + n.string() + " request " + i.string()) {
+            return errors.new("wrong body " + resp.body)
+        }
+    }
+    done.send(n)
+    return null
+}
+
+fn httpTestParallel(string base, chan string out) error {
+    chan int done = chan int(20)
+    try group {
+        for (int i = 0; i < 20; i++) {
+            spawn httpTestParallelClient(base, i, done)
+        }
+    }
+    done.close()
+    int count = 0
+    for (;;) {
+        int? n = done.receive()
+        if (n == null) {
+            break
+        }
+        count++
+    }
+    out.send(count.string() + " clients")
+    return null
+}
+
+test "parallel clients" {
+    string got = try httpTestRun(httpTestParallel)
+    assert(got == "20 clients")
+}
+
+fn httpTestStopSoon() error {
+    time.sleep(50 * time.millisecond)
+    return errors.new("stop")
+}
+
+// Starts a request that the handler takes 30 seconds to answer.
+fn httpTestSlowRequest(string base) error {
+    _ = try get(base + "/slow")
+    return errors.new("the slow request finished")
+}
+
+test "a stopped group stops the server, its connections and its handlers" {
+    net.Listener ln = try net.listen("127.0.0.1:0")
+    defer ln.close()
+    error err = group {
+        spawn serveListener(ln, TestApp{greeting: "hello"})
+        spawn httpTestSlowRequest("http://" + ln.addr())
+        spawn httpTestStopSoon()
+    }
+    assert(err != null)
+    assert(err.message() == "stop")
+}
+
+test "serve reports a port in use" {
+    net.Listener ln = try net.listen("127.0.0.1:0")
+    defer ln.close()
+    error err = serve(ln.addr(), TestApp{greeting: "hello"})
+    assert(err != null)
+    assert(err.message() == "http.serve: " + ln.addr() + ": address already in use")
+}
+
+test "client errors" {
+    net.Listener ln = try net.listen("127.0.0.1:0")
+    string addr = ln.addr()
+    ln.close()
+    Response? resp, error err = get("http://" + addr + "/")
+    assert(httpTestShow(resp, err) == "error: http.get: http://" + addr + "/: connection refused")
+    Response? resp2, error err2 = get("https://example.com/")
+    assert(httpTestShow(resp2, err2) == "error: http.get: https://example.com/: https is not supported")
+    Response? resp3, error err3 = send(Request{method: "GET", url: "ftp://x/", headers: map[string]string{}, body: ""})
+    assert(httpTestShow(resp3, err3) == "error: http.send: ftp://x/: unsupported scheme ftp")
+}
+
+// A server that answers garbage, or closes without answering.
+fn httpTestBadServer(net.Listener ln, string answer) error {
+    for (int i = 0; i < 1; i++) {
+        net.Conn c = try ln.accept()
+        _ = try c.read(65536)
+        if (answer != "") {
+            try c.write(answer)
+        }
+        c.close()
+    }
+    return null
+}
+
+fn httpTestBadClient(string addr, chan string out) error {
+    Response? resp, error err = get("http://" + addr + "/")
+    out.send(httpTestShow(resp, err))
+    return null
+}
+
+fn httpTestAgainst(string answer) (string, error) {
+    net.Listener ln = try net.listen("127.0.0.1:0")
+    defer ln.close()
+    chan string out = chan string(1)
+    try group {
+        spawn httpTestBadServer(ln, answer)
+        spawn httpTestBadClient(ln.addr(), out)
+    }
+    string? got = out.receive()
+    if (got == null) {
+        return null, errors.new("no result")
+    }
+    return got, null
+}
+
+test "malformed responses are errors" {
+    string a = try httpTestAgainst("")
+    assert(a.endsWith("/: connection closed without a response"))
+    string b = try httpTestAgainst("HTTP/1.1 abc\r\n\r\n")
+    assert(b.endsWith("/: malformed status line"))
+    string c = try httpTestAgainst("HTTP/1.1 200 OK\r\ncontent-length: 10\r\n\r\nshort")
+    assert(c.endsWith("/: connection closed in the middle of the response body"))
+    string d = try httpTestAgainst("HTTP/1.1 200 OK\r\n\r\nuntil the end")
+    assert(d == "200 until the end")
+}

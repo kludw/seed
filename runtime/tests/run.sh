@@ -4,7 +4,7 @@
 #   runtime/tests/run.sh [all|asan|tsan|plain|bench]     (default: all)
 #
 #   asan   every test under -fsanitize=address,undefined, with object counting
-#   tsan   the concurrency tests, the exit tests and the example under -fsanitize=thread
+#   tsan   the concurrency and blocking tests, the exit tests and the example under -fsanitize=thread
 #   plain  every test at -O2 (runtime compiled as separate units), including the
 #          long allocation stress test with its resident-memory check and the
 #          stack-overflow tests (which need the runtime's own SIGSEGV handler)
@@ -54,11 +54,11 @@ run_asan() {
   echo "== asan+ubsan"
   # shellcheck disable=SC2086
   step "build seed0_float" $CC -std=c11 $f -w -c "$here/seed0_float.c" -o "$d/seed0_float.o" || return
-  for t in test_int test_mem test_pkg test_conc test_exit example; do
+  for t in test_int test_mem test_pkg test_conc test_block test_exit example; do
     step "build $t" build_test "$d" "$f" $t
   done
   step "build test_str" build_test "$d" "$f" test_str "$d/seed0_float.o"
-  for t in test_int test_str test_mem test_pkg test_conc; do step "$t (asan)" "$d/$t"; done
+  for t in test_int test_str test_mem test_pkg test_conc test_block; do step "$t (asan)" "$d/$t"; done
   step "test_exit (asan)" "$here/test_exit.sh" "$d/test_exit" nostack
   step "example (asan)" run_example "$d/example"
 }
@@ -68,8 +68,9 @@ run_tsan() {
   mkdir -p "$d"
   f="-O1 -g -fsanitize=thread"
   echo "== tsan"
-  for t in test_conc test_exit example; do step "build $t" build_test "$d" "$f" $t; done
+  for t in test_conc test_block test_exit example; do step "build $t" build_test "$d" "$f" $t; done
   step "test_conc (tsan)" "$d/test_conc" 20000
+  step "test_block (tsan)" "$d/test_block" 1000
   step "test_exit (tsan)" "$here/test_exit.sh" "$d/test_exit" nostack
   step "example (tsan)" run_example "$d/example"
 }
@@ -88,7 +89,7 @@ run_plain() {
   done
   # shellcheck disable=SC2086
   step "build seed0_float" $CC -std=c11 $f -w -c "$here/seed0_float.c" -o "$d/seed0_float.o"
-  for t in test_int test_str test_mem test_pkg test_conc test_exit example; do
+  for t in test_int test_str test_mem test_pkg test_conc test_block test_exit example; do
     extra=""
     [ $t = test_str ] && extra="$d/seed0_float.o"
     # shellcheck disable=SC2086
@@ -97,6 +98,7 @@ run_plain() {
   for t in test_int test_str test_pkg; do step "$t (plain)" "$d/$t"; done
   step "test_mem (plain, 2M rounds)" "$d/test_mem" 2000000
   step "test_conc (plain, 100k ping-pongs)" "$d/test_conc" 100000
+  step "test_block (plain, 20k goroutines in one group)" "$d/test_block" 20000
   step "test_exit (plain)" "$here/test_exit.sh" "$d/test_exit"
   step "example (plain)" run_example "$d/example"
 }

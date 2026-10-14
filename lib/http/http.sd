@@ -1,13 +1,10 @@
 package http
 
 // An HTTP/1.1 server and client (docs/stdlib.md, "http"). This file has the
-// public types and the pure-Seed parts of the API: Request.path and
-// Request.query, statusText and the status constants, textResponse and
-// jsonResponse. wire.sd has the message reader and writer that serve, get
-// and send are built on.
-//
-// serve, get and send need the net package (native sockets) and are added
-// with it; see lib/README.md for how they use wire.sd.
+// public types, Request.path and Request.query, statusText and the status
+// constants, textResponse and jsonResponse. server.sd has serve and
+// serveListener, client.sd has get and send; both are built on net and on
+// wire.sd, the message reader and writer.
 
 import "encoding"
 import "json"

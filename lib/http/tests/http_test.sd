@@ -331,10 +331,10 @@ test "parse url errors" {
 }
 
 test "request bytes" {
-    Request get = Request{method: "GET", url: "http://example.com:8080/todos?x=1", headers: map[string]string{}, body: ""}
-    HttpTarget target, error err = parseUrl("http.send", get.url)
+    Request getReq = Request{method: "GET", url: "http://example.com:8080/todos?x=1", headers: map[string]string{}, body: ""}
+    HttpTarget target, error err = parseUrl("http.send", getReq.url)
     assert(err == null)
-    string bytes, error err2 = requestBytes("http.send", get, target)
+    string bytes, error err2 = requestBytes("http.send", getReq, target)
     assert(err2 == null && bytes == "GET /todos?x=1 HTTP/1.1\r\nhost: example.com:8080\r\nconnection: close\r\n\r\n")
     Request post = Request{method: "POST", url: "http://example.com/todos", headers: map[string]string{"Content-Type": "application/json", "Connection": "keep-alive", "Host": "virtual.example"}, body: ""}
     HttpTarget t2, error err3 = parseUrl("http.send", post.url)

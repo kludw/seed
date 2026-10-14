@@ -11,7 +11,7 @@ SEED_SRC = $(sort $(wildcard compiler/*.sd))
 # The runtime that the compiler pastes into every generated program.
 RUNTIME_SRC = $(wildcard runtime/*.h runtime/seed_*.c)
 
-.PHONY: all test0 test test-full test-leaks test-fmt test-lib verify clean
+.PHONY: all test0 test test-full test-leaks test-fmt test-lib test-examples verify clean
 
 all: build/seed2
 
@@ -69,6 +69,11 @@ test-leaks: build/seed2
 # The tests of the standard library packages (lib/<pkg>/tests).
 test-lib: build/seed2
 	build/seed2 test lib
+
+# Builds every program in examples/ and runs the ones that need no person:
+# wordcount on stdin, todo, and server with fetch (and curl) as clients.
+test-examples: build/seed2
+	tests/examples.sh build/seed2
 
 # seed fmt. --verify runs the formatter's own checks on every .sd file under
 # compiler/, tests/ and lib/ (files with syntax errors are skipped): formatting the

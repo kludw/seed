@@ -1,0 +1,17 @@
+package main
+
+import "fmt"
+import "io"
+
+// The last line is returned without a newline; an empty input gives null
+// at once (io_stdin_lines.in is a single unterminated line).
+fn main([]string args) error {
+    for (;;) {
+        string? line = try io.readLine()
+        if (line == null) {
+            fmt.println("end")
+            return null
+        }
+        fmt.println("<" + line + ">")
+    }
+}

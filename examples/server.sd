@@ -17,6 +17,7 @@ import "errors"
 import "fmt"
 import "http"
 import "json"
+import "net"
 import "time"
 
 type Op enum {
@@ -127,13 +128,17 @@ fn main([]string args) error {
     if (args.len() > 1) {
         addr = args[1]
     }
+    // Listening first (rather than http.serve(addr, app)) tells us the real
+    // address, which matters for port 0 ("127.0.0.1:0" picks a free port).
+    net.Listener ln = try net.listen(addr)
+    defer ln.close()
     chan Op ops = chan Op(16)
     App app = App{ops: ops, started: time.monotonic()}
-    fmt.println("listening on " + addr)
-    // If serve fails (the port is taken, say), the group stops the store
-    // and main returns the error.
+    fmt.eprintln("listening on " + ln.addr())
+    // The server runs until the program is stopped. If it failed, the group
+    // would stop the store and main would return the error.
     return group {
         spawn store(ops)
-        spawn http.serve(addr, app)
+        spawn http.serveListener(ln, app)
     }
 }

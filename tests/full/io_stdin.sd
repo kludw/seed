@@ -1,0 +1,24 @@
+package main
+
+import "fmt"
+import "io"
+
+// Reads two lines, then the rest at once; then both report the end.
+fn main([]string args) error {
+    fmt.print("prompt> ")
+    for (int i = 0; i < 3; i++) {
+        string? line = try io.readLine()
+        if (line == null) {
+            fmt.println("null")
+        } else {
+            fmt.println("[" + line + "] " + line.len().string())
+        }
+    }
+    string rest = try io.readAll()
+    fmt.println("rest: [" + rest + "]")
+    string? after = try io.readLine()
+    fmt.println("after: " + (after == null).string())
+    string empty = try io.readAll()
+    fmt.println("empty: [" + empty + "]")
+    return null
+}

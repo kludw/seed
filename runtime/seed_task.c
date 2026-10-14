@@ -1,18 +1,24 @@
 /* Goroutines (one OS thread each), crashes and defer, groups, channels,
- * select, timers and program entry.
+ * select, timers, blocking calls and the handle table, and program entry.
  *
  * Locking order (never acquire against it):
  *   channel locks (several at once: in address order)
  *     -> task->mu
  *   group->mu -> task->mu -> (that task's waiting group)->mu -> ...  (down the tree)
- *   timer lock is never held while taking another lock.
+ *   handle->mu -> task->mu (close waking a waiter)
+ *   timer lock and the handle table's lock are never held while taking another lock.
  */
 #include "seed_internal.h"
 
+#include <fcntl.h>
+#include <limits.h>
+#include <poll.h>
 #include <pthread.h>
 #include <setjmp.h>
 #include <signal.h>
 #include <stdatomic.h>
+#include <sys/socket.h>
+#include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -61,15 +67,19 @@ struct sd_task {
   char *arena;
   size_t arena_len, arena_cap;
 
-  pthread_mutex_t mu; /* protects wake, sleeping, sel, waiting_group */
+  pthread_mutex_t mu; /* protects wake, sleeping, sel, waiting_group, blocking */
   pthread_cond_t cv;
   bool wake, sleeping;
   sd_sel *sel;
   sd_group *waiting_group;
   atomic_int cancelled;
+  /* Blocking calls: the goroutine's wake-up pipe (created on first use; -1
+   * before) and whether it is waiting in poll() on it now. */
+  int wake_r, wake_w;
+  bool blocking;
 
-  sd_group *group; /* the group this goroutine belongs to (NULL for main) */
-  sd_task *next;   /* next member of that group */
+  sd_group *group;          /* the group this goroutine belongs to (NULL for main) */
+  sd_task *next, *prev;     /* the other running members of that group */
   pthread_t thread;
   sd_task_fn body;
   void *args;
@@ -82,7 +92,8 @@ struct sd_task {
 
 struct sd_group {
   pthread_mutex_t mu;
-  sd_task *members;
+  sd_task *members; /* running goroutines */
+  sd_task *dead;    /* finished goroutines not joined yet (linked by next) */
   int64_t running;
   bool failed;
   sd_err err;
@@ -141,6 +152,7 @@ static sd_task *task_new(void) {
   pthread_mutex_init(&t->mu, NULL);
   pthread_cond_init(&t->cv, NULL);
   atomic_init(&t->cancelled, 0);
+  t->wake_r = t->wake_w = -1;
   struct timespec ts;
   clock_gettime(CLOCK_MONOTONIC, &ts);
   t->rng = ((uint64_t)ts.tv_nsec * 0x9E3779B97F4A7C15ULL) ^ ((uint64_t)(uintptr_t)t << 7) ^
@@ -150,6 +162,10 @@ static sd_task *task_new(void) {
 }
 
 static void task_free(sd_task *t) {
+  if (t->wake_r >= 0) {
+    close(t->wake_r);
+    close(t->wake_w);
+  }
   pthread_mutex_destroy(&t->mu);
   pthread_cond_destroy(&t->cv);
   free(t->cl);
@@ -362,9 +378,12 @@ static void unwind_to(sd_task *t, size_t mark) {
 
 static void group_cancel(sd_group *g);
 
+static void task_wake_locked(sd_task *m);
+
 static void task_cancel(sd_task *m) {
   atomic_store(&m->cancelled, 1);
   pthread_mutex_lock(&m->mu);
+  if (m->blocking) task_wake_locked(m);
   if (m->sel) {
     int expected = 0;
     if (atomic_compare_exchange_strong(&m->sel->done, &expected, SEL_CANCELLED)) unpark_locked(m);
@@ -453,6 +472,15 @@ static void *thread_main(void *p) {
     }
     group_cancel_locked(g);
   }
+  /* Move to the dead list: the next spawn in the group (or the group's wait)
+   * joins the thread and frees the task, so a long-lived group (a server)
+   * doesn't keep every finished goroutine. */
+  if (t->prev) t->prev->next = t->next;
+  else g->members = t->next;
+  if (t->next) t->next->prev = t->prev;
+  t->prev = NULL;
+  t->next = g->dead;
+  g->dead = t;
   sd_task *w = NULL;
   if (--g->running == 0) {
     w = g->waiter;
@@ -467,8 +495,22 @@ static void *thread_main(void *p) {
   return NULL;
 }
 
+/* Joins and frees a list of finished goroutines (linked by next). */
+static void reap(sd_task *m) {
+  for (sd_task *next; m; m = next) {
+    next = m->next;
+    pthread_join(m->thread, NULL);
+    task_free(m);
+  }
+}
+
 void sd_spawn(sd_group *g, sd_task_fn body, const sd_type *args_type, const void *args) {
   sd_task *parent = task_current();
+  pthread_mutex_lock(&g->mu);
+  sd_task *dead = g->dead;
+  g->dead = NULL;
+  pthread_mutex_unlock(&g->mu);
+  reap(dead);
   sd_task *c = task_new();
   c->body = body;
   c->group = g;
@@ -489,6 +531,7 @@ void sd_spawn(sd_group *g, sd_task_fn body, const sd_type *args_type, const void
     return;
   }
   c->next = g->members;
+  if (c->next) c->next->prev = c;
   g->members = c;
   g->running++;
   pthread_mutex_unlock(&g->mu);
@@ -517,12 +560,12 @@ static void group_join(sd_task *t, sd_group *g) {
   pthread_mutex_lock(&t->mu);
   t->waiting_group = NULL;
   pthread_mutex_unlock(&t->mu);
-  for (sd_task *m = g->members, *next; m; m = next) {
-    next = m->next;
-    pthread_join(m->thread, NULL);
-    task_free(m);
-  }
-  g->members = NULL;
+  /* Every member has finished, so all are on the dead list now. */
+  pthread_mutex_lock(&g->mu);
+  sd_task *dead = g->dead;
+  g->dead = NULL;
+  pthread_mutex_unlock(&g->mu);
+  reap(dead);
 }
 
 static void group_destroy(sd_group *g) {
@@ -930,6 +973,544 @@ void sd_time_sleep(sd_int ns) {
   sd_int v;
   if (sd_chan_receive(c, &v)) sd_int_release(v);
   sd_chan_release(c);
+}
+
+/* ------------------------------------------------------- blocking calls */
+
+/* A native that waits for the OS (a socket, stdin, a child process) waits in
+ * poll() on its descriptor and on the goroutine's wake-up pipe. Cancelling
+ * the goroutine (task_cancel) writes a byte to the pipe while it waits, so
+ * the wait returns SD_WAIT_STOP and the native returns into the stop path
+ * (sd_stop). Closing a handle wakes the goroutine waiting on it the same
+ * way. A goroutine waiting in poll() counts as running for the deadlock
+ * check: something outside the program can still wake it. */
+
+#define SD_WAIT_WOKEN (-3) /* internal: woken without a stop request */
+#define SD_WAIT_SLICE_MS 50 /* without a wake-up pipe, check for a stop this often */
+
+static void fd_set_flags(int fd, bool nonblock) {
+  fcntl(fd, F_SETFD, fcntl(fd, F_GETFD) | FD_CLOEXEC);
+  if (nonblock) fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK);
+}
+
+/* With t->mu held, on t's own thread: creates the wake-up pipe if needed.
+ * If no descriptors are left, waits poll in short slices instead. */
+static void wake_pipe_locked(sd_task *t) {
+  if (t->wake_r >= 0) return;
+  int p[2];
+  if (pipe(p) != 0) return;
+  fd_set_flags(p[0], true);
+  fd_set_flags(p[1], true);
+  t->wake_r = p[0];
+  t->wake_w = p[1];
+}
+
+/* With m->mu held: wakes m if it waits in poll() (a full pipe already has a
+ * wake-up pending). */
+static void task_wake_locked(sd_task *m) {
+  if (m->wake_w < 0) return;
+  char c = 1;
+  ssize_t r = write(m->wake_w, &c, 1);
+  (void)r;
+}
+
+/* Waits for pf[0..n) (n <= 1) until deadline (monotonic ns; 0: none).
+ * Returns SD_WAIT_READY (with revents set), SD_WAIT_TIMEOUT, SD_WAIT_STOP,
+ * SD_WAIT_FAILED (errno set) or, when wakeable, SD_WAIT_WOKEN. */
+static int wait_core(sd_task *t, struct pollfd *pf, int n, int64_t deadline, bool wakeable) {
+  struct pollfd all[2];
+  pthread_mutex_lock(&t->mu);
+  wake_pipe_locked(t);
+  t->blocking = true;
+  pthread_mutex_unlock(&t->mu);
+  int wfd = t->wake_r, result, saved = 0;
+  for (;;) {
+    if (atomic_load(&t->cancelled)) {
+      result = SD_WAIT_STOP;
+      break;
+    }
+    int ms = -1;
+    if (deadline) {
+      int64_t left = deadline - mono_ns();
+      if (left <= 0) {
+        result = SD_WAIT_TIMEOUT;
+        break;
+      }
+      int64_t lms = (left + 999999) / 1000000;
+      ms = lms > INT_MAX ? INT_MAX : (int)lms;
+    }
+    if (wfd < 0 && (ms < 0 || ms > SD_WAIT_SLICE_MS)) ms = SD_WAIT_SLICE_MS;
+    for (int i = 0; i < n; i++) {
+      all[i] = pf[i];
+      all[i].revents = 0;
+    }
+    int m = n;
+    if (wfd >= 0) all[m++] = (struct pollfd){wfd, POLLIN, 0};
+    int r = poll(all, (nfds_t)m, ms);
+    if (r < 0) {
+      if (errno == EINTR || errno == EAGAIN) continue;
+      saved = errno;
+      result = SD_WAIT_FAILED;
+      break;
+    }
+    bool woken = wfd >= 0 && all[n].revents != 0, ready = false;
+    if (woken) {
+      char buf[64];
+      while (read(wfd, buf, sizeof buf) > 0) {
+      }
+    }
+    for (int i = 0; i < n; i++) {
+      pf[i].revents = all[i].revents;
+      if (all[i].revents) ready = true;
+    }
+    if (atomic_load(&t->cancelled)) {
+      result = SD_WAIT_STOP;
+      break;
+    }
+    if (ready) {
+      result = SD_WAIT_READY;
+      break;
+    }
+    if (woken && wakeable) {
+      result = SD_WAIT_WOKEN;
+      break;
+    }
+  }
+  pthread_mutex_lock(&t->mu);
+  t->blocking = false;
+  pthread_mutex_unlock(&t->mu);
+  if (result == SD_WAIT_FAILED) errno = saved;
+  return result;
+}
+
+int sd_wait_fd(int fd, bool for_write, int64_t timeout_ns) {
+  struct pollfd pf = {fd, for_write ? POLLOUT : POLLIN, 0};
+  return wait_core(task_current(), &pf, 1, timeout_ns > 0 ? mono_ns() + timeout_ns : 0, false);
+}
+
+bool sd_stopping(void) { return atomic_load(&task_current()->cancelled) != 0; }
+
+void sd_stop(void) { stop_task(task_current()); }
+
+typedef struct {
+  pid_t pid;
+  int status, err, fd;
+} child_wait;
+
+/* A helper thread does the blocking waitpid, then signals the pipe that the
+ * goroutine polls (POSIX has no descriptor for a child process). */
+static void *child_waiter(void *p) {
+  child_wait *cw = p;
+  for (;;) {
+    if (waitpid(cw->pid, &cw->status, 0) >= 0) break;
+    if (errno != EINTR) {
+      cw->err = errno;
+      break;
+    }
+  }
+  char c = 1;
+  ssize_t r = write(cw->fd, &c, 1);
+  (void)r;
+  return NULL;
+}
+
+int sd_wait_child(pid_t pid, int *status) {
+  child_wait cw = {pid, 0, 0, -1};
+  int p[2];
+  pthread_t th;
+  if (pipe(p) == 0) {
+    fd_set_flags(p[0], false);
+    fd_set_flags(p[1], false);
+    cw.fd = p[1];
+    if (pthread_create(&th, NULL, child_waiter, &cw) == 0) {
+      int r;
+      do r = sd_wait_fd(p[0], false, 0);
+      while (r == SD_WAIT_FAILED);
+      if (r == SD_WAIT_STOP) kill(pid, SIGKILL);
+      pthread_join(th, NULL);
+      close(p[0]);
+      close(p[1]);
+      if (r == SD_WAIT_STOP) return SD_WAIT_STOP;
+      *status = cw.status;
+      return cw.err;
+    }
+    close(p[0]);
+    close(p[1]);
+  }
+  /* No pipe or thread: wait without being a stop point. */
+  while (waitpid(pid, status, 0) < 0)
+    if (errno != EINTR) return errno;
+  return 0;
+}
+
+/* -------------------------------------------------------------- handles */
+
+#ifdef MSG_NOSIGNAL
+#define SD_MSG_NOSIGNAL MSG_NOSIGNAL
+#else
+#define SD_MSG_NOSIGNAL 0 /* macOS: the socket has SO_NOSIGPIPE instead */
+#endif
+
+struct sd_handle {
+  int64_t id;
+  int kind, fd;
+  bool nonblock; /* fd is O_NONBLOCK: try the call first, poll on EAGAIN */
+  char *name;
+  atomic_int refs; /* the table's, plus one per operation in progress */
+  sd_handle *hnext;
+  pthread_mutex_t mu; /* protects closed, busy, waiter, timeout */
+  pthread_cond_t cv;
+  bool closed, busy;
+  sd_task *waiter; /* the goroutine in poll() on fd, woken by close */
+  int64_t timeout;
+  /* The read buffer (used under the operation lock): bytes [pos, end) are
+   * unread; [pos, pos + scanned) have no newline. */
+  char *buf;
+  size_t pos, end, cap, scanned;
+};
+
+static pthread_mutex_t handles_mu = PTHREAD_MUTEX_INITIALIZER;
+static sd_handle **handles; /* hash table by id, chained; capacity a power of two */
+static size_t handles_cap, handles_len;
+static int64_t handles_next = 1;
+
+static void handle_unref(sd_handle *h) {
+  if (atomic_fetch_sub(&h->refs, 1) != 1) return;
+  if (h->fd >= 0 && h->kind != SD_HANDLE_STDIN) close(h->fd);
+  pthread_mutex_destroy(&h->mu);
+  pthread_cond_destroy(&h->cv);
+  free(h->name);
+  free(h->buf);
+  free(h);
+}
+
+int64_t sd_handle_new(int kind, int fd, const char *name) {
+  sd_handle *h = calloc(1, sizeof *h);
+  if (!h) sd_fatal("out of memory");
+  h->kind = kind;
+  h->fd = fd;
+  int fl = fcntl(fd, F_GETFL);
+  h->nonblock = fl >= 0 && (fl & O_NONBLOCK);
+  h->name = sd_fmt("%s", name ? name : "");
+  atomic_init(&h->refs, 1);
+  pthread_mutex_init(&h->mu, NULL);
+  pthread_cond_init(&h->cv, NULL);
+  pthread_mutex_lock(&handles_mu);
+  if (handles_len + 1 > handles_cap / 2) {
+    size_t cap = handles_cap ? handles_cap * 2 : 64;
+    sd_handle **t = calloc(cap, sizeof *t);
+    if (!t) sd_fatal("out of memory");
+    for (size_t i = 0; i < handles_cap; i++)
+      for (sd_handle *e = handles[i], *next; e; e = next) {
+        next = e->hnext;
+        e->hnext = t[(size_t)e->id & (cap - 1)];
+        t[(size_t)e->id & (cap - 1)] = e;
+      }
+    free(handles);
+    handles = t;
+    handles_cap = cap;
+  }
+  h->id = handles_next++;
+  size_t b = (size_t)h->id & (handles_cap - 1);
+  h->hnext = handles[b];
+  handles[b] = h;
+  handles_len++;
+  int64_t id = h->id;
+  pthread_mutex_unlock(&handles_mu);
+  return id;
+}
+
+/* The handle with a reference added, or NULL. With remove, it is taken out
+ * of the table instead, and the caller gets the table's reference. */
+static sd_handle *handle_find(int64_t id, bool remove) {
+  sd_handle *found = NULL;
+  pthread_mutex_lock(&handles_mu);
+  if (handles_cap) {
+    sd_handle **p = &handles[(size_t)id & (handles_cap - 1)];
+    for (; *p; p = &(*p)->hnext) {
+      if ((*p)->id != id) continue;
+      found = *p;
+      if (remove) {
+        *p = found->hnext;
+        handles_len--;
+      } else {
+        atomic_fetch_add(&found->refs, 1);
+      }
+      break;
+    }
+  }
+  pthread_mutex_unlock(&handles_mu);
+  return found;
+}
+
+sd_handle *sd_handle_acquire(int64_t id, int kind) {
+  sd_handle *h = handle_find(id, false);
+  if (!h) return NULL;
+  if (h->kind != kind) {
+    handle_unref(h);
+    return NULL;
+  }
+  sd_task *t = task_current();
+  pthread_mutex_lock(&h->mu);
+  while (h->busy && !h->closed) {
+    /* Another goroutine's operation on this handle: wait for it, checking
+     * for a stop request now and then. */
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    ts.tv_nsec += 20 * 1000000;
+    if (ts.tv_nsec >= 1000000000) {
+      ts.tv_sec++;
+      ts.tv_nsec -= 1000000000;
+    }
+    pthread_cond_timedwait(&h->cv, &h->mu, &ts);
+    if (atomic_load(&t->cancelled)) {
+      pthread_mutex_unlock(&h->mu);
+      handle_unref(h);
+      stop_task(t);
+    }
+  }
+  if (h->closed) {
+    pthread_mutex_unlock(&h->mu);
+    handle_unref(h);
+    return NULL;
+  }
+  h->busy = true;
+  pthread_mutex_unlock(&h->mu);
+  return h;
+}
+
+void sd_handle_release(sd_handle *h) {
+  pthread_mutex_lock(&h->mu);
+  h->busy = false;
+  pthread_cond_signal(&h->cv);
+  pthread_mutex_unlock(&h->mu);
+  handle_unref(h);
+}
+
+bool sd_handle_close(int64_t id) {
+  sd_handle *h = handle_find(id, true);
+  if (!h) return false;
+  pthread_mutex_lock(&h->mu);
+  h->closed = true;
+  if (h->waiter) {
+    pthread_mutex_lock(&h->waiter->mu);
+    task_wake_locked(h->waiter);
+    pthread_mutex_unlock(&h->waiter->mu);
+  }
+  pthread_cond_broadcast(&h->cv);
+  pthread_mutex_unlock(&h->mu);
+  handle_unref(h); /* the table's: the descriptor is closed once no operation uses it */
+  return true;
+}
+
+void sd_handle_set_timeout(int64_t id, int64_t ns) {
+  sd_handle *h = handle_find(id, false);
+  if (!h) return;
+  pthread_mutex_lock(&h->mu);
+  h->timeout = ns > 0 ? ns : 0;
+  pthread_mutex_unlock(&h->mu);
+  handle_unref(h);
+}
+
+sd_str sd_handle_subject(int64_t id) {
+  sd_handle *h = handle_find(id, false);
+  if (!h) return sd_str_from_cstr("");
+  sd_str s = sd_str_from_cstr(h->name); /* the name never changes */
+  handle_unref(h);
+  return s;
+}
+
+int sd_handle_fd(const sd_handle *h) { return h->fd; }
+
+const char *sd_handle_name(const sd_handle *h) { return h->name; }
+
+static int handle_wait(sd_handle *h, bool for_write, int *err) {
+  sd_task *t = task_current();
+  pthread_mutex_lock(&h->mu);
+  int64_t deadline = h->timeout > 0 ? mono_ns() + h->timeout : 0;
+  pthread_mutex_unlock(&h->mu);
+  for (;;) {
+    pthread_mutex_lock(&h->mu);
+    if (h->closed) {
+      pthread_mutex_unlock(&h->mu);
+      return SD_IO_CLOSED;
+    }
+    h->waiter = t;
+    pthread_mutex_unlock(&h->mu);
+    struct pollfd pf = {h->fd, for_write ? POLLOUT : POLLIN, 0};
+    int r = wait_core(t, &pf, 1, deadline, true);
+    int saved = errno;
+    pthread_mutex_lock(&h->mu);
+    h->waiter = NULL;
+    bool closed = h->closed;
+    pthread_mutex_unlock(&h->mu);
+    if (r == SD_WAIT_STOP) {
+      sd_handle_release(h);
+      stop_task(t);
+    }
+    if (closed) return SD_IO_CLOSED;
+    switch (r) {
+    case SD_WAIT_READY: return SD_IO_OK;
+    case SD_WAIT_TIMEOUT: return SD_IO_TIMEOUT;
+    case SD_WAIT_FAILED:
+      if (err) *err = saved;
+      return SD_IO_ERROR;
+    default: break; /* woken by something else: look again */
+    }
+  }
+}
+
+int sd_handle_wait(sd_handle *h, bool for_write) {
+  int err = 0;
+  int r = handle_wait(h, for_write, &err);
+  if (r == SD_IO_ERROR) errno = err;
+  return r;
+}
+
+/* One read() of at most n bytes into dst, waiting as needed. */
+static int handle_read_some(sd_handle *h, char *dst, size_t n, size_t *got, int *err) {
+  for (;;) {
+    bool waited = false;
+    if (!h->nonblock) {
+      /* A blocking descriptor (stdin): read() only after poll() says there
+       * is something, so that the wait stays a stop point. */
+      int w = handle_wait(h, false, err);
+      if (w != SD_IO_OK) return w;
+      waited = true;
+    }
+    ssize_t r = read(h->fd, dst, n);
+    if (r > 0) {
+      *got = (size_t)r;
+      return SD_IO_OK;
+    }
+    if (r == 0) return SD_IO_EOF;
+    if (errno == EINTR) continue;
+    if (errno != EAGAIN && errno != EWOULDBLOCK) {
+      *err = errno;
+      return SD_IO_ERROR;
+    }
+    if (!waited) {
+      int w = handle_wait(h, false, err);
+      if (w != SD_IO_OK) return w;
+    }
+  }
+}
+
+/* Reads more bytes into the buffer. */
+static int handle_fill(sd_handle *h, int *err) {
+  if (h->cap - h->end < 4096) {
+    if (h->pos > 0) {
+      memmove(h->buf, h->buf + h->pos, h->end - h->pos);
+      h->end -= h->pos;
+      h->pos = 0;
+    }
+    if (h->cap - h->end < 4096) {
+      h->cap = h->cap ? h->cap * 2 : 65536;
+      h->buf = sd_realloc(h->buf, h->cap);
+    }
+  }
+  size_t got = 0;
+  int r = handle_read_some(h, h->buf + h->end, h->cap - h->end, &got, err);
+  if (r == SD_IO_OK) h->end += got;
+  return r;
+}
+
+/* Takes n buffered bytes and skips `skip` more. */
+static sd_str handle_take(sd_handle *h, size_t n, size_t skip) {
+  sd_str s = sd_str_new(h->buf + h->pos, (int64_t)n);
+  h->pos += n + skip;
+  h->scanned = 0;
+  if (h->pos == h->end) h->pos = h->end = 0;
+  return s;
+}
+
+int sd_handle_read(sd_handle *h, int64_t max, sd_str *out, int *err) {
+  *out = NULL;
+  if (max < 1) max = 1;
+  if (h->end > h->pos) {
+    size_t n = h->end - h->pos;
+    if ((uint64_t)max < n) n = (size_t)max;
+    *out = handle_take(h, n, 0);
+    return SD_IO_OK;
+  }
+  char tmp[65536];
+  size_t n = (uint64_t)max < sizeof tmp ? (size_t)max : sizeof tmp, got = 0;
+  int r = handle_read_some(h, tmp, n, &got, err);
+  if (r == SD_IO_OK) *out = sd_str_new(tmp, (int64_t)got);
+  return r;
+}
+
+int sd_handle_read_line(sd_handle *h, sd_str *out, int *err) {
+  *out = NULL;
+  for (;;) {
+    size_t from = h->pos + h->scanned;
+    char *nl = h->end > from ? memchr(h->buf + from, '\n', h->end - from) : NULL;
+    if (nl) {
+      size_t n = (size_t)(nl - (h->buf + h->pos));
+      size_t cr = n > 0 && h->buf[h->pos + n - 1] == '\r';
+      *out = handle_take(h, n - cr, 1 + cr);
+      return SD_IO_OK;
+    }
+    h->scanned = h->end - h->pos;
+    int r = handle_fill(h, err); /* scanned is relative to pos, so it stays valid */
+    if (r == SD_IO_EOF) {
+      if (h->end == h->pos) return SD_IO_EOF;
+      *out = handle_take(h, h->end - h->pos, 0);
+      return SD_IO_OK;
+    }
+    if (r != SD_IO_OK) return r;
+  }
+}
+
+int sd_handle_read_all(sd_handle *h, sd_str *out, int *err) {
+  *out = NULL;
+  for (;;) {
+    int r = handle_fill(h, err);
+    if (r == SD_IO_EOF) break;
+    if (r != SD_IO_OK) return r;
+  }
+  *out = handle_take(h, h->end - h->pos, 0);
+  return SD_IO_OK;
+}
+
+int sd_handle_write(sd_handle *h, const char *data, int64_t len, int *err) {
+  size_t off = 0, n = (size_t)len;
+  while (off < n) {
+    ssize_t r = h->kind == SD_HANDLE_CONN ? send(h->fd, data + off, n - off, SD_MSG_NOSIGNAL) : write(h->fd, data + off, n - off);
+    if (r > 0) {
+      off += (size_t)r;
+      continue;
+    }
+    if (r < 0 && errno == EINTR) continue;
+    if (r < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
+      *err = errno;
+      return SD_IO_ERROR;
+    }
+    int w = handle_wait(h, true, err);
+    if (w != SD_IO_OK) return w;
+  }
+  return SD_IO_OK;
+}
+
+static const char *handle_closed_text(int kind) {
+  switch (kind) {
+  case SD_HANDLE_FILE: return "file is closed";
+  case SD_HANDLE_LISTENER: return "listener is closed";
+  case SD_HANDLE_STDIN: return "stdin is closed";
+  default: return "connection is closed";
+  }
+}
+
+sd_err sd_handle_error(const char *fn, const sd_handle *h, int kind, int result, int err) {
+  const char *reason;
+  switch (result) {
+  case SD_IO_TIMEOUT: reason = "timeout"; break;
+  case SD_IO_CLOSED: reason = handle_closed_text(kind); break;
+  case SD_IO_EOF: reason = "unexpected end of input"; break;
+  default: reason = sd_strerror(err); break;
+  }
+  if (h && h->name[0]) return sd_errorf("%s: %s: %s", fn, h->name, reason);
+  return sd_errorf("%s: %s", fn, reason);
 }
 
 /* ------------------------------------------------------- program entry */
