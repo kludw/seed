@@ -1258,6 +1258,54 @@ fn (Checker c) mut addNarrow(string key) {
     c.narrows.push(Narrow{key: key, dead: false})
 }
 
+// The paths narrowed at this point (the latest entry of a key decides).
+fn (Checker c) liveNarrows() []string {
+    []string seen = []string{}
+    []string live = []string{}
+    for (int i = c.narrows.len() - 1; i >= 0; i--) {
+        string k = c.narrows[i].key
+        if (seen.contains(k)) {
+            continue
+        }
+        seen.push(k)
+        if (!c.narrows[i].dead) {
+            live.push(k)
+        }
+    }
+    return live
+}
+
+// Where two branches meet: an entry killed in either branch (other is the
+// narrowings after the first one, c.narrows after the second) stays
+// killed, and the paths narrowed at the end of every branch that falls
+// through (after) are narrowed again.
+fn (Checker c) mut joinNarrows([]Narrow other, []string after) {
+    int n = c.narrows.len()
+    if (other.len() < n) {
+        n = other.len()
+    }
+    for (int i = 0; i < n; i++) {
+        if (other[i].dead && !c.narrows[i].dead) {
+            c.narrows[i].dead = true
+        }
+    }
+    for (int j = after.len() - 1; j >= 0; j--) {
+        if (!c.isNarrowed(after[j])) {
+            c.addNarrow(after[j])
+        }
+    }
+}
+
+// Whether the checked expression e is a value that is never null (a T, not
+// a T?, null or error); assigning it to a T? path narrows the path.
+fn (Checker c) isNonNullValue(int e) bool {
+    int t = c.typeOf(e)
+    if (t == tyNull || t == tyInvalid || t == tyVoid || t == tyError) {
+        return false
+    }
+    return !c.types.isOpt(t) && !c.types.isTuple(t)
+}
+
 // Whether key is prefix or a path under it (or only under it, if strict).
 fn keyExtends(string key, string prefix, bool strict) bool {
     if (!key.startsWith(prefix)) {

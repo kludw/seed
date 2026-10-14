@@ -1,6 +1,6 @@
 // The pedantic checks: unused variables, imports and results, unreachable
-// code and the naming rules (shadowing is checked in declare). seed0 has
-// none of them; the real compiler always applies them.
+// code and the naming rules (shadowing is checked in declare). The
+// compiler always applies them (the retired seed0 had none of them).
 package main
 
 // Every local variable must be read somewhere (assigning to it is not

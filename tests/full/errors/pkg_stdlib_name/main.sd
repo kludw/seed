@@ -1,0 +1,12 @@
+// expect-error: the project's package "strings" (
+// A project package with the path of a standard library package is an
+// error at the import, not silently shadowed by the standard library.
+package main
+
+import "fmt"
+import "strings"
+
+fn main([]string args) error {
+    fmt.println(strings.repeat("ab", 2))
+    return null
+}

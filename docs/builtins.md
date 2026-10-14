@@ -111,7 +111,7 @@ Strings are immutable UTF-8 bytes. Lengths and indexes count bytes.
 
 ## Core packages
 
-These exist in every Seed compiler, including the `seed0` bootstrap compiler (except `time`, which needs goroutines, and `os.crash`). The real compiler has them as ordinary packages of the standard library (`lib/fmt`, `lib/os`, ...), written with native functions; seed0 builds them in. The full standard library is in [stdlib.md](stdlib.md).
+These are ordinary packages of the standard library (`lib/fmt`, `lib/os`, ...), written with native functions. (The retired bootstrap compiler `seed0` built them in, without `time`, `os.crash` and `errors.wrap`.) The full standard library is in [stdlib.md](stdlib.md).
 
 Errors follow [stdlib.md](stdlib.md#error-messages): `<package>.<function>: <subject>: <reason>`, for example `fs.read: notes.txt: no such file or directory` or `os.run: frobnicate: no such file or directory`.
 
@@ -120,7 +120,7 @@ Errors follow [stdlib.md](stdlib.md#error-messages): `<package>.<function>: <sub
 | Function | Result |
 |---|---|
 | `errors.new(string msg) error` | An error whose `message()` is `msg`. |
-| `errors.wrap(error err, string context) error` | An error whose `message()` is `context + ": " + err.message()`. Crashes if `err` is null. (Not in seed0.) |
+| `errors.wrap(error err, string context) error` | An error whose `message()` is `context + ": " + err.message()`. Crashes if `err` is null. |
 
 ### fmt
 
@@ -138,7 +138,7 @@ Errors follow [stdlib.md](stdlib.md#error-messages): `<package>.<function>: <sub
 | `os.exit(int code)` | Exits immediately. Output is flushed first. |
 | `os.env(string name) string?` | An environment variable, or `null`. |
 | `os.run([]string argv) (int, error)` | Runs a program (looked up on `PATH`) with the same stdin, stdout and stderr, waits for it and returns its exit code. The error is set only if the program could not be started. Crashes if `argv` is empty. |
-| `os.crash(string message)` | Crashes the current goroutine exactly like a runtime fault: `crash: <message>`, its deferred calls run, and inside a `group` the group fails with the error `crash: <message>`. Library code uses it when a caller broke a rule: `os.crash("rand.range: lo (5) must be less than hi (5)")`. Never returns. (Not in seed0.) |
+| `os.crash(string message)` | Crashes the current goroutine exactly like a runtime fault: `crash: <message>`, its deferred calls run, and inside a `group` the group fails with the error `crash: <message>`. Library code uses it when a caller broke a rule: `os.crash("rand.range: lo (5) must be less than hi (5)")`. Never returns. |
 | `os.executable() string` | The absolute path of the running program, with symbolic links resolved, or `""` if it cannot be found. |
 | `os.cwd() (string, error)` | The absolute path of the current directory. |
 
@@ -156,7 +156,7 @@ Errors follow [stdlib.md](stdlib.md#error-messages): `<package>.<function>: <sub
 
 ### time
 
-Durations are `int` nanoseconds. The full `time` package is in [stdlib.md](stdlib.md#time); the real compiler provides this part as a core package (seed0 does not).
+Durations are `int` nanoseconds. The full `time` package is in [stdlib.md](stdlib.md#time); this part is a core package.
 
 | Function / constant | Result |
 |---|---|

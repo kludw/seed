@@ -1,23 +1,23 @@
 # Seed tests
 
 Conformance tests for Seed, written from `SPEC.md`, `docs/grammar.md`,
-`docs/builtins.md` and `docs/seed0.md`. Each test is a complete program whose
+`docs/builtins.md` and the subset of the retired bootstrap compiler seed0
+(`docs/seed0.md`). Each test is a complete program whose
 exact stdout (and exit code, where it isn't 0) is checked.
 
 ## Layout
 
-| Directory | Contents | Compiler |
+| Directory | Contents | Run by |
 |---|---|---|
-| `lang/` | Programs that stay inside the seed0 subset (no interfaces, function values, channels, `select`, `group`/`spawn`, `defer`, `test`/`assert`, user packages or `s.chars()`). | `seed0` and the full compiler |
-| `lang/errors/` | Programs that seed0 must reject: an ignored error, `_` with a plain `T`, a `mut` method on a parameter, a `T?` used as `T`, syntax errors, unknown names and type mismatches. | `seed0` and the full compiler |
-| `full/` | Programs for the features outside the subset: interfaces, function values and `sortBy`, `defer`, channels, `select`, `group`/`spawn` with Erlang-style failure, integers wider than 64 bits, `s.chars()`, `os.crash`, the core packages' error messages, enum patterns. `full/NAME/` directories are programs made of packages (`pkg_basic`). | full compiler only |
-| `full/errors/` | The full compiler's pedantic checks: unused names and imports, shadowing, switch coverage, missing returns, unreachable code, naming rules, `implements`, unhandled errors, formatting, enum patterns and so on. `full/errors/NAME/` directories are package errors: cycles, visibility (`pub` names, fields, methods, struct literals), unknown and wrongly named packages, natives outside the standard library, tests outside `tests/`. | full compiler only |
-| `testcmd/` | Projects for `seed test` (`test_cmd.sh`): `NAME.out` is the exact stdout of `seed test testcmd/NAME` (run in `tests/`), `NAME.exit` its exit code. | full compiler only |
-| `seed0/` | Extra programs for the bootstrap compiler's subset (also run with the full compiler). | `seed0` and the full compiler |
-| `seed0/only/` | What only seed0 does: 64-bit ints that crash on overflow, rejecting interfaces. | `seed0` only |
-| `fmt/` | Golden tests for `seed fmt`: `NAME.sd` must format to `NAME.expected` (`tests/fmt/run.sh <seed>`, or `make test-fmt`). | full compiler |
+| `lang/` | Programs that stay inside the subset of the retired bootstrap compiler seed0 (no interfaces, function values, channels, `select`, `group`/`spawn`, `defer`, `test`/`assert`, user packages or `s.chars()`). | `make test` |
+| `lang/errors/` | Programs that must be rejected: an ignored error, `_` with a plain `T`, a `mut` method on a parameter, a `T?` used as `T`, syntax errors, unknown names and type mismatches. | `make test` |
+| `full/` | Programs for the rest of the language: interfaces, function values and `sortBy`, `defer`, channels, `select`, `group`/`spawn` with Erlang-style failure, integers wider than 64 bits, `s.chars()`, `os.crash`, the core packages' error messages, enum patterns. `full/NAME/` directories are programs made of packages (`pkg_basic`). | `make test-full` |
+| `full/errors/` | The pedantic checks: unused names and imports, shadowing, switch coverage, missing returns, unreachable code, naming rules, `implements`, unhandled errors, formatting, enum patterns and so on. `full/errors/NAME/` directories are package errors: cycles, visibility (`pub` names, fields, methods, struct literals), unknown and wrongly named packages, natives outside the standard library, tests outside `tests/`. | `make test-full` |
+| `testcmd/` | Projects for `seed test` (`test_cmd.sh`): `NAME.out` is the exact stdout of `seed test testcmd/NAME` (run in `tests/`), `NAME.exit` its exit code. | `make test-full` |
+| `core/` | More programs in the same subset as `lang/` (written for the bootstrap compiler seed0, as `tests/seed0/`): crashes, exit codes, equality, narrowing, value copies, an interpreter; `core/errors/` has more programs that must be rejected. | `make test` |
+| `fmt/` | Golden tests for `seed fmt`: `NAME.sd` must format to `NAME.expected` (`tests/fmt/run.sh <seed>`, or `make test-fmt`). | `make test-fmt` |
 
-The `lang/` programs are written to also pass the full compiler's checks: they
+The `lang/` and `core/` programs are written to pass the compiler's pedantic checks: they
 are formatted (4-space indentation, gofmt-style layout), have no unused names
 and no shadowing, and handle every error.
 
@@ -32,7 +32,8 @@ The format is defined in the header of `run.sh`. For every `NAME.sd`:
   `error: disk full` or `crash:`.
 - `NAME.leaks` (only for `tests/leaks.sh`) says why the program is expected
   to leak although it exits normally: a goroutine crashes inside a group,
-  which leaks the locals of its unwound frames.
+  or is stopped while it waits, which leaks the locals of its unwound
+  frames.
 
 For every `errors/NAME.sd`, compiling must fail, and stderr must contain the
 text after `// expect-error: ` on the file's first line.
@@ -43,7 +44,7 @@ whose `.sd` files are package main, and whose subdirectories are the
 packages it imports. A directory `errors/NAME/` must fail to compile, with
 the expected text on the first line of its `main.sd`. Most error tests
 expect `NAME.sd:LINE:`, the location of the offending line, because seed0
-reports errors as `file:line:col: error: message`, while the wording of the
+reported errors as `file:line:col: error: message`, while the wording of the
 message is up to the compiler. Where a name is certain to appear in any
 reasonable message (an unknown identifier, a missing enum case, a badly named
 function), the test expects that name instead.
@@ -51,8 +52,8 @@ function), the test expects that name instead.
 ## Running
 
 ```
-tests/run.sh build/seed0 tests/lang
-tests/run.sh "<full compiler command>" tests/lang tests/full
+tests/run.sh "build/seed2 c" tests/lang tests/core
+tests/run.sh "build/seed2 c" tests/full
 ```
 
 The first argument is a command that takes a `.sd` path and writes C to
@@ -82,16 +83,18 @@ crash unwinds.
 - Float output avoids values whose text depends on where a formatter switches
   to exponent notation. Only values between 0.001 and 100000 and values with
   three-digit exponents (`1e+300`) are printed.
-- seed0's 64-bit overflow crash is tested only in `seed0/only/`, because the
-  full compiler's integers grow instead. `full/bigint_*` and `full/int_*`
-  test the growing integers.
+- Integers grow instead of overflowing: `full/bigint_*` and `full/int_*`
+  test them (`full/int_no_overflow` has the programs that crashed with
+  seed0's 64-bit ints).
 - Every program is compiled with the pedantic checks and the formatting
-  check (always on in the full compiler), so every test program, apart from
-  `errors/`, is formatted and passes them. The seed0-era programs in
-  `seed0/` were adjusted to pass them (they still compile with seed0).
+  check (always on), so every test program, apart from `errors/`, is
+  formatted and passes them.
 - `make test-full` also runs `tests/test_cmd.sh`: the `seed test` projects
   in `testcmd/`, `seed run` with arguments, `seed build` without `-o`, the
-  formatting error, and `seed` found through `$PATH` as a symbolic link
-  without `$SEED_ROOT`.
+  formatting error, `seed` found through `$PATH` as a symbolic link
+  without `$SEED_ROOT`, concurrent runs of programs with the same name,
+  that no temporary directory is left behind, the runtime cache (and its
+  `$TMPDIR` fallback when the root is read-only), and `make install` /
+  `make uninstall` into a temporary `PREFIX`.
 - The standard library's own tests are run by `make test-lib`
   (`seed test lib`).

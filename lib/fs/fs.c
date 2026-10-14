@@ -8,6 +8,7 @@
 #include <fcntl.h>
 #include <limits.h>
 #include <pthread.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -88,8 +89,8 @@ sd_err sd_lib_fs_stat(sd_str path, sd_S_fs_Info *out) {
 
 sd_err sd_lib_fs_list(sd_str dir, sd_list **out) { return sd_fs_list(dir, out); }
 
-/* Like the runtime's sd_fs_mkdir (and seed0's, error messages included),
- * with the mode docs/stdlib.md gives. */
+/* Like the runtime's sd_fs_mkdir (error messages included), with the mode
+ * docs/stdlib.md gives. */
 sd_err sd_lib_fs_mkdir(sd_str path) {
   char *cp = sd_alloc((size_t)path->len + 1);
   memcpy(cp, path->data, (size_t)path->len + 1);
@@ -195,52 +196,13 @@ sd_err sd_lib_fs_makeTemp(sd_str prefix, sd_str *out) {
 
 /* ------------------------------------------------------- File handles */
 
-/* The table of open files. docs/stdlib.md puts one table for fs and net in
- * the runtime; until it has one, fs keeps its own. A File holds the id of
- * an entry (index + 1). Ids count up and are never reused, and entries are
- * never freed (closing frees the buffer and the descriptor), so a stale
- * handle always finds its own, closed, entry. Each entry has a mutex that
- * makes every operation on it atomic. */
-typedef struct {
-  pthread_mutex_t mu;
-  int fd; /* -1 once closed */
-  bool writing;
-  char *buf; /* read buffer: bytes [start, start + len) are unread */
-  size_t start, len, cap;
-} fs_handle;
-
-static pthread_mutex_t fs_table_mu = PTHREAD_MUTEX_INITIALIZER;
-static fs_handle **fs_table;
-static int64_t fs_table_len, fs_table_cap;
-
-static int64_t fs_handle_add(int fd, bool writing) {
-  fs_handle *h = sd_alloc(sizeof *h);
-  pthread_mutex_init(&h->mu, NULL);
-  h->fd = fd;
-  h->writing = writing;
-  h->buf = NULL;
-  h->start = h->len = h->cap = 0;
-  pthread_mutex_lock(&fs_table_mu);
-  if (fs_table_len == fs_table_cap) {
-    fs_table_cap = fs_table_cap ? fs_table_cap * 2 : 16;
-    fs_table = sd_realloc(fs_table, (size_t)fs_table_cap * sizeof *fs_table);
-  }
-  fs_table[fs_table_len++] = h;
-  int64_t id = fs_table_len;
-  pthread_mutex_unlock(&fs_table_mu);
-  return id;
-}
-
-/* The entry of a handle, locked; NULL for an id that was never handed out. */
-static fs_handle *fs_handle_lock(sd_S_fs_File f) {
-  int64_t id;
-  fs_handle *h = NULL;
-  pthread_mutex_lock(&fs_table_mu);
-  if (sd_int_to_i64(f.f_id, &id) && id >= 1 && id <= fs_table_len) h = fs_table[id - 1];
-  pthread_mutex_unlock(&fs_table_mu);
-  if (h) pthread_mutex_lock(&h->mu);
-  return h;
-}
+/* A File is an entry of the runtime's handle table (runtime/README.md,
+ * section 13; kind SD_HANDLE_FILE), shared with io and net: the File holds
+ * its id, whether it was opened for writing, and the path (for messages,
+ * also after close). The table makes every operation atomic (one at a
+ * time per handle), and its reads poll before they read, so a read is a
+ * stop point (a FIFO can block for ever). Ids are never reused, so a stale
+ * copy of a closed File finds nothing and says "file is closed". */
 
 static sd_err fs_open_file(const char *fn, sd_str path, int flags, bool writing, sd_S_fs_File *out) {
   int fd = fs_open_retry(path->data, flags, 0644);
@@ -252,7 +214,8 @@ static sd_err fs_open_file(const char *fn, sd_str path, int flags, bool writing,
       return fs_errorf(fn, path->data, EISDIR);
     }
   }
-  out->f_id = sd_int_from_i64(fs_handle_add(fd, writing));
+  out->f_id = sd_int_from_i64(sd_handle_new(SD_HANDLE_FILE, fd, path->data));
+  out->f_writing = writing;
   out->f_path = sd_str_retain(path);
   return SD_ERR_NULL;
 }
@@ -263,69 +226,35 @@ sd_err sd_lib_fs_create(sd_str path, sd_S_fs_File *out) {
   return fs_open_file("create", path, O_WRONLY | O_CREAT | O_TRUNC, true, out);
 }
 
-/* The entry of f, locked and ready for reading (want_write false) or
- * writing; otherwise NULL with *err set. */
-static fs_handle *fs_handle_use(sd_S_fs_File f, const char *method, bool want_write, sd_err *err) {
-  fs_handle *h = fs_handle_lock(f);
+/* The handle of f, acquired (released with sd_handle_release) and open for
+ * reading (want_write false) or writing; otherwise NULL with *err set. */
+static sd_handle *fs_handle_use(sd_S_fs_File f, const char *method, bool want_write, sd_err *err) {
   const char *why = NULL;
-  if (!h || h->fd < 0) why = "file is closed";
-  else if (want_write && !h->writing) why = "file is open for reading only";
-  else if (!want_write && h->writing) why = "file is open for writing only";
-  if (!why) return h;
-  if (h) pthread_mutex_unlock(&h->mu);
-  *err = sd_errorf("fs.File.%s: %s: %s", method, f.f_path->data, why);
+  if (want_write && !f.f_writing) why = "file is open for reading only";
+  else if (!want_write && f.f_writing) why = "file is open for writing only";
+  sd_handle *h = NULL;
+  int64_t id;
+  if (!why && sd_int_to_i64(f.f_id, &id)) h = sd_handle_acquire(id, SD_HANDLE_FILE);
+  if (h) return h;
+  *err = sd_errorf("fs.File.%s: %s: %s", method, f.f_path->data, why ? why : "file is closed");
   return NULL;
 }
 
-/* Reads more bytes into h's buffer. Returns the number read (0 at the
- * end), or -1 with errno set. */
-static ssize_t fs_fill(fs_handle *h) {
-  if (h->start > 0 && h->len > 0) memmove(h->buf, h->buf + h->start, h->len);
-  h->start = 0;
-  if (h->cap - h->len < 65536) {
-    h->cap = h->len + 65536 > h->cap * 2 ? h->len + 65536 : h->cap * 2;
-    h->buf = sd_realloc(h->buf, h->cap);
-  }
-  ssize_t r;
-  do r = read(h->fd, h->buf + h->len, h->cap - h->len);
-  while (r < 0 && errno == EINTR);
-  if (r > 0) h->len += (size_t)r;
-  return r;
-}
-
-static sd_str fs_take(fs_handle *h, size_t n, size_t skip) {
-  sd_str s = sd_str_new(h->buf + h->start, (int64_t)n);
-  h->start += n + skip;
-  h->len -= n + skip;
-  if (h->len == 0) h->start = 0;
-  return s;
+/* The error for a handle I/O result other than SD_IO_OK and SD_IO_EOF. */
+static sd_err fs_io_error(const char *method, sd_S_fs_File f, int r, int e) {
+  if (r == SD_IO_CLOSED) return sd_errorf("fs.File.%s: %s: file is closed", method, f.f_path->data);
+  if (r == SD_IO_TIMEOUT) return sd_errorf("fs.File.%s: %s: timeout", method, f.f_path->data);
+  return sd_errorf("fs.File.%s: %s: %s", method, f.f_path->data, sd_strerror(e));
 }
 
 sd_err sd_lib_fs_File_readLine(sd_S_fs_File f, sd_str *out) {
   sd_err err = SD_ERR_NULL;
-  fs_handle *h = fs_handle_use(f, "readLine", false, &err);
+  sd_handle *h = fs_handle_use(f, "readLine", false, &err);
   if (!h) return err;
-  size_t scanned = 0;
-  for (;;) {
-    char *nl = h->len > scanned ? memchr(h->buf + h->start + scanned, '\n', h->len - scanned) : NULL;
-    if (nl) {
-      size_t n = (size_t)(nl - (h->buf + h->start));
-      size_t cut = n > 0 && h->buf[h->start + n - 1] == '\r' ? 1 : 0;
-      *out = fs_take(h, n - cut, 1 + cut);
-      break;
-    }
-    scanned = h->len;
-    ssize_t r = fs_fill(h);
-    if (r < 0) {
-      err = fs_errorf("File.readLine", f.f_path->data, errno);
-      break;
-    }
-    if (r == 0) {
-      if (h->len > 0) *out = fs_take(h, h->len, 0);
-      break;
-    }
-  }
-  pthread_mutex_unlock(&h->mu);
+  int e = 0;
+  int r = sd_handle_read_line(h, out, &e);
+  if (r != SD_IO_OK && r != SD_IO_EOF) err = fs_io_error("readLine", f, r, e);
+  sd_handle_release(h);
   return err;
 }
 
@@ -337,36 +266,27 @@ sd_err sd_lib_fs_File_read(sd_S_fs_File f, sd_int max, sd_str *out) {
     sd_crash("fs.File.read: max (%s) must be at least 1", s->data);
   }
   sd_err err = SD_ERR_NULL;
-  fs_handle *h = fs_handle_use(f, "read", false, &err);
+  sd_handle *h = fs_handle_use(f, "read", false, &err);
   if (!h) return err;
-  if (h->len == 0) {
-    ssize_t r = fs_fill(h);
-    if (r < 0) err = fs_errorf("File.read", f.f_path->data, errno);
-  }
-  if (sd_err_is_null(err) && h->len > 0) *out = fs_take(h, (uint64_t)m < h->len ? (size_t)m : h->len, 0);
-  pthread_mutex_unlock(&h->mu);
+  int e = 0;
+  int r = sd_handle_read(h, m, out, &e);
+  if (r != SD_IO_OK && r != SD_IO_EOF) err = fs_io_error("read", f, r, e);
+  sd_handle_release(h);
   return err;
 }
 
 sd_err sd_lib_fs_File_write(sd_S_fs_File f, sd_str data) {
   sd_err err = SD_ERR_NULL;
-  fs_handle *h = fs_handle_use(f, "write", true, &err);
+  sd_handle *h = fs_handle_use(f, "write", true, &err);
   if (!h) return err;
-  int e = fs_write_all(h->fd, data->data, (size_t)data->len);
-  if (e) err = fs_errorf("File.write", f.f_path->data, e);
-  pthread_mutex_unlock(&h->mu);
+  int e = 0;
+  int r = sd_handle_write(h, data->data, data->len, &e);
+  if (r != SD_IO_OK) err = fs_io_error("write", f, r, e);
+  sd_handle_release(h);
   return err;
 }
 
 void sd_lib_fs_File_close(sd_S_fs_File f) {
-  fs_handle *h = fs_handle_lock(f);
-  if (!h) return;
-  if (h->fd >= 0) {
-    close(h->fd);
-    h->fd = -1;
-    free(h->buf);
-    h->buf = NULL;
-    h->start = h->len = h->cap = 0;
-  }
-  pthread_mutex_unlock(&h->mu);
+  int64_t id;
+  if (sd_int_to_i64(f.f_id, &id)) (void)sd_handle_close(id);
 }

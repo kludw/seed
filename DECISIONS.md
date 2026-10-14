@@ -23,7 +23,7 @@ You asked not to be woken up, so these are the language decisions I made without
 
 ## Implementation
 
-14. **The bootstrap compiler `seed0` implements `int` as 64-bit** with overflow detection. Only the real compiler has integers that grow.
+14. **The bootstrap compiler `seed0` implemented `int` as 64-bit** with overflow detection. Only the real compiler has integers that grow. (seed0 is retired: the compiler is built from its own snapshot, `bootstrap/seed.c`.)
 15. **The runtime is written in C** and lives in `runtime/`. Generated programs are C files compiled by the system C compiler.
 
 ## The compiler in Seed (compiler/)
@@ -74,7 +74,7 @@ Details are in [compiler/README.md](compiler/README.md#decisions). The ones that
 
 ## From packages, natives and tests (compiler/README.md)
 
-48. **Import paths are resolved in the standard library first, then relative to the project root**, the directory of the program's `package main` (or the directory given to `seed test`). There is no project file (`seed.mod`). `import "shop/cart"` is `<root>/shop/cart`, and code calls it `cart`. A project package with the name of a standard library package can't be imported (the standard library wins).
+48. **Import paths are resolved in the standard library first, then relative to the project root**, the directory of the program's `package main` (or the directory given to `seed test`). There is no project file (`seed.mod`). `import "shop/cart"` is `<root>/shop/cart`, and code calls it `cart`. A project package with the path of a standard library package is a compile error at the import, rather than being silently shadowed by the standard library's.
 49. **A package's name is its directory's name** (only `package main` may differ), and package `main` can't be imported.
 50. **Struct fields are private unless `pub`**, and a struct literal of another package's type needs every field to be `pub`. Enum cases and interface methods are as visible as their type. Methods need `pub` to be called from other packages.
 51. **A local name can't shadow an imported package's name**, and an import can't have the same name as a package-level declaration of the file's package.

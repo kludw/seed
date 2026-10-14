@@ -1,6 +1,7 @@
 #!/bin/sh
 # Tests of the seed command itself: `seed test`, `seed build`, `seed run`,
-# and finding the root through $PATH and a symbolic link.
+# finding the root through $PATH and a symbolic link, temporary
+# directories, the runtime cache, and make install.
 #
 #   tests/test_cmd.sh <seed>        (make test-full runs it with build/seed2)
 #
@@ -56,6 +57,45 @@ case $out in
   *"hint: run: seed fmt "*) pass=$((pass+1)) ;;
   *) failed "unformatted file" "$out" ;;
 esac
+
+# Two concurrent `seed run`s of programs with the same name use temporary
+# directories of their own, and leave nothing behind in $TMPDIR.
+mkdir -p "$tmp/same/a" "$tmp/same/b" "$tmp/tmpdir"
+for x in a b; do
+  printf 'package main\n\nimport "fmt"\nimport "time"\n\nfn main([]string args) error {\n    time.sleep(100 * time.millisecond)\n    fmt.println("%s")\n    return null\n}\n' "$x" > "$tmp/same/$x/prog.sd"
+done
+TMPDIR="$tmp/tmpdir" "$seed" run "$tmp/same/a/prog.sd" > "$tmp/same/a.out" 2>&1 &
+TMPDIR="$tmp/tmpdir" "$seed" run "$tmp/same/b/prog.sd" > "$tmp/same/b.out" 2>&1 &
+wait
+if [ "$(cat "$tmp/same/a.out")" = a ] && [ "$(cat "$tmp/same/b.out")" = b ]; then pass=$((pass+1)); else failed "concurrent seed run" "$(cat "$tmp/same/a.out" "$tmp/same/b.out")"; fi
+(cd "$here" && TMPDIR="$tmp/tmpdir" "$seed" test testcmd/pass > /dev/null 2>&1)
+(cd "$tmp/build" && TMPDIR="$tmp/tmpdir" "$seed" build "$here/testcmd/pass" > /dev/null 2>&1)
+left=$(ls "$tmp/tmpdir" | grep '^seed-' | grep -v '^seed-cache-')
+if [ -z "$left" ]; then pass=$((pass+1)); else failed "temporary directories removed" "left: $left"; fi
+
+# The runtime is compiled once into a cache: $SEED_ROOT/build/cache, or
+# $TMPDIR/seed-cache-$USER when that cannot be written. A root whose build/
+# is read-only uses the second.
+if ls "$root"/build/cache/runtime-*.o > /dev/null 2>&1; then pass=$((pass+1)); else failed "runtime cache" "no $root/build/cache/runtime-*.o"; fi
+mkdir -p "$tmp/fakeroot/build" "$tmp/tmp2"
+ln -s "$root/runtime" "$tmp/fakeroot/runtime"
+ln -s "$root/lib" "$tmp/fakeroot/lib"
+chmod 555 "$tmp/fakeroot/build"
+out=$(SEED_ROOT="$tmp/fakeroot" TMPDIR="$tmp/tmp2" USER=seedtest "$seed" run "$tmp/same/a/prog.sd" 2>&1)
+if [ "$out" = a ] && ls "$tmp"/tmp2/seed-cache-seedtest/runtime-*.o > /dev/null 2>&1; then
+  pass=$((pass+1))
+else
+  failed "runtime cache fallback" "$out; $(ls -R "$tmp/tmp2")"
+fi
+chmod 755 "$tmp/fakeroot/build"
+
+# make install links $(PREFIX)/bin/seed to the compiler; uninstall removes it.
+if [ "$seed" = "$root/build/seed2" ]; then
+  make -s -C "$root" install PREFIX="$tmp/prefix" > /dev/null 2>&1
+  out=$(cd "$tmp" && env -u SEED_ROOT "$tmp/prefix/bin/seed" run "$tmp/same/b/prog.sd" 2>&1)
+  make -s -C "$root" uninstall PREFIX="$tmp/prefix" > /dev/null 2>&1
+  if [ "$out" = b ] && [ ! -e "$tmp/prefix/bin/seed" ]; then pass=$((pass+1)); else failed "make install/uninstall" "$out"; fi
+fi
 
 echo "$pass passed, $fail failed"
 [ "$fail" = 0 ]

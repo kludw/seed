@@ -1,0 +1,18 @@
+// expect-error: narrow_assign_loop.sd:14:21: error: kind is nullable
+// A loop that assigns null later in its body ends the narrowing at its start.
+package main
+
+import "fmt"
+
+fn find(map[string]string m) string? {
+    return m["k"]
+}
+
+fn main([]string args) error {
+    string? kind = "first"
+    for (int i = 0; i < 2; i++) {
+        fmt.println(kind)
+        kind = find(map[string]string{})
+    }
+    return null
+}

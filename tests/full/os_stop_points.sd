@@ -1,0 +1,45 @@
+// os.run and os.output are stop points: when a group fails, a goroutine
+// waiting for a child (or for its output) is stopped at once and the child
+// is killed.
+package main
+
+import "errors"
+import "fmt"
+import "os"
+import "time"
+
+fn runSleeps() error {
+    _, error err = os.run([]string{"sleep", "30"})
+    return err
+}
+
+fn outputSleeps() error {
+    _, _, error err = os.output([]string{"sleep", "30"})
+    return err
+}
+
+fn outputWaits() error {
+    // The child closes its stdout at once but keeps running: the wait for
+    // its exit is a stop point too.
+    _, _, error err = os.output([]string{"sh", "-c", "exec 1>&-; exec sleep 30"})
+    return err
+}
+
+fn failSoon() error {
+    time.sleep(50 * time.millisecond)
+    return errors.new("enough")
+}
+
+fn main([]string args) error {
+    int start = time.monotonic()
+    error err = group {
+        spawn runSleeps()
+        spawn outputSleeps()
+        spawn outputWaits()
+        spawn failSoon()
+    }
+    fmt.println(err.message())
+    int took = time.monotonic() - start
+    fmt.println((took < 10 * time.second).string())
+    return null
+}

@@ -14,12 +14,14 @@ pub type Info struct {
     pub int modified // last modification, Unix nanoseconds
 }
 
-// An open file: a handle, the id of an entry in fs.c's table of open
-// files. Copying a File copies the id, not the file: both copies refer to
-// the same open file, and close() closes it for every copy. Ids are never
-// reused. Each operation on a File is atomic.
+// An open file: a handle, the id of an entry in the runtime's table of open
+// files, sockets and stdin. Copying a File copies the id, not the file: both
+// copies refer to the same open file, and close() closes it for every copy.
+// Ids are never reused. Each operation on a File is atomic, and reading is
+// a stop point (it can wait for ever on a FIFO).
 pub type File struct {
     int id
+    bool writing // opened by create
     string path // for error messages
 }
 

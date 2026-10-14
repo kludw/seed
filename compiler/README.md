@@ -1,31 +1,41 @@
 # The Seed compiler
 
-The real Seed compiler, written in Seed. It is compiled by the bootstrap
-compiler `seed0` first, and then compiles itself:
+The Seed compiler, written in Seed. It is built from a snapshot of its own
+generated C, `bootstrap/seed.c`, and then compiles itself:
 
 ```
-seed0 compiler/*.sd   -> build/stage1.c -> build/seed1
-seed1 c compiler/*.sd -> build/stage2.c -> build/seed2
-seed2 c compiler/*.sd -> build/stage3.c      (identical to stage2.c)
+cc bootstrap/seed.c        -> build/seed-boot
+seed-boot c compiler/*.sd  -> build/stage1.c -> build/seed1
+seed1 c compiler/*.sd      -> build/stage2.c -> build/seed2
+seed2 c compiler/*.sd      -> build/stage3.c      (identical to stage2.c)
 ```
 
+`build/seed2` is the compiler everything else uses. The bootstrap compiler
+seed0 (C, for a subset of Seed) built the first stages until the snapshot
+existed; it is retired (docs/seed0.md).
+
 ```
-make verify     # builds all stages and checks stage2.c == stage3.c
-make test       # tests/lang and tests/seed0 with build/seed2
-make test-full  # tests/full (programs and packages) and tests/test_cmd.sh (seed test, build, run)
+make            # build/seed2 (a fresh clone needs only a C compiler and make)
+make verify     # stage2.c == stage3.c, and stage3.c == bootstrap/seed.c while the inputs are unchanged
+make release    # verify, then write stage3.c to bootstrap/seed.c (and bootstrap/inputs.sha256)
+make test       # tests/lang and tests/core with build/seed2
+make test-full  # tests/full (programs and packages) and tests/test_cmd.sh (seed test, build, run, install)
 make test-lib   # the standard library's tests: build/seed2 test lib
 make test-leaks # every test program under macOS leaks --atExit
 make test-fmt   # seed fmt: self-checks on every .sd file, tests/fmt goldens
-make test0      # tests/lang, tests/seed0 and tests/seed0/only with seed0
+make test-examples  # builds examples/ and runs the ones that need no person
+make install    # links $(PREFIX)/bin/seed (PREFIX=/usr/local) to build/seed2; make uninstall removes it
 ```
 
-`tests/seed0/only` holds what only seed0 does (64-bit ints that crash on
-overflow, rejecting interfaces); the real compiler's ints grow
-(`tests/full/int_*`).
-
-Because stage 1 is built by seed0, the compiler source may only use the
-seed0 subset (docs/seed0.md) until a snapshot replaces seed0 (see "Adding a
-language feature").
+**The snapshot.** `bootstrap/seed.c` is a verified `stage3.c`:
+self-contained C (runtime and natives pasted in) that needs only `cc
+-std=c11 -O2 -lm -lpthread`. `bootstrap/inputs.sha256` lists the SHA-256
+of every file it was made from (`compiler/*.sd`, `runtime/`, the `lib/`
+packages). `make verify` checks the fixed point and, while those files are
+unchanged, that `stage3.c` is the snapshot byte for byte; once they change
+it only says that the snapshot is out of date. The snapshot does not have
+to be current to build: any snapshot that can compile the current source
+will do (see "Adding a language feature").
 
 ## Command line
 
@@ -45,11 +55,14 @@ described in "Packages" below. Compile errors go to stderr and exit with
 code 1; usage errors exit with 2. The pedantic checks and the formatting
 check are always on (there is no `--strict` any more).
 
-The generated C is self-contained: it starts with the runtime of `runtime/`
-(`seed.h`, `seed_internal.h` and the seven `seed_*.c` files pasted in that
-order, without their `#include "seed..."` lines; `readRuntime` in
-`gen.sd`), followed by the program, into which the C files of the standard
-library packages it uses are pasted (`readNatives`). The compiler finds its
+The C of `seed c` is self-contained: it starts with the runtime of
+`runtime/` (`seed.h`, `seed_internal.h` and the seven `seed_*.c` files
+pasted in that order, without their `#include "seed..."` lines;
+`readRuntime` in `gen.sd`), followed by the program, into which the C files
+of the standard library packages it uses are pasted (`readNatives`).
+`build`, `run` and `test` paste only `seed.h` and link a cached object of
+the runtime instead (see "Decisions"; `runtimeObject` in `main.sd`), in a
+temporary directory of their own that they remove when they finish. The compiler finds its
 root (the directory with `runtime/` and `lib/`) through `$SEED_ROOT`, or
 else from its own path: `os.executable()` gives the binary's real path
 (symbolic links resolved, so `seed` works through `$PATH` or a link), and
@@ -68,8 +81,9 @@ private names) and its imports, with the directory given on the command
 line as the project root. The checker runs in *test mode* (test blocks are
 checked, `main` is not needed) and the generator emits a table of the tests
 and a `main` that calls `sd_test_main` (runtime/README.md, "Native
-functions", for the runner). The program is built in
-`$TMPDIR/seed-test-<path>` and run with the name of a results file; it
+functions", for the runner). The program is built as `test` in a
+subdirectory of a new `$TMPDIR/seed-test-XXXXXX` (removed at the end) and
+run with the name of a results file; it
 prints one line per failed test and writes its counts there, and `seed
 test` prints the total, `N passed, M failed`, and exits with 1 if anything
 failed. A package that does not compile counts as one failure.
@@ -98,6 +112,10 @@ imports into one `Ast`. Each `SourceFile` has the index of its package in
   root>/x/y`, where the project root is the root package's directory (or
   the directory given to `seed test`). The code calls it by its last
   element, `y`. Import paths are lowercase names separated by `/`.
+- A project package that the standard library would shadow (`<project
+  root>/strings` with `package strings` in it, imported as `"strings"` by
+  project code) is an error at the import (`projectPackage`), not silently
+  replaced by the standard library's.
 - Every `.sd` file directly in a package's directory belongs to it; all
   must have the same `package` line, which must be the last element of the
   directory's path (only `package main` may differ). Package `main` cannot
@@ -141,7 +159,7 @@ never return (`isNoReturn`).
 
 | File | Phase | Contents |
 |---|---|---|
-| `main.sd` | driver | CLI, runtime location, building and running programs, `seed test` |
+| `main.sd` | driver | CLI, runtime location, building and running programs (temporary directories, the runtime cache), `seed test` |
 | `load.sd` | driver | loading packages: import resolution, package names, formatting check, cycles |
 | `errors.sd` | all | `Pos`, `Diags` (collect, sort and print errors), "did you mean" |
 | `lexer.sd` | lex | `Tok`, `Token`, `Comment`, newline insertion |
@@ -169,7 +187,7 @@ never return (`isNoReturn`).
 ### Positions and diagnostics
 
 `Pos {file, line, col}`: `file` indexes `Diags.paths`/`Diags.sources` (and
-`Ast.files`); `line` and `col` start at 1 and `col` counts bytes, as in seed0.
+`Ast.files`); `line` and `col` start at 1 and `col` counts bytes.
 
 `Diags` collects `Diag {pos, message, hint}`. It keeps at most 20 errors,
 drops a second error at a position that already has one (almost always a
@@ -342,15 +360,21 @@ past the offending token. When a file has syntax errors, checking is skipped.
    in dependency order), then every function body (natives have none; test
    bodies only in test files), then that every import is used.
 
-Expression checking mirrors seed0: there are no implicit conversions except
+There are no implicit conversions except
 `T → T?` (`coerce` sets `wrap`), `null → T?/error`, reading a narrowed `T?`
 as `T`, and a struct or enum that declares `implements I` → `I` (and `I?`,
 and `error`; `coerce` sets `ifaceFrom`). Narrowing keeps a stack of
 narrowed *paths* (`"v12.email"` = variable 12, field `email`), added by
-conditions (`!=`/`==` null through `&&`, `||`, `!`) and by an `if` whose
-branch always exits, killed by assignment to the path or a prefix, and by a
-mut method call on a prefix. Before a loop, every path the loop assigns or
-mutates is un-narrowed. Whether a statement always exits is a pure function
+conditions (`!=`/`==` null through `&&`, `||`, `!`) and by assigning a
+value that is never null (`isNonNullValue`: a `T`, not a `T?`) to a `T?`
+path with one target (declarations included), killed by assignment to the
+path or a prefix, and by a mut method call on a prefix. `checkIf` checks
+each branch from the narrowings before the `if` and joins them
+(`joinNarrows`): an entry killed in either branch stays killed, and the
+paths narrowed at the end of every branch that falls through
+(`checkBlockLive`) are narrowed after the `if` (so `if (x == null) {
+return }` and `if (x == null) { x = "none" }` both leave `x` narrowed).
+Before a loop, every path the loop assigns or mutates is un-narrowed. Whether a statement always exits is a pure function
 over the checked tree (`stmtExits`), used for "missing return", unreachable
 code and narrowing after early exits.
 
@@ -408,7 +432,7 @@ Concurrency (SPEC.md, "Concurrency"):
 - `time` is a standard library package (`lib/time`): `after` and `sleep`
   are natives, the durations are constants.
 
-The pedantic checks of the full language that seed0 lacks are always on
+The pedantic checks are always on
 (check_style.sd and `declare`): unused variables, imports and call results,
 unreachable code, locals that shadow package-level names or imports, the
 naming rules (camelCase/PascalCase, with a suggested spelling), the error
@@ -624,30 +648,48 @@ Value semantics shape the code:
 
 ## Adding a language feature: teach, snapshot, use
 
-1. **Teach.** Implement the feature in the compiler (checker and generator,
-   plus tests in tests/full) *without using it* in the compiler's own source.
-   The compiler must still build with the previous compiler and reach the
-   fixed point (`make verify`).
-2. **Snapshot.** Commit the generated C of the new compiler (today:
-   `build/stage2.c`) as the new bootstrap (`bootstrap/`), so that the
-   compiler can be rebuilt by a compiler that knows the feature. Once the
-   first snapshot exists, it replaces seed0 as stage 0.
-3. **Use.** Now the compiler's source may use the feature. Rebuild from the
-   snapshot and verify the fixed point again.
+The compiler's source may use the whole language, but only what the
+compiler in `bootstrap/seed.c` already understands, because that compiler
+builds stage 1. A new feature therefore takes three steps:
 
-Until the first snapshot is taken, stage 0 is seed0, so the compiler source
-is limited to the seed0 subset. For a new check (rather than new syntax),
-fix the test programs that fail it in the same change. A small new library
-function the compiler itself needs can also be taught to seed0 directly
-(seed0 got `os.executable()` and `os.cwd()` this way, to find the root
-through symbolic links and to compare directories).
+1. **Teach.** Implement the feature in the compiler (checker and generator,
+   plus tests in tests/full) *without using it* in the compiler's own
+   source. `make` builds it with the old snapshot (stage 1), then with
+   itself; `make verify` must reach the fixed point, and `make test`,
+   `make test-full`, `make test-lib` must pass.
+2. **Release.** `make release` writes the new `stage3.c` to
+   `bootstrap/seed.c` (and its inputs to `bootstrap/inputs.sha256`). Commit
+   the snapshot together with the change that taught the feature.
+3. **Use.** Now the compiler's source may use the feature. `make verify`
+   rebuilds from the new snapshot; `make release` again when the compiler
+   should be built from the newest version.
+
+A change that is not used by the compiler's own source (a fix, a new check,
+a library function) needs only step 1; `make release` then just refreshes
+the snapshot. For a new check, fix the test programs that fail it in the
+same change. If a compiler bug is in the snapshot itself, fix it in the
+source, build (the fixed compiler compiles itself in stage 2), verify and
+release. Never edit `bootstrap/seed.c` by hand; if it cannot build the
+current source, check out an older source that it can build, and walk
+forward one release at a time.
 
 ## Decisions
 
-- **The runtime of `runtime/`, pasted into the output.** Generated programs
-  stay one self-contained C file (so the bootstrap snapshot will be one
-  file). seed0 keeps its own runtime (`seed0/runtime.c`); `compiler/runtime0.c`
-  is gone. Crash messages and exit codes are the same as seed0's.
+- **The runtime of `runtime/`, pasted into the output.** `seed c` output is
+  one self-contained C file (the tests and the bootstrap snapshot rely on
+  it). Crash messages and exit codes are the same as seed0's were.
+- **`seed build`/`run`/`test` link a cached runtime.** Compiling the
+  runtime (about 4,000 lines) took most of the time of building a small
+  program, so these commands compile it once into
+  `$SEED_ROOT/build/cache/runtime-<key>.o` (or `$TMPDIR/seed-cache-$USER/`
+  when the root cannot be written), where the key is a hash of the
+  runtime's pasted text, `cCompiler` and `cFlags`, and paste only `seed.h`
+  above the program (`compileProgramC`, `runtimeObject`). The object is
+  written under a random name and renamed, so concurrent compilers are
+  safe. The natives of `lib/` are not cached: they use the program's own
+  type definitions (`sd_S_fs_File`) and prototypes, so they are compiled
+  with it. Old cache objects are not removed (`make clean` removes
+  `build/`).
 - **Every call result goes into a temporary**, even when it is not counted:
   side effects (printing, crashing) then happen in source order, and C's
   unspecified argument order never matters. clang removes the copies.
@@ -685,14 +727,11 @@ through symbolic links and to compare directories).
   `SD_INT`'s 63-bit range become `SD_INT_BIGLIT` (parsed once, immortal).
 - **Constants are computed once per thread** (`_Thread_local` cache) and
   never freed, as runtime/README.md section 12 asks.
-- **tests/seed0/only** holds the tests whose expectations only hold for
-  seed0 (64-bit overflow crashes, interfaces rejected); `make test0` runs
-  them.
 - **Arenas plus parallel result lists**, with `ExprInfo.wrap`,
   `ExprInfo.narrowed` and `ExprInfo.ifaceFrom` instead of rewriting the tree.
 - **Diagnostics**: up to 20, sorted, deduplicated by position, one error per
   failing expression (`tyInvalid` suppresses cascades). "did you mean x?"
-  hints are written without backticks because the seed0 tests look for that
+  hints are written without backticks because the tests (from seed0's time) look for that
   exact text.
 - **"missing return"** is reported at the closing brace of the function.
 - **`return null, err`** for a plain result is rejected when `err` is the
@@ -707,16 +746,19 @@ through symbolic links and to compare directories).
   (`maxNesting` in parser.sd): every phase recurses over the tree, and
   deeper code overflowed the compiler's stack (and, around 600 levels, the
   C compiler's).
-- **Imports are per file.** seed0 treats them as package-wide.
+- **Imports are per file** (seed0 treated them as package-wide).
 - **The pedantic checks and the formatting check are always on**; the
   `--strict` flag is gone. The seed0-era test programs were changed to pass
-  them (they still compile with seed0).
+  them.
 - **Float literals are emitted as written** (they are valid C and C rounds
   them correctly); seed0 printed them with `%a`.
 - **`select` with `default`** is a syntax error with a hint (select always
   waits).
-- **`seed run`/`seed build`** put the C file and executable in
-  `$TMPDIR/seed-run-<name>` / `$TMPDIR/seed-build-<name>`.
+- **`seed run`/`seed build`/`seed test`** work in a new directory
+  `$TMPDIR/seed-run-XXXXXX` (`seed-build-`, `seed-test-`; `fs.makeTemp`)
+  per invocation, removed when they finish, so concurrent runs of programs
+  with the same name do not collide. `seed test` builds each package in a
+  numbered subdirectory, as `test`.
 - **`seed ast`** exists only for debugging the parser.
 - **Concurrency** (the language decisions are DECISIONS.md 38-47):
   `group` is an expression of type `error`, used only whole (assigned,
@@ -789,8 +831,6 @@ through symbolic links and to compare directories).
   declare a new one in the case.
 - A mut call evaluates its arguments before the receiver's place, so in
   `xs[f()].push(g())` `g` runs before `f`.
-- Two concurrent `seed run` (or `seed test`) of programs with the same name
-  share a temporary directory.
 - A deadlock in one test ends the whole test program (deadlock detection is
   global); `seed test` then reports the package as failed with the exit
   code.

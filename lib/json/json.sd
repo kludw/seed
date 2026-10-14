@@ -659,17 +659,9 @@ pub fn (Value v) at(int i) Value {
 // The string, or null if `v` is not a String.
 pub fn (Value v) asString() string? {
     switch (v) {
-    case Value.Null:
-        return null
-    case Value.Bool(bool _):
-        return null
-    case Value.Number(float _):
-        return null
     case Value.String(string s):
         return s
-    case Value.Array([]Value _):
-        return null
-    case Value.Object(map[string]Value _):
+    case Value.Null, Value.Bool(bool _), Value.Number(float _), Value.Array([]Value _), Value.Object(map[string]Value _):
         return null
     }
 }
@@ -677,17 +669,9 @@ pub fn (Value v) asString() string? {
 // The number, or null if `v` is not a Number.
 pub fn (Value v) asFloat() float? {
     switch (v) {
-    case Value.Null:
-        return null
-    case Value.Bool(bool _):
-        return null
     case Value.Number(float n):
         return n
-    case Value.String(string _):
-        return null
-    case Value.Array([]Value _):
-        return null
-    case Value.Object(map[string]Value _):
+    case Value.Null, Value.Bool(bool _), Value.String(string _), Value.Array([]Value _), Value.Object(map[string]Value _):
         return null
     }
 }
@@ -709,17 +693,9 @@ pub fn (Value v) asInt() int? {
 // The bool, or null if `v` is not a Bool.
 pub fn (Value v) asBool() bool? {
     switch (v) {
-    case Value.Null:
-        return null
     case Value.Bool(bool b):
         return b
-    case Value.Number(float _):
-        return null
-    case Value.String(string _):
-        return null
-    case Value.Array([]Value _):
-        return null
-    case Value.Object(map[string]Value _):
+    case Value.Null, Value.Number(float _), Value.String(string _), Value.Array([]Value _), Value.Object(map[string]Value _):
         return null
     }
 }
@@ -727,17 +703,9 @@ pub fn (Value v) asBool() bool? {
 // The elements, or null if `v` is not an Array.
 pub fn (Value v) asArray() []Value? {
     switch (v) {
-    case Value.Null:
-        return null
-    case Value.Bool(bool _):
-        return null
-    case Value.Number(float _):
-        return null
-    case Value.String(string _):
-        return null
     case Value.Array([]Value items):
         return items
-    case Value.Object(map[string]Value _):
+    case Value.Null, Value.Bool(bool _), Value.Number(float _), Value.String(string _), Value.Object(map[string]Value _):
         return null
     }
 }
@@ -745,18 +713,10 @@ pub fn (Value v) asArray() []Value? {
 // The fields, or null if `v` is not an Object.
 pub fn (Value v) asObject() map[string]Value? {
     switch (v) {
-    case Value.Null:
-        return null
-    case Value.Bool(bool _):
-        return null
-    case Value.Number(float _):
-        return null
-    case Value.String(string _):
-        return null
-    case Value.Array([]Value _):
-        return null
     case Value.Object(map[string]Value fields):
         return fields
+    case Value.Null, Value.Bool(bool _), Value.Number(float _), Value.String(string _), Value.Array([]Value _):
+        return null
     }
 }
 

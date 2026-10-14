@@ -1154,11 +1154,24 @@ fn stripRuntimeIncludes(string text, string name) string {
     return kept.join("\n")
 }
 
+// The runtime files, in the order they are pasted (runtime/README.md,
+// section 1).
+const []string runtimeFiles = []string{"seed.h", "seed_internal.h", "seed_core.c", "seed_int.c", "seed_str.c", "seed_list.c", "seed_task.c", "seed_pkg.c", "seed_test.c"}
+
 // The runtime pasted at the top of every generated program: seed.h,
 // seed_internal.h and the implementation files, without their includes of
 // each other (runtime/README.md, section 1).
 fn readRuntime(string root) (string, error) {
-    []string files = []string{"seed.h", "seed_internal.h", "seed_core.c", "seed_int.c", "seed_str.c", "seed_list.c", "seed_task.c", "seed_pkg.c", "seed_test.c"}
+    return readRuntimeFiles(root, runtimeFiles)
+}
+
+// Only the runtime's API (seed.h), for a program that is linked with a
+// compiled runtime (see runtimeObject in main.sd).
+fn readRuntimeHeader(string root) (string, error) {
+    return readRuntimeFiles(root, []string{"seed.h"})
+}
+
+fn readRuntimeFiles(string root, []string files) (string, error) {
     []string parts = []string{}
     for (int i = 0; i < files.len(); i++) {
         string path = root + "/runtime/" + files[i]

@@ -1,5 +1,5 @@
-// Ints grow instead of overflowing: the programs that crash with seed0's
-// 64-bit ints (tests/seed0/only/crash_overflow_*) print the exact results.
+// Ints grow instead of overflowing: the programs that crashed with seed0's
+// 64-bit ints (the retired tests/seed0/only/crash_overflow_*) print the exact results.
 package main
 
 import "fmt"

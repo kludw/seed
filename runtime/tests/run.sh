@@ -53,11 +53,11 @@ run_asan() {
   f="-O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined -fno-sanitize-recover=undefined -DSD_COUNT_OBJECTS"
   echo "== asan+ubsan"
   # shellcheck disable=SC2086
-  step "build seed0_float" $CC -std=c11 $f -w -c "$here/seed0_float.c" -o "$d/seed0_float.o" || return
+  step "build ref_float" $CC -std=c11 $f -w -c "$here/ref_float.c" -o "$d/ref_float.o" || return
   for t in test_int test_mem test_pkg test_conc test_block test_exit example; do
     step "build $t" build_test "$d" "$f" $t
   done
-  step "build test_str" build_test "$d" "$f" test_str "$d/seed0_float.o"
+  step "build test_str" build_test "$d" "$f" test_str "$d/ref_float.o"
   for t in test_int test_str test_mem test_pkg test_conc test_block; do step "$t (asan)" "$d/$t"; done
   step "test_exit (asan)" "$here/test_exit.sh" "$d/test_exit" nostack
   step "example (asan)" run_example "$d/example"
@@ -88,10 +88,10 @@ run_plain() {
     objs="$objs $d/$u.o"
   done
   # shellcheck disable=SC2086
-  step "build seed0_float" $CC -std=c11 $f -w -c "$here/seed0_float.c" -o "$d/seed0_float.o"
+  step "build ref_float" $CC -std=c11 $f -w -c "$here/ref_float.c" -o "$d/ref_float.o"
   for t in test_int test_str test_mem test_pkg test_conc test_block test_exit example; do
     extra=""
-    [ $t = test_str ] && extra="$d/seed0_float.o"
+    [ $t = test_str ] && extra="$d/ref_float.o"
     # shellcheck disable=SC2086
     step "build $t" $CC -std=c11 $f $warn -I"$rt" "$here/$t.c" $extra $objs -o "$d/$t" $libs
   done

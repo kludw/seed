@@ -1,7 +1,0 @@
-// expect-error: too large
-package main
-
-fn main([]string args) error {
-    int x = 9223372036854775808
-    return null
-}

@@ -1,0 +1,17 @@
+// expect-error: narrow_assign_nullable.sd:15:17: error: kind is nullable
+// Assigning a T? ends the narrowing an earlier assignment of a T made.
+package main
+
+import "fmt"
+
+fn find(map[string]string m) string? {
+    return m["k"]
+}
+
+fn main([]string args) error {
+    string? kind = "first"
+    fmt.println(kind)
+    kind = find(map[string]string{})
+    fmt.println(kind)
+    return null
+}

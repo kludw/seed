@@ -1,8 +1,12 @@
 // expect-error: can only be compared with null
 package main
 
+fn find(int x) int? {
+    return x
+}
+
 fn main([]string args) error {
-    int? n = 1
+    int? n = find(1)
     bool b = n == 1
     return null
 }

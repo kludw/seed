@@ -1,0 +1,77 @@
+// A T? path is narrowed by assigning a T to it (lib/COMPILER_BUGS.md 3),
+// after an if when every branch that falls through leaves it narrowed, and
+// a branch's assignment does not affect the other branch.
+package main
+
+import "errors"
+import "fmt"
+
+type Config struct {
+    string? name
+    Config? parent
+}
+
+fn find(map[string]string m, string k) string? {
+    return m[k]
+}
+
+fn main([]string args) error {
+    map[string]string m = map[string]string{"a": "apple"}
+    string? kind = find(m, "x")
+    if (kind == null) {
+        kind = "none"
+    }
+    fmt.println(kind)
+    string? other = find(m, "a")
+    if (other != null) {
+        fmt.println("found " + other)
+    } else {
+        other = "default"
+    }
+    fmt.println(other.toUpper())
+    string? lit = "literal"
+    fmt.println(lit.len().string())
+    int? n = null
+    n = 41
+    n = n + 1
+    fmt.println(n.string())
+    Config c = Config{name: null, parent: null}
+    c.name = "root"
+    fmt.println(c.name)
+    c.parent = Config{name: "p", parent: null}
+    c.parent.name = "q"
+    fmt.println(c.parent.name)
+    string? chain = find(m, "y")
+    if (args.len() > 10) {
+        chain = "many"
+    } else if (chain == null) {
+        chain = "few"
+    }
+    fmt.println(chain)
+    string? kept = find(m, "a")
+    if (kept == null) {
+        return null
+    }
+    if (args.len() > 10) {
+        kept = null
+    } else {
+        fmt.println("still " + kept)
+    }
+    string? looped = find(m, "z")
+    for (int i = 0; i < 2; i++) {
+        looped = "turn " + i.string()
+        fmt.println(looped)
+    }
+    string? fromTry = null
+    fromTry = try lookup(m, "a")
+    fmt.println(fromTry)
+    return null
+}
+
+fn lookup(map[string]string m, string k) (string, error) {
+    string? v = m[k]
+    if (v == null) {
+        return null, errors.new("missing " + k)
+    }
+    return v, null
+}

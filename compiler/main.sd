@@ -11,6 +11,8 @@
 // single .sd file. The packages it imports are loaded by load.sd.
 package main
 
+import "crypto"
+import "encoding"
 import "errors"
 import "fmt"
 import "fs"
@@ -41,7 +43,8 @@ fn main([]string args) error {
         if (program == null) {
             os.exit(1)
         }
-        fmt.print(program)
+        string runtime = try readRuntime(root)
+        fmt.print(runtime + program)
         return null
     }
     if (cmd == "ast") {
@@ -195,10 +198,11 @@ fn targetOf([]string args) (Build, error) {
     return Build{files: args, dir: fdir, projectRoot: fdir, name: baseName(args[0])}, null
 }
 
-// Loads, checks and translates a program to C. Compile errors are printed
-// to stderr, and the result is then null. In test mode, the root package's
-// tests/ files are compiled too, and the program runs the tests instead of
-// main.
+// Loads, checks and translates a program to C, without the runtime (seed c
+// pastes the whole runtime above it; build, run and test only seed.h, see
+// writeC). Compile errors are printed to stderr, and the result is then
+// null. In test mode, the root package's tests/ files are compiled too, and
+// the program runs the tests instead of main.
 fn compileProgram(string root, Build t, bool testMode) (string?, error) {
     Loader l = newLoader(root, t.projectRoot)
     string path = ""
@@ -224,11 +228,9 @@ fn compileProgram(string root, Build t, bool testMode) (string?, error) {
         c.diags.print()
         return null, null
     }
-    string runtime = try readRuntime(root)
     string natives = try readNatives(c.ast)
     Gen g = newGen(c)
-    string program = g.genProgram(natives)
-    return runtime + program, null
+    return g.genProgram(natives), null
 }
 
 // Parses the files into one tree (for seed ast). Syntax errors are printed
@@ -258,8 +260,9 @@ fn tempDir() string {
     return "/tmp"
 }
 
-// Runs the C compiler on a C file.
-fn compileC(string cfile, string out) error {
+// Runs the C compiler on a C file, linking the runtime object obj with it
+// when there is one.
+fn compileC(string cfile, string? obj, string out) error {
     []string argv = []string{cCompiler}
     for (int i = 0; i < cFlags.len(); i++) {
         argv.push(cFlags[i])
@@ -267,41 +270,111 @@ fn compileC(string cfile, string out) error {
     argv.push("-o")
     argv.push(out)
     argv.push(cfile)
+    if (obj != null) {
+        argv.push(obj)
+    }
     for (int j = 0; j < cLibs.len(); j++) {
         argv.push(cLibs[j])
     }
     int code = try os.run(argv)
     if (code != 0) {
-        return errors.new("the C compiler failed (exit code " + code.string() + ") on " + cfile)
+        return errors.new("the C compiler failed (exit code " + code.string() + "); seed c prints the C program")
     }
     return null
 }
 
-// Compiles a program into the executable out, through a C file in the
-// temporary directory. Returns false when there were compile errors.
+// Writes the program (from compileProgram) to cfile and compiles it into
+// the executable out. The runtime is not compiled again each time: it is
+// linked from a cached object (runtimeObject), so the C file only has
+// seed.h above the program. Without a cache, the C file is self-contained.
+fn compileProgramC(string root, string program, string cfile, string out) error {
+    string? obj = try runtimeObject(root)
+    if (obj == null) {
+        string runtime = try readRuntime(root)
+        try fs.write(cfile, runtime + program)
+    } else {
+        string header = try readRuntimeHeader(root)
+        try fs.write(cfile, header + program)
+    }
+    return compileC(cfile, obj, out)
+}
+
+// The compiled runtime, runtime-<key>.o in the cache directory
+// ($SEED_ROOT/build/cache, or $TMPDIR/seed-cache-$USER when that cannot be
+// written), where key is a hash of the runtime's text, the C compiler and
+// its flags; it is compiled on first use. Null when neither directory can
+// be used.
+fn runtimeObject(string root) (string?, error) {
+    string text = try readRuntime(root)
+    string key = encoding.hexEncode(crypto.sha256(cCompiler + "\n" + cFlags.join(" ") + "\n" + text)).slice(0, 20)
+    string user = "seed"
+    string? u = os.env("USER")
+    if (u != null && u != "") {
+        user = u
+    }
+    []string dirs = []string{root + "/build/cache", tempDir() + "/seed-cache-" + user}
+    for (int i = 0; i < dirs.len(); i++) {
+        string obj = dirs[i] + "/runtime-" + key + ".o"
+        if (fs.exists(obj)) {
+            return obj, null
+        }
+        error err = compileRuntime(dirs[i], text, obj)
+        if (err == null) {
+            return obj, null
+        }
+    }
+    return null, null
+}
+
+// Compiles the runtime into obj, through files with a random name in the
+// same directory and a rename, so that concurrent compilers never see a
+// half-written object.
+fn compileRuntime(string dir, string text, string obj) error {
+    try fs.mkdir(dir)
+    string tmp = dir + "/tmp-" + encoding.hexEncode(crypto.randomBytes(8))
+    defer _ = fs.remove(tmp + ".c")
+    try fs.write(tmp + ".c", text)
+    []string argv = []string{cCompiler}
+    for (int i = 0; i < cFlags.len(); i++) {
+        argv.push(cFlags[i])
+    }
+    argv.push("-c")
+    argv.push("-o")
+    argv.push(tmp + ".o")
+    argv.push(tmp + ".c")
+    int code = try os.run(argv)
+    if (code != 0) {
+        _ = fs.remove(tmp + ".o")
+        return errors.new("the C compiler failed on the runtime (exit code " + code.string() + ")")
+    }
+    return fs.rename(tmp + ".o", obj)
+}
+
+// Compiles a program into the executable out, through a C file in a new
+// temporary directory (removed afterwards). Returns false when there were
+// compile errors.
 fn build(string root, Build t, string out) (bool, error) {
     string? program = try compileProgram(root, t, false)
     if (program == null) {
         return false, null
     }
-    string dir = tempDir() + "/seed-build-" + baseName(out)
-    try fs.mkdir(dir)
-    string cfile = dir + "/" + baseName(out) + ".c"
-    try fs.write(cfile, program)
-    try compileC(cfile, out)
+    string dir = try fs.makeTemp("seed-build-")
+    defer _ = fs.removeAll(dir)
+    try compileProgramC(root, program, dir + "/" + baseName(out) + ".c", out)
     return true, null
 }
 
-// Builds a program into a temporary executable, runs it with args and
-// returns its exit code.
+// Builds a program into a new temporary directory, runs it with args,
+// removes the directory and returns the program's exit code.
 fn run(string root, Build t, []string args) (int, error) {
-    string dir = tempDir() + "/seed-run-" + t.name
-    try fs.mkdir(dir)
-    string exe = dir + "/" + t.name
-    bool ok = try build(root, t, exe)
-    if (!ok) {
+    string? program = try compileProgram(root, t, false)
+    if (program == null) {
         return 1, null
     }
+    string dir = try fs.makeTemp("seed-run-")
+    defer _ = fs.removeAll(dir)
+    string exe = dir + "/" + t.name
+    try compileProgramC(root, program, exe + ".c", exe)
     []string argv = []string{exe}
     for (int i = 0; i < args.len(); i++) {
         argv.push(args[i])
@@ -323,6 +396,9 @@ fn testCommand(string root, []string args) (int, error) {
     }
     int passed = 0
     int failed = 0
+    string tmp = try fs.makeTemp("seed-test-")
+    defer _ = fs.removeAll(tmp)
+    int built = 0
     for (int i = 0; i < dirs.len(); i++) {
         string base = dirs[i]
         if (base.endsWith("/...")) {
@@ -336,7 +412,10 @@ fn testCommand(string root, []string args) (int, error) {
         }
         []string pkgs = try testPackages(base, []string{})
         for (int j = 0; j < pkgs.len(); j++) {
-            []int counts = try testPackage(root, base, pkgs[j])
+            built++
+            string work = tmp + "/" + built.string()
+            try fs.mkdir(work)
+            []int counts = try testPackage(root, base, pkgs[j], work)
             passed = passed + counts[0]
             failed = failed + counts[1]
         }
@@ -379,8 +458,9 @@ fn testPackages(string dir, []string found) ([]string, error) {
 }
 
 // Builds and runs the tests of the package in dir (base is the project
-// root). Returns the numbers of passed and failed tests.
-fn testPackage(string root, string base, string dir) ([]int, error) {
+// root) in the directory work. Returns the numbers of passed and failed
+// tests.
+fn testPackage(string root, string base, string dir, string work) ([]int, error) {
     []string files = try sourceFiles(dir)
     string name = baseName(dir)
     if (dir != base && base == ".") {
@@ -394,16 +474,9 @@ fn testPackage(string root, string base, string dir) ([]int, error) {
         fmt.println("FAIL " + dir + ": the package or its tests do not compile")
         return []int{0, 1}, null
     }
-    string tmp = tempDir() + "/seed-test-" + name.replace("/", "-")
-    try fs.mkdir(tmp)
-    string cfile = tmp + "/test.c"
-    string exe = tmp + "/test"
-    string results = tmp + "/results"
-    try fs.write(cfile, program)
-    try compileC(cfile, exe)
-    if (fs.exists(results)) {
-        try fs.remove(results)
-    }
+    string exe = work + "/test"
+    string results = work + "/results"
+    try compileProgramC(root, program, work + "/test.c", exe)
     int code = try os.run([]string{exe, results})
     string? text, _ = fs.read(results)
     if (text == null) {

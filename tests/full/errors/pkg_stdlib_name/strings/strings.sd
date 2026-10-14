@@ -1,0 +1,5 @@
+package strings
+
+pub fn repeat(string s, int n) string {
+    return s
+}

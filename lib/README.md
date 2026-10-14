@@ -5,9 +5,10 @@ one directory per package, imported by its name (`import "json"`). The
 compiler finds it next to its own binary (`<root>/lib`, or
 `$SEED_ROOT/lib`) and looks there before the project's own packages.
 
-- `io` and `net` are native too, on top of the runtime's handle table and
-  blocking calls (runtime/README.md, section 13), so that every wait in
-  them is a stop point.
+- `io`, `net` and `fs.File` are native too, on top of the runtime's
+  handle table and blocking calls (runtime/README.md, section 13), so that
+  every wait in them is a stop point (and so are `os.run` and
+  `os.output`).
 - `fmt`, `os`, `fs`, `time`, `math`, `rand` and `crypto` have native
   functions (declared without a body) written in C, in `<pkg>/<pkg>.c`,
   some on top of the runtime (`runtime/seed_pkg.c`, `seed_task.c`). How to
@@ -86,7 +87,7 @@ checks it).
 |---|---|---|
 | `errors` | everything: `new`, `wrap` | — |
 | `fmt` | everything: `print`, `println`, `eprint`, `eprintln`, `fixed` (natives) | — |
-| `os` | everything: `exit`, `crash`, `env`, `run`, `output`, `executable`, `cwd`, `hostname` (natives) | `run` and `output` are not stop points yet (runtime hooks) |
+| `os` | everything: `exit`, `crash`, `env`, `run`, `output`, `executable`, `cwd`, `hostname` (natives) | — |
 | `fs` | everything: `read`, `write`, `append`, `exists`, `isDir`, `stat`, `list`, `mkdir`, `rename`, `remove`, `removeAll`, `makeTemp`, `open`, `create`, `File` with `readLine`, `read`, `write`, `close` (natives) | — |
 | `time` | everything: the duration constants, `now`, `monotonic`, `after`, `sleep` (natives); `Date`, `date`, `fromDate`, `format`, `parse` (Seed) | — |
 | `strings` | everything: `repeat`, `padLeft`, `padRight`, `lastIndex`, `fields`, `isDigit`, `isLetter`, `isSpace` | — |
@@ -112,19 +113,19 @@ and 100`.
 
 - `output` is `run` with the child's stdout on a pipe (both ends
   close-on-exec, so concurrent children don't inherit them); the parent
-  reads until end of file, then waits. Errors: `os.output: <program>:
+  reads until end of file, then waits. Both waits are stop points
+  (`sd_wait_fd`, `sd_wait_child`), as `run`'s is: a stopped goroutine
+  kills and reaps the child (tests/full/os_stop_points.sd). Errors: `os.output: <program>:
   <reason>` when it cannot start (or reading or waiting fails); crash
   `os.output: argv is empty`.
 - `hostname` is `gethostname`; error `os.hostname: <reason>`.
-- `run` and `output` block their goroutine's thread but are not stop
-  points yet (that needs the runtime's blocking hooks).
 
 ### fs
 
 - `write`, `append`, `create` use mode `0644` and `mkdir` `0755` (before
   the umask), as docs/stdlib.md says; `write` and `mkdir` are therefore in
   fs.c rather than calling the runtime's versions, with the same messages
-  as seed0 (`fs.mkdir("")` is `fs.mkdir: : not a directory`).
+  (`fs.mkdir("")` is `fs.mkdir: : not a directory`).
 - `append` holds a process-wide mutex around its `write` loop and opens
   with `O_APPEND`, so appends from goroutines never interleave (tested with
   5000-byte lines from two goroutines).
@@ -137,21 +138,23 @@ and 100`.
   denied`. `removeAll("")` does nothing.
 - `makeTemp` is `mkdtemp("$TMPDIR/<prefix>XXXXXX")` (trailing slashes of
   `$TMPDIR` removed; `/tmp` when it is unset or empty).
-- **File handles.** docs/stdlib.md puts the handle table in the runtime,
-  shared with `net`; until the runtime has one, fs.c keeps its own. A
-  `File` holds the entry's id (index + 1) and the path (for messages).
-  Ids are never reused and entries are never freed (closing frees the
-  descriptor and buffer, about 100 bytes stay), so a stale copy finds its
-  own closed entry. A table mutex guards lookups and growth; each entry
-  has a mutex that makes every operation atomic (a handle sent to two
-  goroutines writes whole `write` calls). Descriptors are close-on-exec.
+- **File handles.** A `File` is an entry of the runtime's handle table
+  (runtime/README.md, section 13; kind `SD_HANDLE_FILE`), shared with `io`
+  and `net`. It holds the entry's id, whether it was opened for writing,
+  and the path (for messages, which keep the path after `close`). Ids are
+  never reused, so a stale copy of a closed handle finds nothing (`file is
+  closed`). The table's operation lock makes each operation atomic (a
+  handle sent to two goroutines writes whole `write` calls). Descriptors
+  are close-on-exec.
 - `open` fails on a directory with `is a directory`. `readLine` and `read`
-  share a buffer that is refilled 64 KiB at a time; `read` returns what is
-  buffered, or does one `read(2)`. End of file is not remembered, so a file
+  share the handle's buffer; `read` returns what is buffered, or does one
+  `read(2)` of at most 64 KiB. End of file is not remembered, so a file
   that grows can be read further. Messages: `fs.File.<method>: <path>:
   file is open for reading only` / `writing only` / `file is closed`; crash
   `fs.File.read: max (0) must be at least 1`.
-- File I/O is not a stop point (regular files don't block for long).
+- Reads poll before they read, so they are stop points (a FIFO nobody
+  writes to can block for ever; tests/full/fs_file_stop.sd). `open` itself
+  (which blocks on a FIFO until a writer opens it) and writes are not.
 
 ### time
 

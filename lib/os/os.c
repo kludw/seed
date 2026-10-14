@@ -28,7 +28,9 @@ sd_err sd_lib_os_cwd(sd_str *out) { return sd_os_cwd(out); }
 
 /* os.output: os.run with the child's stdout on a pipe. Both pipe ends are
  * close-on-exec, so no other child started at the same time inherits them;
- * dup2 onto the child's descriptor 1 clears the flag there. */
+ * dup2 onto the child's descriptor 1 clears the flag there. Reading waits
+ * with sd_wait_fd and the end with sd_wait_child, so both are stop points:
+ * a stopped goroutine kills and reaps the child. */
 sd_err sd_lib_os_output(sd_list *argv, sd_str *out, sd_int *code) {
   if (argv->len == 0) sd_crash("os.output: argv is empty");
   sd_str const *xs = sd_list_data(argv);
@@ -61,25 +63,37 @@ sd_err sd_lib_os_output(sd_list *argv, sd_str *out, sd_int *code) {
   int64_t cap = 4096, n = 0;
   char *buf = sd_alloc((size_t)cap);
   int readErr = 0;
+  int st = 0;
   for (;;) {
+    int w = sd_wait_fd(fds[0], false, 0);
+    if (w == SD_WAIT_STOP) {
+      close(fds[0]);
+      free(buf);
+      free(av);
+      (void)sd_wait_child(pid, &st); /* the goroutine is stopped: kills and reaps the child */
+      sd_stop();
+    }
+    if (w == SD_WAIT_FAILED) {
+      if (errno == EINTR || errno == EAGAIN) continue;
+      readErr = errno;
+      break;
+    }
     if (n == cap) {
       cap *= 2;
       buf = sd_realloc(buf, (size_t)cap);
     }
     ssize_t got = read(fds[0], buf + n, (size_t)(cap - n));
-    if (got < 0 && errno == EINTR) continue;
+    if (got < 0 && (errno == EINTR || errno == EAGAIN)) continue;
     if (got < 0) readErr = errno;
     if (got <= 0) break;
     n += got;
   }
   close(fds[0]);
-  int st;
-  int waitErr = 0;
-  while (waitpid(pid, &st, 0) < 0) {
-    if (errno != EINTR) {
-      waitErr = errno;
-      break;
-    }
+  int waitErr = sd_wait_child(pid, &st);
+  if (waitErr == SD_WAIT_STOP) {
+    free(buf);
+    free(av);
+    sd_stop();
   }
   if (readErr || waitErr) {
     sd_err e = sd_errorf("os.output: %s: %s", av[0], sd_strerror(readErr ? readErr : waitErr));

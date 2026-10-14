@@ -151,6 +151,8 @@ if (u.email != null) {
 }
 ```
 
+- Assigning a non-null value narrows too: after `x = "a"` (or `string? x = "a"`), `x` is a `T` until it may become null again (another assignment, a `mut` call on it or on what contains it, a loop that assigns it). After an `if`, a variable is narrowed when every branch that does not exit leaves it narrowed: `if (kind == null) { kind = "none" }`.
+
 ## Values, not pointers
 
 - Seed has no pointers. Every value behaves like an independent copy.
@@ -484,6 +486,8 @@ The same bootstrap approach as the first Seed:
 3. Compile the compiler with itself and reach a fixed point, where its output reproduces itself exactly.
 4. Commit a snapshot of the generated C to `bootstrap/` and delete `seed0.c`.
 5. Add features using the "teach, snapshot, use" cycle.
+
+Steps 1–4 are done: seed0 is retired, and the compiler is built from its own snapshot, `bootstrap/seed.c` (`make release` refreshes it; see compiler/README.md).
 
 ## Open questions
 

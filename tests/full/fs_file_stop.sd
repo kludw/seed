@@ -1,0 +1,52 @@
+// Reading a fs.File is a stop point: a goroutine waiting for a line from a
+// FIFO that nobody writes to is stopped when its group fails.
+package main
+
+import "errors"
+import "fmt"
+import "fs"
+import "os"
+import "time"
+
+fn holdOpen(string fifo) error {
+    // Opens the FIFO for writing (so that the reader's open returns) and
+    // writes nothing.
+    _, error err = os.run([]string{"sh", "-c", "exec sleep 30 3>" + fifo})
+    return err
+}
+
+fn readLine(string fifo, chan int opened) error {
+    fs.File f = try fs.open(fifo)
+    opened.send(1)
+    string? line = try f.readLine()
+    if (line != null) {
+        fmt.println("unexpected line " + line)
+    }
+    return null
+}
+
+fn failOnceOpen(chan int opened) error {
+    _ = opened.receive()
+    time.sleep(20 * time.millisecond)
+    return errors.new("enough")
+}
+
+fn main([]string args) error {
+    string dir = try fs.makeTemp("seed-fifo-")
+    string fifo = dir + "/fifo"
+    int code = try os.run([]string{"mkfifo", fifo})
+    if (code != 0) {
+        return errors.new("mkfifo failed")
+    }
+    chan int opened = chan int(1)
+    int start = time.monotonic()
+    error err = group {
+        spawn holdOpen(fifo)
+        spawn readLine(fifo, opened)
+        spawn failOnceOpen(opened)
+    }
+    fmt.println(err.message())
+    fmt.println((time.monotonic() - start < 10 * time.second).string())
+    try fs.removeAll(dir)
+    return null
+}

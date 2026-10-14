@@ -1,0 +1,21 @@
+// expect-error: narrow_assign_mut.sd:19:19: error: b.label is nullable
+// A mut method call on the struct ends the narrowing of its field.
+package main
+
+import "fmt"
+
+type Box struct {
+    string? label
+}
+
+fn (Box b) mut clear() {
+    b.label = null
+}
+
+fn main([]string args) error {
+    Box b = Box{label: null}
+    b.label = "x"
+    b.clear()
+    fmt.println(b.label)
+    return null
+}

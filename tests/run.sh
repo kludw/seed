@@ -4,7 +4,7 @@
 #   tests/run.sh "<compile command>" <dir>...
 #
 # The compile command is given a .sd path and must write C to stdout, e.g.
-#   tests/run.sh build/seed0 tests/lang
+#   tests/run.sh "build/seed2 c" tests/lang
 #
 # For every <dir>/NAME.sd:
 #   NAME.out   expected stdout (required, may be empty)

@@ -1,117 +1,21 @@
 # Compiler issues found while writing lib/
 
-Found with `build/seed2` at `seed-v2` (7a63a1d). None of them blocked the
-library; the workaround is given for each.
+None are open. Add an entry here when library code has to work around the
+compiler: a minimal program that shows the problem, what the compiler says,
+what it should do, and the workaround used (with the file it is in).
 
-**Status:** both are fixed (with packages, natives and tests): a `T?` next
-to an error is not guarded any more (tests/full/error_guard_nullable.sd),
-and `pub` struct fields parse and are enforced across packages
-(tests/full/pkg_basic, tests/full/errors/pkg_private_field). Of the limits
-at the end, `os.crash` now reports a caller's mistake, a `case` with
-several labels may have patterns whose bindings are all `_`, and packages,
-natives and `test` blocks exist (lib/run_tests.sh is gone).
+Fixed since the library was first written (each with tests):
 
-## 1. Error guard on a variable that is already nullable (`--strict`)
-
-A value declared as `T?` next to an error is still guarded until the error
-is checked, so even comparing it with `null` is rejected. The guard exists to
-stop a `T` from being read while it may be null; a `T?` can always be read
-safely.
-
-```
-package main
-
-import "fmt"
-
-fn f() (string, error) {
-    return "x", null
-}
-
-fn main([]string args) error {
-    string? s, error err = f()
-    if (s == null) {              // error: s is read before err is checked
-        fmt.println("null")
-    }
-    if (err != null) {
-        return err
-    }
-    return null
-}
-```
-
-`build/seed2 c --strict` reports `s is read before err is checked; when err
-is not null, s is null`; without `--strict` it compiles. Expected: no error,
-because `s` is declared `string?`.
-
-Workaround: discard the value with `_, error err = f()` when only the error
-matters (lib/encoding/tests, lib/json/tests).
-
-## 2. `pub` on struct fields is not parsed
-
-SPEC.md ("Structs, enums, interfaces") and DECISIONS.md 20 say struct fields
-are private unless marked `pub` (`pub string name`), and docs/stdlib.md
-relies on it (`http.Request`, `http.Response` have public fields;
-`rand.Source`, handles have private ones).
-
-```
-package main
-
-type Req struct {
-    pub string method             // error: expected a type, found 'pub'
-}
-
-fn main([]string args) error {
-    return null
-}
-```
-
-Workaround: lib/http/http.sd declares the fields without `pub`, with a
-comment saying every field of `Request` and `Response` is meant to be `pub`.
-Until field privacy exists, nothing would stop another package from reading
-or setting `rand.Source.state`; that cannot happen yet, because user
-packages are not implemented either.
-
-## 3. A nullable variable is not narrowed by assigning a value to it
-
-Found while writing the http server tests (seed-v2, e7254fe). After
-`if (x == null) { x = "..." }`, `x` is non-null on every path, but the
-checker still treats it as `string?`:
-
-```
-package main
-
-import "fmt"
-
-fn find(map[string]string m) string? {
-    return m["k"]
-}
-
-fn main([]string args) error {
-    string? kind = find(map[string]string{})
-    if (kind == null) {
-        kind = "none"
-    }
-    fmt.println(kind)             // error: kind is nullable (string?) and cannot be used as string
-    return null
-}
-```
-
-SPEC.md only promises narrowing after a null check, so this may be a
-limit rather than a bug; Kotlin and TypeScript narrow on assignment.
-Workaround (lib/http/tests/server_test.sd): a non-null variable with the
-default, set from the nullable one inside `if (v != null)`.
-
-## Not bugs, but limits the library had to work around
-
-These are documented in lib/README.md:
-
-- There is no way for library code to crash with its own message
-  (docs/stdlib.md: `crash: rand.range: lo (5) must be less than hi (5)`).
-  Each package has a private `<pkg>Crash(message)` that prints
-  `crash: <message>` to stderr and calls `os.exit(2)`; inside a `group` this
-  ends the whole process instead of failing the group.
-- A `case` label with bindings must be the only label of its case
-  (`case Value.Null, Value.Bool(bool _):` is rejected), and enum switches
-  cannot have `default`, so json's accessors list every case.
-- User packages, non-core imports, native (bodiless) functions and `test`
-  blocks are not implemented yet (lib/run_tests.sh works around them).
+- A `T?` declared beside an error is not guarded
+  (tests/full/error_guard_nullable.sd).
+- `pub` struct fields parse and are enforced across packages
+  (tests/full/pkg_basic, tests/full/errors/pkg_private_field).
+- A `T?` variable or field path is narrowed by assigning a `T` to it, also
+  after an `if` whose every falling-through branch leaves it narrowed
+  (`if (kind == null) { kind = "none" }`; tests/full/narrow_assign.sd).
+- `os.crash(message)` lets library code crash with its own message; no
+  package has its own `print` + `os.exit(2)` any more.
+- A `case` with several labels may have patterns whose bindings are all `_`
+  (`case Value.Null, Value.Bool(bool _):`), which json's accessors use
+  (tests/full/enum_patterns.sd).
+- Packages, natives and `test` blocks exist (lib/run_tests.sh is gone).

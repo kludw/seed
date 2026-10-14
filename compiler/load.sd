@@ -5,8 +5,9 @@
 // `import "name"` is resolved, in order, to the standard library
 // ($SEED_ROOT/lib/name) and to a directory relative to the project root
 // (the directory of the root package): `import "shop/cart"` is
-// <root>/shop/cart, and its code calls it `cart`. Every file must be
-// formatted, and the imports must not form a cycle.
+// <root>/shop/cart, and its code calls it `cart`. A project directory with
+// the path of a standard library package is an error at the import. Every
+// file must be formatted, and the imports must not form a cycle.
 package main
 
 import "fs"
@@ -89,6 +90,13 @@ fn (Loader l) mut loadImports() error {
             continue
         }
         bool isLib = dir.startsWith(l.seedRoot + "/lib/")
+        bool fromLib = l.p.ast.pkgs[l.p.ast.files[im.file].pkgIndex].isLib
+        if (isLib && !fromLib) {
+            string? shadowed = try l.projectPackage(im.path, dir)
+            if (shadowed != null) {
+                l.p.diags.errorHint(im.pos, "the project's package \"" + im.path + "\" (" + shadowed + ") has the name of a standard library package", "import \"" + im.path + "\" always means the standard library's; rename the project's directory")
+            }
+        }
         int pkg = l.addPackage(im.path, dir, isLib)
         l.p.ast.imports[i].target = pkg
         []string files = try sourceFiles(dir)
@@ -101,6 +109,32 @@ fn (Loader l) mut loadImports() error {
     l.setNames()
     l.checkCycles()
     return null
+}
+
+// The project's directory for the import path when it is a package of that
+// name (some .sd file in it says `package <last element>`) other than the
+// standard library's directory std, or null.
+fn (Loader l) projectPackage(string path, string std) (string?, error) {
+    string local = joinPath(l.projectRoot, path)
+    if (!fs.isDir(local) || absPath(local) == absPath(std)) {
+        return null, null
+    }
+    []string parts = path.split("/")
+    string clause = "package " + parts[parts.len() - 1]
+    []string files = try sourceFiles(local)
+    for (int i = 0; i < files.len(); i++) {
+        string src = try fs.read(files[i])
+        []string lines = src.split("\n")
+        for (int j = 0; j < lines.len(); j++) {
+            if (lines[j].startsWith("package ")) {
+                if (lines[j].trim() == clause) {
+                    return local, null
+                }
+                break
+            }
+        }
+    }
+    return null, null
 }
 
 // The directory of an import path, or null.

@@ -1,0 +1,19 @@
+// expect-error: narrow_assign_one_branch.sd:17:17: error: kind is nullable
+// Only one branch assigns a value: after the if, kind may still be null.
+package main
+
+import "fmt"
+
+fn find(map[string]string m) string? {
+    return m["k"]
+}
+
+fn main([]string args) error {
+    string? kind = find(map[string]string{})
+    if (args.len() > 1) {
+        kind = "many"
+    }
+    fmt.println("checked")
+    fmt.println(kind)
+    return null
+}

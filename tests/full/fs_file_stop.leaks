@@ -1,0 +1,1 @@
+A goroutine is stopped while it reads from the FIFO, which leaks the File and path held by its unwound frames (runtime/README.md section 16).

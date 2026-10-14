@@ -7,8 +7,13 @@
 package main
 
 fn (Checker c) mut checkBlock(int b) {
+    _ = c.checkBlockLive(b)
+}
+
+// Checks the block and returns the paths narrowed at its end (for checkIf).
+fn (Checker c) mut checkBlockLive(int b) []string {
     if (b < 0) {
-        return
+        return c.liveNarrows()
     }
     Block bl = c.ast.blocks[b]
     bool exited = false
@@ -25,7 +30,9 @@ fn (Checker c) mut checkBlock(int b) {
             exited = true
         }
     }
+    []string live = c.liveNarrows()
     c.popScope()
+    return live
 }
 
 // Whether some statement of the (checked) block always exits.
@@ -260,26 +267,31 @@ fn (Checker c) mut checkExprStmt(Stmt st) {
 fn (Checker c) mut checkIf(Stmt st) {
     c.checkValue(st.expr, tyBool, "as the if condition")
     []Guard before = c.guards
+    // Each branch starts from the narrowings before the if; what either
+    // one kills stays killed after it (see joinNarrows).
+    []Narrow outer = c.narrows
     c.pushScope()
     c.narrowOn(st.expr, true)
     c.latchGuards(st.expr, true)
-    c.checkBlock(st.body)
+    []string thenLive = c.checkBlockLive(st.body)
     c.popScope()
+    []Narrow thenNarrows = c.narrows
+    c.narrows = outer
     []Guard thenGuards = c.guards
     c.guards = before
     c.latchGuards(st.expr, false)
-    if (st.els >= 0 || st.elseIf >= 0) {
+    c.pushScope()
+    c.narrowOn(st.expr, false)
+    []string elseLive = []string{}
+    if (st.elseIf >= 0) {
         c.pushScope()
-        c.narrowOn(st.expr, false)
-        if (st.elseIf >= 0) {
-            c.pushScope()
-            c.checkStmt(st.elseIf)
-            c.popScope()
-        } else {
-            c.checkBlock(st.els)
-        }
+        c.checkStmt(st.elseIf)
+        elseLive = c.liveNarrows()
         c.popScope()
+    } else {
+        elseLive = c.checkBlockLive(st.els)
     }
+    c.popScope()
     bool thenExits = c.blockExits(st.body)
     bool elseExits = c.blockExits(st.els) || c.stmtExits(st.elseIf)
     if (elseExits) {
@@ -287,17 +299,22 @@ fn (Checker c) mut checkIf(Stmt st) {
     } else if (!thenExits) {
         c.guards = joinGuards(c.guards, thenGuards)
     }
-    // After an if whose one branch always exits, the condition is known;
-    // what the other branch assigned is not narrowed by it.
+    // After the if, a path is narrowed when it is narrowed at the end of
+    // every branch that falls through (the condition itself narrows the
+    // branch it leads to, and an assignment of a T narrows too).
+    []string after = []string{}
     if (thenExits && !elseExits) {
-        c.narrowOn(st.expr, false)
-        c.scanBlockKills(st.els)
-        c.scanStmtKills(st.elseIf)
+        after = elseLive
+    } else if (elseExits && !thenExits) {
+        after = thenLive
+    } else if (!thenExits && !elseExits) {
+        for (int i = 0; i < thenLive.len(); i++) {
+            if (elseLive.contains(thenLive[i])) {
+                after.push(thenLive[i])
+            }
+        }
     }
-    if (elseExits && !thenExits) {
-        c.narrowOn(st.expr, true)
-        c.scanBlockKills(st.body)
-    }
+    c.joinNarrows(thenNarrows, after)
 }
 
 fn (Checker c) mut checkFor(Stmt st) {
@@ -590,8 +607,14 @@ fn (Checker c) mut checkAssign(int s) {
         case TargetKind.Decl:
             int t = c.resolve(tg.typeExpr)
             c.targetType[ti] = t
-            c.checkValue(st.expr, t, "to initialize " + tg.name)
-            c.targetVar[ti] = c.declare(tg.name, t, VarKind.Local, tg.pos)
+            c.checkExpr(st.expr)
+            bool declNonNull = c.isNonNullValue(st.expr)
+            c.coerce(st.expr, t, "to initialize " + tg.name)
+            int v = c.declare(tg.name, t, VarKind.Local, tg.pos)
+            c.targetVar[ti] = v
+            if (declNonNull && c.types.isOpt(t)) {
+                c.addNarrow("v" + v.string())
+            }
         case TargetKind.Discard:
             c.checkExpr(st.expr)
             int dt = c.typeOf(st.expr)
@@ -604,8 +627,16 @@ fn (Checker c) mut checkAssign(int s) {
             c.checkLvalue(tg.expr)
             int lt = c.typeOf(tg.expr)
             c.targetType[ti] = lt
-            c.checkValue(st.expr, lt, "in the assignment to " + c.describe(tg.expr))
-            c.assigned(c.pathKey(tg.expr))
+            c.checkExpr(st.expr)
+            bool nonNull = c.isNonNullValue(st.expr)
+            c.coerce(st.expr, lt, "in the assignment to " + c.describe(tg.expr))
+            string key = c.pathKey(tg.expr)
+            c.assigned(key)
+            // A T? path that was just given a T is not null until it may
+            // become null again (assigned, a mut call, a loop).
+            if (nonNull && key != "" && c.types.isOpt(lt)) {
+                c.addNarrow(key)
+            }
         }
         return
     }

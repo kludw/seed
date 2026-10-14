@@ -3,7 +3,7 @@
 
 #include <math.h>
 
-int seed0_float_str(double x, char *buf, int cap); /* seed0_float.c */
+int ref_float_str(double x, char *buf, int cap); /* ref_float.c: seed0's formatter */
 
 static sd_str S(const char *s) { return sd_str_from_cstr(s); }
 
@@ -36,7 +36,7 @@ static void test_float_format(void) {
   CHECK_SDSTR(sd_float_to_str(NAN), "nan");
   CHECK_SDSTR(sd_float_to_str(INFINITY), "inf");
   CHECK_SDSTR(sd_float_to_str(-INFINITY), "-inf");
-  /* identical to seed0 for many random doubles */
+  /* identical to seed0's formatter (ref_float.c) for many random doubles */
   uint64_t r = 0x12345678abcdefULL;
   char want[64];
   for (int i = 0; i < 20000; i++) {
@@ -51,7 +51,7 @@ static void test_float_format(void) {
     } else {
       x = (double)(int64_t)(r % 2000001) / pow(10.0, (double)(r % 9)) - 1000.0;
     }
-    seed0_float_str(x, want, sizeof want);
+    ref_float_str(x, want, sizeof want);
     CHECK_SDSTR(sd_float_to_str(x), want);
     /* and it reads back as the same value */
     sd_str s = sd_float_to_str(x);
