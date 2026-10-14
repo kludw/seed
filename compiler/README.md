@@ -60,16 +60,21 @@ The C of `seed c` is self-contained: it starts with the runtime of
 pasted in that order, without their `#include "seed..."` lines;
 `readRuntime` in `gen.sd`), followed by the program, into which the C files
 of the standard library packages it uses are pasted (`readNatives`).
-`build`, `run` and `test` paste only `seed.h` and link a cached object of
-the runtime instead (see "Decisions"; `runtimeObject` in `main.sd`), in a
+`build`, `run` and `test` instead compile one C file per package below
+`seed.h` (`gen_unit.sd`), take the objects of the imported packages from
+a cache, and link them with a cached object of the runtime (see
+"Decisions"; `buildProgram` and `runtimeObject` in `main.sd`), in a
 temporary directory of their own that they remove when they finish. The compiler finds its
 root (the directory with `runtime/` and `lib/`) through `$SEED_ROOT`, or
 else from its own path: `os.executable()` gives the binary's real path
 (symbolic links resolved, so `seed` works through `$PATH` or a link), and
 the binary is `<root>/build/seedN`. The C compiler and its flags for
-`build`/`run`/`test` are the constants `cCompiler`, `cFlags` and `cLibs` at
-the top of `main.sd` (the Makefile has the same flags in `SEED_CFLAGS` and
-`SEED_LIBS`).
+`build`/`run`/`test` are the constants `cCompiler`, `cFlags`, `buildOpt`,
+`quickOpt` and `cLibs` at the top of `main.sd`: `seed build` compiles with
+`-O2` (`buildOpt`), `seed run` and `seed test` with `-O1` (`quickOpt`,
+about half the C compiler's time), and the runtime's cached object is
+always `-O2`. The Makefile has the `-O2` flags in `SEED_CFLAGS` and
+`SEED_LIBS`.
 
 ### seed test
 
@@ -191,6 +196,7 @@ never return (`isNoReturn`).
 | `gen_stmt.sd` | gen | statements, scopes, return, `defer`, `spawn`, `select`, `assert` |
 | `gen_int.sd` | gen | ints known to be small: the interval analysis of int locals, unboxed locals, plain C arithmetic |
 | `gen_move.sd` | gen | moving a local's value on its last use; borrowed locals and the mod sets of mut methods |
+| `gen_unit.sd` | gen | the program as one C unit per package (for the object cache of build, run and test) |
 | `gen_fast.sd` | gen | small-int versions of pure int functions, and the functions that choose between them and the general ones |
 
 ## Data structures
@@ -833,10 +839,27 @@ forward one release at a time.
   runtime's pasted text, `cCompiler` and `cFlags`, and paste only `seed.h`
   above the program (`compileProgramC`, `runtimeObject`). The object is
   written under a random name and renamed, so concurrent compilers are
-  safe. The natives of `lib/` are not cached: they use the program's own
-  type definitions (`sd_S_fs_File`) and prototypes, so they are compiled
-  with it. Old cache objects are not removed (`make clean` removes
+  safe. Old cache objects are not removed (`make clean` removes
   `build/`).
+- **Packages are compiled into cached objects** (`gen_unit.sd`,
+  `buildProgram`). The standard library is most of the C of most programs
+  (`examples/server.sd`: 300 of 8,000 lines are its own), so `build`,
+  `run` and `test` generate one C unit per package: its own type
+  definitions, prototypes and declarations (only those its text refers to,
+  found by scanning its `sd_` identifiers), natives, helpers, thunks,
+  constants and functions. The object of every package but the root is
+  kept in the cache as `pkg-<path>-<key>.o`, the key a hash of the unit's
+  whole text (with `seed.h`), the C compiler and its flags, so a change
+  anywhere it depends on (the package, a package it imports, the compiler,
+  the runtime's header) gives a new key. A unit's text depends only on its
+  package and its imports: declarations are sorted by name (by rank where
+  one needs another first), helper and thunk numbering restarts per unit.
+  Functions, constants, descriptors and vtables have external linkage in
+  units (the runtime compares descriptors by address, so each is defined
+  once, by its package); `seed c` still writes one self-contained file
+  with everything static. Missing objects and the root unit are compiled
+  in parallel (`group`/`spawn`), then linked. Without a writable cache the
+  program is one file, as before.
 - **Every call result goes into a temporary**, even when it is not counted:
   side effects (printing, crashing) then happen in source order, and C's
   unspecified argument order never matters. clang removes the copies.

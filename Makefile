@@ -1,7 +1,7 @@
 CC ?= cc
 # Flags for compiling generated C (the compiler stages and test programs).
-# compiler/main.sd has the same flags for `seed build`, `seed run` and
-# `seed test` (cFlags, cLibs).
+# compiler/main.sd has the same flags for `seed build` (cFlags, buildOpt,
+# cLibs); `seed run` and `seed test` use -O1 (quickOpt).
 SEED_CFLAGS = -std=c11 -O2 -w
 SEED_LIBS = -lm -lpthread
 

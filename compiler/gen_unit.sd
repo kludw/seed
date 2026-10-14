@@ -1,0 +1,137 @@
+// The C generator, continued: the program as one C file per package.
+//
+// seed build, run and test compile the C of a program package by package
+// (main.sd, buildUnits), so that the object of a package that did not
+// change is taken from the cache instead of being compiled again: the
+// standard library is most of the C of most programs. Each unit is complete
+// C below seed.h: the type definitions, prototypes and declarations it
+// refers to, the package's natives, helpers, vtables, defer thunks, spawn
+// trampolines, constants and functions, and, for the root package, main.
+//
+// Functions, constants, descriptors and vtables then have external linkage
+// (linkage()): a unit calls the functions of the packages it imports,
+// converts their types to interfaces, and boxes their values. A descriptor
+// is defined by the unit of the type's package and declared extern by the
+// others, because the runtime compares descriptors by address. Helpers,
+// thunks, trampolines, the caches of constants and the boxes of enum cases
+// without data stay static in every unit that uses them. A unit's text
+// depends only on its package and the packages it imports (the
+// declarations are ordered by name, the counters of thunks restart in each
+// unit), so the cache serves every program that imports the same package.
+package main
+
+// One package's C (see above): its import path ("" for the root package
+// of a program), and its text below seed.h.
+type Unit struct {
+    string path
+    bool root
+    string text
+}
+
+// The program as units, the root package's (index 0) last. natives[p] is
+// the C of the natives of package p.
+fn (Gen g) mut genUnits([]string natives) []Unit {
+    g.split = true
+    g.genTypes()
+    g.computeModSets()
+    g.findFastFns()
+    g.genProtos()
+    []Unit out = []Unit{}
+    for (int p = 1; p < g.c.ast.pkgs.len(); p++) {
+        out.push(Unit{path: g.c.ast.pkgs[p].path, root: false, text: g.genUnit(p, natives[p])})
+    }
+    out.push(Unit{path: g.c.ast.pkgs[0].path, root: true, text: g.genUnit(0, natives[0])})
+    return out
+}
+
+// The C of package p's unit.
+fn (Gen g) mut genUnit(int p, string natives) string {
+    g.fnText = []string{}
+    g.thunks = []string{}
+    g.consts = []string{}
+    g.helpers = []string{}
+    g.protos = []string{}
+    g.queue = []HelperReq{}
+    g.ndefer = 0
+    g.nspawn = 0
+    // Helpers are requested once per type; every unit has its own.
+    for (int t = 0; t < g.c.types.list.len(); t++) {
+        g.c.types.list[t].helpers = 0
+    }
+    g.genConsts(p)
+    g.genFns(p)
+    g.curFn = -1
+    g.genVtables(p)
+    for (int i = 0; i < g.queue.len(); i++) {
+        g.genHelper(g.queue[i].ty, g.queue[i].kind)
+    }
+    []string body = []string{g.protos.join(""), natives, g.helpers.join(""), g.thunks.join(""), g.consts.join(""), g.fnText.join("")}
+    if (p == 0) {
+        body.push(g.mainText())
+    }
+    string text = body.join("")
+    // The prototypes and type definitions the unit refers to, directly or
+    // through another one it includes.
+    g.refs = map[string]bool{}
+    g.addRefs(text)
+    []string protos = []string{}
+    for (int k = 0; k < g.gprotos.len(); k++) {
+        CDecl pd = g.gprotos[k]
+        if (g.refs[pd.names] != null) {
+            protos.push(pd.text)
+            g.addRefs(pd.text)
+        }
+    }
+    []bool keep = []bool{}
+    for (int d = 0; d < g.decls.len(); d++) {
+        keep.push(false)
+    }
+    for (int j = g.decls.len() - 1; j >= 0; j--) {
+        CDecl cd = g.decls[j]
+        bool want = cd.pkg == p
+        if (cd.pkg < 0) {
+            []string names = cd.names.split(" ")
+            for (int n = 0; n < names.len() && !want; n++) {
+                want = g.refs[names[n]] != null
+            }
+        }
+        if (want) {
+            keep[j] = true
+            g.addRefs(cd.text)
+        }
+    }
+    string pkg = g.c.ast.pkgs[p].path
+    if (p == 0) {
+        pkg = "main"
+    }
+    []string parts = []string{"\n/* ---- package " + pkg + " ---- */\n"}
+    for (int m = 0; m < g.decls.len(); m++) {
+        if (keep[m]) {
+            parts.push(g.decls[m].text)
+        }
+    }
+    parts.push(protos.join(""))
+    parts.push(text)
+    return parts.join("")
+}
+
+// Records the identifiers of the generated code (sd_...) in text.
+fn (Gen g) mut addRefs(string text) {
+    int n = text.len()
+    int i = 0
+    for (; i < n; ) {
+        byte b = text[i]
+        if (!isIdentByte(b)) {
+            i++
+            continue
+        }
+        int j = i
+        for (; j < n && isIdentByte(text[j]); ) {
+            j++
+        }
+        if (j - i > 3 && b == 's' && text[i + 1] == 'd' && text[i + 2] == '_') {
+            g.refs[text.slice(i, j)] = true
+        }
+        i = j
+    }
+}

@@ -251,6 +251,14 @@ if [ -z "$left" ]; then pass=$((pass+1)); else failed "temporary directories rem
 # $TMPDIR/seed-cache-$USER when that cannot be written. A root whose build/
 # is read-only uses the second.
 if ls "$root"/build/cache/runtime-*.o > /dev/null 2>&1; then pass=$((pass+1)); else failed "runtime cache" "no $root/build/cache/runtime-*.o"; fi
+# The imported packages are compiled once into the same cache
+# (compiler/gen_unit.sd): a second build takes fmt's object from it.
+"$seed" build -o "$tmp/cached1" "$tmp/same/a/prog.sd" > /dev/null 2>&1
+before=$(ls "$root"/build/cache/pkg-fmt-*.o 2> /dev/null | wc -l)
+sleep 1; touch "$tmp/cache-mark"
+"$seed" build -o "$tmp/cached2" "$tmp/same/a/prog.sd" > /dev/null 2>&1
+newer=$(find "$root/build/cache" -name 'pkg-fmt-*.o' -newer "$tmp/cache-mark")
+if [ "$before" -ge 1 ] && [ -z "$newer" ] && [ "$("$tmp/cached2")" = a ]; then pass=$((pass+1)); else failed "package cache" "fmt objects: $before, rebuilt: $newer"; fi
 mkdir -p "$tmp/fakeroot/build" "$tmp/tmp2"
 ln -s "$root/runtime" "$tmp/fakeroot/runtime"
 ln -s "$root/lib" "$tmp/fakeroot/lib"

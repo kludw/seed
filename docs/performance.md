@@ -267,3 +267,42 @@ The compiler compiling itself, after the refcount work and these changes:
 |---|---|---|---|
 | instructions | 2,240 M | 2,040 M | 1,544 M |
 | wall time (interleaved, best of 11) | 1.00 | 0.95 | 0.77 |
+
+## Build speed
+
+Building a program was almost all C compiler: the front end and generator
+take 20 to 70 ms for the examples, `cc -O2` 0.4 to 4 s, and most of the C
+is the standard library (`examples/server.sd`: 300 of 8,000 lines are its
+own; `http`, `json`, `time` and `encoding` are the rest). Two changes
+(compiler/README.md, "Decisions"):
+
+1. **`-O1` for `seed run` and `seed test`**, `-O2` for `seed build` (and
+   for the runtime's cached object, compiled once). `-O1` takes 35 to 50%
+   less time than `-O2` on the generated C.
+2. **Cached package objects.** `build`, `run` and `test` generate one C
+   unit per package and keep each imported package's object in the cache
+   (`build/cache/pkg-<path>-<key>.o`, next to the runtime's), keyed by a
+   hash of the unit's text, so only the root package is compiled when
+   nothing it imports changed. Missing objects are compiled in parallel.
+
+Wall time in ms (best of 3; "cold" removes the package objects before every
+command, so it includes compiling them):
+
+| Command | Before | After, cold | After, cached |
+|---|---|---|---|
+| `seed run primes.sd` | 380 | 223 | 177 |
+| `seed run bigmath.sd` | 949 | 449 | 442 |
+| `seed run life.sd` | 552 | 288 | 285 |
+| `seed run values.sd` | 461 | 296 | 297 |
+| `seed run jsonfmt.sd` | 2,100 | 1,116 | 246 |
+| `seed run bank` | 1,528 | 562 | 311 |
+| `seed build server.sd` | 3,431 | 2,252 | 369 |
+| `seed build httpapi` | 3,367 | 2,198 | 173 |
+| `seed test examples/kvstore` | 2,424 | 1,034 | 616 |
+| `seed test lib` (16 packages) | 27,171 | 16,530 | 16,439 |
+
+(`seed run workers.sd`, about 2.5 s either way, is the program's own run
+time.) `seed test lib` gains little from the cache: each package under test
+is compiled with its tests, so only its imports come from the cache, and
+most of the time is the test programs running. The compiler's own build
+(`make`) uses `seed c` and the Makefile's `-O2`, unchanged.

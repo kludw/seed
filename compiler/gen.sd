@@ -62,7 +62,8 @@ type Gen struct {
     Checker c
     []string out
     []string fnText
-    []string typeDefs
+    []CDecl decls
+    []CDecl gprotos
     []string protos
     []string helpers
     []string thunks
@@ -126,6 +127,10 @@ type Gen struct {
     map[int]bool fastFns
     []int fastCalls
     []int fastLoops
+    // Units (gen_unit.sd): whether the program is generated as one C file
+    // per package, and the identifiers the unit being assembled refers to.
+    bool split
+    map[string]bool refs
 }
 
 fn newGen(Checker c) Gen {
@@ -133,7 +138,8 @@ fn newGen(Checker c) Gen {
         c: c,
         out: []string{},
         fnText: []string{},
-        typeDefs: []string{},
+        decls: []CDecl{},
+        gprotos: []CDecl{},
         protos: []string{},
         helpers: []string{},
         thunks: []string{},
@@ -182,6 +188,8 @@ fn newGen(Checker c) Gen {
         fastFns: map[int]bool{},
         fastCalls: []int{},
         fastLoops: []int{},
+        split: false,
+        refs: map[string]bool{},
     }
 }
 
@@ -191,10 +199,40 @@ fn newGen(Checker c) Gen {
 // prototypes, so that it can use them.
 fn (Gen g) mut genProgram(string natives) string {
     g.genTypes()
-    g.genConsts()
     g.computeModSets()
     g.findFastFns()
+    g.genProtos()
+    g.genConsts(-1)
+    g.genFns(-1)
+    g.curFn = -1
+    g.genVtables(-1)
+    for (int i = 0; i < g.queue.len(); i++) {
+        g.genHelper(g.queue[i].ty, g.queue[i].kind)
+    }
+    []string parts = []string{"\n/* ---- program ---- */\n"}
+    for (int d = 0; d < g.decls.len(); d++) {
+        parts.push(g.decls[d].text)
+    }
+    for (int p = 0; p < g.gprotos.len(); p++) {
+        parts.push(g.gprotos[p].text)
+    }
+    parts.push(g.protos.join(""))
+    parts.push(natives)
+    parts.push(g.helpers.join(""))
+    parts.push(g.thunks.join(""))
+    parts.push(g.consts.join(""))
+    parts.push(g.fnText.join(""))
+    parts.push(g.mainText())
+    return parts.join("")
+}
+
+// Generates the functions of the program, or with a unit (a package,
+// >= 0) those of the package.
+fn (Gen g) mut genFns(int unit) {
     for (int f = 0; f < g.c.ast.fns.len(); f++) {
+        if (unit >= 0 && g.c.fnPkg(f) != unit) {
+            continue
+        }
         if (g.c.ast.fns[f].body < 0) {
             g.genNative(f)
         } else if (!g.c.ast.fns[f].isTest || g.c.testMode) {
@@ -204,25 +242,15 @@ fn (Gen g) mut genProgram(string natives) string {
             }
         }
     }
-    g.curFn = -1
-    g.genVtables()
-    for (int i = 0; i < g.queue.len(); i++) {
-        g.genHelper(g.queue[i].ty, g.queue[i].kind)
-    }
-    []string parts = []string{"\n/* ---- program ---- */\n"}
-    parts.push(g.typeDefs.join(""))
-    parts.push(g.protos.join(""))
-    parts.push(natives)
-    parts.push(g.helpers.join(""))
-    parts.push(g.thunks.join(""))
-    parts.push(g.consts.join(""))
-    parts.push(g.fnText.join(""))
+}
+
+// The C function main: the runtime's entry with the program's main, or the
+// test runner with the table of tests.
+fn (Gen g) mainText() string {
     if (g.c.testMode) {
-        parts.push(g.testMain())
-    } else {
-        parts.push("int main(int argc, char **argv) { return sd_main(argc, argv, sd_f_main); }\n")
+        return g.testMain()
     }
-    return parts.join("")
+    return "int main(int argc, char **argv) { return sd_main(argc, argv, sd_f_main); }\n"
 }
 
 // The table of tests and a main that runs them (runtime/seed_test.c): each
@@ -926,24 +954,80 @@ fn (Gen g) mut lessFn(int fnType) string {
 
 // ---- type definitions ----
 
+// One C declaration of the type definitions or prototypes (genTypes,
+// genProtos): its text, the identifiers it declares (separated by spaces),
+// and, for a definition that only one package's unit contains when the
+// program is compiled in units (gen_unit.sd: a descriptor), that package;
+// -1 for a declaration that any unit using it contains.
+type CDecl struct {
+    string text
+    string names
+    int pkg
+}
+
+// The storage class of the program's functions, constants, descriptors and
+// vtables: static in one C file, external when the program is compiled in
+// units (a unit calls the functions of the packages it imports).
+fn (Gen g) linkage() string {
+    if (g.split) {
+        return ""
+    }
+    return "static "
+}
+
+// r as a sort key: four digits.
+fn padRank(int r) string {
+    string s = r.string()
+    for (; s.len() < 4; ) {
+        s = "0" + s
+    }
+    return s
+}
+
+// Appends declarations of one kind to g.decls in the order of their keys,
+// so that the text does not depend on the order in which the program met
+// its types (a unit's text is then the same in every program).
+fn (Gen g) mut addDecls(map[string]CDecl byKey) {
+    []string keys = byKey.keys()
+    keys.sort()
+    for (int i = 0; i < keys.len(); i++) {
+        CDecl? d = byKey[keys[i]]
+        if (d != null) {
+            g.decls.push(d)
+        }
+    }
+}
+
+// The type definitions (g.decls), in dependency order: typedefs of the
+// structs, enums and tuples, function pointer types (one used in another's
+// signature first), structs (one contained by value first), enums, tuples,
+// descriptor declarations, descriptors and the boxes of enum cases without
+// data, vtable types.
 fn (Gen g) mut genTypes() {
+    g.decls = []CDecl{}
     int n = g.c.ast.typeDecls.len()
+    int nt = g.c.types.list.len()
+    map[string]CDecl fwd = map[string]CDecl{}
     for (int i = 0; i < n; i++) {
         TypeDecl td = g.c.ast.typeDecls[i]
+        string tn = ""
         if (td.kind == DeclKind.Enum) {
-            string en = g.c.declCName(i)
-            g.typeDefs.push("typedef struct sd_E_" + en + " sd_E_" + en + ";\n")
+            tn = "sd_E_" + g.c.declCName(i)
         } else if (td.kind == DeclKind.Struct) {
-            string sn = g.c.declCName(i)
-            g.typeDefs.push("typedef struct sd_S_" + sn + " sd_S_" + sn + ";\n")
+            tn = "sd_S_" + g.c.declCName(i)
+        } else {
+            continue
         }
+        fwd[tn] = CDecl{text: "typedef struct " + tn + " " + tn + ";\n", names: tn, pkg: -1}
     }
-    int nt = g.c.types.list.len()
     for (int t = 0; t < nt; t++) {
         if (g.kindOf(t) == Kind.Tuple) {
-            g.typeDefs.push("typedef struct " + g.ctype(t) + " " + g.ctype(t) + ";\n")
+            string un = g.ctype(t)
+            fwd[un] = CDecl{text: "typedef struct " + un + " " + un + ";\n", names: un, pkg: -1}
         }
     }
+    g.addDecls(fwd)
+    map[string]CDecl fns = map[string]CDecl{}
     for (int f = 0; f < nt; f++) {
         if (g.kindOf(f) == Kind.Func) {
             []string ps = []string{}
@@ -953,62 +1037,120 @@ fn (Gen g) mut genTypes() {
             if (ps.len() == 0) {
                 ps.push("void")
             }
-            g.typeDefs.push("typedef " + g.ctype(g.elemOf(f)) + " (*" + g.ctype(f) + ")(" + ps.join(", ") + ");\n")
+            string fname = g.ctype(f)
+            fns[padRank(g.funcRank(f)) + " " + fname] = CDecl{text: "typedef " + g.ctype(g.elemOf(f)) + " (*" + fname + ")(" + ps.join(", ") + ");\n", names: fname, pkg: -1}
         }
     }
-    []int state = []int{}
-    for (int j = 0; j < n; j++) {
-        state.push(0)
-    }
+    g.addDecls(fns)
+    map[string]CDecl structs = map[string]CDecl{}
+    map[string]CDecl enums = map[string]CDecl{}
     for (int k = 0; k < n; k++) {
-        state = g.genStructDef(k, state)
-    }
-    for (int e = 0; e < n; e++) {
-        if (g.c.ast.typeDecls[e].kind == DeclKind.Enum) {
-            g.genEnumDef(e)
+        DeclKind dk = g.c.ast.typeDecls[k].kind
+        if (dk == DeclKind.Struct) {
+            string sn = "sd_S_" + g.c.declCName(k)
+            structs[padRank(g.structRank(k)) + " " + sn] = CDecl{text: g.structDefText(k), names: sn, pkg: -1}
+        } else if (dk == DeclKind.Enum) {
+            string en = "sd_E_" + g.c.declCName(k)
+            enums[en] = CDecl{text: g.enumDefText(k), names: en, pkg: -1}
         }
     }
+    g.addDecls(structs)
+    g.addDecls(enums)
+    map[string]CDecl tuples = map[string]CDecl{}
     for (int u = 0; u < nt; u++) {
         if (g.kindOf(u) == Kind.Tuple) {
             []string fields = []string{}
             for (int q = 0; q < g.c.types.count(u); q++) {
                 fields.push(" " + g.ctype(g.c.types.part(u, q)) + " r" + q.string() + ";")
             }
-            g.typeDefs.push("struct " + g.ctype(u) + " {" + fields.join("") + " };\n")
+            string un2 = g.ctype(u)
+            tuples[un2] = CDecl{text: "struct " + un2 + " {" + fields.join("") + " };\n", names: un2, pkg: -1}
         }
     }
+    g.addDecls(tuples)
+    // Descriptors are compared by address (the dynamic type of a box), so
+    // in units each is defined once, by its package's unit, and declared
+    // extern by the others.
+    string storage = "static const sd_type "
+    if (g.split) {
+        storage = "extern const sd_type "
+    }
+    map[string]CDecl descDecls = map[string]CDecl{}
+    map[string]CDecl descs = map[string]CDecl{}
+    map[string]CDecl boxes = map[string]CDecl{}
     for (int d = 0; d < n; d++) {
         TypeDecl dd = g.c.ast.typeDecls[d]
-        if (dd.kind != DeclKind.Interface) {
-            g.typeDefs.push("static const sd_type sd_D_" + g.c.declCName(d) + ";\n")
+        if (dd.kind == DeclKind.Interface) {
+            continue
+        }
+        string dn = "sd_D_" + g.c.declCName(d)
+        descDecls[dn] = CDecl{text: storage + dn + ";\n", names: dn, pkg: -1}
+        int owner = -1
+        if (g.split) {
+            owner = g.c.declPkg(d)
+        }
+        descs[dn] = CDecl{text: g.descriptorText(d), names: dn, pkg: owner}
+        for (int m = 0; m < dd.caseCount; m++) {
+            EnumCase c = g.c.enumCase(d, m)
+            if (c.paramCount == 0) {
+                string cn = g.c.declCName(d)
+                string kn = "sd_k_" + cn + "__" + c.name
+                boxes[kn] = CDecl{text: "SD_BOX_STATIC(" + kn + ", &sd_D_" + cn + ", sd_E_" + cn + ", {.tag = " + m.string() + "});\n", names: kn, pkg: -1}
+            }
         }
     }
-    for (int s = 0; s < n; s++) {
-        g.genDescriptor(s)
-    }
+    g.addDecls(descDecls)
+    g.addDecls(descs)
+    g.addDecls(boxes)
+    map[string]CDecl vtypes = map[string]CDecl{}
     for (int v = 0; v < n; v++) {
         if (g.c.ast.typeDecls[v].kind == DeclKind.Interface) {
-            g.genVtableType(v)
+            string vn = "sd_V_" + g.c.declCName(v)
+            vtypes[vn] = CDecl{text: g.vtableTypeText(v), names: vn, pkg: -1}
         }
     }
+    g.addDecls(vtypes)
 }
 
-// Emits the C struct for a struct type after the structs it contains by
-// value. state is 0 (not done), 1 (in progress) or 2 (done) per decl.
-fn (Gen g) mut genStructDef(int d, []int state) []int {
-    []int st = state
-    TypeDecl td = g.c.ast.typeDecls[d]
-    if (td.kind != DeclKind.Struct || st[d] != 0) {
-        return st
+// How deep function pointer types nest in the function type f: its typedef
+// needs those of the function types in its signature first.
+fn (Gen g) funcRank(int f) int {
+    int r = g.funcDepth(g.elemOf(f))
+    for (int i = 0; i < g.c.types.count(f); i++) {
+        r = maxOf(r, g.funcDepth(g.c.types.part(f, i)))
     }
-    st[d] = 1
+    return r + 1
+}
+
+// The rank of t when its C type is a function pointer typedef, else 0.
+fn (Gen g) funcDepth(int t) int {
+    Kind k = g.kindOf(t)
+    if (k == Kind.Func) {
+        return g.funcRank(t)
+    }
+    if (k == Kind.Opt && g.kindOf(g.elemOf(t)) == Kind.Func) {
+        return g.funcRank(g.elemOf(t))
+    }
+    return 0
+}
+
+// How deep structs nest by value in struct d: its definition needs those
+// of the structs it contains first.
+fn (Gen g) structRank(int d) int {
+    int r = 0
+    TypeDecl td = g.c.ast.typeDecls[d]
     for (int i = 0; i < td.fieldCount; i++) {
         int ft = g.c.fieldType(d, i)
         if (g.kindOf(ft) == Kind.Struct) {
-            st = g.genStructDef(g.c.types.decl(ft), st)
+            r = maxOf(r, g.structRank(g.c.types.decl(ft)))
         }
     }
-    st[d] = 2
+    return r + 1
+}
+
+// The C struct of a struct type.
+fn (Gen g) structDefText(int d) string {
+    TypeDecl td = g.c.ast.typeDecls[d]
     []string s = []string{"struct sd_S_" + g.c.declCName(d) + " {"}
     for (int j = 0; j < td.fieldCount; j++) {
         s.push(" " + g.ctype(g.c.fieldType(d, j)) + " f_" + g.c.fieldName(d, j) + ";")
@@ -1017,13 +1159,12 @@ fn (Gen g) mut genStructDef(int d, []int state) []int {
         s.push(" char unused_;")
     }
     s.push(" };\n")
-    g.typeDefs.push(s.join(""))
-    return st
+    return s.join("")
 }
 
 // An enum value is a box holding sd_E_Name: a tag followed by a union of
 // the cases' fields.
-fn (Gen g) mut genEnumDef(int d) {
+fn (Gen g) enumDefText(int d) string {
     TypeDecl td = g.c.ast.typeDecls[d]
     []string s = []string{"struct sd_E_" + g.c.declCName(d) + " { int32_t tag;"}
     bool any = false
@@ -1048,14 +1189,14 @@ fn (Gen g) mut genEnumDef(int d) {
         s.push(" } u;")
     }
     s.push(" };\n")
-    g.typeDefs.push(s.join(""))
+    return s.join("")
 }
 
-// The runtime descriptor of a struct or enum, and the immortal boxes of the
-// enum cases without data.
-fn (Gen g) mut genDescriptor(int d) {
+// The runtime descriptor of a struct or enum, with its field tables.
+fn (Gen g) mut descriptorText(int d) string {
     TypeDecl td = g.c.ast.typeDecls[d]
     string n = g.c.declCName(d)
+    string def = g.linkage() + "const sd_type sd_D_" + n + " = "
     if (td.kind == DeclKind.Struct) {
         []string fields = []string{}
         for (int i = 0; i < td.fieldCount; i++) {
@@ -1068,13 +1209,9 @@ fn (Gen g) mut genDescriptor(int d) {
         if (g.counted(g.c.declType[d])) {
             kind = "SD_STRUCT_TYPE"
         }
-        g.typeDefs.push("static const sd_field sd_F_" + n + "[] = {" + fields.join(", ") + "};\n")
-        g.typeDefs.push("static const sd_type sd_D_" + n + " = " + kind + "(\"" + n + "\", sd_S_" + n + ", sd_F_" + n + ");\n")
-        return
+        return "static const sd_field sd_F_" + n + "[] = {" + fields.join(", ") + "};\n" + def + kind + "(\"" + n + "\", sd_S_" + n + ", sd_F_" + n + ");\n"
     }
-    if (td.kind != DeclKind.Enum) {
-        return
-    }
+    []string out = []string{}
     []string vs = []string{}
     for (int j = 0; j < td.caseCount; j++) {
         EnumCase ec = g.c.enumCase(d, j)
@@ -1086,20 +1223,15 @@ fn (Gen g) mut genDescriptor(int d) {
         for (int k = 0; k < ec.paramCount; k++) {
             cf.push("SD_FIELD(sd_E_" + n + ", u.c_" + ec.name + ".f" + k.string() + ", " + g.desc(g.c.caseParamType(d, j, k)) + ")")
         }
-        g.typeDefs.push("static const sd_field sd_F_" + n + "__" + ec.name + "[] = {" + cf.join(", ") + "};\n")
+        out.push("static const sd_field sd_F_" + n + "__" + ec.name + "[] = {" + cf.join(", ") + "};\n")
         vs.push("{\"" + ec.name + "\", sd_F_" + n + "__" + ec.name + ", " + ec.paramCount.string() + "}")
     }
     if (td.caseCount == 0) {
         vs.push("{\"\", NULL, 0}")
     }
-    g.typeDefs.push("static const sd_variant sd_V_" + n + "[] = {" + vs.join(", ") + "};\n")
-    g.typeDefs.push("static const sd_type sd_D_" + n + " = SD_ENUM_TYPE(\"" + n + "\", sd_E_" + n + ", sd_V_" + n + ");\n")
-    for (int m = 0; m < td.caseCount; m++) {
-        EnumCase c = g.c.enumCase(d, m)
-        if (c.paramCount == 0) {
-            g.typeDefs.push("SD_BOX_STATIC(sd_k_" + n + "__" + c.name + ", &sd_D_" + n + ", sd_E_" + n + ", {.tag = " + m.string() + "});\n")
-        }
-    }
+    out.push("static const sd_variant sd_V_" + n + "[] = {" + vs.join(", ") + "};\n")
+    out.push(def + "SD_ENUM_TYPE(\"" + n + "\", sd_E_" + n + ", sd_V_" + n + ");\n")
+    return out.join("")
 }
 
 // ---- interfaces ----
@@ -1133,7 +1265,7 @@ fn (Gen g) vtParams(int sig, bool isMut, bool named) string {
 }
 
 // struct sd_V_Name { sd_vtable hdr; R (*m_name)(const void *self, ...); }
-fn (Gen g) mut genVtableType(int d) {
+fn (Gen g) vtableTypeText(int d) string {
     TypeDecl td = g.c.ast.typeDecls[d]
     []string s = []string{"typedef struct { sd_vtable hdr;"}
     for (int i = 0; i < td.methodCount; i++) {
@@ -1142,14 +1274,18 @@ fn (Gen g) mut genVtableType(int d) {
         s.push(" " + g.ctype(g.elemOf(sig)) + " (*m_" + ms.name + ")(" + g.vtParams(sig, ms.isMut, false) + ");")
     }
     s.push(" } sd_V_" + g.c.declCName(d) + ";\n")
-    g.typeDefs.push(s.join(""))
+    return s.join("")
 }
 
 // One vtable per (type, interface) pair, with a thunk per method that
-// calls the type's method on the payload of the interface's box.
-fn (Gen g) mut genVtables() {
+// calls the type's method on the payload of the interface's box. With a
+// unit (a package, >= 0), only the vtables of the package's types.
+fn (Gen g) mut genVtables(int unit) {
     for (int i = 0; i < g.c.impls.len(); i++) {
         Impl im = g.c.impls[i]
+        if (unit >= 0 && g.c.declPkg(im.decl) != unit) {
+            continue
+        }
         int t = g.c.declType[im.decl]
         string tname = g.c.declCName(im.decl)
         string vt = "sd_vt_" + tname + "__" + g.ifaceName(im.iface)
@@ -1179,12 +1315,16 @@ fn (Gen g) mut genVtables() {
             g.thunks.push("static " + ret + " " + thunk + "(" + g.vtParams(sig, isMut, true) + ") { " + call + "; }\n")
             entries.push(thunk)
         }
-        string vtype = "sd_error_vtable"
-        if (im.iface != tyError) {
-            vtype = "sd_V_" + g.declName(im.iface)
-        }
-        g.thunks.push("static const " + vtype + " " + vt + " = {" + entries.join(", ") + "};\n")
+        g.thunks.push(g.linkage() + "const " + g.vtableTypeOf(im.iface) + " " + vt + " = {" + entries.join(", ") + "};\n")
     }
+}
+
+// The C type of the vtables of interface iface.
+fn (Gen g) vtableTypeOf(int iface) string {
+    if (iface == tyError) {
+        return "sd_error_vtable"
+    }
+    return "sd_V_" + g.declName(iface)
 }
 
 // The vtable that converts a value of type t to the interface iface.
@@ -1200,15 +1340,18 @@ fn isLiteralKind(ExprKind k) bool {
 
 // Constants are functions that return a borrowed value. A literal is
 // returned directly; anything else is computed on first use (per thread)
-// and kept for the rest of the program.
-fn (Gen g) mut genConsts() {
+// and kept for the rest of the program. With a unit (a package, >= 0),
+// only the package's constants.
+fn (Gen g) mut genConsts(int unit) {
     for (int i = 0; i < g.c.ast.consts.len(); i++) {
         ConstDecl cd = g.c.ast.consts[i]
+        if (unit >= 0 && g.c.ast.files[cd.file].pkgIndex != unit) {
+            continue
+        }
         int t = g.c.constType[i]
         string ct = g.ctype(t)
         string cn = g.constCName(i)
-        string head = "static " + ct + " " + cn + "(void)"
-        g.protos.push(head + ";\n")
+        string head = g.linkage() + ct + " " + cn + "(void)"
         g.out = []string{}
         g.slots = []Slot{}
         g.ntmp = 0
@@ -1271,7 +1414,44 @@ fn (Gen g) mut fnSig(int f) string {
     if (ps.len() == 0) {
         ps.push("void")
     }
-    return "static " + g.ctype(g.c.fnRet[f]) + " " + g.c.fnCName[f] + "(" + ps.join(", ") + ")"
+    return g.linkage() + g.ctype(g.c.fnRet[f]) + " " + g.c.fnCName[f] + "(" + ps.join(", ") + ")"
+}
+
+// The prototypes of the program's functions (with the fast and general
+// versions of those that have both, gen_fast.sd) and constants, and, in
+// units, extern declarations of the vtables (g.gprotos, ordered by name).
+fn (Gen g) mut genProtos() {
+    map[string]CDecl ps = map[string]CDecl{}
+    for (int i = 0; i < g.c.ast.consts.len(); i++) {
+        string cn = g.constCName(i)
+        ps[cn] = CDecl{text: g.linkage() + g.ctype(g.c.constType[i]) + " " + cn + "(void);\n", names: cn, pkg: -1}
+    }
+    for (int f = 0; f < g.c.ast.fns.len(); f++) {
+        FnDecl fd = g.c.ast.fns[f]
+        if (fd.body >= 0 && fd.isTest && !g.c.testMode) {
+            continue
+        }
+        string sig = g.fnSig(f)
+        string name = g.c.fnCName[f]
+        ps[name] = CDecl{text: sig + ";\n", names: name, pkg: -1}
+        if (fd.body >= 0 && g.isFast(f)) {
+            string gn = g.generalName(f)
+            ps[gn] = CDecl{text: sig.replace(" " + name + "(", " " + gn + "(") + ";\n", names: gn, pkg: -1}
+            ps[g.fastName(f)] = CDecl{text: g.fastHead(f) + ";\n", names: g.fastName(f), pkg: -1}
+        }
+    }
+    if (g.split) {
+        for (int k = 0; k < g.c.impls.len(); k++) {
+            Impl im = g.c.impls[k]
+            string vt = g.vtableOf(g.c.declType[im.decl], im.iface)
+            ps[vt] = CDecl{text: "extern const " + g.vtableTypeOf(im.iface) + " " + vt + ";\n", names: vt, pkg: -1}
+        }
+    }
+    []CDecl saved = g.decls
+    g.decls = []CDecl{}
+    g.addDecls(ps)
+    g.gprotos = g.decls
+    g.decls = saved
 }
 
 // The C symbol of a native function: sd_lib_<package>_<name>, or
@@ -1313,7 +1493,6 @@ fn (Gen g) mut genNative(int f) {
         }
     }
     string sig = g.fnSig(f)
-    g.protos.push(sig + ";\n")
     if (!g.c.types.isTuple(r)) {
         if (ps.len() == 0) {
             ps.push("void")
@@ -1389,7 +1568,6 @@ fn (Gen g) mut genFn(int f) {
         // that chooses (gen_fast.sd).
         sig = sig.replace(" " + g.c.fnCName[f] + "(", " " + g.generalName(f) + "(")
     }
-    g.protos.push(sig + ";\n")
     g.emit(sig + " {")
     g.indent++
     if (g.defers) {
@@ -1506,23 +1684,37 @@ fn (Gen g) expandFrame(string line) string {
 // (lib/<pkg>/*.c: their native functions), without their includes of the
 // runtime's headers.
 fn readNatives(Ast ast) (string, error) {
+    []string byPkg = try readPackageNatives(ast)
     []string parts = []string{}
-    for (int p = 0; p < ast.pkgs.len(); p++) {
-        Package pk = ast.pkgs[p]
-        if (!pk.isLib) {
-            continue
-        }
-        []string names = try fs.list(pk.dir)
-        for (int i = 0; i < names.len(); i++) {
-            if (!names[i].endsWith(".c")) {
-                continue
-            }
-            string path = pk.dir + "/" + names[i]
-            string text = try fs.read(path)
-            parts.push(stripRuntimeIncludes(text, "lib/" + pk.path + "/" + names[i]))
+    for (int p = 0; p < byPkg.len(); p++) {
+        if (byPkg[p] != "") {
+            parts.push(byPkg[p])
         }
     }
     return parts.join("\n"), null
+}
+
+// The natives of each package of the program, by package index ("" for a
+// package without any).
+fn readPackageNatives(Ast ast) ([]string, error) {
+    []string out = []string{}
+    for (int p = 0; p < ast.pkgs.len(); p++) {
+        Package pk = ast.pkgs[p]
+        []string parts = []string{}
+        if (pk.isLib) {
+            []string names = try fs.list(pk.dir)
+            for (int i = 0; i < names.len(); i++) {
+                if (!names[i].endsWith(".c")) {
+                    continue
+                }
+                string path = pk.dir + "/" + names[i]
+                string text = try fs.read(path)
+                parts.push(stripRuntimeIncludes(text, "lib/" + pk.path + "/" + names[i]))
+            }
+        }
+        out.push(parts.join("\n"))
+    }
+    return out, null
 }
 
 // A C file without its #include "seed..." lines (the runtime is pasted

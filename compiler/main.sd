@@ -18,9 +18,14 @@ import "fmt"
 import "fs"
 import "os"
 
-// The C compiler and its flags, used by build, run and test.
+// The C compiler and its flags, used by build, run and test. seed build
+// optimises fully (buildOpt); seed run and seed test compile faster
+// (quickOpt), which takes about half the C compiler's time. The runtime is
+// compiled once into the cache, always with buildOpt.
 const string cCompiler = "cc"
-const []string cFlags = []string{"-std=c11", "-O2", "-w"}
+const []string cFlags = []string{"-std=c11", "-w"}
+const string buildOpt = "-O2"
+const string quickOpt = "-O1"
 const []string cLibs = []string{"-lm", "-lpthread"}
 
 const string usage = "usage:\n  seed build [-o out] <dir | file.sd>\n  seed run <dir | file.sd> [args...]\n  seed test [-v] [--run text] [dir...]\n  seed fmt [--check] <file.sd>...\n  seed c <dir | file.sd...>\n  seed ast <file.sd>...\n"
@@ -204,6 +209,18 @@ fn targetOf([]string args) (Build, error) {
 // null. In test mode, the root package's tests/ files are compiled too, and
 // the program runs the tests instead of main.
 fn compileProgram(string root, Build t, bool testMode) (string?, error) {
+    Checker? c = try checkedProgram(root, t, testMode)
+    if (c == null) {
+        return null, null
+    }
+    string natives = try readNatives(c.ast)
+    Gen g = newGen(c)
+    return g.genProgram(natives), null
+}
+
+// Loads and checks a program (see compileProgram); null, after printing
+// the errors, when it has compile errors.
+fn checkedProgram(string root, Build t, bool testMode) (Checker?, error) {
     Loader l = newLoader(root, t.projectRoot)
     string path = ""
     if (testMode) {
@@ -232,9 +249,7 @@ fn compileProgram(string root, Build t, bool testMode) (string?, error) {
         printUnformatted(c.diags, l.unformatted)
         return null, null
     }
-    string natives = try readNatives(c.ast)
-    Gen g = newGen(c)
-    return g.genProgram(natives), null
+    return c, null
 }
 
 // Prints the "not formatted" errors (Loader.unformatted) after the others.
@@ -271,21 +286,27 @@ fn tempDir() string {
     return "/tmp"
 }
 
-// Runs the C compiler on a C file, linking the runtime object obj with it
-// when there is one.
-fn compileC(string cfile, string? obj, string out) error {
+// Runs the C compiler with optimisation opt on the inputs (C files and
+// objects) into the executable out, or into an object with -c (args holds
+// the extra arguments).
+fn runCC(string opt, []string args, []string inputs, string out, bool link) error {
     []string argv = []string{cCompiler}
     for (int i = 0; i < cFlags.len(); i++) {
         argv.push(cFlags[i])
     }
+    argv.push(opt)
+    for (int a = 0; a < args.len(); a++) {
+        argv.push(args[a])
+    }
     argv.push("-o")
     argv.push(out)
-    argv.push(cfile)
-    if (obj != null) {
-        argv.push(obj)
+    for (int k = 0; k < inputs.len(); k++) {
+        argv.push(inputs[k])
     }
-    for (int j = 0; j < cLibs.len(); j++) {
-        argv.push(cLibs[j])
+    if (link) {
+        for (int j = 0; j < cLibs.len(); j++) {
+            argv.push(cLibs[j])
+        }
     }
     int code = try os.run(argv)
     if (code != 0) {
@@ -294,30 +315,87 @@ fn compileC(string cfile, string? obj, string out) error {
     return null
 }
 
-// Writes the program (from compileProgram) to cfile and compiles it into
-// the executable out. The runtime is not compiled again each time: it is
-// linked from a cached object (runtimeObject), so the C file only has
-// seed.h above the program. Without a cache, the C file is self-contained.
-fn compileProgramC(string root, string program, string cfile, string out) error {
-    string? obj = try runtimeObject(root)
-    if (obj == null) {
+// Compiles a program into the executable out, through C files in dir:
+// build, run and test (opt is buildOpt or quickOpt). The program is made
+// of one C unit per package (gen_unit.sd); the object of every package but
+// the root one is kept in the cache (next to the runtime's object, see
+// runtimeObject) under a hash of its C text, the C compiler and its flags,
+// so a package is compiled once for every program that uses it, until it
+// (or the compiler, or the runtime's header) changes. The missing objects
+// and the root package's are compiled in parallel, then linked with the
+// runtime. Without a cache the program is one self-contained C file, as
+// for seed c. Returns false when there were compile errors.
+fn buildProgram(string root, Build t, bool testMode, string dir, string name, string out, string opt) (bool, error) {
+    Checker? c = try checkedProgram(root, t, testMode)
+    if (c == null) {
+        return false, null
+    }
+    string cfile = dir + "/" + name + ".c"
+    string? rt = try runtimeObject(root)
+    if (rt == null) {
+        string natives = try readNatives(c.ast)
+        Gen whole = newGen(c)
+        string program = whole.genProgram(natives)
         string runtime = try readRuntime(root)
         try fs.write(cfile, runtime + program)
-    } else {
-        string header = try readRuntimeHeader(root)
-        try fs.write(cfile, header + program)
+        try runCC(opt, []string{}, []string{cfile}, out, true)
+        return true, null
     }
-    return compileC(cfile, obj, out)
+    string cache = dirName(rt)
+    []string natives2 = try readPackageNatives(c.ast)
+    Gen g = newGen(c)
+    []Unit units = g.genUnits(natives2)
+    string header = try readRuntimeHeader(root)
+    []string objs = []string{}
+    []Unit missing = []Unit{}
+    for (int i = 0; i < units.len(); i++) {
+        string text = header + units[i].text
+        if (units[i].root) {
+            try fs.write(cfile, text)
+            continue
+        }
+        string key = encoding.hexEncode(crypto.sha256(cCompiler + "\n" + cFlags.join(" ") + " " + opt + "\n" + text)).slice(0, 20)
+        string obj = cache + "/pkg-" + units[i].path.replace("/", "_") + "-" + key + ".o"
+        objs.push(obj)
+        if (!fs.exists(obj)) {
+            missing.push(Unit{path: obj, root: false, text: text})
+        }
+    }
+    objs.push(rt)
+    if (missing.len() == 0) {
+        []string inputs = []string{cfile}
+        for (int j = 0; j < objs.len(); j++) {
+            inputs.push(objs[j])
+        }
+        try runCC(opt, []string{}, inputs, out, true)
+        return true, null
+    }
+    string rootObj = dir + "/" + name + ".o"
+    error err = group {
+        for (int k = 0; k < missing.len(); k++) {
+            spawn compileObject(cache, missing[k].text, missing[k].path, opt)
+        }
+        spawn runCC(opt, []string{"-c"}, []string{cfile}, rootObj, false)
+    }
+    if (err != null) {
+        return false, err
+    }
+    []string linked = []string{rootObj}
+    for (int m = 0; m < objs.len(); m++) {
+        linked.push(objs[m])
+    }
+    try runCC(opt, []string{}, linked, out, true)
+    return true, null
 }
 
 // The compiled runtime, runtime-<key>.o in the cache directory
 // ($SEED_ROOT/build/cache, or $TMPDIR/seed-cache-$USER when that cannot be
 // written), where key is a hash of the runtime's text, the C compiler and
-// its flags; it is compiled on first use. Null when neither directory can
-// be used.
+// its flags; it is compiled on first use, always with buildOpt. Null when
+// neither directory can be used.
 fn runtimeObject(string root) (string?, error) {
     string text = try readRuntime(root)
-    string key = encoding.hexEncode(crypto.sha256(cCompiler + "\n" + cFlags.join(" ") + "\n" + text)).slice(0, 20)
+    string key = encoding.hexEncode(crypto.sha256(cCompiler + "\n" + cFlags.join(" ") + " " + buildOpt + "\n" + text)).slice(0, 20)
     string user = "seed"
     string? u = os.env("USER")
     if (u != null && u != "") {
@@ -329,7 +407,7 @@ fn runtimeObject(string root) (string?, error) {
         if (fs.exists(obj)) {
             return obj, null
         }
-        error err = compileRuntime(dirs[i], text, obj)
+        error err = compileObject(dirs[i], text, obj, buildOpt)
         if (err == null) {
             return obj, null
         }
@@ -337,55 +415,41 @@ fn runtimeObject(string root) (string?, error) {
     return null, null
 }
 
-// Compiles the runtime into obj, through files with a random name in the
-// same directory and a rename, so that concurrent compilers never see a
-// half-written object.
-fn compileRuntime(string dir, string text, string obj) error {
+// Compiles the C text into the object obj in the cache directory dir,
+// through files with a random name and a rename, so that concurrent
+// compilers never see a half-written object.
+fn compileObject(string dir, string text, string obj, string opt) error {
     try fs.mkdir(dir)
     string tmp = dir + "/tmp-" + encoding.hexEncode(crypto.randomBytes(8))
     defer _ = fs.remove(tmp + ".c")
     try fs.write(tmp + ".c", text)
-    []string argv = []string{cCompiler}
-    for (int i = 0; i < cFlags.len(); i++) {
-        argv.push(cFlags[i])
-    }
-    argv.push("-c")
-    argv.push("-o")
-    argv.push(tmp + ".o")
-    argv.push(tmp + ".c")
-    int code = try os.run(argv)
-    if (code != 0) {
+    error err = runCC(opt, []string{"-c"}, []string{tmp + ".c"}, tmp + ".o", false)
+    if (err != null) {
         _ = fs.remove(tmp + ".o")
-        return errors.new("the C compiler failed on the runtime (exit code " + code.string() + ")")
+        return err
     }
     return fs.rename(tmp + ".o", obj)
 }
 
-// Compiles a program into the executable out, through a C file in a new
+// Compiles a program into the executable out, through C files in a new
 // temporary directory (removed afterwards). Returns false when there were
 // compile errors.
 fn build(string root, Build t, string out) (bool, error) {
-    string? program = try compileProgram(root, t, false)
-    if (program == null) {
-        return false, null
-    }
     string dir = try fs.makeTemp("seed-build-")
     defer _ = fs.removeAll(dir)
-    try compileProgramC(root, program, dir + "/" + baseName(out) + ".c", out)
-    return true, null
+    return buildProgram(root, t, false, dir, baseName(out), out, buildOpt)
 }
 
 // Builds a program into a new temporary directory, runs it with args,
 // removes the directory and returns the program's exit code.
 fn run(string root, Build t, []string args) (int, error) {
-    string? program = try compileProgram(root, t, false)
-    if (program == null) {
-        return 1, null
-    }
     string dir = try fs.makeTemp("seed-run-")
     defer _ = fs.removeAll(dir)
     string exe = dir + "/" + t.name
-    try compileProgramC(root, program, exe + ".c", exe)
+    bool ok = try buildProgram(root, t, false, dir, t.name, exe, quickOpt)
+    if (!ok) {
+        return 1, null
+    }
     []string argv = []string{exe}
     for (int i = 0; i < args.len(); i++) {
         argv.push(args[i])
@@ -521,14 +585,13 @@ fn testPackage(string root, string base, string dir, string work, []string opts)
         name = dir.slice(base.len() + 1, dir.len())
     }
     Build t = Build{files: files, dir: dir, projectRoot: base, name: name}
-    string? program = try compileProgram(root, t, true)
-    if (program == null) {
+    string exe = work + "/test"
+    string results = work + "/results"
+    bool ok = try buildProgram(root, t, true, work, "test", exe, quickOpt)
+    if (!ok) {
         fmt.println("FAIL " + dir + ": the package or its tests do not compile")
         return []int{0, 1}, null
     }
-    string exe = work + "/test"
-    string results = work + "/results"
-    try compileProgramC(root, program, work + "/test.c", exe)
     []string argv = []string{exe, results}
     for (int i = 0; i < opts.len(); i++) {
         argv.push(opts[i])

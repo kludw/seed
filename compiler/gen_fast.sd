@@ -253,28 +253,37 @@ fn (Gen g) paramType(int f, int i) int {
     return g.c.teType[g.c.ast.params[g.c.ast.at(fd.params, i)].typeExpr]
 }
 
+// The head of f's fast version: ints are passed as their words.
+fn (Gen g) fastHead(int f) string {
+    []string names = g.paramNames(f)
+    []string ps = []string{}
+    for (int i = 0; i < names.len(); i++) {
+        if (g.paramType(f, i) == tyInt) {
+            ps.push("int64_t " + names[i])
+        } else {
+            ps.push("bool " + names[i])
+        }
+    }
+    return g.linkage() + "int64_t " + g.fastName(f) + "(" + ps.join(", ") + ")"
+}
+
 // Emits the fast version of f and the function under f's own name that
 // chooses between it and the general version (generalName, made by genFn).
 fn (Gen g) mut genFast(int f) {
     FnDecl fd = g.c.ast.fns[f]
     []string names = g.paramNames(f)
-    []string ps = []string{}
     []string fastArgs = []string{}
     []string ints = []string{}
     for (int i = 0; i < names.len(); i++) {
         if (g.paramType(f, i) == tyInt) {
-            ps.push("int64_t " + names[i])
             fastArgs.push(names[i] + ".w")
             ints.push(names[i] + ".w")
         } else {
-            ps.push("bool " + names[i])
             fastArgs.push(names[i])
         }
     }
-    string head = "static int64_t " + g.fastName(f) + "(" + ps.join(", ") + ")"
-    g.protos.push(head + ";\n")
+    string head = g.fastHead(f)
     string sig = g.fnSig(f)
-    g.protos.push(sig + ";\n")
     g.curFn = f
     g.out = []string{}
     g.indent = 0
