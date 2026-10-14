@@ -69,13 +69,14 @@ but each operation tests both tags and checks for overflow
 released with a tag test. Go does one instruction per operation. `fib` is
 dominated by calls, so it is only 1.2x.
 
-**`json`, `strings`, `maps`: allocation.** A profile of `json` (`sample`)
-puts about a quarter of the time in `malloc`/`free`, a tenth in `memmove`
-(string slices and joins), and the rest in the parser and printer, float
-formatting (`snprintf` for non-integral numbers) and map hashing. Go's
-`encoding/json` with `any` allocates as much. About 3% goes to
-thread-local lookups (`tlv_get_addr`) in the free path of boxes, lists and
-maps (the queue that makes freeing non-recursive).
+**`json`, `strings`, `maps`: allocation.** A profile of `json` (`sample`,
+top of stack) puts over a third of the time in `malloc`/`free` and the
+runtime's free paths, an eighth in `memmove` (string slices, joins and
+list growth), 7% in float formatting and parsing (`snprintf`/`strtod` for
+non-integral numbers), and the rest in the parser and printer and in map
+hashing. Go's `encoding/json` with `any` allocates as much. About 3% goes
+to thread-local lookups (`tlv_get_addr`) in the free path of boxes, lists
+and maps (the queue that makes freeing non-recursive).
 
 **`pingpong`: waking threads.** Goroutines are OS threads, so a goroutine
 blocked on a channel sleeps on a condition variable, and waking it costs a
