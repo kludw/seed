@@ -1,0 +1,31 @@
+// expect-error: guard_incdec.sd:24:5: error: n is read before err is checked; when err is
+// x++ reads x, so it waits for the error check too.
+package main
+
+import "errors"
+import "fmt"
+
+fn fs(bool ok) (string, error) {
+    if (!ok) {
+        return null, errors.new("bad")
+    }
+    return "yes", null
+}
+
+fn fi(bool ok) (int, error) {
+    if (!ok) {
+        return null, errors.new("bad")
+    }
+    return 1, null
+}
+
+fn main([]string args) error {
+    int n, error err = fi(false)
+    n++
+    string s, err = fs(true)
+    if (err != null) {
+        return err
+    }
+    fmt.println(n.string() + s)
+    return null
+}

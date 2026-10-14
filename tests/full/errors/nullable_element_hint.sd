@@ -1,0 +1,14 @@
+// expect-error: store it first (string? v = m["k"]), then check v != null before calling len()
+// Checking m["k"] != null does not narrow it; the hint says to store it in a
+// variable (it used to repeat "check the value != null").
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    map[string]string m = map[string]string{"k": "v"}
+    if (m["k"] != null) {
+        fmt.println(m["k"].len().string())
+    }
+    return null
+}

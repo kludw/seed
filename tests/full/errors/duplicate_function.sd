@@ -1,0 +1,18 @@
+// expect-error: duplicate_function.sd:11:4: error: helper is already declared at line 7
+// A second declaration of a name says where the first one is.
+package main
+
+import "fmt"
+
+fn helper() {
+    fmt.println("one")
+}
+
+fn helper() {
+    fmt.println("two")
+}
+
+fn main([]string args) error {
+    helper()
+    return null
+}

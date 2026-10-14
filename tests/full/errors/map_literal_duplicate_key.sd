@@ -1,0 +1,11 @@
+// expect-error: map_literal_duplicate_key.sd:8:55: error: the key "b" appears twice in the map literal
+// A map literal cannot list the same key twice.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    map[string]int m = map[string]int{"a": 1, "b": 2, "b": 3}
+    fmt.println(m.len().string())
+    return null
+}

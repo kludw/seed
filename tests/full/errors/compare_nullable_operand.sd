@@ -1,0 +1,12 @@
+// expect-error: compare_nullable_operand.sd:10:23: error: count is nullable (int?), so it can only be compared with null
+// The error names the nullable operand of a comparison and points at it.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    map[string]int m = map[string]int{"a": 1}
+    int? count = m["a"]
+    fmt.println((1 == count).string())
+    return null
+}

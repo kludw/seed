@@ -1,0 +1,16 @@
+// expect-error: main.sd:10:10: error: Color is not pub in package colors
+// A case pattern cannot name a type that is not pub in its package.
+package main
+
+import "colors"
+import "fmt"
+
+fn main([]string args) error {
+    switch (colors.pick()) {
+    case colors.Color.Red:
+        fmt.println("red")
+    case colors.Color.Rgb(int r, int _, int _):
+        fmt.println(r.string())
+    }
+    return null
+}

@@ -1,0 +1,8 @@
+// expect-error: cannot use [](string?){...} (type [](string?)) as []string? to initialize names
+// A list literal is named by its type in a type error.
+package main
+
+fn main([]string args) error {
+    []string? names = [](string?){"a", null}
+    return null
+}

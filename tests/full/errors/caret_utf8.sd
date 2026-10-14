@@ -1,0 +1,11 @@
+// expect-error: |                          ^
+// The caret is under the right character when the line has UTF-8 text before it.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    string s = "héllo €" + 1
+    fmt.println(s)
+    return null
+}

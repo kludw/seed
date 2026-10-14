@@ -1,0 +1,42 @@
+// Constants: literals, operators, other constants, enum values, conversions,
+// pure built-in methods, and function values, which can be called.
+package main
+
+import "fmt"
+
+type Shape enum {
+    Circle(float r)
+    Dot
+}
+
+type P struct {
+    int x
+    []string names
+}
+
+fn two() int {
+    return 2
+}
+
+const int a = 1 + 2 * 3
+const string s = "abc".toUpper() + a.string()
+const []int xs = []int{a, a + 1, "xy".len()}
+const map[string]int m = map[string]int{"k": xs[1]}
+const P p = P{x: m.len(), names: "a,b".split(",")}
+const Shape sh = Shape.Circle(float(a))
+const fn() int f = two
+const int pl = p.names.len()
+
+fn main([]string args) error {
+    const int local = a * 2
+    fmt.println(s + local.string() + xs.len().string() + p.names[1] + pl.string() + f().string())
+    switch (sh) {
+    case Shape.Circle(float r):
+        fmt.println(r.string())
+    case Shape.Dot:
+        fmt.println("dot")
+    }
+    int v = 3
+    fmt.println(v.string())
+    return null
+}

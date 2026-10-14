@@ -360,7 +360,16 @@ with `!`). They drive the **error guards**: after `int n, error err = f()`
 (`if (err != null) { return ... }`, inside `if (err == null)`, after
 `err == null &&`, after `assert(err == null)` in a test), `n` is assigned
 again, or the scope ends. Reading a guarded variable is an error. A target
-declared `T?` gets no guard.
+declared `T?` gets no guard (and is null whenever the error is not); a
+field, element or mut receiver cannot be a plain `T` target beside an
+error. `Checker.guards` is the set of guards in effect on the current
+path: `checkIf`, `checkSwitch` and `checkSelect` check each branch from a
+copy and join the ends that fall through; `break` and `continue` carry
+the guards of variables declared outside the loop (`breakGuards`,
+`contGuards`) to the loop's exit and post statement; a guard that comes
+around the loop is an error when the next iteration reads the variable
+before assigning it (`checkLoopGuards`). Assigning the error variable
+again marks the guards waiting for it `lost`.
 
 Function values: a function name used as a value has `Res.Func` and type
 `fn(params) result`; a call whose callee is not a function or method name
@@ -665,8 +674,9 @@ through symbolic links and to compare directories).
 - **Nullable function types need parentheses**: `(fn(int) int)?`, because
   `fn(int) int?` is a function returning `int?`. The type is printed that
   way in messages.
-- **Error guards** last until the end of the block that made them (a guard
-  made inside an `if` does not reach the code after it). Only a plain `T`
+- **Error guards** follow the paths through the function (see
+  "Checking"): a guard made inside an `if` or a loop holds after it on the
+  paths that did not check the error. Only a plain `T`
   is guarded: `T? x, error err = f()` can read `x` (and compare it with
   null) at once, because a `T?` is checked before use anyway.
 - **A field of function type can be called directly** (`op.apply(1, 2)`),
@@ -685,6 +695,18 @@ through symbolic links and to compare directories).
   hints are written without backticks because the seed0 tests look for that
   exact text.
 - **"missing return"** is reported at the closing brace of the function.
+- **`return null, err`** for a plain result is rejected when `err` is the
+  literal `null` (or known to be null), and otherwise checked when the
+  function returns: a null `err` there crashes (`f returned null as result
+  1 without an error`) instead of handing the caller a null it may read.
+- **Constants** must be computable when the program is compiled
+  (`requireConstant`): no calls of functions, methods or function values,
+  no variables, `try`, `group` or channels; conversions and built-in
+  methods that change nothing are allowed.
+- **Nesting is limited to 256 levels** of blocks and expressions
+  (`maxNesting` in parser.sd): every phase recurses over the tree, and
+  deeper code overflowed the compiler's stack (and, around 600 levels, the
+  C compiler's).
 - **Imports are per file.** seed0 treats them as package-wide.
 - **The pedantic checks and the formatting check are always on**; the
   `--strict` flag is gone. The seed0-era test programs were changed to pass

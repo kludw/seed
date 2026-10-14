@@ -1,0 +1,18 @@
+// expect-error: return_null_null.sd:9:16: error: find returns null as its int result beside an error that is null
+// return null, null for (int, error): the caller would read a null int.
+package main
+
+import "fmt"
+
+fn find(string s) (int, error) {
+    if (s == "") {
+        return null, null
+    }
+    return s.len(), null
+}
+
+fn main([]string args) error {
+    int n = try find("abc")
+    fmt.println(n.string())
+    return null
+}

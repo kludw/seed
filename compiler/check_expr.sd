@@ -187,8 +187,14 @@ fn (Checker c) mut requireMutable(int e, string what) {
         return
     }
     Var v = c.vars[c.info[r].ref]
-    if (v.kind == VarKind.Param || v.kind == VarKind.Recv) {
-        c.errorHint(pos, "cannot " + what + " " + c.describe(e) + ": parameters are read-only", "copy it into a local variable first, or make the method mut")
+    string target = c.describe(e)
+    if (target == "the value") {
+        target = "an element of " + v.name
+    }
+    if (v.kind == VarKind.Recv) {
+        c.errorHint(pos, "cannot " + what + " " + target + ": parameters are read-only, and " + v.name + " is the receiver of a method that is not mut", "make the method mut, or copy " + v.name + " into a local variable first")
+    } else if (v.kind == VarKind.Param) {
+        c.errorHint(pos, "cannot " + what + " " + target + ": parameters are read-only", "copy it into a local variable first, or make the method mut")
     } else if (v.kind == VarKind.LocalConst) {
         c.error(pos, "cannot " + what + " the constant " + v.name)
     }
@@ -380,6 +386,17 @@ fn (Checker c) mut checkExpr(int e) {
     }
 }
 
+// Reports a read of the variable n while the guard g is in effect.
+fn (Checker c) mut guardError(int g, string n, Pos pos) {
+    string en = c.guards[g].errName
+    if (c.guards[g].lost) {
+        c.errorHint(pos, n + " may be null: it was returned beside " + en + ", which was assigned again before it was checked", "check " + en + " right after the call that returned " + n + " (or use try)")
+    } else {
+        c.errorHint(pos, n + " is read before " + en + " is checked; when " + en + " is not null, " + n + " is null", "check " + en + " != null first (and return or handle it), or use try")
+    }
+    c.endGuard(c.guards[g].key)
+}
+
 fn (Checker c) mut checkIdent(int e) {
     Expr x = c.ast.exprs[e]
     string n = x.text
@@ -397,9 +414,7 @@ fn (Checker c) mut checkIdent(int e) {
         c.applyNarrowing(e)
         int g = c.guardOf(v)
         if (g >= 0) {
-            string en = c.guards[g].errName
-            c.errorHint(x.pos, n + " is read before " + en + " is checked; when " + en + " is not null, " + n + " is null", "check " + en + " != null first (and return or handle it), or use try")
-            c.guards[g].dead = true
+            c.guardError(g, n, x.pos)
         }
         return
     }
@@ -484,7 +499,7 @@ fn (Checker c) mut checkField(int e) {
     }
     int bt = c.typeOf(x.a)
     if (c.types.isOpt(bt)) {
-        c.errorHint(c.ast.exprs[x.a].pos, c.describe(x.a) + " is nullable (" + c.typeName(bt) + ")", "check " + c.describe(x.a) + " != null before reading ." + x.text)
+        c.errorHint(c.ast.exprs[x.a].pos, c.describe(x.a) + " is nullable (" + c.typeName(bt) + ")", c.nullHint(x.a, bt, "reading ." + x.text))
         c.setType(e, tyInvalid)
         return
     }
@@ -538,7 +553,7 @@ fn (Checker c) mut checkIndex(int e) {
         c.checkValue(x.b, c.types.key(bt), "as a map key")
         c.setType(e, c.types.optOf(c.types.elem(bt)))
     } else if (k == Kind.Opt) {
-        c.errorHint(c.ast.exprs[x.a].pos, c.describe(x.a) + " is nullable (" + c.typeName(bt) + ")", "check " + c.describe(x.a) + " != null before indexing")
+        c.errorHint(c.ast.exprs[x.a].pos, c.describe(x.a) + " is nullable (" + c.typeName(bt) + ")", c.nullHint(x.a, bt, "indexing"))
         c.setType(e, tyInvalid)
     } else {
         c.error(x.pos, "cannot index a value of type " + c.typeName(bt))
@@ -557,8 +572,11 @@ fn (Checker c) mut checkBinary(int e) {
     if (op == Tok.AndAnd || op == Tok.OrOr) {
         c.checkValue(x.a, tyBool, "with " + ops)
         c.narrowMarks.push(c.narrows.len())
+        []Guard savedGuards = c.guards
         c.narrowOn(x.a, op == Tok.AndAnd)
+        c.latchGuards(x.a, op == Tok.AndAnd)
         c.checkValue(x.b, tyBool, "with " + ops)
+        c.guards = savedGuards
         int? mark = c.narrowMarks.pop()
         if (mark != null) {
             c.truncateNarrows(mark)
@@ -613,14 +631,20 @@ fn (Checker c) mut checkBinary(int e) {
         }
         if (at != bt) {
             if ((c.types.isOpt(at) && c.types.elem(at) == bt) || (c.types.isOpt(bt) && c.types.elem(bt) == at)) {
-                c.errorHint(x.pos, "a nullable value can only be compared with null", "check it against null first")
+                int n = a
+                int nt = at
+                if (c.types.isOpt(bt)) {
+                    n = b
+                    nt = bt
+                }
+                c.errorHint(c.ast.exprs[n].pos, c.describe(n) + " is nullable (" + c.typeName(nt) + "), so it can only be compared with null", "check " + c.describe(n) + " != null first, then compare it")
             } else {
                 c.error(x.pos, "mismatched types " + c.typeName(at) + " and " + c.typeName(bt) + " for " + ops)
             }
             return
         }
         if (c.types.isOpt(at)) {
-            c.errorHint(x.pos, "a nullable value (" + c.typeName(at) + ") can only be compared with null", "check it against null first")
+            c.errorHint(x.pos, "nullable values (" + c.typeName(at) + ") can only be compared with null", "check " + c.describe(a) + " and " + c.describe(b) + " against null first, then compare them")
         }
         return
     }
@@ -715,12 +739,33 @@ fn (Checker c) mut checkMapLit(int e) {
     } else {
         mt = c.types.mapOf(k, v)
     }
+    []string seen = []string{}
     for (int i = 0; i < x.count; i++) {
         Expr en = c.ast.exprs[c.ast.at(x.list, i)]
         c.checkValue(en.a, k, "as a map key")
         c.checkValue(en.b, v, "as a map value")
+        string lit = literalKey(c.ast.exprs[en.a])
+        if (lit != "" && seen.contains(lit)) {
+            c.errorHint(c.ast.exprs[en.a].pos, "the key " + c.describe(en.a) + " appears twice in the map literal", "remove one of the entries; a later one would replace the earlier one")
+        } else if (lit != "") {
+            seen.push(lit)
+        }
     }
     c.setType(e, mt)
+}
+
+// A literal map key as a comparable string ("" when it is not a literal).
+fn literalKey(Expr x) string {
+    if (x.kind == ExprKind.StringLit) {
+        return "s" + x.text
+    }
+    if (x.kind == ExprKind.IntLit && x.intValue != minInt) {
+        return "i" + x.intValue.string()
+    }
+    if (x.kind == ExprKind.ByteLit || x.kind == ExprKind.BoolLit) {
+        return "b" + x.intValue.string()
+    }
+    return ""
 }
 
 fn (Checker c) mut checkStructLit(int e) {

@@ -1,0 +1,64 @@
+// select over channels of structs and floats, closed one after the other.
+package main
+
+import "fmt"
+
+type P struct {
+    string name
+    []float xs
+}
+
+fn produce(chan P ps, chan float fs, chan bool done) {
+    for (int i = 0; i < 3; i++) {
+        ps.send(P{name: "p" + i.string(), xs: []float{float(i), 0.5}})
+        fs.send(float(i) * 1.5)
+    }
+    ps.close()
+    fs.close()
+    done.send(true)
+}
+
+fn consume(chan P ps, chan float fs, chan int stop) error {
+    int closed = 0
+    []string got = []string{}
+    for (; closed < 2; ) {
+        select {
+        case P? p = ps.receive():
+            if (p == null) {
+                closed++
+                continue
+            }
+            got.push(p.name + ":" + p.xs.len().string())
+        case float? f = fs.receive():
+            if (f == null) {
+                closed++
+                break
+            }
+            got.push(f.string())
+        }
+    }
+    got.sort()
+    if (got.join(",") != "0.0,1.5,3.0,p0:2,p1:2,p2:2") {
+        fmt.println("bad " + got.join(","))
+    } else {
+        fmt.println("ok")
+    }
+    return null
+}
+
+fn main([]string args) error {
+    chan P ps = chan P(0)
+    chan float fs = chan float(0)
+    chan bool done = chan bool(1)
+    chan int stop = chan int(0)
+    error err = group {
+        spawn produce(ps, fs, done)
+        spawn consume(ps, fs, stop)
+    }
+    if (err != null) {
+        return err
+    }
+    bool? d = done.receive()
+    fmt.println((d != null).string())
+    return null
+}

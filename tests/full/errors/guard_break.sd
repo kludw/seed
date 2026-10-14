@@ -1,0 +1,26 @@
+// expect-error: guard_break.sd:24:17: error: s is read before err is checked; when err is
+// After a break on an error, the value assigned beside it is not checked.
+package main
+
+import "errors"
+import "fmt"
+
+fn fs(bool ok) (string, error) {
+    if (!ok) {
+        return null, errors.new("bad")
+    }
+    return "yes", null
+}
+
+fn main([]string args) error {
+    string s = "a"
+    error err = null
+    for (int i = 0; i < 2; i++) {
+        s, err = fs(false)
+        if (err != null) {
+            break
+        }
+    }
+    fmt.println(s)
+    return err
+}

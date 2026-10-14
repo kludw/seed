@@ -492,6 +492,7 @@ fn (Lexer lx) mut lexQuoted(byte quote) {
     lx.i++
     []byte buf = []byte{}
     bool closed = false
+    bool badEscape = false
     for (; lx.i < n; ) {
         byte c = lx.src[lx.i]
         if (c == quote) {
@@ -528,12 +529,14 @@ fn (Lexer lx) mut lexQuoted(byte quote) {
             int h1 = hexValue(lx.peekByte(0))
             int h2 = hexValue(lx.peekByte(1))
             if (h1 < 0 || h2 < 0) {
+                badEscape = true
                 lx.fail(epos, "\\x needs two hex digits")
             } else {
                 buf.push(byte(h1 * 16 + h2))
                 lx.i = lx.i + 2
             }
         } else {
+            badEscape = true
             lx.fail(epos, "unknown escape sequence '\\" + string([]byte{e}) + "'")
         }
     }
@@ -544,7 +547,7 @@ fn (Lexer lx) mut lexQuoted(byte quote) {
         lx.add(Tok.String, pos, string(buf), start)
         return
     }
-    if (closed && buf.len() != 1) {
+    if (closed && buf.len() != 1 && !badEscape) {
         lx.fail(pos, "a byte literal must hold exactly one byte")
     }
     lx.add(Tok.Byte, pos, string(buf), start)

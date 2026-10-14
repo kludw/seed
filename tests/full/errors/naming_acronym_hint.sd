@@ -1,0 +1,11 @@
+// expect-error: rename it to httpCode
+// The suggested camelCase spelling of a name that starts with an acronym.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    int HTTPCode = 200
+    fmt.println(HTTPCode.string())
+    return null
+}

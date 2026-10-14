@@ -54,13 +54,18 @@ type Narrow struct {
 }
 
 // After `int n, error err = f()`, n may not be read until err is checked:
-// the guard on n (key "v<n>") lasts until err (errKey) is known to be null
-// (the narrowing "!" + errKey), n is assigned again, or its scope ends.
+// the guard on n (key "v<n>", variable var, assigned at pos) lasts until
+// err (errKey) is known to be null (the narrowing "!" + errKey), n is
+// assigned again, or its scope ends. Checker.guards is the set of guards in
+// effect at the current point; branches work on copies of it, which are
+// joined where the branches meet (see checkIf, checkFor, checkSwitch).
 type Guard struct {
     string key
     string errKey
     string errName
-    bool dead
+    int var
+    Pos pos
+    bool lost
 }
 
 // What an expression resolved to.
@@ -209,7 +214,12 @@ type Checker struct {
     []Narrow narrows
     []int narrowMarks
     []Guard guards
-    []int guardMarks
+    []Guard breakGuards
+    []int breakMarks
+    []Guard contGuards
+    []int contMarks
+    []int loopScopes
+    []Guard caseGuards
     int curFn
     int loopDepth
     int groupDepth
@@ -256,7 +266,12 @@ fn newChecker(Ast ast, Diags diags, bool testMode) Checker {
         narrows: []Narrow{},
         narrowMarks: []int{},
         guards: []Guard{},
-        guardMarks: []int{},
+        breakGuards: []Guard{},
+        breakMarks: []int{},
+        contGuards: []Guard{},
+        contMarks: []int{},
+        loopScopes: []int{},
+        caseGuards: []Guard{},
         curFn: -1,
         loopDepth: 0,
         groupDepth: 0,
@@ -494,10 +509,18 @@ fn (Checker c) mut addGlobal(string name, GlobalKind kind, int index, Pos pos) {
         return
     }
     int pkg = c.pkgOf(pos)
+    if (isBuiltinTypeName(name)) {
+        c.errorHint(pos, name + " is the name of a built-in type", "choose another name")
+        return
+    }
     int? old = c.global(pkg, name)
     if (old != null) {
         Pos op = c.globalList[old].pos
-        c.error(pos, name + " is already declared at " + c.diags.paths[op.file] + ":" + op.line.string() + ":" + op.col.string())
+        string where = "at line " + op.line.string()
+        if (op.file != pos.file) {
+            where = "in " + c.diags.paths[op.file] + ":" + op.line.string()
+        }
+        c.errorHint(pos, name + " is already declared " + where, "rename one of them; a package has one declaration per name")
         return
     }
     c.globalList.push(Global{kind: kind, index: index, pos: pos, pkg: pkg, name: name})
@@ -864,7 +887,7 @@ fn (Checker c) mut resolveUncached(int te) int {
             return tyInvalid
         }
         if (v != tyInvalid && c.types.isOpt(v)) {
-            c.errorHint(c.ast.typeExprs[x.b].pos, "map values cannot be nullable", "m[k] already returns " + c.typeName(v) + "?, which would be " + c.typeName(v) + "?")
+            c.errorHint(c.ast.typeExprs[x.b].pos, "map values cannot be nullable", "m[k] already returns " + c.typeName(v) + " (null for a missing key), so a value could not be told apart from a missing one; store a struct with a nullable field instead")
             return tyInvalid
         }
         return c.types.mapOf(k, v)
@@ -950,10 +973,78 @@ fn (Checker c) mut checkConst(int i) {
     c.groupDepth = 0
     c.scope = []int{}
     c.checkValue(cd.expr, t, "to initialize " + cd.name)
+    c.requireConstant(cd.expr, cd.name)
     c.curFn = savedFn
     c.groupDepth = savedGroups
     c.scope = savedScope
     c.constState[i] = 2
+}
+
+// A constant's value must be computable when the program is compiled:
+// literals, other constants, enum values, named functions, operators,
+// conversions and built-in methods that change nothing.
+fn (Checker c) mut requireConstant(int e, string name) {
+    int bad = c.nonConstant(e)
+    if (bad < 0) {
+        return
+    }
+    Expr x = c.ast.exprs[bad]
+    string what = "this value"
+    if (x.kind == ExprKind.Call) {
+        what = "the call " + c.describe(bad)
+    } else if (x.kind == ExprKind.Ident) {
+        what = "the variable " + x.text
+    } else if (x.kind == ExprKind.Try) {
+        what = "try"
+    } else if (x.kind == ExprKind.Group) {
+        what = "a group"
+    } else if (x.kind == ExprKind.ChanMake) {
+        what = "a new channel"
+    }
+    c.errorHint(x.pos, "the value of the constant " + name + " must be computable when the program is compiled, but it uses " + what, "declare a variable instead, or compute the constant from literals and other constants")
+}
+
+// The first part of e that is not a constant, or -1.
+fn (Checker c) nonConstant(int e) int {
+    if (e < 0) {
+        return -1
+    }
+    Expr x = c.ast.exprs[e]
+    ExprInfo i = c.info[e]
+    switch (x.kind) {
+    case ExprKind.Bad, ExprKind.IntLit, ExprKind.FloatLit, ExprKind.ByteLit, ExprKind.StringLit, ExprKind.BoolLit, ExprKind.NullLit:
+        return -1
+    case ExprKind.Ident:
+        if (i.res == Res.Local && c.vars[i.ref].kind != VarKind.LocalConst) {
+            return e
+        }
+        return -1
+    case ExprKind.Try, ExprKind.Group, ExprKind.ChanMake:
+        return e
+    case ExprKind.Call:
+        if (i.res == Res.Func || i.res == Res.Method || i.res == Res.ValueCall || i.res == Res.IfaceMethod) {
+            return e
+        }
+        if (i.res == Res.Builtin && (isBuiltinMutName(c.ast.exprs[x.a].text) || i.builtin == Builtin.Send || i.builtin == Builtin.Receive || i.builtin == Builtin.Close)) {
+            return e
+        }
+    case ExprKind.Field, ExprKind.Index, ExprKind.Unary, ExprKind.Binary, ExprKind.ListLit, ExprKind.MapLit, ExprKind.Entry, ExprKind.StructLit, ExprKind.FieldInit:
+    }
+    int a = c.nonConstant(x.a)
+    if (a >= 0) {
+        return a
+    }
+    int b = c.nonConstant(x.b)
+    if (b >= 0) {
+        return b
+    }
+    for (int k = 0; k < x.count; k++) {
+        int r = c.nonConstant(c.ast.at(x.list, k))
+        if (r >= 0) {
+            return r
+        }
+    }
+    return -1
 }
 
 fn (Checker c) mut checkFnBody(int f) {
@@ -978,7 +1069,12 @@ fn (Checker c) mut checkFnBody(int f) {
     c.narrows = []Narrow{}
     c.narrowMarks = []int{}
     c.guards = []Guard{}
-    c.guardMarks = []int{}
+    c.breakGuards = []Guard{}
+    c.breakMarks = []int{}
+    c.contGuards = []Guard{}
+    c.contMarks = []int{}
+    c.loopScopes = []int{}
+    c.caseGuards = []Guard{}
     c.loopDepth = 0
     c.groupDepth = 0
     c.groupLoop = -1
@@ -1015,19 +1111,28 @@ fn (Checker c) mut checkFnBody(int f) {
 fn (Checker c) mut pushScope() {
     c.scopeMarks.push(c.scope.len())
     c.narrowMarks.push(c.narrows.len())
-    c.guardMarks.push(c.guards.len())
 }
 
 fn (Checker c) mut popScope() {
     int? s = c.scopeMarks.pop()
     int? n = c.narrowMarks.pop()
-    int? g = c.guardMarks.pop()
     if (s != null && n != null) {
         c.truncateScope(s)
         c.truncateNarrows(n)
+        c.dropGuardsOutOfScope()
     }
-    if (g != null && c.guards.len() > g) {
-        c.guards = c.guards.slice(0, g)
+}
+
+// The guards on variables that are no longer in scope end.
+fn (Checker c) mut dropGuardsOutOfScope() {
+    []Guard kept = []Guard{}
+    for (int i = 0; i < c.guards.len(); i++) {
+        if (c.scope.contains(c.guards[i].var)) {
+            kept.push(c.guards[i])
+        }
+    }
+    if (kept.len() != c.guards.len()) {
+        c.guards = kept
     }
 }
 
@@ -1063,6 +1168,8 @@ fn (Checker c) mut declare(string name, int t, VarKind kind, Pos pos) int {
         c.checkCamel(name, pos, "the parameter")
     } else if (kind == VarKind.Recv || kind == VarKind.MutRecv) {
         c.checkCamel(name, pos, "the receiver")
+    } else if (kind == VarKind.LocalConst) {
+        c.checkCamel(name, pos, "the constant")
     } else {
         c.checkCamel(name, pos, "the variable")
     }
@@ -1071,9 +1178,23 @@ fn (Checker c) mut declare(string name, int t, VarKind kind, Pos pos) int {
     } else if (c.importedPkg(pos.file, name) >= 0) {
         c.errorHint(pos, name + " is the name of an imported package; shadowing is not allowed", "choose another name")
     }
+    if (isBuiltinTypeName(name)) {
+        c.errorHint(pos, name + " is the name of a built-in type; it cannot be used as a name", "choose another name")
+    }
     int old = c.lookupVar(name)
     if (old >= 0) {
-        c.errorHint(pos, name + " is already declared at line " + c.vars[old].pos.line.string() + "; shadowing is not allowed", "assign with = instead, or choose another name")
+        string what = ""
+        VarKind ok = c.vars[old].kind
+        if (ok == VarKind.Param) {
+            what = " (a parameter)"
+        } else if (ok == VarKind.Recv || ok == VarKind.MutRecv) {
+            what = " (the receiver)"
+        }
+        string hint = "assign with = instead, or choose another name"
+        if (kind == VarKind.Param || kind == VarKind.Recv || kind == VarKind.MutRecv) {
+            hint = "give the parameters and the receiver different names"
+        }
+        c.errorHint(pos, name + " is already declared at line " + c.vars[old].pos.line.string() + what + "; shadowing is not allowed", hint)
     }
     c.vars.push(Var{name: name, ty: t, kind: kind, pos: pos, used: false})
     int v = c.vars.len() - 1
@@ -1109,6 +1230,21 @@ fn (Checker c) pathKey(int e) string {
     return ""
 }
 
+// The hint for using the nullable e (of type t) before checking it: a null
+// check narrows only a variable or a path of fields, so anything else (an
+// element, a map entry, a call result) has to be stored in a variable first.
+fn (Checker c) nullHint(int e, int t, string action) string {
+    string d = c.describe(e)
+    if (c.pathKey(e) != "") {
+        return "check " + d + " != null before " + action
+    }
+    string src = c.ast.fullText(e)
+    if (src == "") {
+        src = "..."
+    }
+    return "a null check narrows only variables and their fields; store it first (" + c.typeName(t) + " v = " + src + "), then check v != null before " + action
+}
+
 fn (Checker c) isNarrowed(string key) bool {
     for (int i = c.narrows.len() - 1; i >= 0; i--) {
         if (c.narrows[i].key == key) {
@@ -1134,7 +1270,7 @@ fn keyExtends(string key, string prefix, bool strict) bool {
 }
 
 // The path was assigned: it and everything under it may be null again (or
-// no longer null), and a guard on it ends.
+// no longer null). See assigned for the guards.
 fn (Checker c) mut killAssign(string key) {
     if (key == "") {
         return
@@ -1148,10 +1284,39 @@ fn (Checker c) mut killAssign(string key) {
             c.narrows[i].dead = true
         }
     }
-    for (int j = 0; j < c.guards.len(); j++) {
-        if (c.guards[j].key == key) {
-            c.guards[j].dead = true
+}
+
+// The path was assigned (here, not in a loop scan): narrowing ends, and so
+// does a guard on it.
+fn (Checker c) mut assigned(string key) {
+    c.killAssign(key)
+    c.endGuard(key)
+    if (key == "") {
+        return
+    }
+    // The error a guard waits for was replaced before it was checked: the
+    // value beside it can no longer be shown to be valid.
+    for (int i = 0; i < c.guards.len(); i++) {
+        if (!c.guards[i].lost && keyExtends(c.guards[i].errKey, key, false)) {
+            c.guards[i].lost = true
+            c.guards[i].errKey = "#" + c.guards[i].errKey
         }
+    }
+}
+
+// The guards on key end on the current path.
+fn (Checker c) mut endGuard(string key) {
+    if (key == "" || c.guards.len() == 0) {
+        return
+    }
+    []Guard kept = []Guard{}
+    for (int i = 0; i < c.guards.len(); i++) {
+        if (c.guards[i].key != key) {
+            kept.push(c.guards[i])
+        }
+    }
+    if (kept.len() != c.guards.len()) {
+        c.guards = kept
     }
 }
 
@@ -1164,14 +1329,64 @@ fn (Checker c) guardOf(int v) int {
     string key = "v" + v.string()
     for (int i = c.guards.len() - 1; i >= 0; i--) {
         Guard g = c.guards[i]
-        if (g.key == key && !g.dead) {
-            if (c.isNarrowed("!" + g.errKey)) {
-                return -1
-            }
+        if (g.key == key && !c.isNarrowed("!" + g.errKey)) {
             return i
         }
     }
     return -1
+}
+
+// After cond is known to be `when`, the errors it shows to be null are
+// checked: the guards waiting for them end on this path.
+fn (Checker c) mut latchGuards(int cond, bool when) {
+    if (cond < 0 || c.guards.len() == 0) {
+        return
+    }
+    []string keys = c.condKeys(cond, when, []string{})
+    []Guard kept = []Guard{}
+    for (int i = 0; i < c.guards.len(); i++) {
+        if (!keys.contains("!" + c.guards[i].errKey)) {
+            kept.push(c.guards[i])
+        }
+    }
+    if (kept.len() != c.guards.len()) {
+        c.guards = kept
+    }
+}
+
+// The guards of two paths that meet: a guard of either holds after them.
+fn joinGuards([]Guard a, []Guard b) []Guard {
+    []Guard out = a
+    for (int i = 0; i < b.len(); i++) {
+        bool dup = false
+        for (int j = 0; j < a.len(); j++) {
+            if (a[j].key == b[i].key && a[j].errKey == b[i].errKey && a[j].pos.line == b[i].pos.line && a[j].pos.col == b[i].pos.col && a[j].pos.file == b[i].pos.file) {
+                dup = true
+                break
+            }
+        }
+        if (!dup) {
+            out.push(b[i])
+        }
+    }
+    return out
+}
+
+// At break or continue: the guards in effect on variables declared outside
+// the loop go with the jump (to the code after the loop, or around again).
+fn (Checker c) loopGuards() []Guard {
+    []Guard out = []Guard{}
+    int n = c.loopScopes[c.loopScopes.len() - 1]
+    for (int i = 0; i < c.guards.len(); i++) {
+        int v = c.guards[i].var
+        for (int j = 0; j < n; j++) {
+            if (c.scope[j] == v) {
+                out.push(c.guards[i])
+                break
+            }
+        }
+    }
+    return out
 }
 
 // A mut method was called on the path: everything under it may change.
@@ -1268,6 +1483,9 @@ fn (Checker c) mut scanStmtKills(int s) {
         for (int k = 0; k < st.count; k++) {
             Case cs = c.ast.cases[c.ast.at(st.list, k)]
             c.scanStmtKills(cs.comm)
+            for (int m = 0; m < cs.labelCount; m++) {
+                c.scanExprKills(c.ast.labels[c.ast.at(cs.labels, m)].expr)
+            }
             c.scanBlockKills(cs.body)
         }
     case StmtKind.Bad, StmtKind.Break, StmtKind.Continue:

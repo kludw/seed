@@ -1,0 +1,9 @@
+// expect-error: double_nullable.sd:7:12: error: T?? is not a valid type
+// A declaration with T?? names the problem (it used to say "expected the end of the statement").
+package main
+
+fn main([]string args) error {
+    string? ok = null
+    string?? bad = ok
+    return null
+}

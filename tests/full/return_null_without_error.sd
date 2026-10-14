@@ -1,0 +1,32 @@
+// return null, err with an err that turns out to be null crashes in the
+// callee, instead of handing the caller a null string it would read.
+package main
+
+import "errors"
+import "fmt"
+
+fn check(string s) error {
+    if (s == "") {
+        return errors.new("empty")
+    }
+    return null
+}
+
+fn load(string s) (string, error) {
+    error err = check(s)
+    if (s == "" || s == "bad") {
+        // Fine for "", whose check fails; "bad" passes the check.
+        return null, err
+    }
+    return s + "!", null
+}
+
+fn main([]string args) error {
+    string a = try load("ok")
+    fmt.println(a)
+    string? b, error err = load("")
+    fmt.println((b == null).string() + " " + err.message())
+    string c = try load("bad")
+    fmt.println(c.len().string())
+    return null
+}

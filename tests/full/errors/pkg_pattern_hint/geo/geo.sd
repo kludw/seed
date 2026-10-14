@@ -1,0 +1,10 @@
+package geo
+
+pub type Point struct {
+    pub int x
+}
+
+pub type Shape enum {
+    At(Point p, []Point more)
+    None
+}

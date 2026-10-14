@@ -1,0 +1,27 @@
+// expect-error: guard_field_target.sd:22:5: error: b.s cannot be assigned beside an error:
+// A field cannot hold the null that comes with an error.
+package main
+
+import "errors"
+import "fmt"
+
+fn fs(bool ok) (string, error) {
+    if (!ok) {
+        return null, errors.new("bad")
+    }
+    return "yes", null
+}
+
+type Box struct {
+    string s
+}
+
+fn main([]string args) error {
+    Box b = Box{s: "a"}
+    error err = null
+    b.s, err = fs(false)
+    if (err != null) {
+        fmt.println(b.s)
+    }
+    return err
+}

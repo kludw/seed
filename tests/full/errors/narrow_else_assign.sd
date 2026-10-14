@@ -1,0 +1,19 @@
+// expect-error: narrow_else_assign.sd:17:17: error: x is nullable (string?) and cannot be
+// After if (x == null) { return } else { x = null }, x is not narrowed.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    string? x = "a"
+    if (args.len() > 100) {
+        x = null
+    }
+    if (x == null) {
+        return null
+    } else {
+        x = null
+    }
+    fmt.println(x)
+    return null
+}

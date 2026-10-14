@@ -1,0 +1,17 @@
+// expect-error: const_call.sd:12:15: error: the value of the constant x must be computable
+// A constant's value must be computable when the program is compiled: no calls.
+package main
+
+import "fmt"
+
+fn two() int {
+    fmt.println("side effect")
+    return 2
+}
+
+const int x = two()
+
+fn main([]string args) error {
+    fmt.println(x.string())
+    return null
+}

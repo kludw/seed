@@ -1,0 +1,22 @@
+// expect-error: guard_loop_assign.sd:20:17: error: s is read before err is checked; when
+// Assigning the value in a loop does not check it: the loop may not run.
+package main
+
+import "errors"
+import "fmt"
+
+fn fs(bool ok) (string, error) {
+    if (!ok) {
+        return null, errors.new("bad")
+    }
+    return "yes", null
+}
+
+fn main([]string args) error {
+    string s, error err = fs(false)
+    for (int i = 0; i < args.len() - 1; i++) {
+        s = "x"
+    }
+    fmt.println(s)
+    return err
+}

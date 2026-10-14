@@ -1,0 +1,12 @@
+// expect-error: const_local_variable.sd:9:19: error: the value of the constant y must be
+// A local constant cannot be computed from a variable.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    int v = args.len()
+    const int y = v + 1
+    fmt.println(y.string())
+    return null
+}

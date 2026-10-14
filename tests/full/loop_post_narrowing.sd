@@ -1,0 +1,17 @@
+// The post statement of a for loop sees the narrowing of its condition.
+package main
+
+import "fmt"
+
+type Node struct {
+    int v
+    Node? next
+}
+
+fn main([]string args) error {
+    Node? head = Node{v: 1, next: Node{v: 2, next: null}}
+    for (Node? c = head; c != null; c = c.next) {
+        fmt.println(c.v.string())
+    }
+    return null
+}

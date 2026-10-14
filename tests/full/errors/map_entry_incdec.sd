@@ -1,0 +1,12 @@
+// expect-error: map_entry_incdec.sd:9:5: error: ++ cannot change a map entry: the key may be missing
+// m[k]++ reads an entry that may be missing (it used to generate invalid C).
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    map[string]int counts = map[string]int{"a": 1}
+    counts["a"]++
+    fmt.println(counts.len().string())
+    return null
+}

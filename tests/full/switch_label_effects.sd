@@ -1,0 +1,44 @@
+// Value switch labels: a label that is a call without arguments (p.bump()),
+// labels tried in order (a later one only when the earlier ones did not
+// match), and a label whose mut call changes what the switch value was read
+// from (the switch keeps its own copy; this was a use-after-free).
+package main
+
+import "fmt"
+
+type P struct {
+    string name
+}
+
+fn (P p) mut bump() string {
+    p.name = "x" + p.name.len().string()
+    return "never"
+}
+
+fn word(int n) string {
+    fmt.println("eval " + n.string())
+    return "w" + n.string()
+}
+
+fn main([]string args) error {
+    for (int i = 0; i < 3; i++) {
+        switch (word(i)) {
+        case "w" + "0", word(10):
+            fmt.println("zero")
+        case "w1", word(11):
+            fmt.println("one")
+        default:
+            fmt.println("other")
+        }
+    }
+    P p = P{name: "abc" + "def"}
+    switch (p.name) {
+    case p.bump():
+        fmt.println("bumped")
+    case "abcdef":
+        fmt.println("orig " + p.name)
+    default:
+        fmt.println("default " + p.name)
+    }
+    return null
+}

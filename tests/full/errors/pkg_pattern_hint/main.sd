@@ -1,0 +1,17 @@
+// expect-error: write case geo.Shape.At(geo.Point p, []geo.Point more):
+// The suggested pattern names the field types as this package must write them.
+package main
+
+import "fmt"
+import "geo"
+
+fn main([]string args) error {
+    geo.Shape s = geo.Shape.None
+    switch (s) {
+    case geo.Shape.At:
+        fmt.println("at")
+    case geo.Shape.None:
+        fmt.println("none")
+    }
+    return null
+}

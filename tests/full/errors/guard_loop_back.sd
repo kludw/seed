@@ -1,0 +1,23 @@
+// expect-error: guard_loop_back.sd:20:9: error: s may be null when the loop comes around
+// A value assigned beside an error at the end of a loop body is read by the next iteration.
+package main
+
+import "errors"
+import "fmt"
+
+fn fs(bool ok) (string, error) {
+    if (!ok) {
+        return null, errors.new("bad")
+    }
+    return "yes", null
+}
+
+fn main([]string args) error {
+    string s = "a"
+    error err = null
+    for (int i = 0; i < 2; i++) {
+        fmt.println(s)
+        s, err = fs(false)
+    }
+    return err
+}

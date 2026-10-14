@@ -373,21 +373,20 @@ fn (Gen g) mut genMultiAssign(int s) {
     int rt = g.typeOf(st.expr)
     string v = g.gexpr(st.expr)
     string err = v + ".r" + (n - 1).string()
-    bool discard = g.c.stmtDiscard[s]
-    if (discard) {
-        // T? x, _ = f(): when f fails, x is null.
-        []string rels = []string{}
-        for (int i = 0; i < n - 1; i++) {
-            if (g.takesPart(st, i)) {
-                string r = g.releaseCall(g.c.types.part(rt, i), v + ".r" + i.string())
-                if (r != "") {
-                    rels.push(r + ";")
-                }
+    bool errLast = g.c.types.part(rt, n - 1) == tyError
+    // T? x, error err = f() (or T? x, _ = f()): when f fails, x is null,
+    // whatever f returned beside the error.
+    []string rels = []string{}
+    for (int i = 0; i < n - 1; i++) {
+        if (errLast && g.nullOnError(st, i)) {
+            string r = g.releaseCall(g.c.types.part(rt, i), v + ".r" + i.string())
+            if (r != "") {
+                rels.push(r + ";")
             }
         }
-        if (rels.len() > 0) {
-            g.emit("if (!sd_err_is_null(" + err + ")) { " + rels.join(" ") + " }")
-        }
+    }
+    if (rels.len() > 0) {
+        g.emit("if (!sd_err_is_null(" + err + ")) { " + rels.join(" ") + " }")
     }
     []string declared = []string{}
     []int declaredTypes = []int{}
@@ -408,7 +407,7 @@ fn (Gen g) mut genMultiAssign(int s) {
         if (tt != pt) {
             val = g.wrapOwned(tt, part)
         }
-        if (discard && j < n - 1) {
+        if (errLast && j < n - 1 && g.nullOnError(st, j)) {
             val = "(sd_err_is_null(" + err + ") ? " + val + " : " + g.nullOf(tt) + ")"
         }
         if (tg.kind == TargetKind.Decl) {
@@ -426,6 +425,16 @@ fn (Gen g) mut genMultiAssign(int s) {
             g.slots.push(Slot{name: declared[k], ty: declaredTypes[k], live: true, temp: false})
         }
     }
+}
+
+// Whether target i of a multiple assignment is a T? that must be null when
+// the error beside it is not.
+fn (Gen g) nullOnError(Stmt st, int i) bool {
+    if (!g.takesPart(st, i)) {
+        return false
+    }
+    int tt = g.c.targetType[g.c.ast.at(st.list, i)]
+    return g.c.types.isOpt(tt)
 }
 
 // Whether target i of a multiple assignment takes its value.
@@ -552,7 +561,23 @@ fn (Gen g) mut genSwitch(Stmt st) {
     int mark = g.slots.len()
     g.emit("{")
     g.indent++
-    string sv = g.gexpr(st.expr)
+    // A label that calls a mut method could change (and free) what the
+    // value was read from, so then the switch keeps its own copy.
+    bool labelMut = false
+    for (int ci = 0; ci < st.count; ci++) {
+        Case lc = g.c.ast.cases[g.c.ast.at(st.list, ci)]
+        for (int li = 0; li < lc.labelCount && !isEnum; li++) {
+            if (g.hasMutEffects(g.c.ast.labels[g.c.ast.at(lc.labels, li)].expr)) {
+                labelMut = true
+            }
+        }
+    }
+    string sv = ""
+    if (labelMut) {
+        sv = g.ownedTemp(st.expr)
+    } else {
+        sv = g.gexpr(st.expr)
+    }
     if (!isIdent(sv)) {
         sv = g.alias(t, sv)
     }
@@ -586,12 +611,41 @@ fn (Gen g) mut genSwitch(Stmt st) {
             []string saved = g.out
             g.out = []string{}
             int lmark = g.slots.len()
-            []string vconds = []string{}
-            for (int k = 0; k < cs.labelCount; k++) {
-                int le = g.c.ast.labels[g.c.ast.at(cs.labels, k)].expr
-                vconds.push(g.eqExpr(t, sv, g.gexpr(le)))
+            bool chain = false
+            for (int h = 1; h < cs.labelCount; h++) {
+                if (g.hasEffects(g.c.ast.labels[g.c.ast.at(cs.labels, h)].expr)) {
+                    chain = true
+                }
             }
-            string cond = g.condVal(vconds.join(" || "), lmark)
+            string cond = ""
+            if (chain) {
+                // The labels are tried in order: a later one is evaluated
+                // only when the earlier ones did not match.
+                cond = g.newTmp()
+                g.emit("bool " + cond + " = false;")
+                for (int k2 = 0; k2 < cs.labelCount; k2++) {
+                    if (k2 > 0) {
+                        g.emit("if (!" + cond + ") {")
+                        g.indent++
+                    }
+                    int lm = g.slots.len()
+                    int le2 = g.c.ast.labels[g.c.ast.at(cs.labels, k2)].expr
+                    string lv = g.gexpr(le2)
+                    g.emit(cond + " = " + g.eqExpr(t, sv, lv) + ";")
+                    g.releaseTo(lm)
+                    if (k2 > 0) {
+                        g.indent--
+                        g.emit("}")
+                    }
+                }
+            } else {
+                []string vconds = []string{}
+                for (int k = 0; k < cs.labelCount; k++) {
+                    int le = g.c.ast.labels[g.c.ast.at(cs.labels, k)].expr
+                    vconds.push(g.eqExpr(t, sv, g.gexpr(le)))
+                }
+                cond = g.condVal(vconds.join(" || "), lmark)
+            }
             []string lines = g.out
             g.out = saved
             if (first) {
@@ -727,6 +781,17 @@ fn (Gen g) mut genReturn(Stmt st) {
         es.push(g.c.ast.at(st.list, i))
     }
     []string vals = g.operands(es)
+    // return null, err for a plain result: err must not be null, or the
+    // caller would read the null (the checker rejects a literal null).
+    int rtype = g.c.fnRet[g.curFn]
+    for (int r = 0; r < es.len() - 1; r++) {
+        int pt = g.c.types.part(rtype, r)
+        if (g.c.ast.exprs[es[r]].kind == ExprKind.NullLit && !g.c.types.isOpt(pt) && pt != tyError && g.c.types.part(rtype, es.len() - 1) == tyError) {
+            string msg = g.c.ast.fns[g.curFn].name + " returned null as result " + (r + 1).string() + " without an error"
+            g.emit("if (sd_err_is_null(" + vals[es.len() - 1] + ")) sd_crash(\"%s\", " + cString(msg) + ");")
+            break
+        }
+    }
     []string keep = []string{}
     []string fields = []string{}
     for (int k = 0; k < es.len(); k++) {

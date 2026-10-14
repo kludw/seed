@@ -1,0 +1,14 @@
+// expect-error: cannot use "7" (type string) as int as argument 1 of double()
+// A literal is named as written in a type error.
+package main
+
+import "fmt"
+
+fn double(int n) int {
+    return n * 2
+}
+
+fn main([]string args) error {
+    fmt.println(double("7").string())
+    return null
+}

@@ -1,0 +1,22 @@
+// expect-error: loop_post_narrowing_killed.sd:14:41: error: c is nullable
+// A body that assigns the narrowed variable ends the narrowing for the post statement.
+package main
+
+import "fmt"
+
+type Node struct {
+    int v
+    Node? next
+}
+
+fn main([]string args) error {
+    Node? head = Node{v: 1, next: Node{v: 2, next: null}}
+    for (Node? c = head; c != null; c = c.next) {
+        if (c.v == 1) {
+            c = null
+            continue
+        }
+        fmt.println(c.v.string())
+    }
+    return null
+}

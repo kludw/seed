@@ -1,0 +1,15 @@
+// expect-error: cannot call the mut method push() on an element of rows: parameters are read-only
+// The error names the parameter whose element would be changed (it said "the value").
+package main
+
+import "fmt"
+
+fn addOne([][]int rows) {
+    rows[0].push(1)
+}
+
+fn main([]string args) error {
+    addOne([][]int{[]int{}})
+    fmt.println("done")
+    return null
+}

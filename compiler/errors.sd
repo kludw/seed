@@ -115,7 +115,9 @@ fn (Diags d) render(Diag g) string {
         for (int i = 0; i < g.pos.col - 1 && i < text.len(); i++) {
             if (text[i] == '\t') {
                 caret.push('\t')
-            } else {
+            } else if (text[i] < byte(0x80) || text[i] >= byte(0xc0)) {
+                // One space per character: UTF-8 continuation bytes
+                // (0x80-0xbf) take no column of their own.
                 caret.push(' ')
             }
         }

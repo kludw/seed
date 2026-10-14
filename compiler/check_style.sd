@@ -67,9 +67,19 @@ fn convertCase(string name, bool pascal) string {
                 allUpper = false
             }
         }
+        // camelCase starts with a lowercase word: HTTPCode -> httpCode.
+        int lead = 0
+        if (out.len() == 0 && !pascal) {
+            for (; lead < w.len() && isUpper(w[lead]); ) {
+                lead++
+            }
+            if (lead > 1 && lead < w.len() && isLower(w[lead])) {
+                lead--
+            }
+        }
         for (int k = 0; k < w.len(); k++) {
             byte b = w[k]
-            if (allUpper && k > 0) {
+            if ((allUpper && k > 0) || k < lead) {
                 b = lowerByte(b)
             }
             if (k == 0) {

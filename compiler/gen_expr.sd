@@ -185,7 +185,9 @@ fn isIdent(string v) bool {
 // A pointer to the (borrowed) value v of type t. A function value is
 // copied first: v may be the name of a C function.
 fn (Gen g) mut addr(int t, string v) string {
-    if (isIdent(v) && g.kindOf(t) != Kind.Func) {
+    // Only variables and temporaries have an address: true, false, NULL
+    // and SD_IFACE_NULL look like identifiers but are not lvalues.
+    if (isIdent(v) && (v.startsWith("l_") || v.startsWith("_t")) && g.kindOf(t) != Kind.Func) {
         return "&" + v
     }
     return "&" + g.alias(t, v)

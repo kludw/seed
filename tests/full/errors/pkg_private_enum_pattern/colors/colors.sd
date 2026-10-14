@@ -1,0 +1,10 @@
+package colors
+
+type Color enum {
+    Red
+    Rgb(int r, int g, int b)
+}
+
+pub fn pick() Color {
+    return Color.Rgb(1, 2, 3)
+}

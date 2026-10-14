@@ -1,0 +1,7 @@
+v0,odd 1,v2,odd 3
+default v2
+v2 later
+odd 1
+err dflt
+false true
+v2 v2

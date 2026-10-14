@@ -1,0 +1,20 @@
+// expect-error: p is the receiver of a method that is not mut
+// Assigning to the receiver of a method that is not mut explains why.
+package main
+
+import "fmt"
+
+type Point struct {
+    int x
+}
+
+fn (Point p) moveRight() {
+    p.x = p.x + 1
+}
+
+fn main([]string args) error {
+    Point pt = Point{x: 1}
+    pt.moveRight()
+    fmt.println(pt.x.string())
+    return null
+}

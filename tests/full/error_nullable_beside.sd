@@ -1,0 +1,49 @@
+// A T? declared beside an error is null when the error is not null, even
+// when the callee returned a placeholder (structs, ints, floats, enums).
+package main
+
+import "errors"
+import "fmt"
+
+type P struct {
+    string s
+    int n
+}
+
+type E enum {
+    A
+    B(int x)
+}
+
+fn fp(bool ok) (P, error) {
+    if (!ok) {
+        return null, errors.new("bad")
+    }
+    return P{s: "x", n: 1}, null
+}
+
+fn ff(bool ok) (float, bool, byte, E, error) {
+    if (!ok) {
+        return null, null, null, null, errors.new("bad")
+    }
+    return 1.5, true, 'a', E.B(3), null
+}
+
+fn main([]string args) error {
+    P? p, error err = fp(false)
+    fmt.println((p == null).string() + " " + (err != null).string())
+    P? p2, _ = fp(false)
+    fmt.println((p2 == null).string())
+    float? f, bool? b, byte? y, E? e, error err2 = ff(false)
+    fmt.println((f == null).string() + (b == null).string() + (y == null).string() + (e == null).string() + (err2 != null).string())
+    float? f2, bool? b2, byte? y2, E? e2, _ = ff(false)
+    fmt.println((f2 == null).string() + (b2 == null).string() + (y2 == null).string() + (e2 == null).string())
+    float? f3, bool? b3, byte? y3, E? e3, _ = ff(true)
+    fmt.println((f3 == null).string() + (b3 == null).string() + (y3 == null).string() + (e3 == null).string())
+    P? p3 = null
+    p3, err = fp(false)
+    fmt.println((p3 == null).string())
+    p3, err = fp(true)
+    fmt.println((p3 == null).string())
+    return null
+}

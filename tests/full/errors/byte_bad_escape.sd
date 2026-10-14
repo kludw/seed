@@ -1,0 +1,8 @@
+// expect-error: byte_bad_escape.sd:6:15: error: \x needs two hex digits
+// A bad escape in a byte literal is one error (not also "must hold exactly one byte").
+package main
+
+fn main([]string args) error {
+    byte b = '\x'
+    return null
+}

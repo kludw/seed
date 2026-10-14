@@ -502,13 +502,65 @@ fn (Ast a) exprText(int e) string {
             return ""
         }
         return callee + "()"
-    case ExprKind.Bad, ExprKind.IntLit, ExprKind.FloatLit, ExprKind.ByteLit, ExprKind.StringLit, ExprKind.BoolLit:
+    case ExprKind.IntLit, ExprKind.FloatLit, ExprKind.ByteLit, ExprKind.StringLit, ExprKind.BoolLit, ExprKind.NullLit:
+        // A short literal as written ("a", -42, 'x', true, null).
+        if (x.kind == ExprKind.NullLit) {
+            return "null"
+        }
+        if (x.raw.len() == 0 || x.raw.len() > 24) {
+            return ""
+        }
+        if (x.kind == ExprKind.IntLit && x.neg) {
+            return "-" + x.raw
+        }
+        return x.raw
+    case ExprKind.ListLit:
+        return "[]" + a.typeExprText(x.typeExpr) + "{...}"
+    case ExprKind.MapLit:
+        return "map[" + a.typeExprText(x.typeExpr) + "]" + a.typeExprText(x.typeExpr2) + "{...}"
+    case ExprKind.StructLit:
+        if (x.pkg != "") {
+            return x.pkg + "." + x.text + "{...}"
+        }
+        return x.text + "{...}"
+    case ExprKind.Bad, ExprKind.Index, ExprKind.Unary, ExprKind.Binary, ExprKind.Try:
         return ""
-    case ExprKind.NullLit, ExprKind.Index, ExprKind.Unary, ExprKind.Binary, ExprKind.Try, ExprKind.ListLit:
-        return ""
-    case ExprKind.MapLit, ExprKind.Entry, ExprKind.StructLit, ExprKind.FieldInit, ExprKind.ChanMake, ExprKind.Group:
+    case ExprKind.ChanMake:
+        return "chan " + a.typeExprText(x.typeExpr) + "(...)"
+    case ExprKind.Entry, ExprKind.FieldInit, ExprKind.Group:
         return ""
     }
+}
+
+// Like exprText, but also for elements and map entries (xs[0], m["k"]).
+fn (Ast a) fullText(int e) string {
+    if (e < 0) {
+        return ""
+    }
+    Expr x = a.exprs[e]
+    if (x.kind == ExprKind.Index) {
+        string base = a.fullText(x.a)
+        string idx = a.fullText(x.b)
+        if (base == "" || idx == "") {
+            return ""
+        }
+        return base + "[" + idx + "]"
+    }
+    if (x.kind == ExprKind.Field) {
+        string fb = a.fullText(x.a)
+        if (fb == "") {
+            return ""
+        }
+        return fb + "." + x.text
+    }
+    if (x.kind == ExprKind.Call) {
+        string callee = a.fullText(x.a)
+        if (callee == "") {
+            return ""
+        }
+        return callee + "(...)"
+    }
+    return a.exprText(e)
 }
 
 // Like exprText, but never empty.

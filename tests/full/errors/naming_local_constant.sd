@@ -1,0 +1,11 @@
+// expect-error: naming_local_constant.sd:8:15: error: the constant MaxSize must be written in camelCase
+// A local constant is named as a constant in the naming error.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    const int MaxSize = 3
+    fmt.println(MaxSize.string())
+    return null
+}

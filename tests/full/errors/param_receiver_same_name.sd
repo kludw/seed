@@ -1,0 +1,18 @@
+// expect-error: p is already declared at line 11 (the receiver); shadowing is not allowed
+// A parameter named like the receiver says so, and does not suggest assigning.
+package main
+
+import "fmt"
+
+type Point struct {
+    int x
+}
+
+fn (Point p) shifted(int p) int {
+    return p
+}
+
+fn main([]string args) error {
+    fmt.println(Point{x: 1}.shifted(2).string())
+    return null
+}

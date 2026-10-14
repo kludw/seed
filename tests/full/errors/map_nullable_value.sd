@@ -1,0 +1,11 @@
+// expect-error: m[k] already returns string? (null for a missing key)
+// The hint for a nullable map value names the type m[k] returns (it said string??).
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    map[string](string?) m = map[string](string?){}
+    fmt.println(m.len().string())
+    return null
+}

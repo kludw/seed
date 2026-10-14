@@ -378,7 +378,8 @@ fn (Parser p) mut parseType(bool named) int {
     if (p.kind() == Tok.Question && base >= 0) {
         Pos q = p.next().pos
         if (p.kind() == Tok.Question) {
-            p.errorAt(p.here(), "T?? is not a valid type")
+            p.errorHint(p.here(), "T?? is not a valid type: a type is either nullable or not", "write T? once")
+            p.pos++
         }
         TypeExpr o = newTypeExpr(TypeExprKind.Optional, q)
         o.a = base

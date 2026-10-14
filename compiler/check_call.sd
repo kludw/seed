@@ -37,7 +37,7 @@ fn (Checker c) mut checkValueCall(int e) {
     if (c.kindOf(ft) != Kind.Func) {
         Pos cpos = c.ast.exprs[x.a].pos
         if (c.types.isOpt(ft) && c.kindOf(c.types.elem(ft)) == Kind.Func) {
-            c.errorHint(cpos, c.describe(x.a) + " is nullable (" + c.typeName(ft) + ")", "check " + c.describe(x.a) + " != null before calling it")
+            c.errorHint(cpos, c.describe(x.a) + " is nullable (" + c.typeName(ft) + ")", c.nullHint(x.a, ft, "calling it"))
         } else {
             c.error(cpos, c.describe(x.a) + " has type " + c.typeName(ft) + ", which cannot be called")
         }
@@ -115,7 +115,16 @@ fn (Checker c) mut checkGlobalCall(int e, int g, string what) {
     case GlobalKind.Type:
         c.errorHint(cpos, what + " is a type", "a struct value is written " + what + "{field: value, ...}")
     case GlobalKind.Const:
-        c.error(cpos, what + " is a constant, not a function")
+        // A constant of function type is called like any function value.
+        int fe = c.ast.exprs[e].a
+        c.checkExpr(fe)
+        if (c.isFuncType(c.typeOf(fe))) {
+            c.checkValueCall(e)
+            return
+        }
+        if (c.typeOf(fe) != tyInvalid) {
+            c.error(cpos, what + " is a constant of type " + c.typeName(c.typeOf(fe)) + ", not a function")
+        }
     }
     c.checkArgsLoosely(e)
 }
@@ -500,7 +509,7 @@ fn (Checker c) mut checkBuiltin(int e, int recv, string name) {
             b = Builtin.Close
         }
     } else if (k == Kind.Opt) {
-        c.errorHint(c.ast.exprs[recv].pos, c.describe(recv) + " is nullable (" + c.typeName(rt) + ")", "check " + c.describe(recv) + " != null before calling " + name + "()")
+        c.errorHint(c.ast.exprs[recv].pos, c.describe(recv) + " is nullable (" + c.typeName(rt) + ")", c.nullHint(recv, rt, "calling " + name + "()"))
         c.checkArgsLoosely(e)
         return
     }

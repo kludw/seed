@@ -18,10 +18,60 @@ type Parser struct {
     int pos
     int file
     bool failed
+    int nesting
+    []int depths
 }
 
 fn newParser(Diags diags) Parser {
-    return Parser{ast: newAst(), diags: diags, toks: []Token{}, pos: 0, file: 0, failed: false}
+    return Parser{ast: newAst(), diags: diags, toks: []Token{}, pos: 0, file: 0, failed: false, nesting: 0, depths: []int{}}
+}
+
+// How deeply blocks and expressions may nest. The later phases recurse over
+// the tree, so a deeper program would overflow the compiler's stack.
+const int maxNesting = 256
+
+// Reports a program nested deeper than maxNesting and skips the rest of
+// the file.
+fn (Parser p) mut tooDeep() {
+    p.errorHint(p.here(), "the code is nested too deeply (more than " + maxNesting.string() + " levels of blocks or expressions)", "split it into smaller functions or several statements")
+    p.pos = p.toks.len() - 1
+}
+
+// Enters a nested block or expression; false when that is too deep.
+fn (Parser p) mut enter() bool {
+    p.nesting++
+    if (p.nesting > maxNesting) {
+        p.tooDeep()
+        return false
+    }
+    return true
+}
+
+// Adds an expression node, keeping the depth of its tree (depths, parallel
+// to ast.exprs).
+fn (Parser p) mut addExpr(Expr x) int {
+    int d = 0
+    if (x.a >= 0 && x.a < p.depths.len() && p.depths[x.a] > d) {
+        d = p.depths[x.a]
+    }
+    if (x.b >= 0 && x.b < p.depths.len() && p.depths[x.b] > d) {
+        d = p.depths[x.b]
+    }
+    for (int i = 0; i < x.count; i++) {
+        int c = p.ast.at(x.list, i)
+        if (c >= 0 && c < p.depths.len() && p.depths[c] > d) {
+            d = p.depths[c]
+        }
+    }
+    for (; p.depths.len() < p.ast.exprs.len(); ) {
+        p.depths.push(0)
+    }
+    int e = p.ast.addExpr(x)
+    p.depths.push(d + 1)
+    if (d + 1 > maxNesting && !p.failed) {
+        p.tooDeep()
+    }
+    return e
 }
 
 // ---- tokens ----
@@ -164,6 +214,10 @@ fn (Parser p) scanType(int i, bool named) int {
     if (end < 0) {
         return -1
     }
+    if (p.kindAt(end) == Tok.Question && p.kindAt(end + 1) == Tok.Question) {
+        // T?? is still a declaration; parseType reports it.
+        return end + 2
+    }
     if (p.kindAt(end) == Tok.Question) {
         return end + 1
     }
@@ -282,6 +336,17 @@ fn (Parser p) atDeclaration() bool {
 
 fn (Parser p) mut parseBlock(string context) int {
     Pos start = p.here()
+    if (!p.enter()) {
+        p.nesting--
+        p.ast.blocks.push(Block{pos: start, end: start, list: 0, count: 0})
+        return p.ast.blocks.len() - 1
+    }
+    int b = p.parseBlockBody(context, start)
+    p.nesting--
+    return b
+}
+
+fn (Parser p) mut parseBlockBody(string context, Pos start) int {
     if (!p.expectTok(Tok.LBrace, context)) {
         p.ast.blocks.push(Block{pos: start, end: start, list: 0, count: 0})
         return p.ast.blocks.len() - 1
@@ -637,6 +702,16 @@ fn (Parser p) mut parseLabel() int {
                 int end = p.scanType(j + 1, true)
                 pattern = end >= 0 && p.kindAt(end) == Tok.Ident
             }
+            if (pattern && p.kindAt(j + 1) == Tok.RParen) {
+                // Type.Case() or a call without arguments (v.name()): which
+                // one depends on the type of the switch, so keep both.
+                l.isPattern = true
+                l.parens = true
+                l = p.labelNames(l, qualified)
+                l.expr = p.parseExpr()
+                p.ast.labels.push(l)
+                return p.ast.labels.len() - 1
+            }
             if (pattern) {
                 l.isPattern = true
                 l.parens = true
@@ -715,11 +790,17 @@ fn binaryPrecedence(Tok k) int {
 }
 
 fn (Parser p) mut parseExpr() int {
-    return p.parseBinary(1)
+    if (!p.enter()) {
+        p.nesting--
+        return p.badExpr()
+    }
+    int e = p.parseBinary(1)
+    p.nesting--
+    return e
 }
 
 fn (Parser p) mut badExpr() int {
-    return p.ast.addExpr(newExpr(ExprKind.Bad, p.here()))
+    return p.addExpr(newExpr(ExprKind.Bad, p.here()))
 }
 
 fn (Parser p) mut parseBinary(int minPrec) int {
@@ -747,7 +828,7 @@ fn (Parser p) mut parseBinary(int minPrec) int {
         b.op = t.kind
         b.a = left
         b.b = right
-        left = p.ast.addExpr(b)
+        left = p.addExpr(b)
     }
     return left
 }
@@ -756,7 +837,12 @@ fn (Parser p) mut parseUnary() int {
     Token t = p.toks[p.pos]
     if (t.kind == Tok.Minus || t.kind == Tok.Not) {
         p.pos++
+        if (!p.enter()) {
+            p.nesting--
+            return p.badExpr()
+        }
         int operand = p.parseUnary()
+        p.nesting--
         Expr x = p.ast.exprs[operand]
         if (t.kind == Tok.Minus && x.kind == ExprKind.IntLit && !x.paren && !x.neg) {
             // Fold the sign into the literal, so the smallest int can be written.
@@ -770,13 +856,13 @@ fn (Parser p) mut parseUnary() int {
         Expr u = newExpr(ExprKind.Unary, t.pos)
         u.op = t.kind
         u.a = operand
-        return p.ast.addExpr(u)
+        return p.addExpr(u)
     }
     if (t.kind == Tok.KwTry) {
         p.pos++
         Expr tr = newExpr(ExprKind.Try, t.pos)
         tr.a = p.parseUnary()
-        return p.ast.addExpr(tr)
+        return p.addExpr(tr)
     }
     return p.parsePostfix()
 }
@@ -826,7 +912,7 @@ fn (Parser p) mut parsePostfix() int {
             Expr f = newExpr(ExprKind.Field, npos)
             f.a = e
             f.text = name
-            e = p.ast.addExpr(f)
+            e = p.addExpr(f)
         } else if (t.kind == Tok.LBrack) {
             p.pos++
             p.skipNewlines()
@@ -835,7 +921,7 @@ fn (Parser p) mut parsePostfix() int {
             ix.b = p.parseExpr()
             p.skipNewlines()
             p.expect(Tok.RBrack, " to close the index")
-            e = p.ast.addExpr(ix)
+            e = p.addExpr(ix)
         } else if (t.kind == Tok.LParen) {
             p.pos++
             Expr c = newExpr(ExprKind.Call, p.ast.exprs[e].pos)
@@ -843,7 +929,7 @@ fn (Parser p) mut parsePostfix() int {
             []int args = p.parseExprList(Tok.RParen, " to close the argument list")
             c.list = p.ast.addList(args)
             c.count = args.len()
-            e = p.ast.addExpr(c)
+            e = p.addExpr(c)
         } else {
             break
         }
@@ -884,14 +970,14 @@ fn (Parser p) mut parsePrimary() int {
         } else {
             i.intValue = -negated
         }
-        return p.ast.addExpr(i)
+        return p.addExpr(i)
     }
     if (k == Tok.Float) {
         p.pos++
         Expr f = newExpr(ExprKind.FloatLit, t.pos)
         f.raw = t.raw
         f.text = t.raw
-        return p.ast.addExpr(f)
+        return p.addExpr(f)
     }
     if (k == Tok.Byte) {
         p.pos++
@@ -901,14 +987,14 @@ fn (Parser p) mut parsePrimary() int {
         if (t.text.len() > 0) {
             b.intValue = int(t.text[0])
         }
-        return p.ast.addExpr(b)
+        return p.addExpr(b)
     }
     if (k == Tok.String) {
         p.pos++
         Expr s = newExpr(ExprKind.StringLit, t.pos)
         s.raw = t.raw
         s.text = t.text
-        return p.ast.addExpr(s)
+        return p.addExpr(s)
     }
     if (k == Tok.KwTrue || k == Tok.KwFalse) {
         p.pos++
@@ -917,11 +1003,11 @@ fn (Parser p) mut parsePrimary() int {
         if (k == Tok.KwTrue) {
             bl.intValue = 1
         }
-        return p.ast.addExpr(bl)
+        return p.addExpr(bl)
     }
     if (k == Tok.KwNull) {
         p.pos++
-        return p.ast.addExpr(newExpr(ExprKind.NullLit, t.pos))
+        return p.addExpr(newExpr(ExprKind.NullLit, t.pos))
     }
     if (k == Tok.Ident) {
         p.pos++
@@ -930,7 +1016,7 @@ fn (Parser p) mut parsePrimary() int {
         }
         Expr id = newExpr(ExprKind.Ident, t.pos)
         id.text = t.text
-        return p.ast.addExpr(id)
+        return p.addExpr(id)
     }
     if (k == Tok.LParen) {
         p.pos++
@@ -954,7 +1040,7 @@ fn (Parser p) mut parsePrimary() int {
         []int elems = p.parseExprList(Tok.RBrace, " to close the list literal")
         l.list = p.ast.addList(elems)
         l.count = elems.len()
-        return p.ast.addExpr(l)
+        return p.addExpr(l)
     }
     if (k == Tok.KwMap) {
         return p.parseMapLit()
@@ -966,13 +1052,13 @@ fn (Parser p) mut parsePrimary() int {
         p.expect(Tok.LParen, " after the channel type (a channel is made with chan int(10))")
         ch.a = p.parseExpr()
         p.expect(Tok.RParen, " to close the channel size")
-        return p.ast.addExpr(ch)
+        return p.addExpr(ch)
     }
     if (k == Tok.KwGroup) {
         p.pos++
         Expr g = newExpr(ExprKind.Group, t.pos)
         g.block = p.parseBlock(" after group")
-        return p.ast.addExpr(g)
+        return p.addExpr(g)
     }
     if (k == Tok.KwFn) {
         p.errorHint(t.pos, "there are no anonymous functions", "declare a named function and use its name as the value")
@@ -998,7 +1084,7 @@ fn (Parser p) mut parseMapLit() int {
         p.expect(Tok.Colon, " between a map key and its value")
         p.skipNewlines()
         en.b = p.parseExpr()
-        entries.push(p.ast.addExpr(en))
+        entries.push(p.addExpr(en))
         p.skipNewlines()
         if (!p.accept(Tok.Comma)) {
             break
@@ -1009,7 +1095,7 @@ fn (Parser p) mut parseMapLit() int {
     p.expect(Tok.RBrace, " to close the map literal")
     m.list = p.ast.addList(entries)
     m.count = entries.len()
-    return p.ast.addExpr(m)
+    return p.addExpr(m)
 }
 
 // `Type{field: value, ...}` with the current token at `{`.
@@ -1026,7 +1112,7 @@ fn (Parser p) mut parseStructLit(Pos pos, string pkg, string name) int {
         p.expect(Tok.Colon, " after the field name")
         p.skipNewlines()
         f.a = p.parseExpr()
-        fields.push(p.ast.addExpr(f))
+        fields.push(p.addExpr(f))
         p.skipNewlines()
         if (!p.accept(Tok.Comma)) {
             break
@@ -1037,5 +1123,5 @@ fn (Parser p) mut parseStructLit(Pos pos, string pkg, string name) int {
     p.expect(Tok.RBrace, " to close the struct literal")
     s.list = p.ast.addList(fields)
     s.count = fields.len()
-    return p.ast.addExpr(s)
+    return p.addExpr(s)
 }

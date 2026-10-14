@@ -1,0 +1,113 @@
+// Error guards follow the paths through if, else, switch, loops, break and
+// continue: a value is readable wherever its error is known to be checked.
+package main
+
+import "errors"
+import "fmt"
+
+fn fs(int n) (string, error) {
+    if (n % 2 == 1) {
+        return null, errors.new("odd " + n.string())
+    }
+    return "v" + n.string(), null
+}
+
+fn loopContinue() string {
+    []string out = []string{}
+    string s = ""
+    error err = null
+    for (int i = 0; i < 4; i++) {
+        s, err = fs(i)
+        if (err != null) {
+            out.push(err.message())
+            continue
+        }
+        out.push(s)
+    }
+    return out.join(",")
+}
+
+fn defaulted(int n) string {
+    string s, error err = fs(n)
+    if (err != null) {
+        s = "default"
+    }
+    return s
+}
+
+fn recheck(int n) (string, error) {
+    string s, error err = fs(n)
+    if (err != null) {
+        return null, err
+    }
+    err = errors.new("later")
+    return s + " " + err.message(), null
+}
+
+fn breakOut() (string, error) {
+    string s = "none"
+    error err = null
+    for (int i = 0; i < 4; i++) {
+        s, err = fs(i * 2 + 1)
+        if (err != null) {
+            break
+        }
+    }
+    if (err != null) {
+        return null, err
+    }
+    return s, null
+}
+
+fn inSwitch(int n) string {
+    string s = "x"
+    error err = null
+    switch (n) {
+    case 1:
+        s, err = fs(n)
+        if (err != null) {
+            return "err"
+        }
+    default:
+        s = "dflt"
+    }
+    return s
+}
+
+fn andCheck(int n) bool {
+    string s, error err = fs(n)
+    return err == null && s.len() > 0
+}
+
+fn elseBranch(int n) string {
+    string s, error err = fs(n)
+    if (err == null) {
+        return s
+    } else {
+        s, err = fs(n + 1)
+        if (err != null) {
+            return "both bad"
+        }
+    }
+    return s
+}
+
+fn main([]string args) error {
+    fmt.println(loopContinue())
+    fmt.println(defaulted(1) + " " + defaulted(2))
+    string r, error e = recheck(2)
+    if (e == null) {
+        fmt.println(r)
+    }
+    string? b, error be = breakOut()
+    if (be != null) {
+        fmt.println(be.message())
+    }
+    if (b != null) {
+        fmt.println(b)
+    }
+    fmt.println(inSwitch(1) + " " + inSwitch(2))
+    fmt.println(andCheck(1).string() + " " + andCheck(2).string())
+    fmt.println(elseBranch(1) + " " + elseBranch(2))
+    return null
+}

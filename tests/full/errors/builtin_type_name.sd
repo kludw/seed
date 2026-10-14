@@ -1,0 +1,11 @@
+// expect-error: builtin_type_name.sd:8:12: error: float is the name of a built-in type
+// A variable named like a built-in type would hide the conversion float(x).
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    string float = "x"
+    fmt.println(float + float(2).string())
+    return null
+}

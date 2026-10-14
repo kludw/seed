@@ -143,6 +143,7 @@ fn (Checker c) mut checkStmt(int s) {
     case StmtKind.Const:
         int ct = c.resolve(st.typeExpr)
         c.checkValue(st.expr, ct, "to initialize " + st.name)
+        c.requireConstant(st.expr, st.name)
         c.stmtVar[s] = c.declare(st.name, ct, VarKind.LocalConst, st.namePos)
     case StmtKind.If:
         c.checkIf(st)
@@ -168,6 +169,10 @@ fn (Checker c) mut checkStmt(int s) {
             c.error(st.pos, what + " outside of a loop")
         } else if (c.groupDepth > 0 && c.loopDepth == c.groupLoop) {
             c.errorHint(st.pos, what + " cannot leave a group block", "the group must wait for its goroutines first; set a variable in the block and " + what + " after it")
+        } else if (c.loopScopes.len() > 0 && st.kind == StmtKind.Break) {
+            c.breakGuards = joinGuards(c.breakGuards, c.loopGuards())
+        } else if (c.loopScopes.len() > 0) {
+            c.contGuards = joinGuards(c.contGuards, c.loopGuards())
         }
     case StmtKind.Select:
         c.checkSelect(st)
@@ -195,10 +200,28 @@ fn (Checker c) mut checkAssert(Stmt st) {
     // null, and after assert(err == null) the values returned with err can
     // be read.
     c.narrowOn(st.expr, true)
+    c.latchGuards(st.expr, true)
 }
 
 fn (Checker c) mut checkIncDec(Stmt st) {
     c.checkLvalue(st.expr)
+    Expr x = c.ast.exprs[st.expr]
+    if (x.kind == ExprKind.Index && c.info[st.expr].res == Res.MapIndex) {
+        string op = "--"
+        if (st.inc) {
+            op = "++"
+        }
+        string m = c.describe(x.a)
+        int vt = c.types.optOf(c.typeOf(st.expr))
+        c.errorHint(st.pos, op + " cannot change a map entry: the key may be missing", "read it first: " + c.typeName(vt) + " v = " + m + "[key], then check v != null and assign " + m + "[key] = v " + op.slice(0, 1) + " 1")
+        return
+    }
+    if (x.kind == ExprKind.Ident && c.info[st.expr].res == Res.Local) {
+        int g = c.guardOf(c.info[st.expr].ref)
+        if (g >= 0) {
+            c.guardError(g, x.text, x.pos)
+        }
+    }
     int t = c.typeOf(st.expr)
     if (t != tyInvalid && t != tyInt && t != tyFloat) {
         string op = "--"
@@ -207,7 +230,7 @@ fn (Checker c) mut checkIncDec(Stmt st) {
         }
         c.error(st.pos, op + " needs an int or float, not " + c.typeName(t))
     }
-    c.killAssign(c.pathKey(st.expr))
+    c.assigned(c.pathKey(st.expr))
 }
 
 fn (Checker c) mut checkExprStmt(Stmt st) {
@@ -236,10 +259,15 @@ fn (Checker c) mut checkExprStmt(Stmt st) {
 
 fn (Checker c) mut checkIf(Stmt st) {
     c.checkValue(st.expr, tyBool, "as the if condition")
+    []Guard before = c.guards
     c.pushScope()
     c.narrowOn(st.expr, true)
+    c.latchGuards(st.expr, true)
     c.checkBlock(st.body)
     c.popScope()
+    []Guard thenGuards = c.guards
+    c.guards = before
+    c.latchGuards(st.expr, false)
     if (st.els >= 0 || st.elseIf >= 0) {
         c.pushScope()
         c.narrowOn(st.expr, false)
@@ -254,11 +282,21 @@ fn (Checker c) mut checkIf(Stmt st) {
     }
     bool thenExits = c.blockExits(st.body)
     bool elseExits = c.blockExits(st.els) || c.stmtExits(st.elseIf)
+    if (elseExits) {
+        c.guards = thenGuards
+    } else if (!thenExits) {
+        c.guards = joinGuards(c.guards, thenGuards)
+    }
+    // After an if whose one branch always exits, the condition is known;
+    // what the other branch assigned is not narrowed by it.
     if (thenExits && !elseExits) {
         c.narrowOn(st.expr, false)
+        c.scanBlockKills(st.els)
+        c.scanStmtKills(st.elseIf)
     }
     if (elseExits && !thenExits) {
         c.narrowOn(st.expr, true)
+        c.scanBlockKills(st.body)
     }
 }
 
@@ -273,14 +311,29 @@ fn (Checker c) mut checkFor(Stmt st) {
     if (st.expr >= 0) {
         c.checkValue(st.expr, tyBool, "as the loop condition")
     }
+    []Guard before = c.guards
+    c.loopScopes.push(c.scope.len())
+    c.breakMarks.push(c.breakGuards.len())
+    c.contMarks.push(c.contGuards.len())
     c.pushScope()
     if (st.expr >= 0) {
         c.narrowOn(st.expr, true)
+        c.latchGuards(st.expr, true)
     }
     c.loopDepth++
     c.checkBlock(st.body)
     c.loopDepth--
-    c.popScope()
+    // The post statement runs after the body and after continue, so the
+    // condition still holds unless the body assigned what it narrowed
+    // (for (Node? n = head; n != null; n = n.next)).
+    if (c.blockExits(st.body)) {
+        c.guards = []Guard{}
+    }
+    int? cm = c.contMarks.pop()
+    if (cm != null) {
+        c.guards = joinGuards(c.guards, c.contGuards.slice(cm, c.contGuards.len()))
+        c.contGuards = c.contGuards.slice(0, cm)
+    }
     if (st.post >= 0) {
         Stmt post = c.ast.stmts[st.post]
         if (post.kind == StmtKind.Assign) {
@@ -295,6 +348,159 @@ fn (Checker c) mut checkFor(Stmt st) {
         }
     }
     c.popScope()
+    // The guards that come around again were not in effect when the
+    // condition and the start of the body were checked.
+    c.checkLoopGuards(st, before)
+    // The loop ends when its condition is false (coming from before the
+    // loop or around again), or at a break.
+    c.guards = joinGuards(before, c.guards)
+    if (st.expr < 0) {
+        c.guards = []Guard{}
+    } else {
+        c.latchGuards(st.expr, false)
+    }
+    int? bm = c.breakMarks.pop()
+    if (bm != null) {
+        c.guards = joinGuards(c.guards, c.breakGuards.slice(bm, c.breakGuards.len()))
+        c.breakGuards = c.breakGuards.slice(0, bm)
+    }
+    c.loopScopes = c.loopScopes.slice(0, c.loopScopes.len() - 1)
+    c.popScope()
+}
+
+// A guard that comes around a loop again (it was made in the loop and its
+// error is not checked by the end of the body): the variable may be null
+// where the next iteration reads it, before assigning it again.
+fn (Checker c) mut checkLoopGuards(Stmt st, []Guard before) {
+    for (int i = 0; i < c.guards.len(); i++) {
+        Guard gd = c.guards[i]
+        if (joinGuards(before, []Guard{gd}).len() == before.len()) {
+            continue
+        }
+        if (c.readsBeforeAssign(st, gd.var)) {
+            Var v = c.vars[gd.var]
+            c.errorHint(gd.pos, v.name + " may be null when the loop comes around again: it is assigned beside " + gd.errName + ", which is not always checked before the next iteration reads " + v.name, "check " + gd.errName + " before the end of the loop body (if (" + gd.errName + " != null) { return " + gd.errName + " }), or declare " + v.name + " inside the loop")
+        }
+    }
+}
+
+// Whether a loop iteration may read the variable v before assigning it: the
+// condition reads it, or a statement of the body reads it before the first
+// statement of the body that assigns it as a whole.
+fn (Checker c) readsBeforeAssign(Stmt loop, int v) bool {
+    if (c.exprReads(loop.expr, v)) {
+        return true
+    }
+    if (loop.body < 0) {
+        return false
+    }
+    Block bl = c.ast.blocks[loop.body]
+    for (int i = 0; i < bl.count; i++) {
+        int s = c.ast.at(bl.list, i)
+        if (c.stmtReads(s, v)) {
+            return true
+        }
+        Stmt st = c.ast.stmts[s]
+        if (st.kind == StmtKind.Assign) {
+            for (int j = 0; j < st.count; j++) {
+                Target tg = c.ast.targets[c.ast.at(st.list, j)]
+                if (tg.kind == TargetKind.Place && c.isVarRef(tg.expr, v)) {
+                    return false
+                }
+            }
+        }
+    }
+    return false
+}
+
+fn (Checker c) isVarRef(int e, int v) bool {
+    return e >= 0 && c.ast.exprs[e].kind == ExprKind.Ident && c.info[e].res == Res.Local && c.info[e].ref == v
+}
+
+// Whether the expression mentions the variable v.
+fn (Checker c) exprReads(int e, int v) bool {
+    if (e < 0) {
+        return false
+    }
+    if (c.isVarRef(e, v)) {
+        return true
+    }
+    Expr x = c.ast.exprs[e]
+    if (x.kind == ExprKind.Group) {
+        return c.blockReads(x.block, v)
+    }
+    if (c.exprReads(x.a, v) || c.exprReads(x.b, v)) {
+        return true
+    }
+    for (int i = 0; i < x.count; i++) {
+        if (c.exprReads(c.ast.at(x.list, i), v)) {
+            return true
+        }
+    }
+    return false
+}
+
+fn (Checker c) blockReads(int b, int v) bool {
+    if (b < 0) {
+        return false
+    }
+    Block bl = c.ast.blocks[b]
+    for (int i = 0; i < bl.count; i++) {
+        if (c.stmtReads(c.ast.at(bl.list, i), v)) {
+            return true
+        }
+    }
+    return false
+}
+
+// Whether the statement reads the variable v (assigning v as a whole is
+// not a read).
+fn (Checker c) stmtReads(int s, int v) bool {
+    if (s < 0) {
+        return false
+    }
+    Stmt st = c.ast.stmts[s]
+    switch (st.kind) {
+    case StmtKind.Assign:
+        for (int i = 0; i < st.count; i++) {
+            Target tg = c.ast.targets[c.ast.at(st.list, i)]
+            if (tg.kind == TargetKind.Place && !c.isVarRef(tg.expr, v) && c.exprReads(tg.expr, v)) {
+                return true
+            }
+        }
+        return c.exprReads(st.expr, v)
+    case StmtKind.Return:
+        for (int j = 0; j < st.count; j++) {
+            if (c.exprReads(c.ast.at(st.list, j), v)) {
+                return true
+            }
+        }
+        return false
+    case StmtKind.If:
+        return c.exprReads(st.expr, v) || c.blockReads(st.body, v) || c.blockReads(st.els, v) || c.stmtReads(st.elseIf, v)
+    case StmtKind.For:
+        return c.stmtReads(st.init, v) || c.exprReads(st.expr, v) || c.stmtReads(st.post, v) || c.blockReads(st.body, v)
+    case StmtKind.Switch, StmtKind.Select:
+        if (c.exprReads(st.expr, v)) {
+            return true
+        }
+        for (int k = 0; k < st.count; k++) {
+            Case cs = c.ast.cases[c.ast.at(st.list, k)]
+            if (c.stmtReads(cs.comm, v) || c.blockReads(cs.body, v)) {
+                return true
+            }
+            for (int m = 0; m < cs.labelCount; m++) {
+                if (c.exprReads(c.ast.labels[c.ast.at(cs.labels, m)].expr, v)) {
+                    return true
+                }
+            }
+        }
+        return false
+    case StmtKind.ExprStmt, StmtKind.Const, StmtKind.Defer, StmtKind.Spawn, StmtKind.Assert, StmtKind.IncDec:
+        return c.exprReads(st.expr, v)
+    case StmtKind.Bad, StmtKind.Break, StmtKind.Continue:
+        return false
+    }
 }
 
 fn (Checker c) mut checkReturn(Stmt st) {
@@ -341,13 +547,24 @@ fn (Checker c) mut checkReturn(Stmt st) {
         }
         return
     }
+    int last = c.ast.at(st.list, n - 1)
+    bool errIsNull = c.ast.exprs[last].kind == ExprKind.NullLit
+    string lastKey = c.pathKey(last)
+    if (lastKey != "" && c.isNarrowed("!" + lastKey)) {
+        errIsNull = true
+    }
     for (int k = 0; k < n; k++) {
         int e = c.ast.at(st.list, k)
         int rt = c.resultType(c.curFn, k)
         c.checkExpr(e)
         if (c.ast.exprs[e].kind == ExprKind.NullLit && n > 1 && hasErr && !c.types.isOpt(rt) && rt != tyError) {
-            // null in a plain slot next to an error: the value is never read.
+            // null in a plain slot next to an error: the value is never
+            // read, because the error is not null (checked when the
+            // function returns; see genReturn).
             c.setType(e, rt)
+            if (errIsNull) {
+                c.errorHint(c.ast.exprs[e].pos, fd.name + " returns null as its " + c.typeName(rt) + " result beside an error that is null, so the caller would read a null " + c.typeName(rt), "return a " + c.typeName(rt) + " value, or return an error such as errors.new(...)")
+            }
             continue
         }
         string context = "as the return value"
@@ -388,7 +605,7 @@ fn (Checker c) mut checkAssign(int s) {
             int lt = c.typeOf(tg.expr)
             c.targetType[ti] = lt
             c.checkValue(st.expr, lt, "in the assignment to " + c.describe(tg.expr))
-            c.killAssign(c.pathKey(tg.expr))
+            c.assigned(c.pathKey(tg.expr))
         }
         return
     }
@@ -450,7 +667,7 @@ fn (Checker c) mut checkAssign(int s) {
             }
             c.targetVar[ti3] = c.declare(tg3.name, c.targetType[ti3], VarKind.Local, tg3.pos)
         } else if (tg3.kind == TargetKind.Place) {
-            c.killAssign(c.pathKey(tg3.expr))
+            c.assigned(c.pathKey(tg3.expr))
         }
     }
     c.addGuards(s, rt)
@@ -475,25 +692,34 @@ fn (Checker c) mut addGuards(int s, int rt) {
         errKey = c.pathKey(last.expr)
         errName = c.describe(last.expr)
     }
-    if (errKey == "") {
-        return
-    }
     for (int i = 0; i < n - 1; i++) {
         int ti = c.ast.at(st.list, i)
         Target tg = c.ast.targets[ti]
-        int v = -1
-        if (c.types.isOpt(c.targetType[ti])) {
+        int tt = c.targetType[ti]
+        if (tg.kind == TargetKind.Discard || tt == tyInvalid || tt == tyError || c.types.isOpt(tt)) {
             // A T? can always be read (and compared with null); only a
             // plain T may hold the null that comes with an error.
             continue
         }
+        int v = -1
         if (tg.kind == TargetKind.Decl) {
             v = c.targetVar[ti]
-        } else if (tg.kind == TargetKind.Place && c.ast.exprs[tg.expr].kind == ExprKind.Ident && c.info[tg.expr].res == Res.Local) {
+        } else if (c.ast.exprs[tg.expr].kind == ExprKind.Ident && c.info[tg.expr].res == Res.Local && c.vars[c.info[tg.expr].ref].kind == VarKind.Local) {
             v = c.info[tg.expr].ref
+        } else {
+            // A field, an element or a mut receiver cannot be guarded: it
+            // would hold the null whenever the error is not null.
+            string what = c.describe(tg.expr)
+            if (what == "the value") {
+                what = "the element"
+            }
+            c.errorHint(tg.pos, what + " cannot be assigned beside an error: when the error is not null, " + what + " would be null", "assign to a new local variable, check the error, and then store the value (or use try)")
+            continue
         }
-        if (v >= 0) {
-            c.guards.push(Guard{key: "v" + v.string(), errKey: errKey, errName: errName, dead: false})
+        if (v >= 0 && errKey == "" && last.kind == TargetKind.Place) {
+            c.errorHint(last.pos, "the error must be assigned to a variable or a field, so that it can be checked before " + c.vars[v].name + " is read", "declare it: error err = ...")
+        } else if (v >= 0 && errKey != "") {
+            c.guards.push(Guard{key: "v" + v.string(), errKey: errKey, errName: errName, var: v, pos: tg.pos, lost: false})
         }
     }
 }
@@ -515,11 +741,34 @@ fn (Checker c) mut declareTargetsAnyway(int s) {
 
 fn (Checker c) mut checkSwitch(Stmt st) {
     c.checkExpr(st.expr)
+    []Guard saved = c.caseGuards
+    c.caseGuards = []Guard{}
+    c.checkSwitchCases(st)
+    // Every switch covers every value (an enum switch lists every case,
+    // another switch has default), so the cases are the only paths.
+    if (st.count > 0) {
+        c.guards = c.caseGuards
+    }
+    c.caseGuards = saved
+}
+
+// The guards at the end of a case (when it can end) join the ones after
+// the switch or select; the next case starts from before.
+fn (Checker c) mut endCase(int body, []Guard before) {
+    if (!c.blockExits(body)) {
+        c.caseGuards = joinGuards(c.caseGuards, c.guards)
+    }
+    c.guards = before
+}
+
+fn (Checker c) mut checkSwitchCases(Stmt st) {
+    []Guard before = c.guards
     if (!c.isValue(st.expr)) {
         for (int i = 0; i < st.count; i++) {
             c.pushScope()
             c.checkBlock(c.ast.cases[c.ast.at(st.list, i)].body)
             c.popScope()
+            c.endCase(c.ast.cases[c.ast.at(st.list, i)].body, before)
         }
         return
     }
@@ -548,7 +797,7 @@ fn (Checker c) mut checkSwitch(Stmt st) {
         }
         for (int k = 0; k < cs.labelCount; k++) {
             Label l = c.ast.labels[c.ast.at(cs.labels, k)]
-            if (l.parens) {
+            if (l.parens && (l.paramCount > 0 || l.expr < 0)) {
                 c.error(l.pos, c.typeName(t) + " is not an enum, so case patterns with bindings cannot be used")
                 continue
             }
@@ -557,6 +806,7 @@ fn (Checker c) mut checkSwitch(Stmt st) {
         c.pushScope()
         c.checkBlock(cs.body)
         c.popScope()
+        c.endCase(cs.body, before)
     }
     if (!hasDefault) {
         c.errorHint(st.pos, "a switch over " + c.typeName(t) + " must end with a default case", "add default: for the values not listed")
@@ -564,6 +814,7 @@ fn (Checker c) mut checkSwitch(Stmt st) {
 }
 
 fn (Checker c) mut checkEnumSwitch(Stmt st, int t) {
+    []Guard before = c.guards
     int d = c.types.decl(t)
     TypeDecl td = c.ast.typeDecls[d]
     string tname = c.declDisplayName(d)
@@ -606,6 +857,7 @@ fn (Checker c) mut checkEnumSwitch(Stmt st, int t) {
         }
         c.checkBlock(cs.body)
         c.popScope()
+        c.endCase(cs.body, before)
     }
     for (int n = 0; n < td.caseCount; n++) {
         if (!seen[n]) {
@@ -625,7 +877,13 @@ fn (Checker c) mut labelNamesDecl(Label l, int d) bool {
         c.usedImports[l.pos.file.string() + ":" + l.pkg] = true
     }
     int? g = c.global(pkg, l.typeName)
-    return g != null && c.globalList[g].kind == GlobalKind.Type && c.globalList[g].index == d
+    if (g == null || c.globalList[g].kind != GlobalKind.Type || c.globalList[g].index != d) {
+        return false
+    }
+    if (l.pkg != "" && !c.globalPub(g)) {
+        c.errorHint(l.pos, l.typeName + " is not pub in package " + c.ast.pkgs[pkg].name, "only names declared pub can be used outside their package")
+    }
+    return true
 }
 
 fn labelText(Label l) string {
@@ -646,7 +904,7 @@ fn (Checker c) casePattern(int d, int ci) string {
     []string ps = []string{}
     for (int i = 0; i < ec.paramCount; i++) {
         Param p = c.ast.params[c.ast.at(ec.params, i)]
-        ps.push(c.ast.typeExprText(p.typeExpr) + " " + p.name)
+        ps.push(c.typeName(c.caseParamType(d, ci, i)) + " " + p.name)
     }
     return head + "(" + ps.join(", ") + ")"
 }
@@ -768,13 +1026,21 @@ fn (Checker c) mut checkSelect(Stmt st) {
     if (st.count == 0) {
         c.errorHint(st.pos, "select has no cases and would wait forever", "add a case such as case int? v = ch.receive():")
     }
+    []Guard before = c.guards
+    []Guard saved = c.caseGuards
+    c.caseGuards = []Guard{}
     for (int i = 0; i < st.count; i++) {
         Case cs = c.ast.cases[c.ast.at(st.list, i)]
         c.pushScope()
         c.checkSelectComm(cs.comm)
         c.checkBlock(cs.body)
         c.popScope()
+        c.endCase(cs.body, before)
     }
+    if (st.count > 0) {
+        c.guards = c.caseGuards
+    }
+    c.caseGuards = saved
 }
 
 fn (Checker c) mut checkSelectComm(int s) {
