@@ -1,0 +1,12 @@
+one:one-tag
+two:two-tag
+one:one-tag
+two:two-tag now two+:two-tag/+
+t0->t1
+t1->t2
+a/a/a
+a/a/changed
+one+ one-tag 2
+one+ one-tag/+/mine | one-tag/+
+add one, add two, describe one, bump one, describe two, bump two, describe one, bump one, add late, add later, keep
+one counted 2

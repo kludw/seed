@@ -532,6 +532,27 @@ generated.
   afterwards; a local declared outside a loop is never moved inside it.
   Besides a retain/release pair, a move keeps a list's count at 1, so
   changing the copy later does not copy the list.
+- *Borrowed locals* (`gen_move.sd`, `analyzeBorrows`): `T x = place` (a
+  variable, a field path of one, an element of a list reached through one,
+  as in `Expr x = g.c.ast.exprs[e]`) declares `x` as a plain C local with
+  the place's bits, owning nothing (no retain, no release, no slot, no
+  frame field), when nothing in the function changes `x`, and nothing in
+  `x`'s scope changes the place's variable where `x` could see it. One
+  walk per function records the mutations in order (assignments and
+  `++`/`--` of places, mut built-ins, mut interface methods, mut methods
+  called on places) with the variable and field path of their place (cut
+  at the first index); a mutation of `root.p` conflicts with a read of
+  `root.q` when one path is a prefix of the other. A mut method called on
+  `root.p` only changes `root.p.f` for the fields `f` of its *mod set*
+  (`computeModSets`: the first-level fields of the receiver its body
+  changes, closed over the mut methods it calls on its own receiver; a
+  native changes everything), so `Expr x = g.c.ast.exprs[e]` stays
+  borrowed across `g.emit(...)`. A store or a return of `x` retains it,
+  as for a parameter; `x` and the roots of borrowed locals are never moved
+  (a moved container would get a new owner that may change it in place).
+  Other variables cannot alias the place: locals are values, parameters are
+  read-only and borrowed from the caller, and a mut call keeps a copy of
+  every argument read from its receiver's own variable (`mutArgs`).
 - `x = x + a + b` on a local string appends in place (`sd_str_append`);
   other string `+` chains are one `sd_str_concat_n`. When a part of the
   chain is `n.string()` on an int, the chain is one `sd_str_concat_parts`
@@ -728,7 +749,10 @@ Value semantics shape the code:
   enum cases without data).
 - Passing a struct (even `Checker`) to a function or a plain method costs a
   memcpy and no counting: parameters are borrowed. Storing it in a local
-  retains every counted field.
+  retains every counted field, unless the local is borrowed (it is never
+  changed and its place is not changed while it is in scope; see "Memory
+  management"): `Expr x = g.c.ast.exprs[e]` followed by `g.emit(...)` is
+  free, because `emit` does not change `g.c`.
 - Build long strings as `[]string` and `join("")`, or append to a local
   (`s = s + x` appends in place when `s` is not shared); `+` on a growing
   string stored elsewhere is quadratic.

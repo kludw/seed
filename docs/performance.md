@@ -164,3 +164,43 @@ scheduler with growable stacks) to get `spawn` and `pingpong` to Go's
 level. Threads are a deliberate simplification (runtime/README.md, decision
 8); the worker pool and spinning recover most of the cost for the patterns
 programs use (a goroutine per request, short hand-offs).
+
+## Refcount elision
+
+Measured on Linux x86_64 (4 cores, GCC 13), the machine shared with other
+builds, so wall times are interleaved A/B runs (best of 7 to 15) and
+reported as ratios; instruction counts come from callgrind and do not
+depend on the load. compiler/README.md ("Memory management") has the rules.
+
+1. **Parameters were already borrowed.** Parameters are read-only in Seed,
+   so a callee never retains or releases one and a caller passes its
+   values as they are; nothing to do there.
+2. **Mut-call arguments are borrowed** when they read another variable
+   than the receiver's (`c.error(pos, message)` no longer copies `pos` and
+   `message`), and literals are never retained into a temporary.
+3. **Move on last use.** A store of a local that is its last use, in a
+   simple statement of the local's own block, moves the value: no retain,
+   no release at the end of the block, and the list or map keeps a count of
+   1, so changing the copy later changes it in place.
+4. **Borrowed locals.** `Expr x = g.c.ast.exprs[e]` holds the element's bits
+   without owning them when nothing changes `x` and nothing changes the
+   place where `x` could see it while `x` is in scope; the mut methods
+   called meanwhile are judged by their *mod sets* (the receiver fields
+   they may change), so `g.emit(...)` does not stop it.
+
+The compiler compiling itself (`seed2 c compiler/*.sd`):
+
+| | Before | After |
+|---|---|---|
+| instructions | 2,240 M | 2,040 M (-8.9%) |
+| wall time (interleaved, best of 15) | 1.00 | 0.90 |
+| `sd_rt_` struct copies in its C (static) | 902 | 269 |
+| `sd_str_retain` / `sd_list_retain` / `sd_int_retain` (static) | 851 / 197 / 1610 | 293 / 124 / 770 |
+
+Of the gain, moves and borrowed arguments give about 5% (the baseline
+compiler's source built by the new generator runs 2,124 M instructions)
+and borrowed locals the rest; the analyses themselves cost about 1.5% of
+the compile. The benchmarks do not change: `fib`, `intloop`, `pingpong`,
+`spawn` and `strings` compile to the same C as before, and `json` (1.01),
+`maps` (0.99) and `sort` (0.98) are within noise; their time goes to
+allocation and to the runtime, not to copies of locals.

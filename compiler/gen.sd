@@ -112,6 +112,15 @@ type Gen struct {
     map[int]int mvLast
     map[int]int mvCount
     map[int]bool mvCond
+    // Borrowed locals (gen_move.sd): the mod sets of the mut methods, the
+    // borrowed locals of the current function and their places' variables,
+    // and the walk's state.
+    map[int][]string modSets
+    map[int]bool borrowed
+    map[int]bool borrowRoots
+    []MutEvent bwEvents
+    []BorrowCand bwCands
+    bool bwOn
 }
 
 fn newGen(Checker c) Gen {
@@ -159,6 +168,12 @@ fn newGen(Checker c) Gen {
         mvLast: map[int]int{},
         mvCount: map[int]int{},
         mvCond: map[int]bool{},
+        modSets: map[int][]string{},
+        borrowed: map[int]bool{},
+        borrowRoots: map[int]bool{},
+        bwEvents: []MutEvent{},
+        bwCands: []BorrowCand{},
+        bwOn: false,
     }
 }
 
@@ -169,6 +184,7 @@ fn newGen(Checker c) Gen {
 fn (Gen g) mut genProgram(string natives) string {
     g.genTypes()
     g.genConsts()
+    g.computeModSets()
     for (int f = 0; f < g.c.ast.fns.len(); f++) {
         if (g.c.ast.fns[f].body < 0) {
             g.genNative(f)
@@ -1352,6 +1368,7 @@ fn (Gen g) mut genFn(int f) {
     g.slotDone = map[int]bool{}
     g.frameSlots = []Slot{}
     g.analyzeInts(fd.body)
+    g.analyzeBorrows(fd.body)
     g.analyzeMoves(fd.body)
     g.defers = g.blockHasDefer(fd.body)
     string sig = g.fnSig(f)

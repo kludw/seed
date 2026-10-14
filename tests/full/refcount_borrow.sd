@@ -1,0 +1,124 @@
+// Locals copied from a place that nothing changes while they are in scope
+// hold the value without owning it (compiler/gen_move.sd, borrowed locals).
+// Whatever the generator does, a local keeps the value it was given.
+package main
+
+import "fmt"
+
+type Node struct {
+    string name
+    []string tags
+}
+
+type Store struct {
+    []Node nodes
+    []string log
+    map[string]int counts
+    string title
+}
+
+fn (Store s) mut note(string line) {
+    s.log.push(line)
+}
+
+fn (Store s) mut bump(string key) {
+    int? n = s.counts[key]
+    if (n == null) {
+        s.counts[key] = 1
+    } else {
+        s.counts[key] = n + 1
+    }
+    s.note("bump " + key)
+}
+
+fn (Store s) mut addNode(string name) {
+    s.nodes.push(Node{name: name, tags: []string{name + "-tag"}})
+    s.note("add " + name)
+}
+
+fn (Store s) mut renameAll(string suffix) {
+    for (int i = 0; i < s.nodes.len(); i++) {
+        s.nodes[i].name = s.nodes[i].name + suffix
+        s.nodes[i].tags.push(suffix)
+    }
+}
+
+fn (Store s) mut retitle(string t) {
+    s.title = t
+}
+
+// Changes only log and counts: n stays borrowed from s.nodes.
+fn (Store s) mut describe(int i) string {
+    Node n = s.nodes[i]
+    s.note("describe " + n.name)
+    s.bump(n.name)
+    return n.name + ":" + n.tags.join("/")
+}
+
+// Changes the nodes while n is in scope: n must be a copy.
+fn (Store s) mut renameAndShow(int i) string {
+    Node n = s.nodes[i]
+    s.renameAll("+")
+    s.addNode("late")
+    s.addNode("later")
+    return n.name + ":" + n.tags.join("/") + " now " + s.nodes[i].name + ":" + s.nodes[i].tags.join("/")
+}
+
+// A field read, then the same field assigned.
+fn (Store s) mut swapTitle(string t) string {
+    string old = s.title
+    s.retitle(t)
+    return old + "->" + s.title
+}
+
+// Borrowed from a local list, which is changed in a nested block later.
+fn localList(bool change) string {
+    []Node nodes = []Node{Node{name: "a", tags: []string{"x"}}}
+    Node first = nodes[0]
+    string name = first.name
+    if (change) {
+        nodes[0].name = "changed"
+        nodes.push(Node{name: "b", tags: []string{}})
+    }
+    return name + "/" + first.name + "/" + nodes[0].name
+}
+
+// A chain of borrowed locals from a parameter.
+fn chain(Store s) string {
+    Node n = s.nodes[0]
+    []string tags = n.tags
+    string t = tags[0]
+    return n.name + " " + t + " " + tags.len().string()
+}
+
+// Borrowed, then stored and returned: the stores own their copies.
+fn (Store s) mut keep() Node {
+    Node n = s.nodes[0]
+    s.note("keep")
+    s.nodes.push(n)
+    return n
+}
+
+fn main([]string args) error {
+    Store s = Store{nodes: []Node{}, log: []string{}, counts: map[string]int{}, title: "t0"}
+    s.addNode("one")
+    s.addNode("two")
+    fmt.println(s.describe(0))
+    fmt.println(s.describe(1))
+    fmt.println(s.describe(0))
+    fmt.println(s.renameAndShow(1))
+    fmt.println(s.swapTitle("t1"))
+    fmt.println(s.swapTitle("t2"))
+    fmt.println(localList(false))
+    fmt.println(localList(true))
+    fmt.println(chain(s))
+    Node k = s.keep()
+    k.tags.push("mine")
+    fmt.println(k.name + " " + k.tags.join("/") + " | " + s.nodes[s.nodes.len() - 1].tags.join("/"))
+    fmt.println(s.log.join(", "))
+    int? c = s.counts["one"]
+    if (c != null) {
+        fmt.println("one counted " + c.string())
+    }
+    return null
+}

@@ -52,7 +52,7 @@ fn (Gen g) mut analyzeMoves(int b) {
             continue
         }
         VarKind vk = g.c.vars[v].kind
-        if ((vk != VarKind.Local && vk != VarKind.LocalConst) || g.isUnboxed(v) || !g.counted(g.c.vars[v].ty)) {
+        if ((vk != VarKind.Local && vk != VarKind.LocalConst) || g.isUnboxed(v) || !g.counted(g.c.vars[v].ty) || g.isBorrowed(v) || g.borrowRoots[v] != null) {
             continue
         }
         []int? at = g.moveAt[last]
@@ -222,5 +222,365 @@ fn (Gen g) mut mvMention(int v, bool cond) {
     g.mvCount[v] = n + 1
     if (cond || g.mvStmtAt.len() - 1 > level) {
         g.mvCond[v] = true
+    }
+}
+
+// ---- borrowed locals ----
+//
+// T x = place (a variable, a field path of one, an element of a list
+// reached through one: Expr x = g.c.ast.exprs[e]) copies the value, which
+// retains every counted part (a struct's strings and lists) and releases
+// them all at the end of the block. When x is never changed, and nothing
+// changes the place's variable where x could see it while x is in scope,
+// x can hold the value without owning it: it is declared as a plain C local
+// with the place's bits, never retained, released, moved or put in the
+// cleanup frame (it owns nothing to release on a crash). A copy that must
+// own the value (a store, a return) retains it, as for a parameter.
+//
+// "Changes" are the mutations of the function: assignments and ++/-- of a
+// place, mut built-ins, mut interface methods, and mut methods called on a
+// place. A mutation of root.p (p the field path from the variable, cut at
+// the first index) can only change what x reads at root.q when one of p and
+// q is a prefix of the other. A mut method called on root.p changes only
+// root.p.f for the first-level fields f of its receiver in its mod set
+// (modSets: computed for every mut method from its body, through the mut
+// methods it calls on its own receiver), so Expr x = g.c.ast.exprs[e] stays
+// borrowed across g.emit(...), which changes g.out and other fields but not
+// g.c. A move of the root would hand its container to another owner, which
+// could then change it in place, so roots of borrowed locals are never
+// moved.
+
+// A mutation found by the walk: the place's variable and field path, and
+// the mut method called on it (-1 for any other mutation of the whole
+// place).
+type MutEvent struct {
+    int root
+    string path
+    int method
+}
+
+// A candidate borrowed local: declared from root.path, in scope while the
+// events start..end of the walk happen.
+type BorrowCand struct {
+    int var
+    int root
+    string path
+    int start
+    int end
+}
+
+fn joinField(string a, string b) string {
+    if (a == "") {
+        return b
+    }
+    return a + "." + b
+}
+
+// The field path of the place e below its variable: "c.ast.exprs" for
+// g.c.ast.exprs[e].a (cut at the first index), "" for the variable itself.
+fn (Gen g) fieldPath(int e) string {
+    string p = g.rawPath(e)
+    for (int i = 0; i < p.len(); i++) {
+        if (p[i] == '[') {
+            if (i == 0) {
+                return ""
+            }
+            return p.slice(0, i - 1)
+        }
+    }
+    return p
+}
+
+fn (Gen g) rawPath(int e) string {
+    Expr x = g.c.ast.exprs[e]
+    if (x.kind == ExprKind.Field) {
+        return joinField(g.rawPath(x.a), x.text)
+    }
+    if (x.kind == ExprKind.Index) {
+        return joinField(g.rawPath(x.a), "[")
+    }
+    return ""
+}
+
+// Whether a mutation of path a can change what is read at path b (or the
+// other way round).
+fn pathsOverlap(string a, string b) bool {
+    return a == "" || b == "" || a == b || a.startsWith(b + ".") || b.startsWith(a + ".")
+}
+
+// Whether event ev can change what is read at path p of its variable.
+fn (Gen g) eventHits(MutEvent ev, string p) bool {
+    if (ev.method < 0) {
+        return pathsOverlap(ev.path, p)
+    }
+    []string? fields = g.modSets[ev.method]
+    if (fields == null || fields.contains("")) {
+        return pathsOverlap(ev.path, p)
+    }
+    for (int i = 0; i < fields.len(); i++) {
+        if (pathsOverlap(joinField(ev.path, fields[i]), p)) {
+            return true
+        }
+    }
+    return false
+}
+
+// Whether e reads a place: a variable, a field of a place, an element of a
+// list place (the index is evaluated when x is declared).
+fn (Gen g) isPlaceRead(int e) bool {
+    Expr x = g.c.ast.exprs[e]
+    ExprInfo i = g.c.info[e]
+    if (i.ifaceFrom >= 0 || (i.wrap && !g.wrapIsIdentity(i.ty))) {
+        return false
+    }
+    if (x.kind == ExprKind.Ident) {
+        return i.res == Res.Local
+    }
+    if (x.kind == ExprKind.Field) {
+        return i.res == Res.Field && g.isPlaceRead(x.a)
+    }
+    if (x.kind == ExprKind.Index) {
+        return i.res == Res.ListIndex && g.isPlaceRead(x.a)
+    }
+    return false
+}
+
+// Computes g.modSets: for every mut method, the first-level fields of its
+// receiver it may change ("" for any: the whole receiver, or a native).
+fn (Gen g) mut computeModSets() {
+    g.modSets = map[int][]string{}
+    map[int][]int deps = map[int][]int{}
+    for (int f = 0; f < g.c.ast.fns.len(); f++) {
+        FnDecl fd = g.c.ast.fns[f]
+        if (!fd.isMethod || !fd.recvMut) {
+            continue
+        }
+        if (fd.body < 0 || g.c.recvVar[f] < 0) {
+            g.modSets[f] = []string{""}
+            continue
+        }
+        g.bwEvents = []MutEvent{}
+        g.bwCands = []BorrowCand{}
+        g.bwOn = false
+        g.bwBlock(fd.body)
+        []string set = []string{}
+        []int calls = []int{}
+        int rv = g.c.recvVar[f]
+        for (int i = 0; i < g.bwEvents.len(); i++) {
+            MutEvent ev = g.bwEvents[i]
+            if (ev.root != rv) {
+                continue
+            }
+            string field = ev.path
+            for (int j = 0; j < field.len(); j++) {
+                if (field[j] == '.') {
+                    field = field.slice(0, j)
+                    break
+                }
+            }
+            if (field == "" && ev.method >= 0) {
+                if (!calls.contains(ev.method)) {
+                    calls.push(ev.method)
+                }
+            } else if (!set.contains(field)) {
+                set.push(field)
+            }
+        }
+        g.modSets[f] = set
+        deps[f] = calls
+    }
+    bool changed = true
+    for (; changed; ) {
+        changed = false
+        []int fs = deps.keys()
+        for (int k = 0; k < fs.len(); k++) {
+            []int? cs = deps[fs[k]]
+            []string? own = g.modSets[fs[k]]
+            if (cs == null || own == null || own.contains("")) {
+                continue
+            }
+            []string set2 = own
+            bool grew = false
+            for (int m = 0; m < cs.len(); m++) {
+                []string? theirs = g.modSets[cs[m]]
+                if (theirs == null) {
+                    continue
+                }
+                for (int n = 0; n < theirs.len(); n++) {
+                    if (!set2.contains(theirs[n])) {
+                        set2.push(theirs[n])
+                        grew = true
+                    }
+                }
+            }
+            if (grew) {
+                g.modSets[fs[k]] = set2
+                changed = true
+            }
+        }
+    }
+}
+
+// Computes g.borrowed (the borrowed locals of the function whose body is
+// b) and g.borrowRoots (their places' variables).
+fn (Gen g) mut analyzeBorrows(int b) {
+    g.borrowed = map[int]bool{}
+    g.borrowRoots = map[int]bool{}
+    g.bwEvents = []MutEvent{}
+    g.bwCands = []BorrowCand{}
+    g.bwOn = true
+    g.bwBlock(b)
+    g.bwOn = false
+    map[int]bool changed = map[int]bool{}
+    for (int i = 0; i < g.bwEvents.len(); i++) {
+        changed[g.bwEvents[i].root] = true
+    }
+    for (int k = 0; k < g.bwCands.len(); k++) {
+        BorrowCand bc = g.bwCands[k]
+        if (changed[bc.var] != null) {
+            continue
+        }
+        bool ok = true
+        for (int j = bc.start; j < bc.end && ok; j++) {
+            MutEvent ev = g.bwEvents[j]
+            if (ev.root == bc.root && g.eventHits(ev, bc.path)) {
+                ok = false
+            }
+        }
+        if (ok) {
+            g.borrowed[bc.var] = true
+            g.borrowRoots[bc.root] = true
+        }
+    }
+}
+
+// Whether local v holds a borrowed value (see analyzeBorrows).
+fn (Gen g) isBorrowed(int v) bool {
+    return g.borrowed[v] != null
+}
+
+// The walk: the mutations in order (bwEvents) and, when bwOn, the
+// candidate borrowed locals with the events of their scope.
+fn (Gen g) mut bwBlock(int b) {
+    if (b < 0) {
+        return
+    }
+    int first = g.bwCands.len()
+    Block bl = g.c.ast.blocks[b]
+    for (int i = 0; i < bl.count; i++) {
+        int s = g.c.ast.at(bl.list, i)
+        g.bwStmt(s)
+        if (g.bwOn) {
+            g.bwCandidate(s)
+        }
+    }
+    for (int k = first; k < g.bwCands.len(); k++) {
+        if (g.bwCands[k].end < 0) {
+            g.bwCands[k].end = g.bwEvents.len()
+        }
+    }
+}
+
+// T x = place, directly in a block: a candidate whose scope starts after
+// the statement.
+fn (Gen g) mut bwCandidate(int s) {
+    Stmt st = g.c.ast.stmts[s]
+    if (st.kind != StmtKind.Assign || st.count != 1) {
+        return
+    }
+    int ti = g.c.ast.at(st.list, 0)
+    if (g.c.ast.targets[ti].kind != TargetKind.Decl) {
+        return
+    }
+    int v = g.c.targetVar[ti]
+    if (v < 0 || g.c.vars[v].kind != VarKind.Local || g.isUnboxed(v) || !g.counted(g.c.targetType[ti])) {
+        return
+    }
+    if (!g.isPlaceRead(st.expr)) {
+        return
+    }
+    int root = g.rootVar(st.expr)
+    if (root < 0 || root == v) {
+        return
+    }
+    g.bwCands.push(BorrowCand{var: v, root: root, path: g.fieldPath(st.expr), start: g.bwEvents.len(), end: -1})
+}
+
+fn (Gen g) mut bwEvent(int place, int method) {
+    int root = g.rootVar(place)
+    if (root >= 0) {
+        g.bwEvents.push(MutEvent{root: root, path: g.fieldPath(place), method: method})
+    }
+}
+
+fn (Gen g) mut bwStmt(int s) {
+    if (s < 0) {
+        return
+    }
+    Stmt st = g.c.ast.stmts[s]
+    g.bwExpr(st.expr)
+    switch (st.kind) {
+    case StmtKind.Assign:
+        for (int i = 0; i < st.count; i++) {
+            Target tg = g.c.ast.targets[g.c.ast.at(st.list, i)]
+            if (tg.kind == TargetKind.Place) {
+                g.bwExpr(tg.expr)
+                g.bwEvent(tg.expr, -1)
+            }
+        }
+    case StmtKind.IncDec:
+        g.bwEvent(st.expr, -1)
+    case StmtKind.Return:
+        for (int j = 0; j < st.count; j++) {
+            g.bwExpr(g.c.ast.at(st.list, j))
+        }
+    case StmtKind.If:
+        g.bwBlock(st.body)
+        g.bwStmt(st.elseIf)
+        g.bwBlock(st.els)
+    case StmtKind.For:
+        g.bwStmt(st.init)
+        g.bwBlock(st.body)
+        g.bwStmt(st.post)
+    case StmtKind.Switch, StmtKind.Select:
+        for (int k = 0; k < st.count; k++) {
+            Case cs = g.c.ast.cases[g.c.ast.at(st.list, k)]
+            for (int l = 0; l < cs.labelCount; l++) {
+                g.bwExpr(g.c.ast.labels[g.c.ast.at(cs.labels, l)].expr)
+            }
+            g.bwStmt(cs.comm)
+            g.bwBlock(cs.body)
+        }
+    case StmtKind.ExprStmt, StmtKind.Defer, StmtKind.Spawn, StmtKind.Assert, StmtKind.Const:
+        return
+    case StmtKind.Break, StmtKind.Continue, StmtKind.Bad:
+        return
+    }
+}
+
+fn (Gen g) mut bwExpr(int e) {
+    if (e < 0) {
+        return
+    }
+    Expr x = g.c.ast.exprs[e]
+    if (x.kind == ExprKind.Group) {
+        g.bwBlock(x.block)
+        return
+    }
+    g.bwExpr(x.a)
+    g.bwExpr(x.b)
+    for (int k = 0; k < x.count; k++) {
+        g.bwExpr(g.c.ast.at(x.list, k))
+    }
+    if (x.kind != ExprKind.Call) {
+        return
+    }
+    ExprInfo i = g.c.info[e]
+    if (i.res == Res.Method && g.c.ast.fns[i.ref].recvMut) {
+        g.bwEvent(g.recvOf(e), i.ref)
+    } else if (i.res == Res.IfaceMethod && g.c.ifaceMethod(i.ref, i.sub).isMut) {
+        g.bwEvent(g.recvOf(e), -1)
+    } else if (i.res == Res.Builtin && isMutBuiltin(i.builtin)) {
+        g.bwEvent(g.recvOf(e), -1)
     }
 }

@@ -255,6 +255,12 @@ fn (Gen g) mut genAssign(int s) {
             return
         }
         int t = g.c.targetType[ti]
+        if (g.isBorrowed(v)) {
+            // The place's bits, owning nothing (gen_move.sd).
+            g.emit(g.ctype(t) + " " + g.lname(v) + " = " + g.gexpr(st.expr) + ";")
+            g.releaseTo(mark)
+            return
+        }
         string val = g.ownVal(g.gexpr(st.expr), t)
         g.emit(g.localDecl(v, t) + " = " + g.localInit(v, val) + ";")
         g.releaseTo(mark)
@@ -827,7 +833,7 @@ fn (Gen g) isPlainMove(int e) bool {
         return false
     }
     VarKind k = g.c.vars[i.ref].kind
-    if ((k != VarKind.Local && k != VarKind.LocalConst) || g.isUnboxed(i.ref)) {
+    if ((k != VarKind.Local && k != VarKind.LocalConst) || g.isUnboxed(i.ref) || g.isBorrowed(i.ref)) {
         return false
     }
     return !i.wrap || g.wrapIsIdentity(i.ty)
