@@ -1,0 +1,539 @@
+// The C generator, continued: small-int versions of pure int functions.
+//
+// fn fib(int n) int calls itself twice per call, and each general int
+// operation tests both tags, checks for overflow and releases its
+// temporaries. Most calls of such a function only ever see small ints, so
+// it gets a second version that works on the words of small ints directly
+// (a small int n is the int64_t 2n, so + and - are one add with an overflow
+// check, and comparisons are plain compares):
+//
+//   static int64_t sd_fs_fib(int64_t l_n)   the fast version
+//   static sd_int sd_fg_fib(sd_int l_n)     the general version (genFn)
+//   static sd_int sd_f_fib(sd_int l_n)      tries the fast version when every
+//                                           int argument is small, else (or
+//                                           when it gives up) the general one
+//
+// The fast version gives up by returning an odd word (1, never a small int's
+// word) when a result leaves the small range or a division by zero would
+// crash. That is invisible, because only *pure* functions get one: their
+// parameters are int or bool, their result is int or bool, and their body
+// has only int and bool locals, int literals and literal constants,
+// arithmetic, comparisons, if, for, return, and calls of functions that
+// have a fast version too. Such a function prints nothing, changes nothing
+// and allocates nothing, so computing it again with the general version
+// gives the same result (or the same crash, division by zero, now from the
+// general version). A deep recursion may still overflow the stack, as the
+// general version would, and crashes the same way.
+//
+// The general version calls the general versions of the functions that
+// have a fast one: once a call has fallen back, its whole subtree stays
+// general, so a fallback costs at most one fast attempt per call that the
+// program makes (not one per level of a recursion).
+package main
+
+// Finds the functions that get a fast version (g.fastFns): the candidates
+// whose bodies are made of what the fast version can do, minus those that
+// call (perhaps through others) a function without one.
+fn (Gen g) mut findFastFns() {
+    g.fastFns = map[int]bool{}
+    map[int][]int calls = map[int][]int{}
+    for (int f = 0; f < g.c.ast.fns.len(); f++) {
+        if (!g.fastSignature(f)) {
+            continue
+        }
+        g.fastCalls = []int{}
+        if (g.fastBlockOk(g.c.ast.fns[f].body)) {
+            g.fastFns[f] = true
+            calls[f] = g.fastCalls
+        }
+    }
+    bool changed = true
+    for (; changed; ) {
+        changed = false
+        []int fs = g.fastFns.keys()
+        for (int i = 0; i < fs.len(); i++) {
+            []int? cs = calls[fs[i]]
+            if (cs == null) {
+                continue
+            }
+            for (int j = 0; j < cs.len(); j++) {
+                if (g.fastFns[cs[j]] == null) {
+                    g.fastFns.delete(fs[i])
+                    changed = true
+                    break
+                }
+            }
+        }
+    }
+}
+
+// Whether f is a plain function (not a method, test, native or main) with
+// int or bool parameters (at least one) and an int or bool result.
+fn (Gen g) fastSignature(int f) bool {
+    FnDecl fd = g.c.ast.fns[f]
+    if (fd.body < 0 || fd.isMethod || fd.isTest || fd.resultCount != 1 || fd.paramCount == 0) {
+        return false
+    }
+    int r = g.c.fnRet[f]
+    if (r != tyInt && r != tyBool) {
+        return false
+    }
+    for (int i = 0; i < fd.paramCount; i++) {
+        Param p = g.c.ast.params[g.c.ast.at(fd.params, i)]
+        int t = g.c.teType[p.typeExpr]
+        if (t != tyInt && t != tyBool) {
+            return false
+        }
+    }
+    return true
+}
+
+// Whether f has a fast version.
+fn (Gen g) isFast(int f) bool {
+    return f >= 0 && g.fastFns[f] != null
+}
+
+fn isIntOrBool(int t) bool {
+    return t == tyInt || t == tyBool
+}
+
+fn (Gen g) mut fastBlockOk(int b) bool {
+    if (b < 0) {
+        return true
+    }
+    Block bl = g.c.ast.blocks[b]
+    for (int i = 0; i < bl.count; i++) {
+        if (!g.fastStmtOk(g.c.ast.at(bl.list, i))) {
+            return false
+        }
+    }
+    return true
+}
+
+fn (Gen g) mut fastStmtOk(int s) bool {
+    if (s < 0) {
+        return true
+    }
+    Stmt st = g.c.ast.stmts[s]
+    switch (st.kind) {
+    case StmtKind.Assign:
+        if (st.count != 1 || !g.fastExprOk(st.expr)) {
+            return false
+        }
+        int ti = g.c.ast.at(st.list, 0)
+        Target tg = g.c.ast.targets[ti]
+        if (tg.kind == TargetKind.Decl) {
+            return g.c.targetVar[ti] < 0 || isIntOrBool(g.c.vars[g.c.targetVar[ti]].ty)
+        }
+        if (tg.kind == TargetKind.Place) {
+            return g.fastLocal(tg.expr)
+        }
+        return true
+    case StmtKind.Const:
+        int cv = g.c.stmtVar[s]
+        return (cv < 0 || isIntOrBool(g.c.vars[cv].ty)) && g.fastExprOk(st.expr)
+    case StmtKind.IncDec:
+        return g.fastLocal(st.expr) && g.typeOf(st.expr) == tyInt
+    case StmtKind.If:
+        return g.fastExprOk(st.expr) && g.fastBlockOk(st.body) && g.fastStmtOk(st.elseIf) && g.fastBlockOk(st.els)
+    case StmtKind.For:
+        return (st.expr < 0 || g.fastExprOk(st.expr)) && g.fastStmtOk(st.init) && g.fastStmtOk(st.post) && g.fastBlockOk(st.body)
+    case StmtKind.Return:
+        return st.count == 1 && g.fastExprOk(g.c.ast.at(st.list, 0))
+    case StmtKind.Break, StmtKind.Continue:
+        return true
+    case StmtKind.ExprStmt, StmtKind.Switch, StmtKind.Select, StmtKind.Defer, StmtKind.Spawn, StmtKind.Assert, StmtKind.Bad:
+        return false
+    }
+}
+
+// Whether e is a local int or bool variable (a place the fast version
+// keeps in a C local).
+fn (Gen g) fastLocal(int e) bool {
+    Expr x = g.c.ast.exprs[e]
+    ExprInfo i = g.c.info[e]
+    return x.kind == ExprKind.Ident && i.res == Res.Local && !i.narrowed && isIntOrBool(g.c.vars[i.ref].ty)
+}
+
+// The value of a constant that the fast version can use: an int literal in
+// the small range ("" otherwise).
+fn (Gen g) fastConst(int ci) string {
+    Expr ce = g.c.ast.exprs[g.c.ast.consts[ci].expr]
+    if (ce.kind == ExprKind.IntLit && ce.intValue != minInt && ce.intValue >= smallIntMin && ce.intValue <= smallIntMax) {
+        return intLit(ce) + ".w"
+    }
+    if (ce.kind == ExprKind.BoolLit) {
+        if (ce.intValue != 0) {
+            return "true"
+        }
+        return "false"
+    }
+    return ""
+}
+
+fn (Gen g) mut fastExprOk(int e) bool {
+    if (e < 0) {
+        return false
+    }
+    Expr x = g.c.ast.exprs[e]
+    ExprInfo i = g.c.info[e]
+    if (i.wrap || i.narrowed || i.ifaceFrom >= 0 || !isIntOrBool(i.ty)) {
+        return false
+    }
+    switch (x.kind) {
+    case ExprKind.IntLit:
+        return x.intValue != minInt && x.intValue >= smallIntMin && x.intValue <= smallIntMax
+    case ExprKind.BoolLit:
+        return true
+    case ExprKind.Ident:
+        if (i.res == Res.Local) {
+            return true
+        }
+        return i.res == Res.Const && g.fastConst(i.ref) != ""
+    case ExprKind.Unary:
+        return g.fastExprOk(x.a)
+    case ExprKind.Binary:
+        int at = g.typeOf(x.a)
+        if (!isIntOrBool(at) || !g.fastExprOk(x.a) || !g.fastExprOk(x.b)) {
+            return false
+        }
+        Tok op = x.op
+        if (at == tyBool) {
+            return op == Tok.AndAnd || op == Tok.OrOr || op == Tok.Eq || op == Tok.Ne
+        }
+        return op == Tok.Plus || op == Tok.Minus || op == Tok.Star || op == Tok.Slash || op == Tok.Percent || op == Tok.Amp || op == Tok.Pipe || op == Tok.Caret || isComparison(op)
+    case ExprKind.Call:
+        if (i.res != Res.Func || !g.fastSignature(i.ref)) {
+            return false
+        }
+        for (int k = 0; k < x.count; k++) {
+            if (!g.fastExprOk(g.c.ast.at(x.list, k))) {
+                return false
+            }
+        }
+        g.fastCalls.push(i.ref)
+        return true
+    case ExprKind.Bad, ExprKind.FloatLit, ExprKind.ByteLit, ExprKind.StringLit, ExprKind.NullLit, ExprKind.Field, ExprKind.Index:
+        return false
+    case ExprKind.Try, ExprKind.ListLit, ExprKind.MapLit, ExprKind.Entry, ExprKind.StructLit, ExprKind.FieldInit, ExprKind.ChanMake:
+        return false
+    case ExprKind.Group:
+        return false
+    }
+}
+
+// ---- generating ----
+
+// The C names of f's fast and general versions.
+fn (Gen g) fastName(int f) string {
+    return "sd_fs_" + g.c.fnCName[f].slice(5, g.c.fnCName[f].len())
+}
+
+fn (Gen g) generalName(int f) string {
+    return "sd_fg_" + g.c.fnCName[f].slice(5, g.c.fnCName[f].len())
+}
+
+// The C names of f's parameters, as fnSig declares them.
+fn (Gen g) paramNames(int f) []string {
+    FnDecl fd = g.c.ast.fns[f]
+    []string out = []string{}
+    for (int i = 0; i < fd.paramCount; i++) {
+        Param p = g.c.ast.params[g.c.ast.at(fd.params, i)]
+        if (p.name == "_") {
+            out.push("_p" + i.string())
+        } else {
+            out.push("l_" + p.name)
+        }
+    }
+    return out
+}
+
+fn (Gen g) paramType(int f, int i) int {
+    FnDecl fd = g.c.ast.fns[f]
+    return g.c.teType[g.c.ast.params[g.c.ast.at(fd.params, i)].typeExpr]
+}
+
+// Emits the fast version of f and the function under f's own name that
+// chooses between it and the general version (generalName, made by genFn).
+fn (Gen g) mut genFast(int f) {
+    FnDecl fd = g.c.ast.fns[f]
+    []string names = g.paramNames(f)
+    []string ps = []string{}
+    []string fastArgs = []string{}
+    []string ints = []string{}
+    for (int i = 0; i < names.len(); i++) {
+        if (g.paramType(f, i) == tyInt) {
+            ps.push("int64_t " + names[i])
+            fastArgs.push(names[i] + ".w")
+            ints.push(names[i] + ".w")
+        } else {
+            ps.push("bool " + names[i])
+            fastArgs.push(names[i])
+        }
+    }
+    string head = "static int64_t " + g.fastName(f) + "(" + ps.join(", ") + ")"
+    g.protos.push(head + ";\n")
+    string sig = g.fnSig(f)
+    g.protos.push(sig + ";\n")
+    g.curFn = f
+    g.out = []string{}
+    g.indent = 0
+    g.ntmp = 0
+    g.frameOn = false
+    g.fastLoops = []int{}
+    g.emit(head + " {")
+    g.indent++
+    g.fastBlock(fd.body)
+    g.emit("return 1;")
+    g.indent--
+    g.emit("}")
+    g.emit("")
+    // The chooser.
+    string value = "(sd_int){r_}"
+    if (g.c.fnRet[f] == tyBool) {
+        value = "r_ != 0"
+    }
+    g.emit(sig + " {")
+    g.indent++
+    string call = "int64_t r_ = " + g.fastName(f) + "(" + fastArgs.join(", ") + ");"
+    string take = "if (SD_LIKELY((r_ & 1) == 0)) return " + value + ";"
+    if (ints.len() == 0) {
+        g.emit("{ " + call + " " + take + " }")
+    } else {
+        g.emit("if (SD_LIKELY(((" + ints.join(" | ") + ") & 1) == 0)) { " + call + " " + take + " }")
+    }
+    []string args = []string{}
+    for (int k = 0; k < names.len(); k++) {
+        args.push(names[k])
+    }
+    g.emit("return " + g.generalName(f) + "(" + args.join(", ") + ");")
+    g.indent--
+    g.emit("}")
+    g.emit("")
+    g.fnText.push(g.out.join(""))
+}
+
+fn (Gen g) mut fastBlock(int b) {
+    if (b < 0) {
+        return
+    }
+    Block bl = g.c.ast.blocks[b]
+    for (int i = 0; i < bl.count; i++) {
+        g.fastStmt(g.c.ast.at(bl.list, i))
+    }
+}
+
+// The C type of an int or bool in the fast version.
+fn fastCType(int t) string {
+    if (t == tyBool) {
+        return "bool"
+    }
+    return "int64_t"
+}
+
+fn (Gen g) mut fastStmt(int s) {
+    Stmt st = g.c.ast.stmts[s]
+    switch (st.kind) {
+    case StmtKind.Assign:
+        int ti = g.c.ast.at(st.list, 0)
+        Target tg = g.c.ast.targets[ti]
+        string v = g.fastExpr(st.expr)
+        if (tg.kind == TargetKind.Decl && g.c.targetVar[ti] >= 0) {
+            int dv = g.c.targetVar[ti]
+            g.emit(fastCType(g.c.vars[dv].ty) + " l_" + g.c.vars[dv].name + " = " + v + ";")
+        } else if (tg.kind == TargetKind.Place) {
+            g.emit("l_" + g.c.vars[g.c.info[tg.expr].ref].name + " = " + v + ";")
+        } else {
+            g.emit("(void)(" + v + ");")
+        }
+    case StmtKind.Const:
+        string cvv = g.fastExpr(st.expr)
+        int cv = g.c.stmtVar[s]
+        if (cv >= 0) {
+            g.emit(fastCType(g.c.vars[cv].ty) + " l_" + g.c.vars[cv].name + " = " + cvv + ";")
+        }
+    case StmtKind.IncDec:
+        string name = "l_" + g.c.vars[g.c.info[st.expr].ref].name
+        string op = "sub"
+        if (st.inc) {
+            op = "add"
+        }
+        g.emit("if (__builtin_" + op + "_overflow(" + name + ", (int64_t)2, &" + name + ")) return 1;")
+    case StmtKind.If:
+        string c = g.fastExpr(st.expr)
+        g.emit("if (" + c + ") {")
+        g.indent++
+        g.fastBlock(st.body)
+        g.indent--
+        if (st.elseIf >= 0) {
+            g.emit("} else {")
+            g.indent++
+            g.fastStmt(st.elseIf)
+            g.indent--
+        } else if (st.els >= 0) {
+            g.emit("} else {")
+            g.indent++
+            g.fastBlock(st.els)
+            g.indent--
+        }
+        g.emit("}")
+    case StmtKind.For:
+        g.emit("{")
+        g.indent++
+        if (st.init >= 0) {
+            g.fastStmt(st.init)
+        }
+        g.ntmp++
+        int label = g.ntmp
+        g.emit("for (;;) {")
+        g.indent++
+        if (st.expr >= 0) {
+            string fc = g.fastExpr(st.expr)
+            g.emit("if (!(" + fc + ")) break;")
+        }
+        g.fastLoops.push(label)
+        g.emit("{")
+        g.indent++
+        g.fastBlock(st.body)
+        g.indent--
+        g.emit("}")
+        g.fastLoops = g.fastLoops.slice(0, g.fastLoops.len() - 1)
+        g.emit("_c" + label.string() + ":;")
+        if (st.post >= 0) {
+            g.fastStmt(st.post)
+        }
+        g.indent--
+        g.emit("}")
+        g.indent--
+        g.emit("}")
+    case StmtKind.Return:
+        string r = g.fastExpr(g.c.ast.at(st.list, 0))
+        if (g.c.fnRet[g.curFn] == tyBool) {
+            g.emit("return (" + r + ") ? 2 : 0;")
+        } else {
+            g.emit("return " + r + ";")
+        }
+    case StmtKind.Break:
+        g.emit("break;")
+    case StmtKind.Continue:
+        g.emit("goto _c" + g.fastLoops[g.fastLoops.len() - 1].string() + ";")
+    case StmtKind.ExprStmt, StmtKind.Switch, StmtKind.Select, StmtKind.Defer, StmtKind.Spawn, StmtKind.Assert, StmtKind.Bad:
+        g.emit("return 1;")
+    }
+}
+
+// A new C local of the fast version holding cexpr.
+fn (Gen g) mut fastTemp(string ctype, string cexpr) string {
+    string n = g.newTmp()
+    g.emit(ctype + " " + n + " = " + cexpr + ";")
+    return n
+}
+
+// The C value of e in the fast version (the word of an int, a C bool);
+// work that may give up (an overflow, a division by zero, a call that gave
+// up) is emitted before, returning 1.
+fn (Gen g) mut fastExpr(int e) string {
+    Expr x = g.c.ast.exprs[e]
+    ExprInfo i = g.c.info[e]
+    switch (x.kind) {
+    case ExprKind.IntLit:
+        return intLit(x) + ".w"
+    case ExprKind.BoolLit:
+        if (x.intValue != 0) {
+            return "true"
+        }
+        return "false"
+    case ExprKind.Ident:
+        if (i.res == Res.Const) {
+            return g.fastConst(i.ref)
+        }
+        return "l_" + g.c.vars[i.ref].name
+    case ExprKind.Unary:
+        string u = g.fastExpr(x.a)
+        if (x.op == Tok.Not) {
+            return "(!" + u + ")"
+        }
+        string n = g.newTmp()
+        g.emit("int64_t " + n + "; if (__builtin_sub_overflow((int64_t)0, " + u + ", &" + n + ")) return 1;")
+        return n
+    case ExprKind.Binary:
+        return g.fastBinary(e)
+    case ExprKind.Call:
+        []string args = []string{}
+        for (int k = 0; k < x.count; k++) {
+            args.push(g.fastExpr(g.c.ast.at(x.list, k)))
+        }
+        string r = g.newTmp()
+        g.emit("int64_t " + r + " = " + g.fastName(i.ref) + "(" + args.join(", ") + "); if (" + r + " & 1) return 1;")
+        if (g.c.fnRet[i.ref] == tyBool) {
+            return "(" + r + " != 0)"
+        }
+        return r
+    case ExprKind.Bad, ExprKind.FloatLit, ExprKind.ByteLit, ExprKind.StringLit, ExprKind.NullLit, ExprKind.Field, ExprKind.Index:
+        return "0"
+    case ExprKind.Try, ExprKind.ListLit, ExprKind.MapLit, ExprKind.Entry, ExprKind.StructLit, ExprKind.FieldInit, ExprKind.ChanMake:
+        return "0"
+    case ExprKind.Group:
+        return "0"
+    }
+}
+
+fn (Gen g) mut fastBinary(int e) string {
+    Expr x = g.c.ast.exprs[e]
+    Tok op = x.op
+    if (op == Tok.AndAnd || op == Tok.OrOr) {
+        // The right side only runs when needed (it may call).
+        string a = g.fastExpr(x.a)
+        []string saved = g.out
+        g.out = []string{}
+        g.indent++
+        string b = g.fastExpr(x.b)
+        g.indent--
+        []string lines = g.out
+        g.out = saved
+        string cop = "&&"
+        if (op == Tok.OrOr) {
+            cop = "||"
+        }
+        if (lines.len() == 0) {
+            return "(" + a + " " + cop + " " + b + ")"
+        }
+        string t = g.fastTemp("bool", a)
+        if (op == Tok.OrOr) {
+            g.emit("if (!" + t + ") {")
+        } else {
+            g.emit("if (" + t + ") {")
+        }
+        for (int i = 0; i < lines.len(); i++) {
+            g.out.push(lines[i])
+        }
+        g.indent++
+        g.emit(t + " = " + b + ";")
+        g.indent--
+        g.emit("}")
+        return t
+    }
+    string l = g.fastExpr(x.a)
+    string r = g.fastExpr(x.b)
+    if (isComparison(op) || op == Tok.Amp || op == Tok.Pipe || op == Tok.Caret) {
+        return "((" + l + ") " + op.text() + " (" + r + "))"
+    }
+    string n = g.newTmp()
+    if (op == Tok.Plus) {
+        g.emit("int64_t " + n + "; if (__builtin_add_overflow(" + l + ", " + r + ", &" + n + ")) return 1;")
+    } else if (op == Tok.Minus) {
+        g.emit("int64_t " + n + "; if (__builtin_sub_overflow(" + l + ", " + r + ", &" + n + ")) return 1;")
+    } else if (op == Tok.Star) {
+        g.emit("int64_t " + n + "; if (__builtin_mul_overflow(" + l + ", (" + r + ") >> 1, &" + n + ")) return 1;")
+    } else if (op == Tok.Slash) {
+        // (2a >> 1) / (2b >> 1) = a / b truncated, as Seed's /; only
+        // min / -1 leaves the small range.
+        g.emit("if ((" + r + ") == 0) return 1;")
+        g.emit("int64_t " + n + "; if (__builtin_add_overflow(((" + l + ") >> 1) / ((" + r + ") >> 1), ((" + l + ") >> 1) / ((" + r + ") >> 1), &" + n + ")) return 1;")
+    } else {
+        // 2a % 2b = 2 (a % b), with the sign of a, as Seed's %.
+        g.emit("if ((" + r + ") == 0) return 1;")
+        g.emit("int64_t " + n + " = (" + l + ") % (" + r + ");")
+    }
+    return n
+}

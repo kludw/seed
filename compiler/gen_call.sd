@@ -60,6 +60,10 @@ fn (Gen g) mut callFrom(int e, []string vals) string {
     if (i.res == Res.Builtin) {
         return "sd_chan_close(" + vals[0] + ")"
     }
+    if (i.res == Res.Func && g.isFast(i.ref) && g.isFast(g.curFn)) {
+        // A general version calls general versions (gen_fast.sd).
+        return g.generalName(i.ref) + "(" + vals.join(", ") + ")"
+    }
     if (i.res == Res.Func || i.res == Res.Method) {
         return g.c.fnCName[i.ref] + "(" + vals.join(", ") + ")"
     }

@@ -275,7 +275,7 @@ fn (Gen g) mut genAssign(int s) {
         int uv = g.intLocal(tg.expr)
         if (uv >= 0 && g.isUnboxed(uv)) {
             g.emit("l_" + g.c.vars[uv].name + " = " + smallOf(g.gexpr(st.expr)) + ";")
-        } else if (!g.genAppend(st, tg)) {
+        } else if (!g.genAppend(st, tg) && !g.genIntUpdate(st, tg)) {
             g.gstore(tg.expr, g.ownedTemp(st.expr))
         }
         g.releaseTo(mark)
@@ -526,12 +526,11 @@ fn (Gen g) mut genIncDec(Stmt st) {
         target = "*" + pt
     }
     if (i.ty == tyInt) {
-        string f = "sd_int_sub"
+        string f = "sub"
         if (st.inc) {
-            f = "sd_int_add"
+            f = "add"
         }
-        string t = g.newTmp()
-        g.emit("sd_int " + t + " = " + f + "(" + target + ", SD_INT(1)); sd_int_release(" + target + "); " + target + " = " + t + ";")
+        g.emit(intUpdate(target, f, "SD_INT(1)"))
         return
     }
     string op = "-"

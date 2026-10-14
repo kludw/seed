@@ -190,7 +190,8 @@ never return (`isNoReturn`).
 | `gen_call.sd` | gen | calls, places, built-in methods, conversions |
 | `gen_stmt.sd` | gen | statements, scopes, return, `defer`, `spawn`, `select`, `assert` |
 | `gen_int.sd` | gen | ints known to be small: the interval analysis of int locals, unboxed locals, plain C arithmetic |
-| `gen_move.sd` | gen | moving a local's value on its last use instead of copying it |
+| `gen_move.sd` | gen | moving a local's value on its last use; borrowed locals and the mod sets of mut methods |
+| `gen_fast.sd` | gen | small-int versions of pure int functions, and the functions that choose between them and the general ones |
 
 ## Data structures
 
@@ -622,6 +623,39 @@ no temporary (`smallBinary`). In an int `+` chain, the simple small operands
 first and then added to the others with one general addition (`gsumSmall`;
 ints never overflow, so `+` is associative).
 
+*Int fast paths* (gen_int.sd, gen_fast.sd, gen_expr.sd):
+
+- `x = x + a + b`, `x = x - e`, `x++` and `x--` on an int that is not
+  unboxed (a sum that grows) update `x` in place (`genIntUpdate`,
+  `intUpdate`): when both words are small and the add does not overflow,
+  `x.w` is replaced; only the slow path calls `sd_int_add_slow` (or
+  `_sub_slow`) and releases the old value. Before, every update made a
+  temporary and released the old value, two branches GCC could not remove.
+- *Fast versions* (`gen_fast.sd`): a pure int function (parameters `int` or
+  `bool`, result `int` or `bool`, a body of int and bool locals, literals
+  and literal constants, arithmetic, comparisons, `if`, `for`, `return` and
+  calls of other such functions; not a method) gets `sd_fs_f`, which works
+  on the words of small ints (`2n`) with `__builtin_*_overflow` checks, and
+  returns the odd word 1 to give up (overflow out of the small range, a
+  division by zero). `sd_f_f` calls it when every int argument is small and
+  falls back to the general version `sd_fg_f` (the normal body) when it
+  gives up. The function being pure, computing it again is invisible (a
+  division by zero then crashes in the general version, with the usual
+  message). General versions call general versions, so a fallback costs one
+  fast attempt per call the program makes, not one per recursion level.
+  `findFastFns` keeps only the candidates all of whose callees have fast
+  versions.
+- `v == E.Case` and `!=` (either way round), where `E.Case` has no data and
+  `v` is an `E`, compare the tag (`genumIs`) instead of calling
+  `sd_box_equal`, which compares two different boxes through their
+  descriptor.
+
+Intervals for parameters and fields were not added: a parameter or a field
+can hold any int when the function is called or the struct built, so an
+interval for it needs every caller and every store (a whole-program
+analysis, and none for exported functions or function values); the fast
+versions are the checked-at-run-time form of "the parameters are small".
+
 *Concurrency* (runtime/README.md sections 10 and 11):
 
 - `chan T(n)` is `sd_chan_new(<descriptor of T>, n)`; `ch.send(v)` is
@@ -908,6 +942,15 @@ forward one release at a time.
   whole function: simple, and enough for loop counters, lengths and
   constants. Lengths are bounded only by the small range (the runtime's own
   limit), so `i + 1` with `i < xs.len()` is not small, while `i < 1000` is.
+- **Fast versions only for pure functions** (gen_fast.sd): giving up and
+  computing again is only invisible when the function has no effects, and
+  the fast version stays simple (words of small ints, no temporaries, no
+  frames). Functions with lists, strings or calls of other functions keep
+  one version.
+- **Ownership analyses are syntactic** (gen_move.sd): move on last use
+  looks at the statements of the declaring block, borrowed locals at the
+  mutations in the local's scope; neither follows the control flow, so
+  neither can be wrong about a path, and both are one walk per function.
 - **`seed fmt` prints tokens, not the tree** (see "The formatter"). Style
   decisions not fixed by the task are listed in docs/formatting.md: no line
   length limit, `{}` for empty blocks, trailing comments not aligned,

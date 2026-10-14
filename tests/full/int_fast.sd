@@ -1,0 +1,139 @@
+// Pure int functions get a small-int version (compiler/gen_fast.sd) that
+// gives up when a value leaves the small range or a division by zero would
+// crash; the general version then computes the same result. Every result
+// here must be the same as with general ints only.
+package main
+
+import "fmt"
+
+const int limit = 10
+const int big = 4611686018427387903
+
+fn fib(int n) int {
+    if (n < 2) {
+        return n
+    }
+    return fib(n - 1) + fib(n - 2)
+}
+
+// Linear recursion whose results overflow the small range early.
+fn fact(int n) int {
+    if (n <= 1) {
+        return 1
+    }
+    return n * fact(n - 1)
+}
+
+fn power(int b, int e) int {
+    int r = 1
+    for (int i = 0; i < e; i++) {
+        r = r * b
+    }
+    return r
+}
+
+fn gcd(int a, int b) int {
+    if (b == 0) {
+        return a
+    }
+    return gcd(b, a % b)
+}
+
+fn isEven(int n) bool {
+    if (n == 0) {
+        return true
+    }
+    return isOdd(n - 1)
+}
+
+fn isOdd(int n) bool {
+    if (n == 0) {
+        return false
+    }
+    return isEven(n - 1)
+}
+
+// && and || must not evaluate their right side when not needed: here that
+// would recurse forever.
+fn countDown(int n) bool {
+    return n <= 0 || countDown(n - 1)
+}
+
+fn both(bool a, int n) bool {
+    return a && n > 0 && countDown(n)
+}
+
+fn divs(int a, int b) int {
+    return a / b * 1000 + a % b
+}
+
+fn loops(int n) int {
+    int total = 0
+    for (int i = 0; i < n; i++) {
+        if (i % 3 == 0) {
+            continue
+        }
+        if (i > limit * 2) {
+            break
+        }
+        int sq = i * i
+        total = total + sq - (i & 1) + (i | 4) - (i ^ 2)
+    }
+    int j = n
+    for (; j > 0; ) {
+        j--
+        total++
+    }
+    const int k = 7
+    return total + k - -n
+}
+
+fn sumTo(int n) int {
+    int s = 0
+    for (int i = 1; i <= n; i++) {
+        s = s + i * i * i
+    }
+    return s
+}
+
+fn neg(int x) int {
+    return -x
+}
+
+fn minus(int a, int b) int {
+    return a - b
+}
+
+fn ackermann(int m, int n) int {
+    if (m == 0) {
+        return n + 1
+    }
+    if (n == 0) {
+        return ackermann(m - 1, 1)
+    }
+    return ackermann(m - 1, ackermann(m, n - 1))
+}
+
+fn unused(int _, int b) int {
+    int _ = b + 1
+    return b
+}
+
+fn main([]string args) error {
+    fmt.println(fib(30).string())
+    fmt.println(fact(20).string() + " " + fact(21).string() + " " + fact(30).string())
+    fmt.println(power(3, 39).string() + " " + power(3, 40).string() + " " + power(-2, 63).string())
+    fmt.println(gcd(1071, 462).string() + " " + gcd(-48, 18).string() + " " + gcd(big * 6, big * 4).string())
+    fmt.println(isEven(10).string() + " " + isOdd(7).string() + " " + isEven(7).string())
+    fmt.println(countDown(5).string() + " " + both(false, 3).string() + " " + both(true, 0).string() + " " + both(true, 4).string())
+    fmt.println(divs(7, 2).string() + " " + divs(-7, 2).string() + " " + divs(7, -2).string() + " " + divs(-7, -2).string())
+    fmt.println(divs(-4611686018427387904, -1).string())
+    fmt.println(loops(10).string() + " " + loops(40).string() + " " + loops(0).string())
+    fmt.println(sumTo(1000).string() + " " + sumTo(60000).string() + " " + sumTo(-5).string())
+    fmt.println(neg(5).string() + " " + neg(-4611686018427387904).string() + " " + neg(big + 1).string())
+    fmt.println(minus(-4611686018427387904, 1).string() + " " + minus(big, -1).string() + " " + minus(big * 2, big).string())
+    fmt.println(ackermann(2, 3).string() + " " + unused(1, 2).string())
+    fmt.println(fib(big - big + 20).string() + " " + fib(big * big - big * big + 10).string())
+    fmt.println(divs(1, 0).string())
+    return null
+}

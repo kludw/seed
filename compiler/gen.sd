@@ -121,6 +121,11 @@ type Gen struct {
     []MutEvent bwEvents
     []BorrowCand bwCands
     bool bwOn
+    // Fast versions of pure int functions (gen_fast.sd): the functions
+    // that have one, and the state of the search and of the generator.
+    map[int]bool fastFns
+    []int fastCalls
+    []int fastLoops
 }
 
 fn newGen(Checker c) Gen {
@@ -174,6 +179,9 @@ fn newGen(Checker c) Gen {
         bwEvents: []MutEvent{},
         bwCands: []BorrowCand{},
         bwOn: false,
+        fastFns: map[int]bool{},
+        fastCalls: []int{},
+        fastLoops: []int{},
     }
 }
 
@@ -185,11 +193,15 @@ fn (Gen g) mut genProgram(string natives) string {
     g.genTypes()
     g.genConsts()
     g.computeModSets()
+    g.findFastFns()
     for (int f = 0; f < g.c.ast.fns.len(); f++) {
         if (g.c.ast.fns[f].body < 0) {
             g.genNative(f)
         } else if (!g.c.ast.fns[f].isTest || g.c.testMode) {
             g.genFn(f)
+            if (g.isFast(f)) {
+                g.genFast(f)
+            }
         }
     }
     g.curFn = -1
@@ -262,7 +274,7 @@ fn (Gen g) mut emit(string line) {
 // leaked by a crash. Everything else that is called may crash.
 fn safeCallSet() map[string]bool {
     map[string]bool m = map[string]bool{}
-    []string names = []string{"sd_int_retain", "sd_int_release", "sd_str_retain", "sd_str_release", "sd_list_retain", "sd_list_release", "sd_map_retain", "sd_map_release", "sd_box_retain", "sd_box_release", "sd_iface_retain", "sd_iface_release", "sd_chan_retain", "sd_chan_release", "sd_list_new", "sd_map_new", "sd_box_new", "sd_iface_new", "SD_LIST_PUSH", "sd_str_concat", "sd_str_concat_n", "sd_str_concat_parts", "sd_str_append", "sd_int_to_str", "sd_float_to_str", "sd_bool_to_str", "sd_byte_to_str", "sd_str_from_bytes", "SD_INT", "SD_INT_S", "SD_SMALL", "SD_STR_LIT", "SD_BOX_REF", "SD_BOX_GET", "sd_err_is_null", "sd_iface_is_null", "sd_int_is_null", "sd_str_len", "sd_list_len", "sd_map_len", "sd_str_eq", "sd_str_cmp", "sd_int_eq", "sd_int_lt", "sd_int_le", "sd_int_gt", "sd_int_ge", "sd_int_add", "sd_int_sub", "sd_int_mul", "sd_int_neg", "sd_int_and", "sd_int_or", "sd_int_xor", "sd_byte_to_int", "sd_int_to_float", "sd_iface_self", "sd_str_contains", "sd_str_starts_with", "sd_str_ends_with", "sd_defer_mark", "sd_group_begin"}
+    []string names = []string{"sd_int_retain", "sd_int_release", "sd_str_retain", "sd_str_release", "sd_list_retain", "sd_list_release", "sd_map_retain", "sd_map_release", "sd_box_retain", "sd_box_release", "sd_iface_retain", "sd_iface_release", "sd_chan_retain", "sd_chan_release", "sd_list_new", "sd_map_new", "sd_box_new", "sd_iface_new", "SD_LIST_PUSH", "sd_str_concat", "sd_str_concat_n", "sd_str_concat_parts", "sd_str_append", "sd_int_to_str", "sd_float_to_str", "sd_bool_to_str", "sd_byte_to_str", "sd_str_from_bytes", "SD_INT", "SD_INT_S", "SD_SMALL", "SD_STR_LIT", "SD_BOX_REF", "SD_BOX_GET", "sd_err_is_null", "sd_iface_is_null", "sd_int_is_null", "sd_str_len", "sd_list_len", "sd_map_len", "sd_str_eq", "sd_str_cmp", "sd_int_eq", "sd_int_lt", "sd_int_le", "sd_int_gt", "sd_int_ge", "sd_int_add", "sd_int_sub", "sd_int_mul", "sd_int_neg", "sd_int_and", "sd_int_or", "sd_int_xor", "sd_byte_to_int", "sd_int_to_float", "sd_iface_self", "sd_str_contains", "sd_str_starts_with", "sd_str_ends_with", "sd_defer_mark", "sd_group_begin", "sd_int_add_slow", "sd_int_sub_slow", "SD_LIKELY", "__builtin_add_overflow", "__builtin_sub_overflow"}
     for (int i = 0; i < names.len(); i++) {
         m[names[i]] = true
     }
@@ -1372,6 +1384,11 @@ fn (Gen g) mut genFn(int f) {
     g.analyzeMoves(fd.body)
     g.defers = g.blockHasDefer(fd.body)
     string sig = g.fnSig(f)
+    if (g.isFast(f)) {
+        // The general version; genFast makes the fast one and the function
+        // that chooses (gen_fast.sd).
+        sig = sig.replace(" " + g.c.fnCName[f] + "(", " " + g.generalName(f) + "(")
+    }
     g.protos.push(sig + ";\n")
     g.emit(sig + " {")
     g.indent++

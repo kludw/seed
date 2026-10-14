@@ -647,6 +647,103 @@ fn (Gen g) plusLeaves(int e, []int acc) []int {
     return out
 }
 
+// The statement that adds (op "add") or subtracts (op "sub") the sd_int
+// value b to or from the sd_int lvalue x in place: when both are small
+// and the result does not overflow, x's word is replaced (a small int owns
+// nothing, so its old value needs no release); otherwise the runtime's
+// slow path computes the result, and x's old value is released. The C
+// compiler folds the tag test of b when b is known to be small.
+fn intUpdate(string lv, string op, string b) string {
+    string x = "(" + lv + ")"
+    return "{ int64_t r_; if (SD_LIKELY(((" + x + ".w | " + b + ".w) & 1) == 0) && SD_LIKELY(!__builtin_" + op + "_overflow(" + x + ".w, " + b + ".w, &r_))) " + x + ".w = r_; else { sd_int s_ = sd_int_" + op + "_slow(" + x + ", " + b + "); sd_int_release(" + x + "); " + x + " = s_; } }"
+}
+
+// x = x + a + b (or x = x - e) on an int local that is not unboxed (a
+// sum that grows, say): the value of the rest is computed, then x is
+// updated in place (intUpdate), with no temporary and no release on the
+// fast path. The rest must not mention x (x is read after it, which is the
+// same as before it, since nothing else can assign a local).
+fn (Gen g) mut genIntUpdate(Stmt st, Target tg) bool {
+    int v = g.intLocal(tg.expr)
+    if (v < 0 || g.isUnboxed(v)) {
+        return false
+    }
+    Expr rx = g.c.ast.exprs[st.expr]
+    ExprInfo ri = g.c.info[st.expr]
+    if (rx.kind != ExprKind.Binary || ri.ty != tyInt || ri.wrap || ri.narrowed) {
+        return false
+    }
+    []int rest = []int{}
+    string op = "add"
+    if (rx.op == Tok.Plus) {
+        []int leaves = g.plusLeaves(st.expr, []int{})
+        if (g.intLocal(leaves[0]) != v) {
+            return false
+        }
+        rest = leaves.slice(1, leaves.len())
+    } else if (rx.op == Tok.Minus) {
+        if (g.intLocal(rx.a) != v) {
+            return false
+        }
+        rest = []int{rx.b}
+        op = "sub"
+    } else {
+        return false
+    }
+    for (int i = 0; i < rest.len(); i++) {
+        if (g.mentionsVar(rest[i], v)) {
+            return false
+        }
+    }
+    string b = g.sumOf(rest)
+    if (!isIdent(b) && !b.startsWith("SD_INT(")) {
+        b = g.alias(tyInt, b)
+    }
+    g.emit(intUpdate(g.lname(v), op, b))
+    return true
+}
+
+// The sum of the int expressions leaves (evaluated in order) as a borrowed
+// sd_int: the simple small ones (isSimpleSmall) are added in C when their
+// total is small, the others with general additions.
+fn (Gen g) mut sumOf([]int leaves) string {
+    []int rest = []int{}
+    []int simple = []int{}
+    IntRange total = knownRange(0, 0)
+    for (int i = 0; i < leaves.len(); i++) {
+        if (g.isSimpleSmall(leaves[i])) {
+            simple.push(leaves[i])
+            total = binRange(Tok.Plus, total, g.smallRange(leaves[i]))
+        } else {
+            rest.push(leaves[i])
+        }
+    }
+    if (!isSmallRange(total)) {
+        rest = leaves
+        simple = []int{}
+    }
+    string acc = ""
+    if (rest.len() > 0) {
+        []string vals = g.operands(rest)
+        acc = vals[0]
+        for (int j = 1; j < vals.len(); j++) {
+            acc = g.temp(tyInt, "sd_int_add(" + acc + ", " + vals[j] + ")")
+        }
+    }
+    if (simple.len() == 0) {
+        return acc
+    }
+    []string terms = []string{}
+    for (int k = 0; k < simple.len(); k++) {
+        terms.push(smallOf(g.gexpr(simple[k])))
+    }
+    string s = "SD_INT_S((" + terms.join(" + ") + "))"
+    if (acc == "") {
+        return s
+    }
+    return g.temp(tyInt, "sd_int_add(" + acc + ", " + s + ")")
+}
+
 // sum + (i * i) % 7 + (i & 3): ints never overflow, so + is associative
 // and commutative, and the simple small operands (see isSimpleSmall) can be
 // added up in C first and then added to the others with one general

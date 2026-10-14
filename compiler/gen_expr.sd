@@ -785,6 +785,12 @@ fn (Gen g) mut gbinary(int e) string {
         return "(!" + n + ")"
     }
     int t = g.typeOf(x.a)
+    if (op == Tok.Eq || op == Tok.Ne) {
+        string tag = g.genumIs(e)
+        if (tag != "") {
+            return tag
+        }
+    }
     if (op == Tok.Plus && t == tyString) {
         return g.gconcat(e)
     }
@@ -802,6 +808,34 @@ fn (Gen g) mut gbinary(int e) string {
         }
     }
     return g.binaryOp(op, t, vals[0], vals[1])
+}
+
+// v == E.Case (or !=, either way round) where E.Case has no data and v is
+// an E (never null): only the case's tag needs comparing, not the boxes
+// (sd_box_equal compares the payloads through the descriptor when the boxes
+// differ). "" for any other comparison.
+fn (Gen g) mut genumIs(int e) string {
+    Expr x = g.c.ast.exprs[e]
+    int lit = x.b
+    int other = x.a
+    if (g.c.info[x.a].res == Res.EnumVal && g.c.ast.exprs[x.a].kind == ExprKind.Field) {
+        lit = x.a
+        other = x.b
+    }
+    ExprInfo li = g.c.info[lit]
+    if (g.c.ast.exprs[lit].kind != ExprKind.Field || li.res != Res.EnumVal || li.wrap || li.ifaceFrom >= 0) {
+        return ""
+    }
+    int t = g.typeOf(other)
+    if (g.kindOf(t) != Kind.Enum || g.c.types.decl(t) != li.ref) {
+        return ""
+    }
+    string v = g.gexpr(other)
+    string c = "(SD_BOX_GET(" + v + ", sd_E_" + g.declName(t) + ").tag == " + li.sub.string() + ")"
+    if (x.op == Tok.Ne) {
+        return "(!" + c + ")"
+    }
+    return c
 }
 
 // The operator op (not &&, || or string +) on two evaluated operands of

@@ -204,3 +204,66 @@ the compile. The benchmarks do not change: `fib`, `intloop`, `pingpong`,
 `spawn` and `strings` compile to the same C as before, and `json` (1.01),
 `maps` (0.99) and `sort` (0.98) are within noise; their time goes to
 allocation and to the runtime, not to copies of locals.
+
+## Integer fast paths
+
+On Linux x86_64 with GCC, `fib` was 2.9x Go and `intloop` 2.2x, against
+1.2x and 0.8x on macOS arm64. The generated code is the same; the
+difference is in what the C compiler makes of it. On x86 every general
+int operation becomes a tag test, the operation with an overflow jump,
+and, for each temporary, a release that tests the tag again (two compares
+and two branches). GCC cannot remove those releases, because the slow path
+(a big integer) also reaches them; clang on arm64 schedules the same
+branches better. `fib`'s hot path was 45 instructions with five saved
+registers; `intloop`'s loop 27. Three changes (compiler/README.md, "Int
+fast paths"):
+
+1. **In-place int updates.** `sum = sum + e`, `x = x - e`, `x++` and `x--`
+   on an int that is not unboxed replace the word when both values are
+   small and the add does not overflow; only the slow path makes a new
+   value and releases the old one. `intloop`'s loop went from 27 to 22
+   instructions; what is left against Go (17) is the tag test and overflow
+   jump of the unbounded `sum` and the shift that boxes the small part.
+2. **Fast versions of pure int functions.** A function of ints and bools
+   with a body of int arithmetic, comparisons, `if`, `for` and calls of
+   other such functions gets a version on the words of small ints
+   (`sd_fs_fib`: add, compare, overflow jump, no tags, no releases), tried
+   when every int argument is small; when a result leaves the small range
+   or a division by zero would crash, it gives up and the general version
+   computes the same result. `fib`'s fast version is about 25 instructions
+   with two saved registers (GCC also drops the overflow checks of `n - 1`
+   and `n - 2`, knowing `n >= 2` there).
+3. **Enum comparisons by tag.** `x.kind == ExprKind.Ident` compared the two
+   boxes with `sd_box_equal`, which walks the descriptor whenever the boxes
+   differ; comparing with a case without data now compares the tag. This
+   is not in the benchmarks (they compare no enums in their loops), but it
+   was 20% of the compiler's own time.
+
+Tried and not kept: unsigned `/` and `%` when the interval analysis knows
+the dividend is not negative (GCC already proves it and emits the same
+code). Not done: intervals for parameters and fields (a parameter can hold
+any int; bounding it needs every call site, which exported functions and
+function values do not have; the fast versions check the arguments at run
+time instead), and unboxing an unbounded accumulator like `sum` (it needs
+a second copy of the loop to continue in when it overflows).
+
+Interleaved runs (best of 9) against the code before these changes, and Go
+on the same machine:
+
+| Benchmark | Before | After | After / before | Go | After / Go |
+|---|---|---|---|---|---|
+| `fib` | 1.66 | 0.63 | 0.38 | 0.59 | 1.1 (was 2.9) |
+| `intloop` | 0.86 | 0.69 | 0.80 | 0.41 | 1.7 (was 2.2) |
+| `json` | 1.52 | 1.47 | 0.97 | 1.07 | 1.4 |
+
+The other benchmarks run the same instructions as before (callgrind:
+`strings` 9,512 M before and after; `json` 9,076 M to 8,902 M); their
+wall times moved by up to 8% either way between identical binaries on this
+shared machine.
+
+The compiler compiling itself, after the refcount work and these changes:
+
+| | Start | Refcount elision | Integer fast paths |
+|---|---|---|---|
+| instructions | 2,240 M | 2,040 M | 1,544 M |
+| wall time (interleaved, best of 11) | 1.00 | 0.95 | 0.77 |
