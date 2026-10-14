@@ -1,0 +1,17 @@
+// Package io reads the program's standard input. Stdout and stderr are
+// written with fmt.
+//
+// A line ends at "\n"; a "\r" directly before it is removed too. The last
+// line is returned even if it has no "\n". readLine and readAll share one
+// buffer, so they can be mixed. Calls from different goroutines are
+// serialised, and each call gets whole lines. Stdout is flushed before
+// stdin is read. Reading is a stop point: a goroutine whose group is
+// stopped while it waits for input stops there.
+package io
+
+// The next line of stdin without its line ending, or null at end of input.
+// The error is set only when reading fails, not at the end.
+pub fn readLine() (string?, error)
+
+// Everything left on stdin, up to end of input ("" if nothing is left).
+pub fn readAll() (string, error)

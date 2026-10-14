@@ -1,0 +1,74 @@
+// Package net is TCP connections, IPv4 and IPv6 (docs/stdlib.md, "net").
+//
+// Listener and Conn are handles: a private id of an entry in the runtime's
+// handle table. Copying one copies the id, so every copy refers to the
+// same connection; close() closes it for every copy, after which every
+// operation returns an error ending in "connection is closed" (or
+// "listener is closed"). Ids are never reused.
+//
+// accept, read, write and dial are stop points: if the goroutine's group
+// is stopped while one of them waits, the goroutine stops there and its
+// defers run. Each operation on a handle is atomic; two goroutines using
+// one handle take turns.
+//
+// Errors read "<function>: <subject>: <reason>":
+// "net.dial: localhost:1: connection refused",
+// "net.Conn.read: 127.0.0.1:51234: timeout".
+package net
+
+// A socket listening for TCP connections.
+pub type Listener struct {
+    int id
+}
+
+// A TCP connection.
+pub type Conn struct {
+    int id
+}
+
+// Listens for TCP connections on addr, "host:port". An empty host
+// (":8080") listens on every IPv4 interface ("[::]:8080" for every IPv6
+// one). Port 0 picks a free port; addr() tells which.
+pub fn listen(string addr) (Listener, error)
+
+// Connects to "host:port". The host can be a name, an IPv4 address or a
+// bracketed IPv6 address ("[::1]:80"). A name is resolved with the system
+// resolver, and each of its addresses is tried in order. timeout limits the
+// whole call, in nanoseconds; 0 means no limit. Crashes if timeout is
+// negative.
+pub fn dial(string addr, int timeout) (Conn, error)
+
+// Waits for the next connection. After close() (from any goroutine), it
+// returns the error "net.Listener.accept: <addr>: listener is closed".
+pub fn (Listener l) accept() (Conn, error)
+
+// The address being listened on, with the real port: "127.0.0.1:54321",
+// "[::1]:8080". "" once the listener is closed.
+pub fn (Listener l) addr() string
+
+// Stops listening. A goroutine waiting in accept gets an error. Closing
+// again does nothing.
+pub fn (Listener l) close()
+
+// Waits for data and returns between 1 and max bytes as soon as some are
+// available, or null when the other side has closed its end. Crashes if
+// max < 1.
+pub fn (Conn c) read(int max) (string?, error)
+
+// Writes all of data. Writing to a connection the other side has closed
+// returns an error ("broken pipe" or "connection reset by peer").
+pub fn (Conn c) write(string data) error
+
+// From now on, each read and write fails with "timeout" if it makes no
+// progress for d nanoseconds; 0 (the default) means no limit. The
+// connection stays usable after a timeout. Applies to every copy. Crashes
+// if d is negative.
+pub fn (Conn c) setTimeout(int d)
+
+// The other side's address, "203.0.113.7:51234". "" once the connection is
+// closed.
+pub fn (Conn c) remoteAddr() string
+
+// Closes the connection. A goroutine waiting in read or write on it gets an
+// error. Closing again does nothing.
+pub fn (Conn c) close()

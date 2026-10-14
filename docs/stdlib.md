@@ -142,7 +142,8 @@ Reading the program's standard input. Stdout and stderr are written with `fmt`.
 - A line ends at `"\n"`. A `"\r"` directly before it is removed too. The last line is returned even if it has no `"\n"`. An empty input gives `null` on the first call.
 - `io.readAll()` returns everything not yet returned by `io.readLine()`, so the two can be mixed.
 - Stdin is shared by the whole process. Calls from different goroutines are serialised, and each call gets whole lines.
-- The error is set only when reading fails (for example, stdin was closed by the OS). Reaching the end is not an error.
+- The error is set only when reading fails (for example, stdin was closed by the OS): `io.readLine: bad file descriptor`. Reaching the end is not an error.
+- Both are stop points: a goroutine waiting for input whose group is stopped stops there.
 
 ```
 for (;;) {
@@ -597,7 +598,7 @@ Seed has only values, and an open connection is not a value: it lives in the ope
 - A handle is a small struct holding the id of an entry in the runtime's handle table. Its fields are private, so a program cannot make one up.
 - **Copying a handle copies the id, not the connection.** Both copies refer to the same connection, the same way two copies of a `chan` refer to the same channel. `==` on handles compares ids.
 - Handle methods are not `mut`, because they don't change the handle value; they act on the connection behind it. So they can be called on parameters, and a handle can be stored in a struct and used from a read-only method.
-- `close()` closes the connection for every copy. After that, every operation on any copy returns an error ending in `connection is closed`. Ids are never reused, so a stale copy can never reach a different connection opened later.
+- `close()` closes the connection for every copy. After that, every operation on any copy returns an error ending in `connection is closed` (`listener is closed` for a `net.Listener`, `file is closed` for an `fs.File`), and a goroutine waiting in an operation on it is woken with that error. Closing again does nothing. Ids are never reused, so a stale copy can never reach a different connection opened later.
 - Handles are not closed automatically when the last copy disappears; close them, usually with `defer`. When a group stops a goroutine, its `defer`s run, so `defer conn.close()` also covers that case. Every handle is closed when the process exits.
 - **Goroutines.** A handle can be sent over a channel to hand the connection to another goroutine. This is how a server passes each accepted connection to a worker. The sending goroutine should then stop using its copy. If two goroutines do use one connection, nothing breaks in memory: each operation on a handle is atomic, but the order in which their reads and writes happen is up to the scheduler.
 
@@ -617,16 +618,18 @@ pub type Conn struct {
 
 | Function | Result |
 |---|---|
-| `net.listen(string addr) (Listener, error)` | Listens for TCP connections on `addr`, `"host:port"`. An empty host (`":8080"`) listens on every interface. Port `0` picks a free port; read it back with `addr()`. |
-| `net.dial(string addr, int timeout) (Conn, error)` | Connects to `"host:port"`. The host can be a name, an IPv4 address or a bracketed IPv6 address (`"[::1]:80"`). A name is resolved with the system resolver, trying each address in order. `timeout` limits the whole call, in nanoseconds; `0` means no limit. |
+| `net.listen(string addr) (Listener, error)` | Listens for TCP connections on `addr`, `"host:port"`. An empty host (`":8080"`) listens on every IPv4 interface (`"[::]:8080"` on every IPv6 one). Port `0` picks a free port; read it back with `addr()`. |
+| `net.dial(string addr, int timeout) (Conn, error)` | Connects to `"host:port"`. The host can be a name, an IPv4 address or a bracketed IPv6 address (`"[::1]:80"`); an empty host means `localhost`. A name is resolved with the system resolver, trying each address in order. `timeout` limits the whole call, name resolution included, in nanoseconds; `0` means no limit. Crashes if `timeout` is negative. |
+
+A malformed address is an error, not a crash, since addresses usually come from outside the program: `net.dial: example.com: missing port`, `invalid port`, `IPv6 addresses need brackets: [::1]:80`.
 
 ### Listener methods
 
 | Method | Result |
 |---|---|
 | `l.accept() (Conn, error)` | Waits for the next connection. |
-| `l.addr() string` | The address being listened on, with the real port: `"0.0.0.0:54321"`. |
-| `l.close()` | Stops listening. A goroutine waiting in `accept` gets an error. |
+| `l.addr() string` | The address being listened on, with the real port: `"0.0.0.0:54321"`, `"[::1]:8080"`. `""` once the listener is closed. |
+| `l.close()` | Stops listening. A goroutine waiting in `accept` gets the error `net.Listener.accept: 0.0.0.0:8080: listener is closed`. |
 
 ### Conn methods
 
@@ -635,12 +638,13 @@ pub type Conn struct {
 | `c.read(int max) (string?, error)` | Waits for data and returns between 1 and `max` bytes as soon as some are available, or `null` when the other side has closed its end. Crashes if `max < 1`. |
 | `c.write(string data) error` | Writes all of `data`. |
 | `c.setTimeout(int d)` | From now on, each `read` and `write` fails with `timeout` if it makes no progress for `d` nanoseconds. `0` (the default) means no limit. Crashes if `d` is negative. Applies to the connection, so to every copy. |
-| `c.remoteAddr() string` | The other side's address, `"203.0.113.7:51234"`. |
+| `c.remoteAddr() string` | The other side's address, `"203.0.113.7:51234"`. `""` once the connection is closed. |
 | `c.close()` | Closes the connection. |
 
 - `accept`, `read`, `write` and `dial` are stop points: if the goroutine's group is stopped while one of them waits, it returns and the goroutine stops, running its `defer`s.
 - Writing to a connection the other side has closed returns an error (`broken pipe`); it never kills the process.
 - A timeout error reads `net.Conn.read: 203.0.113.7:51234: timeout`. After a timeout the connection is still open and can be used again.
+- Sockets are opened close-on-exec, so children started with `os.run` don't inherit them.
 
 ```
 fn echo(net.Conn c) error {
@@ -719,14 +723,16 @@ Any other response is a struct literal: `http.Response{status: 302, headers: map
 
 | Function | Result |
 |---|---|
-| `http.serve(string addr, Handler handler) error` | Listens on `addr` (as `net.listen`) and serves requests with `handler` until the goroutine running it is stopped. Returns an error only if it cannot listen. |
+| `http.serve(string addr, Handler handler) error` | Listens on `addr` (as `net.listen`) and serves requests with `handler` until the goroutine running it is stopped. Returns an error only if it cannot listen: `http.serve: :80: permission denied`. |
+| `http.serveListener(net.Listener ln, Handler handler) error` | Serves on a listener the program opened, until the goroutine running it is stopped or `ln` is closed (by any copy); then it returns `null`. Listening on port `0` and passing the listener here is how a program, or a test, serves on a free port and learns which one it got (`ln.addr()`). |
 
 - **Each connection runs in its own goroutine**, inside a group that `serve` owns. Connections are kept alive between requests (HTTP/1.1 keep-alive) and closed after 60 seconds idle.
 - **The handler is an interface, not a function**, because a function value cannot carry anything: Seed has no closures and no global variables. A struct that `implements http.Handler` can hold configuration and channels. Each request sees a copy of it, so the handler can't change shared state directly; state that requests change lives in a goroutine that the handler talks to over channels (see `examples/server.sd`).
 - **Errors and crashes are contained per request.** If `handle` returns an error, the client gets `500` with the body `internal server error`, and `http: GET /path: <message>` is written to stderr. If `handle` crashes, the same happens with the crash message. In both cases the server carries on; one bad request never stops the server.
 - The server sets `content-length` itself and ignores one set by the handler. It sends no `content-type` unless the handler set one. For `HEAD` requests it sends the headers but no body.
-- Limits: request line and headers 64 KiB (else `431`), body 8 MiB (else `413`), and 30 seconds to receive a whole request (else the connection is closed). Chunked request bodies are decoded. Malformed requests get `400` without calling the handler.
-- `serve` is normally spawned in the program's top-level group. If the group is stopped, `serve` stops accepting, stops the connection goroutines at their next stop point, closes the listener and returns.
+- Limits: request line and headers 64 KiB (else `431`), body 8 MiB (else `413`), and 30 seconds without progress while a request is being received (else the connection is closed). Chunked request bodies are decoded. Malformed requests get `400` (`505` for an HTTP version other than 1.x, `501` for a transfer coding other than chunked) without calling the handler, and the connection is closed.
+- HTTP/1.0 requests are answered and the connection closed, unless they ask for `connection: keep-alive`; `connection: close` closes it after the response in either version. A request with `expect: 100-continue` gets `100 Continue` before its body is read.
+- **Stopping a server.** `serve` is normally spawned in the program's top-level group. If the group is stopped, `serve` stops accepting, stops the connection goroutines (and the handlers they are running) at their next stop point, closes the listener and returns. Closing the listener given to `serveListener` stops the server the same way, from any goroutine; `serveListener` then returns `null`. Requests in progress are cut off in both cases: there is no graceful drain in v1.
 
 ### Client
 
@@ -814,10 +820,9 @@ pub fn (Conn c) read(int max) (string?, error)
 - Native declarations are only allowed in packages under `lib/`. Anywhere else, a missing body is a compile error ("fn f needs a body").
 - The compiler emits a call to a C function with a fixed name: `sd_lib_<pkg>_<name>` for functions and `sd_lib_<pkg>_<Type>_<method>` for methods (`sd_lib_math_sqrt`, `sd_lib_net_Conn_read`). Arguments and results use the runtime's normal C representation of each Seed type; with several results, the last one (normally the `error`) is returned and the others are written through out-pointers after the arguments. A `mut` native method receives a pointer to the receiver. The full contract is in [runtime/README.md](../runtime/README.md#13-native-functions).
 - Errors are made with the runtime helper that `errors.new` uses, so their messages follow the format above. The native code builds the full message (`fs.read: notes.txt: no such file or directory`) from `sd_strerror(errno)` (`strerror` with a lowercase first letter).
-- **Blocking.** A native call that can wait (reading, accepting, connecting, sleeping, waiting for a child process) must call the runtime's `sd_block_begin()` and `sd_block_end()` around the wait, so that other goroutines keep running and so that a group can stop the goroutine there. `sd_block_end()` reports whether the goroutine was asked to stop; the native then cleans up (kills a child, abandons a read) and returns to the runtime's stop path, which runs `defer`s. How this maps to the scheduler (OS threads, or an event loop with non-blocking descriptors) is the runtime's choice; the observable behaviour is the same.
-- **Handles.** The runtime keeps one process-wide table (shared by `fs` and `net`, so it belongs in `runtime/`, not in one package's C file). Until the runtime has it, `fs` keeps its own table of open files in `lib/fs/fs.c`, with the same rules. Each entry holds the kind (file, conn, listener), the descriptor, the read buffer used by `readLine` and `read`, the timeout, the closed flag, and a mutex that makes each operation atomic. The Seed struct holds only the entry's `int` id; ids count up and are never reused.
+- **Blocking.** A native call that can wait (reading, accepting, connecting, waiting for a child process) waits through the runtime, so that a group can stop the goroutine there: `sd_wait_fd(fd, for_write, timeout)` (a `poll` on the descriptor and on the goroutine's wake-up pipe, which the runtime writes to when it cancels the goroutine), `sd_wait_child(pid, &status)`, or the handle functions below. A wait returns `SD_WAIT_STOP` when the goroutine must stop; the native then cleans up (closes a half-made socket, frees what it allocated; `sd_wait_child` has already killed and reaped the child) and calls `sd_stop()`, the runtime's stop path, which runs `defer`s. Each goroutine is an OS thread, so a waiting native blocks only its own goroutine. `time.sleep` and `time.after` are runtime timers and stop points too. The C side is in [runtime/README.md](../runtime/README.md#13-native-functions).
+- **Handles.** The runtime keeps one process-wide table (shared by `io`, `net` and `fs`, so it is in `runtime/`, not in one package's C file). `fs.File` still uses its own table in `lib/fs/fs.c` with the same rules and will move to the runtime table. Each entry holds the kind (file, conn, listener, stdin), the descriptor, the read buffer used by `readLine` and `read`, the timeout, the closed flag, and an operation lock that makes each operation atomic (waiting for it is a stop point too). The Seed struct holds only the entry's `int` id; ids count up and are never reused. `close` marks the entry closed, wakes a goroutine waiting on it, and the descriptor is closed when no operation uses it any more, so a descriptor number is never reused under a running operation.
 - **The core packages in seed0.** `seed0` implements `errors.new`, `fmt`, `os.exit`, `os.env`, `os.run`, `os.executable`, `os.cwd` and the `fs` functions in [builtins.md](builtins.md) directly in its runtime and does not read `lib/`. The real compiler uses `lib/`, and both must behave identically for that subset (including the error messages).
-- **Blocking natives are not stop points yet.** The runtime has no `sd_block_begin`/`sd_block_end` hooks so far; a native that blocks only blocks its own goroutine (each goroutine is a thread), but a failed group cannot stop it there.
 
 ### Native code per package
 

@@ -33,6 +33,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+#include <sys/types.h>
 
 #define SD_INLINE static inline __attribute__((unused))
 #define SD_NORETURN __attribute__((noreturn))
@@ -604,6 +605,81 @@ sd_chan *sd_time_after(sd_int ns);  /* chan int receiving the wall-clock time on
 void sd_time_sleep(sd_int ns);      /* a cancellation point, like a receive */
 sd_int sd_time_now(void);           /* monotonic nanoseconds */
 
+/* ---- blocking calls (stop points) and handles ----
+ * A native that waits for the OS waits through these, so that a goroutine
+ * whose group fails stops there (runtime/README.md, section 13). Results of
+ * the waits: */
+enum {
+  SD_WAIT_READY = 1,    /* the descriptor is ready (or has an error or hang-up to report) */
+  SD_WAIT_TIMEOUT = 0,  /* the timeout passed first */
+  SD_WAIT_STOP = -1,    /* the goroutine must stop: clean up, then sd_stop() */
+  SD_WAIT_FAILED = -2,  /* poll failed; errno is set */
+};
+/* Waits until fd is readable (for_write false) or writable, for at most
+ * timeout_ns (<= 0: no limit). */
+int sd_wait_fd(int fd, bool for_write, int64_t timeout_ns);
+/* Waits for child process pid to end and stores its waitpid status. 0, or
+ * an errno value, or SD_WAIT_STOP after killing the child (SIGKILL) and
+ * reaping it. */
+int sd_wait_child(pid_t pid, int *status);
+/* True when the goroutine has been asked to stop (its group failed). */
+bool sd_stopping(void);
+/* Stops the goroutine: unwinds it like a cancelled channel operation, running
+ * its defers. Natives call it after cleaning up when a wait says
+ * SD_WAIT_STOP. */
+SD_NORETURN void sd_stop(void);
+
+/* Handles: one process-wide table of open descriptors (net connections and
+ * listeners, files, stdin), referred to from Seed by an int id. Ids count up
+ * from 1 and are never reused. Each entry has an operation lock (one
+ * operation at a time), a read buffer, a timeout and a closed flag. */
+typedef struct sd_handle sd_handle;
+enum { SD_HANDLE_FILE = 1, SD_HANDLE_CONN, SD_HANDLE_LISTENER, SD_HANDLE_STDIN };
+/* Results of the handle I/O functions (and SD_WAIT_READY/TIMEOUT above). */
+enum {
+  SD_IO_OK = 1,        /* done; a read got at least one byte */
+  SD_IO_EOF = 0,       /* end of input: nothing read */
+  SD_IO_ERROR = -1,    /* the OS failed: the errno value is stored through the err argument */
+  SD_IO_TIMEOUT = -2,  /* no progress within the handle's timeout */
+  SD_IO_CLOSED = -3,   /* the handle was closed (by any copy) */
+};
+/* Registers fd (owned from now on: closed when the handle is closed and no
+ * operation uses it any more). name is the subject of its error messages
+ * (copied; NULL or "" for none). Returns the id. */
+int64_t sd_handle_new(int kind, int fd, const char *name);
+/* The handle with its operation lock held, or NULL if id is closed, unknown
+ * or of another kind. Waiting for another goroutine's operation on the same
+ * handle is a stop point. */
+sd_handle *sd_handle_acquire(int64_t id, int kind);
+void sd_handle_release(sd_handle *h);  /* unlocks */
+/* Closes the handle for every copy: operations waiting on it return
+ * SD_IO_CLOSED. False if it was already closed. */
+bool sd_handle_close(int64_t id);
+void sd_handle_set_timeout(int64_t id, int64_t ns); /* 0: none; ignored when closed */
+int sd_handle_fd(const sd_handle *h);
+const char *sd_handle_name(const sd_handle *h);     /* "" when it has none */
+/* The name of handle id without waiting for its operation lock ("" once it
+ * is closed). Owned. */
+sd_str sd_handle_subject(int64_t id);
+/* Waits for the acquired handle's descriptor, with its timeout: SD_IO_OK
+ * (ready), SD_IO_TIMEOUT, SD_IO_CLOSED, or SD_IO_ERROR (errno set). If the
+ * goroutine must stop, releases h and stops (so hold nothing else across
+ * it). */
+int sd_handle_wait(sd_handle *h, bool for_write);
+/* Buffered I/O on an acquired handle; a stop point like sd_handle_wait.
+ * read: between 1 and max bytes (buffered ones first). read_line: the next
+ * line without "\n" or "\r\n" (the last line may lack it). read_all:
+ * everything up to the end (SD_IO_OK, possibly ""). *out is owned. */
+int sd_handle_read(sd_handle *h, int64_t max, sd_str *out, int *err);
+int sd_handle_read_line(sd_handle *h, sd_str *out, int *err);
+int sd_handle_read_all(sd_handle *h, sd_str *out, int *err);
+int sd_handle_write(sd_handle *h, const char *data, int64_t len, int *err);
+/* The error "<fn>: <name>: <reason>" for an I/O result (SD_IO_ERROR,
+ * SD_IO_TIMEOUT: "timeout", SD_IO_CLOSED). h may be NULL (a closed handle:
+ * then there is no subject); kind picks "connection is closed", "listener
+ * is closed", "file is closed" or "stdin is closed". */
+sd_err sd_handle_error(const char *fn, const sd_handle *h, int kind, int result, int err);
+
 /* ---- program entry and exit ----
  *   int main(int argc, char **argv) { return sd_main(argc, argv, sd_f_main); }
  * Runs the Seed main with an owned []string of the arguments. Returning an
@@ -648,7 +724,7 @@ SD_NORETURN void sd_os_crash(sd_str message);       /* os.crash: like a runtime 
 sd_str sd_os_executable(void);                      /* the program's real path ("" if unknown) */
 sd_err sd_os_cwd(sd_str *out);                      /* os.cwd */
 sd_str sd_os_env(sd_str name);                      /* string?: NULL when unset */
-sd_err sd_os_run(const sd_list *argv, sd_int *code); /* on error *code = SD_INT_NULL */
+sd_err sd_os_run(const sd_list *argv, sd_int *code); /* on error *code = SD_INT_NULL; a stop point */
 /* fs (on error the out value is NULL) */
 sd_err sd_fs_read(sd_str path, sd_str *out);
 sd_err sd_fs_write(sd_str path, sd_str data);

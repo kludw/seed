@@ -71,6 +71,36 @@ Until field privacy exists, nothing would stop another package from reading
 or setting `rand.Source.state`; that cannot happen yet, because user
 packages are not implemented either.
 
+## 3. A nullable variable is not narrowed by assigning a value to it
+
+Found while writing the http server tests (seed-v2, e7254fe). After
+`if (x == null) { x = "..." }`, `x` is non-null on every path, but the
+checker still treats it as `string?`:
+
+```
+package main
+
+import "fmt"
+
+fn find(map[string]string m) string? {
+    return m["k"]
+}
+
+fn main([]string args) error {
+    string? kind = find(map[string]string{})
+    if (kind == null) {
+        kind = "none"
+    }
+    fmt.println(kind)             // error: kind is nullable (string?) and cannot be used as string
+    return null
+}
+```
+
+SPEC.md only promises narrowing after a null check, so this may be a
+limit rather than a bug; Kotlin and TypeScript narrow on assignment.
+Workaround (lib/http/tests/server_test.sd): a non-null variable with the
+default, set from the nullable one inside `if (v != null)`.
+
 ## Not bugs, but limits the library had to work around
 
 These are documented in lib/README.md:

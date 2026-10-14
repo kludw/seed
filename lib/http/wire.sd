@@ -2,7 +2,7 @@ package http
 
 // HTTP/1.1 messages on the wire (RFC 9112), with no I/O: a reader that turns
 // bytes, as they arrive, into requests or responses, and the functions that
-// write them. serve, get and send (which need net) are built on these:
+// write them. serve, get and send (server.sd, client.sd) are built on these:
 //
 //   server, per connection:
 //     MessageReader r = newMessageReader(maxHeadBytes, maxRequestBody)
@@ -101,6 +101,12 @@ type MessageReader struct {
     int bodyLen
     // nextResponse: the status of the head being read.
     int status
+    // nextRequest, set when a request's head has been read: whether the
+    // connection must be closed after answering it (HTTP/1.0 without
+    // keep-alive, or "connection: close"), and whether the client waits
+    // for "100 Continue" before sending the body.
+    bool closeAfter
+    bool expectContinue
 }
 
 fn newMessageReader(int headLimit, int bodyLimit) MessageReader {
@@ -119,6 +125,8 @@ fn newMessageReader(int headLimit, int bodyLimit) MessageReader {
         body: []string{},
         bodyLen: 0,
         status: 0,
+        closeAfter: false,
+        expectContinue: false,
     }
 }
 
@@ -133,6 +141,12 @@ fn (MessageReader r) mut feed(string data) {
 // The number of bytes received and not yet used by a message.
 fn (MessageReader r) buffered() int {
     return r.buf.len() - r.pos + r.moreLen
+}
+
+// Whether the reader is between messages: nothing of the next one has
+// arrived.
+fn (MessageReader r) idle() bool {
+    return r.phase == ReadPhase.Head && r.head.len() == 0 && r.buffered() == 0
 }
 
 // Moves the fed bytes into buf, dropping the parsed bytes before pos.
@@ -521,6 +535,23 @@ fn (MessageReader r) mut nextRequest() RequestParse {
         if (version == "HTTP/1.1" && headers["host"] == null) {
             return RequestParse.Reject(400, "missing host header")
         }
+        r.closeAfter = version == "HTTP/1.0"
+        string? connection = headers["connection"]
+        if (connection != null) {
+            []string tokens = connection.toLower().split(",")
+            for (int i = 0; i < tokens.len(); i++) {
+                string token = httpTrimOws(tokens[i])
+                if (token == "close") {
+                    r.closeAfter = true
+                    break
+                }
+                if (token == "keep-alive") {
+                    r.closeAfter = false
+                }
+            }
+        }
+        string? expect = headers["expect"]
+        r.expectContinue = version == "HTTP/1.1" && expect != null && httpTrimOws(expect).toLower() == "100-continue"
         string framing = r.startBody(headers, false, false)
         if (framing == "unsupported transfer-encoding") {
             return RequestParse.Reject(501, framing)

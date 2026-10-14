@@ -109,13 +109,16 @@ sd_err sd_os_run(const sd_list *argv, sd_int *code) {
     free(av);
     return e;
   }
-  int st;
-  while (waitpid(pid, &st, 0) < 0) {
-    if (errno != EINTR) {
-      sd_err e = sd_errorf("os.run: %s: %s", av[0], sd_strerror(errno));
-      free(av);
-      return e;
-    }
+  int st = 0;
+  int w = sd_wait_child(pid, &st); /* a stop point: the child is killed if the goroutine is stopped */
+  if (w == SD_WAIT_STOP) {
+    free(av);
+    sd_stop();
+  }
+  if (w != 0) {
+    sd_err e = sd_errorf("os.run: %s: %s", av[0], sd_strerror(w));
+    free(av);
+    return e;
   }
   /* glibc's posix_spawnp reports exec failure as exit status 127. */
   free(av);

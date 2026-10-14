@@ -1,0 +1,7 @@
+prompt> [first line] 10
+[] 0
+[third] 5
+rest: [fourth
+last without newline]
+after: true
+empty: []

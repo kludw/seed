@@ -1,0 +1,344 @@
+package net
+
+import "errors"
+import "strings"
+import "time"
+
+// Accepts one connection and echoes what it reads until the client closes
+// its end.
+fn echoOnce(Listener ln) error {
+    Conn c = try ln.accept()
+    defer c.close()
+    for (;;) {
+        string? data = try c.read(4096)
+        if (data == null) {
+            return null
+        }
+        try c.write(data)
+    }
+}
+
+// Sends each message and reads its echo; sends the joined echoes on out.
+fn echoClient(string addr, []string messages, chan string out) error {
+    Conn c = try dial(addr, 5 * time.second)
+    defer c.close()
+    []string got = []string{}
+    for (int i = 0; i < messages.len(); i++) {
+        try c.write(messages[i])
+        string echoed = ""
+        for (; echoed.len() < messages[i].len(); ) {
+            string? data = try c.read(4096)
+            if (data == null) {
+                return errors.new("server closed early")
+            }
+            echoed = echoed + data
+        }
+        got.push(echoed)
+    }
+    out.send(got.join("|"))
+    return null
+}
+
+test "echo over loopback" {
+    Listener ln = try listen("127.0.0.1:0")
+    defer ln.close()
+    string addr = ln.addr()
+    assert(addr.startsWith("127.0.0.1:"))
+    assert(addr != "127.0.0.1:0")
+    chan string out = chan string(1)
+    error err = group {
+        spawn echoOnce(ln)
+        spawn echoClient(addr, []string{"hello", "", "world", strings.repeat("x", 100000)}, out)
+    }
+    assert(err == null)
+    string? got = out.receive()
+    assert(got != null)
+    assert(got == "hello||world|" + strings.repeat("x", 100000))
+}
+
+test "remoteAddr and addr" {
+    Listener ln = try listen("127.0.0.1:0")
+    defer ln.close()
+    Conn client = try dial(ln.addr(), 0)
+    defer client.close()
+    Conn server = try ln.accept()
+    defer server.close()
+    assert(client.remoteAddr() == ln.addr())
+    assert(server.remoteAddr().startsWith("127.0.0.1:"))
+    assert(server.remoteAddr() != ln.addr())
+    // Handles compare by id: copies are equal, different connections not.
+    Conn copy = client
+    assert(copy == client)
+    assert(copy != server)
+}
+
+test "read returns null when the other side closes" {
+    Listener ln = try listen("127.0.0.1:0")
+    defer ln.close()
+    Conn client = try dial(ln.addr(), 0)
+    Conn server = try ln.accept()
+    defer server.close()
+    try client.write("bye")
+    client.close()
+    string all = ""
+    for (;;) {
+        string? data = try server.read(1)
+        if (data == null) {
+            break
+        }
+        assert(data.len() == 1)
+        all = all + data
+    }
+    assert(all == "bye")
+}
+
+test "operations on a closed connection fail" {
+    Listener ln = try listen("127.0.0.1:0")
+    Conn client = try dial(ln.addr(), 0)
+    Conn copy = client
+    client.close()
+    client.close()
+    string? data, error err = copy.read(10)
+    assert(data == null)
+    assert(err != null)
+    assert(err.message() == "net.Conn.read: connection is closed")
+    error werr = copy.write("x")
+    assert(werr != null)
+    assert(werr.message() == "net.Conn.write: connection is closed")
+    assert(copy.remoteAddr() == "")
+    ln.close()
+    assert(ln.addr() == "")
+    _, error aerr = ln.accept()
+    assert(aerr != null)
+    assert(aerr.message() == "net.Listener.accept: listener is closed")
+}
+
+test "dial errors" {
+    // Find a port nobody listens on: listen, note the port, close.
+    Listener ln = try listen("127.0.0.1:0")
+    string addr = ln.addr()
+    ln.close()
+    _, error err = dial(addr, 0)
+    assert(err != null)
+    assert(err.message() == "net.dial: " + addr + ": connection refused")
+    _, error err2 = dial("127.0.0.1", 0)
+    assert(err2 != null)
+    assert(err2.message() == "net.dial: 127.0.0.1: missing port")
+    _, error err3 = dial("127.0.0.1:99999", 0)
+    assert(err3 != null)
+    assert(err3.message() == "net.dial: 127.0.0.1:99999: invalid port")
+    _, error err4 = dial("::1:80", 0)
+    assert(err4 != null)
+    assert(err4.message() == "net.dial: ::1:80: IPv6 addresses need brackets: [::1]:80")
+    _, error err5 = listen("127.0.0.1:x")
+    assert(err5 != null)
+    assert(err5.message() == "net.listen: 127.0.0.1:x: invalid port")
+}
+
+test "listen on a port in use fails" {
+    Listener ln = try listen("127.0.0.1:0")
+    defer ln.close()
+    _, error err = listen(ln.addr())
+    assert(err != null)
+    assert(err.message() == "net.listen: " + ln.addr() + ": address already in use")
+}
+
+test "dial by name and IPv6" {
+    Listener ln = try listen("127.0.0.1:0")
+    defer ln.close()
+    string port = ln.addr().slice(10, ln.addr().len())
+    // localhost may resolve to ::1 first; dial tries each address.
+    Conn c = try dial("localhost:" + port, 5 * time.second)
+    c.close()
+    Listener ln6, error err = listen("[::1]:0")
+    if (err == null) {
+        assert(ln6.addr().startsWith("[::1]:"))
+        Conn c6 = try dial(ln6.addr(), 0)
+        Conn s6 = try ln6.accept()
+        assert(s6.remoteAddr().startsWith("[::1]:"))
+        c6.close()
+        s6.close()
+        ln6.close()
+    }
+}
+
+test "read timeout" {
+    Listener ln = try listen("127.0.0.1:0")
+    defer ln.close()
+    Conn client = try dial(ln.addr(), 0)
+    defer client.close()
+    Conn server = try ln.accept()
+    defer server.close()
+    server.setTimeout(20 * time.millisecond)
+    string? data, error err = server.read(10)
+    assert(data == null)
+    assert(err != null)
+    assert(err.message() == "net.Conn.read: " + server.remoteAddr() + ": timeout")
+    // The connection is still usable.
+    try client.write("late")
+    server.setTimeout(0)
+    string? later = try server.read(10)
+    assert(later != null)
+    assert(later == "late")
+}
+
+fn netTestCrashRead(Conn c) {
+    _, _ = c.read(0)
+}
+
+fn netTestCrashTimeout(Conn c) {
+    c.setTimeout(-1)
+}
+
+fn netTestCrashDial() {
+    _, _ = dial("127.0.0.1:1", -5)
+}
+
+test "caller mistakes crash" {
+    Listener ln = try listen("127.0.0.1:0")
+    defer ln.close()
+    Conn c = try dial(ln.addr(), 0)
+    defer c.close()
+    error err = group {
+        spawn netTestCrashRead(c)
+    }
+    assert(err != null)
+    assert(err.message() == "crash: net.Conn.read: max (0) must be at least 1")
+    error err2 = group {
+        spawn netTestCrashTimeout(c)
+    }
+    assert(err2 != null)
+    assert(err2.message() == "crash: net.Conn.setTimeout: d (-1) must not be negative")
+    error err3 = group {
+        spawn netTestCrashDial()
+    }
+    assert(err3 != null)
+    assert(err3.message() == "crash: net.dial: timeout (-5) must not be negative")
+}
+
+// Blocks in accept (nobody connects).
+fn netTestAcceptForever(Listener ln) error {
+    _ = try ln.accept()
+    return errors.new("accept returned")
+}
+
+// Blocks in read (nobody writes).
+fn netTestReadForever(Conn c) error {
+    _ = try c.read(10)
+    return errors.new("read returned")
+}
+
+fn netTestFailSoon() error {
+    time.sleep(30 * time.millisecond)
+    return errors.new("stop")
+}
+
+test "a stopped group stops goroutines blocked in accept and read" {
+    Listener ln = try listen("127.0.0.1:0")
+    defer ln.close()
+    Conn c = try dial(ln.addr(), 0)
+    defer c.close()
+    Conn s = try ln.accept()
+    defer s.close()
+    error err = group {
+        spawn netTestAcceptForever(ln)
+        spawn netTestReadForever(c)
+        spawn netTestFailSoon()
+    }
+    assert(err != null)
+    assert(err.message() == "stop")
+    // The listener and the connection still work.
+    Conn c2 = try dial(ln.addr(), 0)
+    c2.close()
+    Conn s2 = try ln.accept()
+    s2.close()
+    try s.write("ok")
+    string? got = try c.read(10)
+    assert(got != null)
+    assert(got == "ok")
+}
+
+fn netTestCloseSoon(Listener ln) error {
+    time.sleep(30 * time.millisecond)
+    ln.close()
+    return null
+}
+
+fn netTestAcceptUntilClosed(Listener ln, chan string out) error {
+    _, error err = ln.accept()
+    if (err == null) {
+        return errors.new("accept returned a connection")
+    }
+    out.send(err.message())
+    return null
+}
+
+test "close wakes a goroutine waiting in accept" {
+    Listener ln = try listen("127.0.0.1:0")
+    string addr = ln.addr()
+    chan string out = chan string(1)
+    error err = group {
+        spawn netTestAcceptUntilClosed(ln, out)
+        spawn netTestCloseSoon(ln)
+    }
+    assert(err == null)
+    string? msg = out.receive()
+    assert(msg != null)
+    assert(msg == "net.Listener.accept: " + addr + ": listener is closed")
+}
+
+// Accepts n connections; each one gets its own goroutine that answers with
+// its number.
+fn netTestServeMany(Listener ln, int n) error {
+    return group {
+        for (int i = 0; i < n; i++) {
+            Conn c, error err = ln.accept()
+            if (err != null) {
+                break
+            }
+            spawn netTestAnswer(c, i)
+        }
+    }
+}
+
+fn netTestAnswer(Conn c, int i) error {
+    defer c.close()
+    try c.write("conn " + i.string())
+    return null
+}
+
+fn netTestClients(string addr, int n, chan int out) error {
+    int total = 0
+    for (int i = 0; i < n; i++) {
+        Conn c = try dial(addr, 5 * time.second)
+        string got = ""
+        for (;;) {
+            string? data = try c.read(100)
+            if (data == null) {
+                break
+            }
+            got = got + data
+        }
+        c.close()
+        if (!got.startsWith("conn ")) {
+            return errors.new("unexpected answer " + got)
+        }
+        total++
+    }
+    out.send(total)
+    return null
+}
+
+test "many connections, one goroutine each" {
+    Listener ln = try listen("127.0.0.1:0")
+    defer ln.close()
+    chan int out = chan int(1)
+    error err = group {
+        spawn netTestServeMany(ln, 200)
+        spawn netTestClients(ln.addr(), 200, out)
+    }
+    assert(err == null)
+    int? total = out.receive()
+    assert(total != null)
+    assert(total == 200)
+}

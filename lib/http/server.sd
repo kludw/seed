@@ -1,0 +1,152 @@
+package http
+
+// The server: serve and serveListener (docs/stdlib.md, "Server").
+//
+//   serveListener: a group with one goroutine per connection
+//     serveConn: read a request (wire.sd), callHandler, write the response,
+//                again while the connection is kept alive
+//       callHandler: the handler runs in a group of its own, so that an
+//                    error or a crash becomes a 500 for that request only
+//
+// A server stops when the goroutine running it is stopped, or when its
+// listener is closed (from any goroutine: handles are shared by copies).
+// Either way the connection goroutines are stopped at their next stop
+// point, and their defers close the connections.
+
+import "errors"
+import "fmt"
+import "net"
+import "time"
+
+// How long a kept-alive connection may wait for its next request
+// (60 * time.second), and how long a request may take to arrive without
+// any progress (30 * time.second).
+const int idleTimeout = 60000000000
+const int requestTimeout = 30000000000
+
+// The error that ends the connection group when the listener is closed.
+const string serverClosed = "http: server closed"
+
+// Listens on addr (as net.listen) and serves requests with handler until
+// the goroutine running it is stopped. Returns an error only if it cannot
+// listen: "http.serve: :80: permission denied".
+pub fn serve(string addr, Handler handler) error {
+    net.Listener ln, error err = net.listen(addr)
+    if (err != null) {
+        return errors.new("http.serve: " + addr + ": " + httpReason(err.message(), addr))
+    }
+    defer ln.close()
+    return serveListener(ln, handler)
+}
+
+// Serves requests on a listener the program opened, until the goroutine
+// running it is stopped or the listener is closed (by any copy); then it
+// stops the connections and returns null. Listening on port 0 and passing
+// the listener here is how a program (or a test) serves on a free port
+// and learns which one it is (ln.addr()).
+pub fn serveListener(net.Listener ln, Handler handler) error {
+    error err = group {
+        for (;;) {
+            net.Conn c, error aerr = ln.accept()
+            if (aerr != null) {
+                if (aerr.message().endsWith("listener is closed")) {
+                    break
+                }
+                // Out of descriptors, say: wait a little and carry on.
+                time.sleep(50 * time.millisecond)
+                continue
+            }
+            spawn serveConn(handler, c)
+        }
+        // Stop the connections that are still open.
+        spawn httpStopServer()
+    }
+    if (err != null && err.message() != serverClosed) {
+        return err
+    }
+    return null
+}
+
+fn httpStopServer() error {
+    return errors.new(serverClosed)
+}
+
+// Serves the requests of one connection. Never returns an error, so one
+// connection can't stop the others.
+fn serveConn(Handler handler, net.Conn c) error {
+    defer c.close()
+    MessageReader r = newMessageReader(maxHeadBytes, maxRequestBody)
+    for (;;) {
+        RequestParse step = r.nextRequest()
+        switch (step) {
+        case RequestParse.NeedMore:
+            if (r.expectContinue) {
+                r.expectContinue = false
+                error werr = c.write("HTTP/1.1 100 Continue\r\n\r\n")
+                if (werr != null) {
+                    return null
+                }
+            }
+            if (r.idle()) {
+                c.setTimeout(idleTimeout)
+            } else {
+                c.setTimeout(requestTimeout)
+            }
+            string? data, error err = c.read(65536)
+            if (err != null || data == null) {
+                return null
+            }
+            r.feed(data)
+        case RequestParse.Reject(int status, string _):
+            _ = c.write(errorResponseBytes(status))
+            return null
+        case RequestParse.Done(Request req):
+            bool close = r.closeAfter
+            Response resp = callHandler(handler, req)
+            error werr = c.write(responseBytes(req.method, resp, close))
+            if (werr != null || close) {
+                return null
+            }
+        }
+    }
+}
+
+// The handler's response. If the handler returns an error or crashes, the
+// error is logged to stderr ("http: GET /path: <message>") and the client
+// gets 500.
+fn callHandler(Handler handler, Request req) Response {
+    chan Response out = chan Response(1)
+    error err = group {
+        spawn runHandler(handler, req, out)
+    }
+    if (err == null) {
+        Response? resp = out.receive()
+        if (resp != null) {
+            return resp
+        }
+        err = errors.new("the handler sent no response")
+    }
+    fmt.eprintln("http: " + req.method + " " + req.path() + ": " + err.message())
+    return textResponse(statusInternalServerError, "internal server error\n")
+}
+
+fn runHandler(Handler handler, Request req, chan Response out) error {
+    Response resp = try handler.handle(req)
+    out.send(resp)
+    return null
+}
+
+// The reason in an error message "<function>: <subject>: <reason>" from
+// another package, without the function and the subject (when it is
+// `subject`).
+fn httpReason(string message, string subject) string {
+    int? colon = message.index(": ")
+    if (colon == null) {
+        return message
+    }
+    string rest = message.slice(colon + 2, message.len())
+    if (subject != "" && rest.startsWith(subject + ": ")) {
+        return rest.slice(subject.len() + 2, rest.len())
+    }
+    return rest
+}

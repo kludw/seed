@@ -1,0 +1,62 @@
+package http
+
+// The client: get and send (docs/stdlib.md, "Client"). Each request uses a
+// new connection ("connection: close"); the response is read with wire.sd.
+
+import "errors"
+import "net"
+
+// The client gives up when connecting, or a single read or write, makes no
+// progress for this long (30 * time.second).
+const int clientTimeout = 30000000000
+
+// Sends a GET with no extra headers. Errors start with "http.get".
+pub fn get(string url) (Response, error) {
+    return httpSend("http.get", Request{method: "GET", url: url, headers: map[string]string{}, body: ""})
+}
+
+// Sends any request and returns the response. Any response is a success,
+// including 404 and 500; the error is set only when no response arrived:
+// "http.send: http://localhost:1/: connection refused". Redirects are not
+// followed.
+pub fn send(Request req) (Response, error) {
+    return httpSend("http.send", req)
+}
+
+fn httpSend(string fnName, Request req) (Response, error) {
+    HttpTarget t = try parseUrl(fnName, req.url)
+    string data = try requestBytes(fnName, req, t)
+    string prefix = fnName + ": " + req.url + ": "
+    net.Conn c, error err = net.dial(t.address, clientTimeout)
+    if (err != null) {
+        return null, errors.new(prefix + httpReason(err.message(), t.address))
+    }
+    defer c.close()
+    c.setTimeout(clientTimeout)
+    string peer = c.remoteAddr()
+    error werr = c.write(data)
+    if (werr != null) {
+        return null, errors.new(prefix + httpReason(werr.message(), peer))
+    }
+    MessageReader r = newMessageReader(maxHeadBytes, maxResponseBody)
+    bool eof = false
+    for (;;) {
+        ResponseParse step = r.nextResponse(req.method, eof)
+        switch (step) {
+        case ResponseParse.Done(Response resp):
+            return resp, null
+        case ResponseParse.Fail(string reason):
+            return null, errors.new(prefix + reason)
+        case ResponseParse.NeedMore:
+            string? more, error rerr = c.read(65536)
+            if (rerr != null) {
+                return null, errors.new(prefix + httpReason(rerr.message(), peer))
+            }
+            if (more == null) {
+                eof = true
+            } else {
+                r.feed(more)
+            }
+        }
+    }
+}
