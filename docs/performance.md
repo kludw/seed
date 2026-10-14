@@ -80,7 +80,9 @@ list growth), 7% in float formatting and parsing (`snprintf`/`strtod` for
 non-integral numbers), and the rest in the parser and printer and in map
 hashing. Go's `encoding/json` with `any` allocates as much. About 3% goes
 to thread-local lookups (`tlv_get_addr`) in the free path of boxes, lists
-and maps (the queue that makes freeing non-recursive).
+and maps (the queue that makes freeing non-recursive). The runtime's own
+allocator has since replaced `malloc` for these objects (section
+"Allocator").
 
 **`pingpong`: waking threads.** Goroutines are OS threads, so a goroutine
 blocked on a channel sleeps on a condition variable, and waking it costs a
@@ -164,3 +166,73 @@ scheduler with growable stacks) to get `spawn` and `pingpong` to Go's
 level. Threads are a deliberate simplification (runtime/README.md, decision
 8); the worker pool and spinning recover most of the cost for the patterns
 programs use (a goroutine per request, short hand-offs).
+
+## Allocator
+
+Counted objects (strings, lists, maps and their arrays, boxes, big
+integers, channels) used to be `malloc` blocks. They now come from the
+runtime's own small-object allocator: 24 size classes up to 2 KB,
+per-thread free lists, and a central pool that the lists overflow to and
+refill from in batches. Blocks freed on another thread join that thread's
+list. runtime/README.md, section 15, has the design and the thread-local
+rule that keeps it correct when goroutines move between threads.
+
+**Where allocation time went.** Instruction counts (`valgrind
+--tool=callgrind`, Linux x86_64, glibc 2.39) before the change: glibc's
+`malloc`, `free` and their internals (`_int_malloc`, `_int_free`,
+`malloc_consolidate`, `unlink_chunk`) were 27% of the instructions of
+`json`, 45% of `strings` and 19% of `maps`. After the change, `sd_mem_alloc`
+plus `sd_mem_free` are 9%, 15% and 8%, and total instructions fell by 31%
+(`json`), 45% (`strings`) and 18% (`maps`). The free fast path is about 15
+instructions: header, thread pointer, list head, push, room counter, with
+no lock and no atomic operation.
+
+**Results.** These are from a different machine from the table above:
+Linux x86_64, 4 cores, GCC 13, `-O2`, shared with other builds while it
+ran. "Before" and "after" were run alternately in the same window, best of
+9 each. The ratio is the stable number; the absolute times moved by up to
+50% between windows for the thread-heavy benchmarks.
+
+| Benchmark | Before (s) | After (s) | After / before | Go (s) |
+|---|---|---|---|---|
+| `fib` | 1.70 | 1.76 | 1.04 | 0.58 |
+| `intloop` | 0.83 | 0.85 | 1.03 | 0.42 |
+| `json` | 1.43 | 1.07 | **0.75** | 0.93 |
+| `maps` | 1.20 | 1.10 | **0.92** | 1.81 |
+| `pingpong` | 0.56 | 0.48 | **0.86** | 0.12 |
+| `sort` | 0.55 | 0.50 | **0.91** | 0.91 |
+| `spawn` | 1.02 | 0.98 | 0.96 | 0.08 |
+| `strings` | 1.36 | 0.69 | **0.51** | 2.00 |
+
+In three separate windows, the ratios were: `strings` 0.48-0.55, `json`
+0.74-0.75, `maps` 0.92-0.96, `sort` 0.88-0.99, `pingpong` 0.79-0.97.
+`fib`, `intloop` and `spawn` allocate (almost) no counted objects, so they
+measure noise. `fib` executes the same 14.4 billion instructions before
+and after; its 2-5% is where the code lands in the binary. The compiler
+compiling itself (a whole-program build of the runtime) went from 394 ms to
+374 ms, with peak resident memory 26.4 MB before and 27.2 MB after.
+
+What made the difference:
+
+- **No `malloc` bookkeeping for small blocks.** glibc's free path merges
+  neighbouring chunks and its allocation path sorts bins. A size class's
+  free list is a stack.
+- **Strings and lists use their whole slot as capacity.** A 30-byte string
+  sits in a 48-byte slot with room to grow. `strings` appends in place more
+  often, and a short list grows without moving.
+- **Maps' entry and index arrays come from the allocator too.** These are
+  three blocks per small map instead of three `malloc` calls.
+- **Boxes, lists and maps whose elements hold nothing counted skip the free
+  queue** (the thread-local queue that makes freeing non-recursive), so
+  freeing them reads no thread-local state besides the allocator's.
+
+Not done:
+
+- **Short-string optimisation.** The string representation is not opaque.
+  `sd_str` is a pointer that generated code compares with `NULL`, literals
+  are static structs built by `SD_STR_LIT` in generated code, and natives
+  read `s->data` directly. Inlining short strings would change the C type
+  of every string in generated code. runtime/README.md, decision 23, has
+  the details.
+- **Returning memory to the system.** Freed slots are reused, so memory
+  stays flat at the peak of live objects, but chunks are never unmapped.
