@@ -1,0 +1,30 @@
+// SPEC "Select": when several cases can proceed, one is chosen at random.
+// Both channels always have a value ready; over 200 rounds each case must be
+// chosen at least once (a fixed choice fails; randomness fails with
+// probability 2^-199).
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    chan int a = chan int(1)
+    chan int b = chan int(1)
+    int fromA = 0
+    int fromB = 0
+    for (int i = 0; i < 200; i++) {
+        a.send(1)
+        b.send(2)
+        select {
+        case int? v = a.receive():
+            fromA++
+            _ = b.receive()
+            _ = v
+        case int? v = b.receive():
+            fromB++
+            _ = a.receive()
+            _ = v
+        }
+    }
+    fmt.println((fromA > 0).string() + " " + (fromB > 0).string() + " " + (fromA + fromB).string())
+    return null
+}

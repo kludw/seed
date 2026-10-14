@@ -1,0 +1,14 @@
+// expect-error: op_compare_list_of_functions.sd:11:
+// SPEC "Operators": == is not defined for types that contain function values.
+package main
+
+fn one() int {
+    return 1
+}
+
+fn main([]string args) error {
+    []fn() int fs = []fn() int{one}
+    bool same = fs == []fn() int{one}
+    _ = same
+    return null
+}

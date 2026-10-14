@@ -1,0 +1,8 @@
+// expect-error: literal_list_without_type.sd:6:
+// SPEC "Literals": the type of a list literal is always written.
+package main
+
+fn main([]string args) error {
+    []int xs = {1, 2}
+    return null
+}

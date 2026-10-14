@@ -1,0 +1,13 @@
+// expect-error: try_in_function_without_error.sd:6:
+// SPEC "Errors": try can only be used in a function whose last result is error.
+package main
+
+fn parse(string s) int {
+    int n = try s.toInt()
+    return n
+}
+
+fn main([]string args) error {
+    _ = parse("1")
+    return null
+}

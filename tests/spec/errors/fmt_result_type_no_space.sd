@@ -1,0 +1,10 @@
+// expect-error: fmt_result_type_no_space.sd:7:1: error:
+// docs/formatting.md "Spaces": a result type follows the parameter list after one space.
+package main
+
+import "fmt"
+
+fn main([]string args)error {
+    fmt.println("hi")
+    return null
+}

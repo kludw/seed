@@ -1,0 +1,16 @@
+// expect-error: default
+// SPEC "Control flow": a switch over a byte must end with default.
+package main
+
+fn name(byte x) int {
+    switch (x) {
+    case 'a':
+        return 1
+    }
+    return 0
+}
+
+fn main([]string args) error {
+    _ = name('a')
+    return null
+}

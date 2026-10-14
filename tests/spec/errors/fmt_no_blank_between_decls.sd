@@ -1,0 +1,12 @@
+// expect-error: fmt_no_blank_between_decls.sd:8:1: error:
+// docs/formatting.md "Blank lines": exactly one blank line between top-level declarations (none is not enough).
+package main
+
+import "fmt"
+
+fn f() {}
+fn main([]string args) error {
+    fmt.println("hi")
+    f()
+    return null
+}

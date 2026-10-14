@@ -1,0 +1,55 @@
+// SPEC "Types": a struct cannot contain itself by value; the cycle is broken
+// with a nullable field, a list or an enum.
+package main
+
+import "fmt"
+
+type Node struct {
+    int value
+    Node? next
+}
+
+type Dir struct {
+    string name
+    []Dir children
+}
+
+type Expr enum {
+    Num(int n)
+    Add(Wrapper left, Wrapper right)
+}
+
+type Wrapper struct {
+    Expr e
+}
+
+fn count(Dir d) int {
+    int n = 1
+    for (int i = 0; i < d.children.len(); i++) {
+        n = n + count(d.children[i])
+    }
+    return n
+}
+
+fn eval(Expr e) int {
+    switch (e) {
+    case Expr.Num(int n):
+        return n
+    case Expr.Add(Wrapper l, Wrapper r):
+        return eval(l.e) + eval(r.e)
+    }
+}
+
+fn main([]string args) error {
+    Node list = Node{value: 1, next: Node{value: 2, next: null}}
+    int sum = 0
+    Node? cur = list
+    for (; cur != null; ) {
+        sum = sum + cur.value
+        cur = cur.next
+    }
+    Dir root = Dir{name: "/", children: []Dir{Dir{name: "a", children: []Dir{}}, Dir{name: "b", children: []Dir{Dir{name: "c", children: []Dir{}}}}}}
+    Expr e = Expr.Add(Wrapper{e: Expr.Num(2)}, Wrapper{e: Expr.Add(Wrapper{e: Expr.Num(3)}, Wrapper{e: Expr.Num(4)})})
+    fmt.println(sum.string() + " " + count(root).string() + " " + eval(e).string())
+    return null
+}

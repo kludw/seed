@@ -1,0 +1,22 @@
+// expect-error: null_narrowing_prefix_assign.sd:18:
+// SPEC "Null": narrowing of u.email ends when a part of the path (u) is assigned a value that may have a null email.
+package main
+
+type User struct {
+    string? email
+}
+
+fn other() User {
+    return User{email: null}
+}
+
+fn main([]string args) error {
+    User u = User{email: "a@b"}
+    int n = 0
+    if (u.email != null) {
+        u = other()
+        n = u.email.len()
+    }
+    _ = n
+    return null
+}

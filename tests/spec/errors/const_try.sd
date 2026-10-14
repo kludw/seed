@@ -1,0 +1,13 @@
+// expect-error: const_try.sd:6:
+// SPEC "Variables and constants": a constant's value cannot use try.
+package main
+
+fn run() error {
+    const int n = try "1".toInt()
+    _ = n
+    return null
+}
+
+fn main([]string args) error {
+    return run()
+}

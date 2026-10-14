@@ -1,0 +1,9 @@
+package sums
+
+fn add(int a, int b) int {
+    return a + b
+}
+
+fn work() error {
+    return null
+}

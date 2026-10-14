@@ -1,0 +1,14 @@
+// expect-error: group_statement_alone.sd:10:
+// SPEC "Groups": a group on its own as a statement is an unchecked error.
+package main
+
+fn work() error {
+    return null
+}
+
+fn main([]string args) error {
+    group {
+        spawn work()
+    }
+    return null
+}

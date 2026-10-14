@@ -1,0 +1,7 @@
+package counter
+
+import "strings"
+
+pub fn describe(Counter c) string {
+    return strings.repeat("counter ", 1) + "at " + c.n.string()
+}

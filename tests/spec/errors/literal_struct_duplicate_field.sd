@@ -1,0 +1,14 @@
+// expect-error: literal_struct_duplicate_field.sd:11:
+// SPEC "Literals": a struct literal sets every field by name (each once).
+package main
+
+type Point struct {
+    int x
+    int y
+}
+
+fn main([]string args) error {
+    Point p = Point{x: 1, x: 2, y: 3}
+    _ = p
+    return null
+}

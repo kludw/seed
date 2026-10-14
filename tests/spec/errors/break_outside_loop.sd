@@ -1,0 +1,8 @@
+// expect-error: break_outside_loop.sd:6:
+// SPEC "Control flow": break works in loops.
+package main
+
+fn main([]string args) error {
+    break
+    return null
+}

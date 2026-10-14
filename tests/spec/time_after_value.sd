@@ -1,0 +1,18 @@
+// builtins "time": time.after(d) receives the current time (Unix nanoseconds)
+// once, d nanoseconds from now, and is then closed.
+package main
+
+import "fmt"
+import "time"
+
+fn main([]string args) error {
+    chan int ch = time.after(time.millisecond)
+    int? t = ch.receive()
+    int? again = ch.receive()
+    if (t != null) {
+        // 2020-01-01 in Unix nanoseconds.
+        fmt.println((t > 1577836800 * time.second).string())
+    }
+    fmt.println((again == null).string())
+    return null
+}

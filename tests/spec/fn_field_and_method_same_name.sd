@@ -1,0 +1,25 @@
+// SPEC "Function values": a struct field of function type is called
+// directly only when the struct has no method of that name; with a method of
+// the same name, j.run() calls the method and j.run is still the field.
+package main
+
+import "fmt"
+
+fn fieldRun() string {
+    return "field"
+}
+
+type Job struct {
+    fn() string run
+}
+
+fn (Job j) run() string {
+    return "method"
+}
+
+fn main([]string args) error {
+    Job j = Job{run: fieldRun}
+    fn() string f = j.run
+    fmt.println(j.run() + " " + f())
+    return null
+}

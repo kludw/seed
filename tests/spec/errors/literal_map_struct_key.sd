@@ -1,0 +1,12 @@
+// expect-error: literal_map_struct_key.sd:10:
+// SPEC "Literals": map keys may be int, byte, bool or string (not structs).
+package main
+
+type P struct {
+    int x
+}
+
+fn main([]string args) error {
+    map[P]int m = map[P]int{}
+    return null
+}

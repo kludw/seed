@@ -1,0 +1,15 @@
+// expect-error: unreachable_after_os_crash.sd:9:
+// SPEC "Compiler": unreachable code is rejected; os.crash never returns.
+package main
+
+import "os"
+
+fn fail() int {
+    os.crash("fail")
+    return 0
+}
+
+fn main([]string args) error {
+    _ = fail()
+    return null
+}

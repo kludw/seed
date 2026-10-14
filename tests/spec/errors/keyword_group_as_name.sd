@@ -1,0 +1,9 @@
+// expect-error: keyword_group_as_name.sd:6:
+// grammar "Lexical structure": group is a keyword, not an identifier.
+package main
+
+fn main([]string args) error {
+    int group = 1
+    _ = group
+    return null
+}

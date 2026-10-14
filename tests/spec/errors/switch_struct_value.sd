@@ -1,0 +1,17 @@
+// expect-error: switch_struct_value.sd:11:
+// SPEC "Control flow": a value switch is over an int, byte, string or bool (not a struct).
+package main
+
+type P struct {
+    int x
+}
+
+fn main([]string args) error {
+    P p = P{x: 1}
+    switch (p) {
+    case P{x: 1}:
+        return null
+    default:
+        return null
+    }
+}

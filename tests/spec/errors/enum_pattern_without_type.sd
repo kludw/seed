@@ -1,0 +1,22 @@
+// expect-error: enum_pattern_without_type.sd:14:
+// SPEC "Structs, enums, interfaces": an enum case is written with its type in a switch too.
+package main
+
+type Shape enum {
+    Circle(float r)
+    Dot
+}
+
+fn area(Shape s) float {
+    switch (s) {
+    case Shape.Circle(float r):
+        return r * r
+    case Dot:
+        return 0.0
+    }
+}
+
+fn main([]string args) error {
+    _ = area(Shape.Dot)
+    return null
+}

@@ -1,0 +1,14 @@
+// builtins "errors": errors.wrap crashes if err is null.
+package main
+
+import "errors"
+import "fmt"
+
+fn main([]string args) error {
+    error inner = errors.new("disk full")
+    fmt.println(errors.wrap(inner, "saving").message())
+    error none = null
+    error wrapped = errors.wrap(none, "saving")
+    fmt.println("not reached " + (wrapped == null).string())
+    return null
+}

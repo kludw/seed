@@ -1,0 +1,11 @@
+// expect-error: named
+// SPEC "Syntax basics": types use PascalCase (interfaces too).
+package main
+
+type named interface {
+    name() string
+}
+
+fn main([]string args) error {
+    return null
+}

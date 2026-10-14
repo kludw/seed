@@ -1,0 +1,8 @@
+// expect-error: literal_byte_multibyte_char.sd:6:
+// SPEC "Literals": a byte literal is a single byte; é is two bytes in UTF-8.
+package main
+
+fn main([]string args) error {
+    byte b = 'é'
+    return null
+}

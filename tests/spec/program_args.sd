@@ -1,0 +1,15 @@
+// SPEC "Program entry": args[0] is the program itself and the arguments
+// follow it. tests/test_cmd.sh also runs this with
+// `seed run program_args.sd -- -x two` (SPEC "Toolchain": a -- before the
+// arguments is skipped, and later ones are passed on).
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    fmt.println(args.len().string() + " " + (args[0].len() > 0).string())
+    for (int i = 1; i < args.len(); i++) {
+        fmt.println(args[i])
+    }
+    return null
+}

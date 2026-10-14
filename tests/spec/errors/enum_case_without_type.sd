@@ -1,0 +1,14 @@
+// expect-error: enum_case_without_type.sd:11:
+// SPEC "Structs, enums, interfaces": an enum case is always written with its type.
+package main
+
+type Shape enum {
+    Circle(float r)
+    Dot
+}
+
+fn main([]string args) error {
+    Shape s = Circle(1.0)
+    _ = s
+    return null
+}

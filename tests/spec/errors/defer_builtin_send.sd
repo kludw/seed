@@ -1,0 +1,9 @@
+// expect-error: defer_builtin_send.sd:7:
+// SPEC "Control flow" / "Channels": ch.close() is the one built-in method call that defer accepts.
+package main
+
+fn main([]string args) error {
+    chan int ch = chan int(1)
+    defer ch.send(1)
+    return null
+}

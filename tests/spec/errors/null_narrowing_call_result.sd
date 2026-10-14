@@ -1,0 +1,16 @@
+// expect-error: null_narrowing_call_result.sd:12:
+// SPEC "Null": narrowing does not apply to call results; store them in a variable first.
+package main
+
+fn find() int? {
+    return 3
+}
+
+fn main([]string args) error {
+    int total = 0
+    if (find() != null) {
+        total = find() + 1
+    }
+    _ = total
+    return null
+}

@@ -1,0 +1,12 @@
+// expect-error: fmt_blank_line_between_imports.sd:6:1: error:
+// docs/formatting.md "Declarations": the imports are one group with no blank lines between them.
+package main
+
+import "fmt"
+
+import "os"
+
+fn main([]string args) error {
+    fmt.println("hi")
+    os.exit(0)
+}

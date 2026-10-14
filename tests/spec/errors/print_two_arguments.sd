@@ -1,0 +1,10 @@
+// expect-error: print_two_arguments.sd:8:
+// SPEC "Printing": fmt.print takes exactly one string.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    fmt.print("a", "b")
+    return null
+}

@@ -1,0 +1,12 @@
+// expect-error: contains itself
+// SPEC "Types": a struct cannot contain itself by value (directly).
+package main
+
+type Node struct {
+    int value
+    Node next
+}
+
+fn main([]string args) error {
+    return null
+}

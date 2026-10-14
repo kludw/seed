@@ -1,0 +1,14 @@
+// builtins "string": toUpper/toLower change ASCII letters only; trim removes
+// spaces, tabs, \n and \r only; lengths and indexes count bytes.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    string s = "éa"
+    fmt.println(s.toUpper() + " " + "ÉA".toLower() + " " + s.len().string())
+    string padded = "\x0b x \x0c"
+    fmt.println(padded.trim().len().string())
+    fmt.println("[" + " \t\r\n x \n\r\t ".trim() + "]")
+    return null
+}

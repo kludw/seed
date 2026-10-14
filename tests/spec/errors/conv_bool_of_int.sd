@@ -1,0 +1,9 @@
+// expect-error: conv_bool_of_int.sd:6:
+// SPEC "Types": there is no conversion from int to bool.
+package main
+
+fn main([]string args) error {
+    bool b = bool(1)
+    _ = b
+    return null
+}

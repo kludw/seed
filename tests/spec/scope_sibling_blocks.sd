@@ -1,0 +1,33 @@
+// SPEC "Variables and constants": shadowing is about enclosing scopes; the
+// same name may be declared in sibling blocks and in consecutive loops.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    int n = 3
+    if (n > 0) {
+        string label = "positive"
+        fmt.println(label)
+    } else {
+        string label = "other"
+        fmt.println(label)
+    }
+    for (int i = 0; i < 2; i++) {
+        int sq = i * i
+        fmt.println(sq.string())
+    }
+    for (int i = 5; i < 6; i++) {
+        int sq = i * i
+        fmt.println(sq.string())
+    }
+    switch (n) {
+    case 3:
+        int x = 30
+        fmt.println(x.string())
+    default:
+        int x = 0
+        fmt.println(x.string())
+    }
+    return null
+}

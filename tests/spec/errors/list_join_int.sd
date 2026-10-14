@@ -1,0 +1,10 @@
+// expect-error: list_join_int.sd:7:
+// SPEC "Lists": join(sep) is only for []string.
+package main
+
+fn main([]string args) error {
+    []int xs = []int{1, 2}
+    string s = xs.join(",")
+    _ = s
+    return null
+}

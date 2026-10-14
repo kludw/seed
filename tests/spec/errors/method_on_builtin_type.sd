@@ -1,0 +1,11 @@
+// expect-error: method_on_builtin_type.sd:5:
+// SPEC "Methods": a method is declared on a struct or enum type of the same package.
+package main
+
+fn (int n) double() int {
+    return n * 2
+}
+
+fn main([]string args) error {
+    return null
+}

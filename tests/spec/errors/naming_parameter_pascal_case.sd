@@ -1,0 +1,12 @@
+// expect-error: Count
+// SPEC "Syntax basics": parameters use camelCase.
+package main
+
+fn twice(int Count) int {
+    return Count * 2
+}
+
+fn main([]string args) error {
+    _ = twice(1)
+    return null
+}

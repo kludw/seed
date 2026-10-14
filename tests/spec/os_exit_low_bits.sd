@@ -1,0 +1,12 @@
+// builtins "os": os.exit exits with the low 8 bits of its code (300 -> 44),
+// output is flushed first and defers do not run.
+package main
+
+import "fmt"
+import "os"
+
+fn main([]string args) error {
+    defer fmt.println("deferred: must not run")
+    fmt.print("before exit")
+    os.exit(300)
+}

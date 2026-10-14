@@ -1,0 +1,23 @@
+// grammar "Expressions": conditions are parenthesised, so Name{ is always a
+// struct literal, also inside if, for and switch conditions.
+package main
+
+import "fmt"
+
+type Point struct {
+    int x
+    int y
+}
+
+fn main([]string args) error {
+    Point p = Point{x: 1, y: 2}
+    if (p == Point{x: 1, y: 2}) {
+        fmt.println("equal")
+    }
+    int n = 0
+    for (; p != Point{x: 1, y: 5}; p.y++) {
+        n++
+    }
+    fmt.println(n.string())
+    return null
+}

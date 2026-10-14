@@ -1,0 +1,10 @@
+// SPEC "Tests": assert is not allowed inside a group block.
+package sums
+
+test "assert in a group" {
+    error err = group {
+        assert(add(1, 1) == 2)
+        spawn work()
+    }
+    assert(err == null)
+}

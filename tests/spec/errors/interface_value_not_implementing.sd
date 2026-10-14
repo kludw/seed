@@ -1,0 +1,21 @@
+// expect-error: interface_value_not_implementing.sd:18:
+// SPEC "Structs, enums, interfaces": only a type that declares implements converts to the interface.
+package main
+
+type Named interface {
+    name() string
+}
+
+type Dog struct {
+    string n
+}
+
+fn (Dog d) name() string {
+    return d.n
+}
+
+fn main([]string args) error {
+    Named x = Dog{n: "rex"}
+    _ = x
+    return null
+}

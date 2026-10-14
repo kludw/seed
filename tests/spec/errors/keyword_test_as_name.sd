@@ -1,0 +1,9 @@
+// expect-error: keyword_test_as_name.sd:6:
+// grammar "Lexical structure": test is a keyword, not an identifier.
+package main
+
+fn main([]string args) error {
+    int test = 1
+    _ = test
+    return null
+}

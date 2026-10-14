@@ -1,0 +1,16 @@
+// SPEC "Converting to text": int, float, bool, byte and string have string();
+// byte.string() gives the number; string([]byte) builds text from bytes.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    int n = -42
+    float f = 2.5
+    bool b = true
+    byte c = 'a'
+    string s = "text"
+    fmt.println(n.string() + " " + f.string() + " " + b.string() + " " + c.string() + " " + s.string())
+    fmt.println('a'.string() + " " + string([]byte{'h', 'i'}) + " " + false.string() + " " + 7.string())
+    return null
+}

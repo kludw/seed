@@ -1,0 +1,13 @@
+// expect-error: shadowing is not allowed
+// SPEC "Variables and constants": declaring a name that exists as a parameter fails.
+package main
+
+fn twice(int n) int {
+    int n = 2
+    return n
+}
+
+fn main([]string args) error {
+    _ = twice(1)
+    return null
+}

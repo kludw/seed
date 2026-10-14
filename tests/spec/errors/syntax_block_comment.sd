@@ -1,0 +1,8 @@
+// expect-error: syntax_block_comment.sd:6:
+// SPEC "Syntax basics": comments use //; there are no block comments.
+package main
+
+fn main([]string args) error {
+    /* not a comment */
+    return null
+}

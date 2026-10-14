@@ -1,0 +1,9 @@
+// expect-error: package_level_variable.sd:5:
+// SPEC "Variables and constants": package-level variables are not allowed, only const.
+package main
+
+int counter = 0
+
+fn main([]string args) error {
+    return null
+}

@@ -1,0 +1,10 @@
+// expect-error: op_byte_increment.sd:7:
+// SPEC "Operators": bytes have no arithmetic, so b++ is not allowed either.
+package main
+
+fn main([]string args) error {
+    byte b = 'a'
+    b++
+    _ = b
+    return null
+}

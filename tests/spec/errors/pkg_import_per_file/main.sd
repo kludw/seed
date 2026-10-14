@@ -1,0 +1,10 @@
+// expect-error: helper.sd:4:
+// SPEC "Packages": imports are per file; a file imports the packages it uses itself.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    fmt.println(greeting())
+    return null
+}

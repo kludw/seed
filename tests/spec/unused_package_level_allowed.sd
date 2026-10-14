@@ -1,0 +1,32 @@
+// SPEC "Compiler": unused parameters and unused package-level declarations
+// (functions, methods, types, constants) are allowed.
+package main
+
+import "fmt"
+
+const int unusedLimit = 3
+
+type Unused struct {
+    int x
+}
+
+type UnusedKind enum {
+    One
+}
+
+fn (Unused u) unusedMethod() int {
+    return u.x
+}
+
+fn unusedFunction(int a) int {
+    return a
+}
+
+fn ignoresParam(int a, string b) string {
+    return "ok"
+}
+
+fn main([]string args) error {
+    fmt.println(ignoresParam(1, "b"))
+    return null
+}

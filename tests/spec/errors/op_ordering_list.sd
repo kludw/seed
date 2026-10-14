@@ -1,0 +1,9 @@
+// expect-error: op_ordering_list.sd:6:
+// SPEC "Operators": ordering works on int, float, string and byte (not lists).
+package main
+
+fn main([]string args) error {
+    bool x = []int{1} < []int{2}
+    _ = x
+    return null
+}

@@ -1,0 +1,11 @@
+// expect-error: discard_read.sd:7:
+// grammar "Lexical structure": _ alone is the discard name; it cannot be read.
+package main
+
+fn main([]string args) error {
+    int x = 1
+    int y = _
+    _ = x
+    _ = y
+    return null
+}

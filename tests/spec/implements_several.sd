@@ -1,0 +1,41 @@
+// SPEC "Structs, enums, interfaces": several interfaces in implements are
+// separated by commas; the value converts to each of them (and to the
+// nullable interface) automatically.
+package main
+
+import "fmt"
+
+type Named interface {
+    name() string
+}
+
+type Sized interface {
+    size() int
+}
+
+type File struct implements Named, Sized {
+    string n
+    int bytes
+}
+
+fn (File f) name() string {
+    return f.n
+}
+
+fn (File f) size() int {
+    return f.bytes
+}
+
+fn show(Named n, Sized s) string {
+    return n.name() + " " + s.size().string()
+}
+
+fn main([]string args) error {
+    File f = File{n: "a.txt", bytes: 12}
+    Named? maybe = f
+    fmt.println(show(f, f))
+    if (maybe != null) {
+        fmt.println(maybe.name())
+    }
+    return null
+}

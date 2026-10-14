@@ -1,0 +1,18 @@
+// SPEC "Null": after an if whose block always leaves with os.crash, the rest
+// of the block knows the opposite of its condition.
+package main
+
+import "fmt"
+import "os"
+
+fn need(string? s) int {
+    if (s == null) {
+        os.crash("need: s is null")
+    }
+    return s.len()
+}
+
+fn main([]string args) error {
+    fmt.println(need("four").string())
+    return null
+}

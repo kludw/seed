@@ -1,0 +1,21 @@
+// Package tally is tested by tests/tally_test.sd (SPEC "Tests").
+package tally
+
+import "errors"
+
+fn count([]string words, string w) int {
+    int n = 0
+    for (int i = 0; i < words.len(); i++) {
+        if (words[i] == w) {
+            n++
+        }
+    }
+    return n
+}
+
+pub fn first(string s) (byte, error) {
+    if (s.len() == 0) {
+        return null, errors.new("tally.first: empty string")
+    }
+    return s[0], null
+}

@@ -1,0 +1,12 @@
+// expect-error: enum_case_empty_parens_decl.sd:6:
+// SPEC "Structs, enums, interfaces": a case without data has no parentheses.
+package main
+
+type Token enum {
+    Eof()
+    Num(int n)
+}
+
+fn main([]string args) error {
+    return null
+}

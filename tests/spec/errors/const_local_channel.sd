@@ -1,0 +1,9 @@
+// expect-error: const_local_channel.sd:6:
+// SPEC "Variables and constants": a constant's value has no channels (inside functions too).
+package main
+
+fn main([]string args) error {
+    const chan int ch = chan int(1)
+    ch.close()
+    return null
+}

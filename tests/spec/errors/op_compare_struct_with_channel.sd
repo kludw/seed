@@ -1,0 +1,15 @@
+// expect-error: op_compare_struct_with_channel.sd:12:
+// SPEC "Operators": == works on every type except channels, function values and types that contain them.
+package main
+
+type Mailbox struct {
+    chan int inbox
+}
+
+fn main([]string args) error {
+    Mailbox a = Mailbox{inbox: chan int(1)}
+    Mailbox b = a
+    bool same = a == b
+    _ = same
+    return null
+}

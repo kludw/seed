@@ -1,0 +1,12 @@
+// builtins "time": durations are int nanoseconds; the constants are 1, 1000,
+// 1000000, 1000000000, 60 seconds and 60 minutes.
+package main
+
+import "fmt"
+import "time"
+
+fn main([]string args) error {
+    fmt.println(time.nanosecond.string() + " " + time.microsecond.string() + " " + time.millisecond.string())
+    fmt.println(time.second.string() + " " + time.minute.string() + " " + time.hour.string())
+    return null
+}

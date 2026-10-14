@@ -1,0 +1,8 @@
+// expect-error: is not imported
+// SPEC "Packages": the core packages (here time) must be imported like any other.
+package main
+
+fn main([]string args) error {
+    time.sleep(1)
+    return null
+}

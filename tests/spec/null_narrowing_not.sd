@@ -1,0 +1,42 @@
+// SPEC "Null": a condition narrows through !, in the block, in its else and
+// after an if whose block always leaves.
+package main
+
+import "fmt"
+
+fn size(string? s) int {
+    if (!(s != null)) {
+        return -1
+    }
+    return s.len()
+}
+
+fn size2(string? s) int {
+    if (!(s == null)) {
+        return s.len()
+    } else {
+        return 0
+    }
+}
+
+fn size3(string? s) int {
+    if (!(s == null) && s.len() > 1) {
+        return s.len()
+    }
+    return 0
+}
+
+fn size4(string? s) int {
+    if (!(s == null || s.len() == 0)) {
+        return s.len()
+    }
+    return 0
+}
+
+fn main([]string args) error {
+    fmt.println(size(null).string() + " " + size("abc").string())
+    fmt.println(size2(null).string() + " " + size2("ab").string())
+    fmt.println(size3("a").string() + " " + size3("abcd").string() + " " + size3(null).string())
+    fmt.println(size4(null).string() + " " + size4("").string() + " " + size4("xyz").string())
+    return null
+}

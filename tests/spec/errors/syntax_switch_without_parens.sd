@@ -1,0 +1,15 @@
+// expect-error: syntax_switch_without_parens.sd:8:
+// SPEC "Syntax basics": conditions are always in parentheses, switch (...) too.
+package main
+
+fn main([]string args) error {
+    int x = 1
+    int y = 0
+    switch x {
+    case 1:
+        y = 1
+    default:
+        y = 2
+    }
+    return null
+}

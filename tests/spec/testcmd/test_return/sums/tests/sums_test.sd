@@ -1,0 +1,9 @@
+// SPEC "Tests": return is not allowed in a test.
+package sums
+
+test "returns early" {
+    if (add(1, 1) == 2) {
+        return null
+    }
+    assert(false)
+}

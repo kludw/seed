@@ -1,0 +1,9 @@
+// expect-error: op_logic_int.sd:6:
+// SPEC "Operators": && || ! work on bool only.
+package main
+
+fn main([]string args) error {
+    bool x = 1 && 2
+    _ = x
+    return null
+}

@@ -1,0 +1,16 @@
+// expect-error: fn_overloading.sd:9:
+// SPEC "Functions and methods": there is no overloading (a different parameter list does not help).
+package main
+
+fn show(int x) int {
+    return x
+}
+
+fn show(string s) int {
+    return s.len()
+}
+
+fn main([]string args) error {
+    _ = show(1)
+    return null
+}

@@ -1,0 +1,12 @@
+// expect-error: fn_default_argument.sd:5:
+// SPEC "Functions and methods": there are no default arguments.
+package main
+
+fn inc(int x, int by = 1) int {
+    return x + by
+}
+
+fn main([]string args) error {
+    _ = inc(1)
+    return null
+}

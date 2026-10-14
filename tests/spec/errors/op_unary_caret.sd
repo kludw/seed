@@ -1,0 +1,10 @@
+// expect-error: op_unary_caret.sd:7:
+// SPEC "Operators": there is no unary ^.
+package main
+
+fn main([]string args) error {
+    int a = 5
+    int b = ^a
+    _ = b
+    return null
+}

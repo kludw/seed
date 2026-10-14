@@ -1,0 +1,51 @@
+// SPEC "Control flow": defer takes a call of a function, method, function
+// value, interface method or package function, or ch.close(); the receiver
+// and arguments are evaluated when the defer statement runs.
+package main
+
+import "fmt"
+
+type Logger interface {
+    log(string msg)
+}
+
+type Prefix struct implements Logger {
+    string p
+}
+
+fn (Prefix x) log(string msg) {
+    fmt.println(x.p + msg)
+}
+
+fn plain(string msg) {
+    fmt.println("plain " + msg)
+}
+
+type Hooks struct {
+    fn(string) onExit
+}
+
+fn work(chan int ch) {
+    Prefix pre = Prefix{p: "method "}
+    Logger lg = Prefix{p: "interface "}
+    Hooks h = Hooks{onExit: plain}
+    fn(string) f = plain
+    defer ch.close()
+    defer fmt.println("package function")
+    defer pre.log("call")
+    defer lg.log("call")
+    defer f("value")
+    defer h.onExit("field")
+    pre = Prefix{p: "changed "}
+    lg = Prefix{p: "changed "}
+    f = fmt.println
+    fmt.println("body done")
+}
+
+fn main([]string args) error {
+    chan int ch = chan int(1)
+    work(ch)
+    int? v = ch.receive()
+    fmt.println("closed " + (v == null).string())
+    return null
+}

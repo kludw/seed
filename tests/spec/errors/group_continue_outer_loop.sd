@@ -1,0 +1,17 @@
+// expect-error: group_continue_outer_loop.sd:12:
+// SPEC "Groups": continue of a loop outside the group block is not allowed.
+package main
+
+fn work() error {
+    return null
+}
+
+fn main([]string args) error {
+    for (int i = 0; i < 3; i++) {
+        error err = group {
+            continue
+        }
+        _ = err
+    }
+    return null
+}

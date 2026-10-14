@@ -1,0 +1,8 @@
+// expect-error: literal_byte_two_bytes.sd:6:
+// SPEC "Literals": a byte literal is a single byte.
+package main
+
+fn main([]string args) error {
+    byte b = 'ab'
+    return null
+}

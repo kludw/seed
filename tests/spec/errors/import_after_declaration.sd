@@ -1,0 +1,12 @@
+// expect-error: import_after_declaration.sd:7:
+// grammar "Files": imports come after the package line, before declarations.
+package main
+
+const int a = 1
+
+import "fmt"
+
+fn main([]string args) error {
+    fmt.println(a.string())
+    return null
+}

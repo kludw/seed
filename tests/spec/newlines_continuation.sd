@@ -1,0 +1,50 @@
+// grammar "Newlines": a statement continues on the next line when its line
+// ends with an operator, =, a comma, an opening bracket or a dot; comment
+// lines inside it produce nothing.
+package main
+
+import "fmt"
+
+type Point struct {
+    int x
+    int y
+}
+
+fn add(int a, int b) int {
+    return a + b
+}
+
+fn main([]string args) error {
+    int total = 1 +
+        2 *
+        3
+    int assigned =
+        40
+    int called = add(
+        1,
+        2,
+    )
+    int args2 = add(
+        1,
+        // a comment line inside the call
+        2,
+    )
+    []int xs = []int{
+        1,
+
+        2,
+    }
+    int indexed = xs[
+        1]
+    int length = xs.
+        len()
+    bool both = total > 0 &&
+        assigned > 0
+    Point p = Point{
+        x: 1,
+        y: 2,
+    }
+    fmt.println(total.string() + " " + assigned.string() + " " + called.string() + " " + args2.string())
+    fmt.println(indexed.string() + " " + length.string() + " " + both.string() + " " + (p.x + p.y).string())
+    return null
+}

@@ -1,0 +1,11 @@
+// expect-error: types_generic_struct.sd:5:
+// SPEC "Types": user code cannot define generic types.
+package main
+
+type Box[T] struct {
+    T value
+}
+
+fn main([]string args) error {
+    return null
+}

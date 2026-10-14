@@ -1,0 +1,11 @@
+// expect-error: fmt_blank_line_before_brace.sd:10:1: error:
+// docs/formatting.md "Blank lines": no blank line before a closing }.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    fmt.println("hi")
+    return null
+
+}

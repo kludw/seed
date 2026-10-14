@@ -1,0 +1,11 @@
+// expect-error: text_map_string.sd:9:
+// SPEC "Converting to text": maps have no automatic text form.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    map[string]int m = map[string]int{"a": 1}
+    fmt.println(m.string())
+    return null
+}

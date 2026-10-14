@@ -1,0 +1,9 @@
+// expect-error: literal_string_multiline.sd:6:
+// SPEC "Literals": no multi-line strings.
+package main
+
+fn main([]string args) error {
+    string s = "first
+second"
+    return null
+}

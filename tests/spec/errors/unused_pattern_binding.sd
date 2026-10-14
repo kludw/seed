@@ -1,0 +1,22 @@
+// expect-error: unused_pattern_binding.sd:12:
+// SPEC "Compiler": an unused local variable, including a pattern binding, is rejected.
+package main
+
+type Shape enum {
+    Rect(float w, float h)
+    Dot
+}
+
+fn width(Shape s) float {
+    switch (s) {
+    case Shape.Rect(float w, float h):
+        return w
+    case Shape.Dot:
+        return 0.0
+    }
+}
+
+fn main([]string args) error {
+    _ = width(Shape.Dot)
+    return null
+}

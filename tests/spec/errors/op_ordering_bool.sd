@@ -1,0 +1,9 @@
+// expect-error: op_ordering_bool.sd:6:
+// SPEC "Operators": ordering works on int, float, string and byte.
+package main
+
+fn main([]string args) error {
+    bool x = true < false
+    _ = x
+    return null
+}

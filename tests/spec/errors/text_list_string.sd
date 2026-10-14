@@ -1,0 +1,11 @@
+// expect-error: text_list_string.sd:9:
+// SPEC "Converting to text": lists have no automatic text form.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    []int xs = []int{1, 2}
+    fmt.println(xs.string())
+    return null
+}

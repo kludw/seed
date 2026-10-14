@@ -1,0 +1,9 @@
+// expect-error: decl_var_keyword.sd:6:
+// SPEC "Variables and constants": there is no var.
+package main
+
+fn main([]string args) error {
+    var x = 1
+    _ = x
+    return null
+}

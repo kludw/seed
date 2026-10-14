@@ -1,0 +1,14 @@
+// expect-error: fn_value_nullable_needs_parens.sd:10:
+// SPEC "Function values": fn(int) int? is a function that returns int?, not a nullable function.
+package main
+
+fn inc(int x) int {
+    return x + 1
+}
+
+fn main([]string args) error {
+    fn(int) int? f = null
+    _ = f
+    _ = inc(1)
+    return null
+}

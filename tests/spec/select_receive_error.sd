@@ -1,0 +1,34 @@
+// SPEC "Select" / "Channels": for a chan error, receive() returns error, so
+// a receive case declares error e (null once the channel is closed), and
+// _ = errs.receive() discards it.
+package main
+
+import "errors"
+import "fmt"
+
+fn main([]string args) error {
+    chan error errs = chan error(3)
+    errs.send(errors.new("boom"))
+    errs.send(null)
+    errs.send(errors.new("dropped"))
+    for (int i = 0; i < 2; i++) {
+        select {
+        case error e = errs.receive():
+            if (e != null) {
+                fmt.println(e.message())
+            } else {
+                fmt.println("null")
+            }
+        }
+    }
+    select {
+    case _ = errs.receive():
+        fmt.println("discarded")
+    }
+    errs.close()
+    select {
+    case error e = errs.receive():
+        fmt.println("closed " + (e == null).string())
+    }
+    return null
+}

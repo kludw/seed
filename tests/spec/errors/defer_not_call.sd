@@ -1,0 +1,9 @@
+// expect-error: defer_not_call.sd:7:
+// SPEC "Control flow": defer takes a call.
+package main
+
+fn main([]string args) error {
+    int x = 1
+    defer x
+    return null
+}

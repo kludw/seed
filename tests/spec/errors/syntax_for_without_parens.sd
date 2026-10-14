@@ -1,0 +1,11 @@
+// expect-error: syntax_for_without_parens.sd:7:
+// SPEC "Syntax basics": conditions are always in parentheses, for (...) too.
+package main
+
+fn main([]string args) error {
+    int y = 0
+    for int i = 0; i < 3; i++ {
+        y = y + i
+    }
+    return null
+}

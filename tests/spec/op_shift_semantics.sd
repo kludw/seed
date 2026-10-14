@@ -1,0 +1,12 @@
+// SPEC "Operators": << and >> work on int and byte. A byte shift keeps the
+// low 8 bits (byte is an 8-bit value); an int never overflows and >> floors.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    byte b = byte(200)
+    fmt.println((b << byte(1)).string() + " " + (b >> byte(3)).string() + " " + (b << byte(8)).string())
+    fmt.println((1 << 70).string() + " " + (-7 >> 1).string() + " " + (7 >> 1).string())
+    return null
+}

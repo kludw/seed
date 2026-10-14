@@ -1,0 +1,20 @@
+// expect-error: error_guard_element_target.sd:18:
+// SPEC "Errors" (error guards): a list element, like a field, cannot receive a plain T beside an error,
+// because it would hold null when the error is not null (see full/errors/guard_field_target.sd).
+package main
+
+import "errors"
+
+fn parse(bool ok) (int, error) {
+    if (!ok) {
+        return null, errors.new("bad")
+    }
+    return 1, null
+}
+
+fn main([]string args) error {
+    []int xs = []int{0}
+    error err = null
+    xs[0], err = parse(false)
+    return err
+}

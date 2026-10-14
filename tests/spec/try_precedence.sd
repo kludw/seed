@@ -1,0 +1,21 @@
+// grammar "Expressions": try is a unary operator: try f() + 1 is
+// (try f()) + 1, and try works anywhere in an expression.
+package main
+
+import "fmt"
+
+fn parse(string s) (int, error) {
+    return s.toInt()
+}
+
+fn run() error {
+    int n = try parse("4") + 1
+    int m = -try parse("2") * 3
+    bool big = try parse("10") > 5 && !(try parse("0") > 1)
+    fmt.println(n.string() + " " + m.string() + " " + big.string())
+    return null
+}
+
+fn main([]string args) error {
+    return run()
+}

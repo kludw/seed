@@ -1,0 +1,20 @@
+// expect-error: method_plain_receiver_mut_call.sd:14:
+// SPEC "Methods": a plain method only reads its receiver: it cannot call a mut method on it.
+package main
+
+type Counter struct {
+    int n
+}
+
+fn (Counter c) mut bump() {
+    c.n = c.n + 1
+}
+
+fn (Counter c) peek() int {
+    c.bump()
+    return c.n
+}
+
+fn main([]string args) error {
+    return null
+}

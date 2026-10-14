@@ -1,0 +1,13 @@
+// builtins "Lists": xs.slice(a, b) outside 0 <= a <= b <= len crashes, like
+// s.slice(a, b) does for strings.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    []int xs = []int{1, 2, 3}
+    fmt.println(xs.slice(1, 3).len().string() + " " + xs.slice(3, 3).len().string())
+    []int bad = xs.slice(2, 5)
+    fmt.println("not reached " + bad.len().string())
+    return null
+}

@@ -29,6 +29,90 @@ for dir in "$here"/testcmd/*/; do
   pass=$((pass+1))
 done
 
+# The same for the spec conformance projects in spec/testcmd/NAME/ (run in
+# spec/), where NAME.err, if present, is text that must appear in stderr
+# (for projects whose tests must not compile).
+for dir in "$here"/spec/testcmd/*/; do
+  [ -d "$dir" ] || continue
+  name=$(basename "$dir")
+  (cd "$here/spec" && "$seed" test "testcmd/$name" > "$tmp/out" 2> "$tmp/err"); code=$?
+  want=$(cat "$here/spec/testcmd/$name.exit")
+  if [ "$code" != "$want" ]; then
+    failed "seed test spec/testcmd/$name" "exit code $code, want $want: $(head -c 300 "$tmp/err")"; continue
+  fi
+  if ! cmp -s "$tmp/out" "$here/spec/testcmd/$name.out"; then
+    failed "seed test spec/testcmd/$name" "stdout differs:"; diff "$here/spec/testcmd/$name.out" "$tmp/out" | head -20; continue
+  fi
+  if [ -f "$here/spec/testcmd/$name.err" ] && ! grep -qF "$(cat "$here/spec/testcmd/$name.err")" "$tmp/err"; then
+    failed "seed test spec/testcmd/$name" "stderr missing '$(cat "$here/spec/testcmd/$name.err")', got: $(head -c 300 "$tmp/err")"; continue
+  fi
+  pass=$((pass+1))
+done
+
+# SPEC "Tests": seed test without a directory runs the tests under the
+# current one.
+out=$(cd "$here/spec/testcmd/rules" && "$seed" test 2>&1)
+case $out in
+  *'FAIL "byte comparison": tally/tests/tally_test.sd:35:'*"3 passed, 3 failed") pass=$((pass+1)) ;;
+  *) failed "seed test in spec/testcmd/rules" "$out" ;;
+esac
+
+# SPEC "Toolchain": seed run skips a -- before the program's arguments (only
+# the first one).
+out=$("$seed" run "$here/spec/program_args.sd" -- -x -- two 2>&1)
+if [ "$out" = "$(printf '4 true\n-x\n--\ntwo')" ]; then pass=$((pass+1)); else failed "seed run program_args.sd -- -x -- two" "$out"; fi
+
+# SPEC "Concurrency": reading stdin is a stop point. spec/io_stdin_stop_point.sd
+# reads from a FIFO whose writer stays open for 10 seconds without writing;
+# the failing sibling must stop the reader long before that.
+mkfifo "$tmp/stdin"
+(sleep 10 > "$tmp/stdin" & echo $! > "$tmp/sleeper.pid")
+out=$("$seed" run "$here/spec/io_stdin_stop_point.sd" < "$tmp/stdin" 2>&1)
+kill "$(cat "$tmp/sleeper.pid")" 2>/dev/null
+if [ "$out" = "$(printf 'enough\ntrue')" ]; then pass=$((pass+1)); else failed "io.readLine is a stop point" "$out"; fi
+
+# docs/formatting.md "The command": seed fmt --check prints the first line
+# that differs and the hint to stderr and exits with 1; it exits with 0 for
+# a formatted file. A file with syntax errors is not rewritten, its errors
+# are printed and the exit code is 1.
+mkdir -p "$tmp/fmt"
+cp "$here/full/errors/unformatted_code.sd" "$tmp/fmt/x.sd"
+cp "$here/lang/hello.sd" "$tmp/fmt/ok.sd"
+cp "$here/core/errors/statement_newline.sd" "$tmp/fmt/bad.sd"
+out=$(cd "$tmp/fmt" && "$seed" fmt --check x.sd 2>&1 >/dev/null); code=$?
+if [ "$code" = 1 ] && [ "$out" = "$(printf 'x.sd:9: not formatted\n    hint: run: seed fmt x.sd')" ]; then
+  pass=$((pass+1))
+else
+  failed "seed fmt --check x.sd" "exit $code: $out"
+fi
+if (cd "$tmp/fmt" && "$seed" fmt --check ok.sd > /dev/null 2>&1); then pass=$((pass+1)); else failed "seed fmt --check ok.sd" "exit code not 0"; fi
+out=$(cd "$tmp/fmt" && "$seed" fmt bad.sd 2>&1); code=$?
+if [ "$code" = 1 ] && cmp -s "$tmp/fmt/bad.sd" "$here/core/errors/statement_newline.sd" &&
+  case $out in *"bad.sd:5:15: error: expected the end of the statement"*) true ;; *) false ;; esac; then
+  pass=$((pass+1))
+else
+  failed "seed fmt on a file with syntax errors" "exit $code: $out"
+fi
+if (cd "$tmp/fmt" && "$seed" fmt --check bad.sd > /dev/null 2>&1); then failed "seed fmt --check bad.sd" "exit code 0 for a file with syntax errors"; else pass=$((pass+1)); fi
+
+# SPEC "Toolchain": seed build of a single file names the executable after
+# the file, or as -o says; seed ast prints the syntax tree.
+mkdir -p "$tmp/buildfile"
+if (cd "$tmp/buildfile" && "$seed" build "$here/spec/program_args.sd" > /dev/null 2>&1) && [ "$("$tmp/buildfile/program_args")" = "1 true" ]; then
+  pass=$((pass+1))
+else
+  failed "seed build program_args.sd" "no working executable $tmp/buildfile/program_args"
+fi
+if "$seed" build -o "$tmp/buildfile/named" "$here/spec/program_args.sd" > /dev/null 2>&1 && [ "$("$tmp/buildfile/named" a)" = "$(printf '2 true\na')" ]; then
+  pass=$((pass+1))
+else
+  failed "seed build -o" "no working executable $tmp/buildfile/named"
+fi
+case $("$seed" ast "$here/lang/hello.sd" 2>&1) in
+  *"(file"*"(fn main"*) pass=$((pass+1)) ;;
+  *) failed "seed ast hello.sd" "no syntax tree" ;;
+esac
+
 # seed run <dir> passes the arguments and the exit code.
 out=$(cd "$here/testcmd" && "$seed" run pass one two 2>&1)
 if [ "$out" = "$(printf 'sum 6\narg one\narg two')" ]; then pass=$((pass+1)); else failed "seed run pass one two" "$out"; fi

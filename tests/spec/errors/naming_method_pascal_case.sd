@@ -1,0 +1,15 @@
+// expect-error: Area
+// SPEC "Syntax basics": methods use camelCase.
+package main
+
+type Sq struct {
+    int s
+}
+
+fn (Sq q) Area() int {
+    return q.s * q.s
+}
+
+fn main([]string args) error {
+    return null
+}

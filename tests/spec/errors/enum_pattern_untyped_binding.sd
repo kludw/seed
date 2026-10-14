@@ -1,0 +1,22 @@
+// expect-error: enum_pattern_untyped_binding.sd:12:
+// SPEC "Control flow": variables bound in a case also write their type.
+package main
+
+type Shape enum {
+    Circle(float r)
+    Dot
+}
+
+fn area(Shape s) float {
+    switch (s) {
+    case Shape.Circle(r):
+        return r
+    case Shape.Dot:
+        return 0.0
+    }
+}
+
+fn main([]string args) error {
+    _ = area(Shape.Dot)
+    return null
+}

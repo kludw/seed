@@ -1,0 +1,18 @@
+// expect-error: default
+// SPEC "Control flow": a switch over a bool must end with default, even when both values are listed.
+package main
+
+fn name(bool x) int {
+    switch (x) {
+    case true:
+        return 1
+    case false:
+        return 0
+    }
+    return 2
+}
+
+fn main([]string args) error {
+    _ = name(true)
+    return null
+}

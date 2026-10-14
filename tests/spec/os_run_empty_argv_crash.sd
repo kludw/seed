@@ -1,0 +1,13 @@
+// builtins "os": os.run crashes if argv is empty.
+package main
+
+import "fmt"
+import "os"
+
+fn main([]string args) error {
+    fmt.println("running")
+    _, error err = os.run([]string{})
+    _ = err
+    fmt.println("not reached")
+    return null
+}

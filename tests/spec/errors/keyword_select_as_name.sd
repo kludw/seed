@@ -1,0 +1,9 @@
+// expect-error: keyword_select_as_name.sd:6:
+// grammar "Lexical structure": select is a keyword, not an identifier.
+package main
+
+fn main([]string args) error {
+    int select = 1
+    _ = select
+    return null
+}

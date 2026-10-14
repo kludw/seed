@@ -1,0 +1,9 @@
+// expect-error: conv_implicit_int_to_byte.sd:6:
+// SPEC "Types": no implicit conversions; an int is not a byte (byte(65) is).
+package main
+
+fn main([]string args) error {
+    byte b = 65
+    _ = b
+    return null
+}

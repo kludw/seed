@@ -1,0 +1,9 @@
+// expect-error: list_sort_bool.sd:7:
+// SPEC "Lists": sort() is only for lists of int, float, string or byte.
+package main
+
+fn main([]string args) error {
+    []bool xs = []bool{true, false}
+    xs.sort()
+    return null
+}

@@ -1,0 +1,26 @@
+// expect-error: null_narrowing_prefix_mut.sd:22:
+// SPEC "Null": narrowing ends when a mut method is called on a part of the path (u for u.box.label).
+package main
+
+type Box struct {
+    string? label
+}
+
+type User struct {
+    Box box
+}
+
+fn (User u) mut reset() {
+    u.box.label = null
+}
+
+fn main([]string args) error {
+    User u = User{box: Box{label: "x"}}
+    int n = 0
+    if (u.box.label != null) {
+        u.reset()
+        n = u.box.label.len()
+    }
+    _ = n
+    return null
+}

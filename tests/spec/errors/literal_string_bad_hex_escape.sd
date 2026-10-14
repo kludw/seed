@@ -1,0 +1,9 @@
+// expect-error: literal_string_bad_hex_escape.sd:6:
+// SPEC "Literals": \xHH needs two hex digits.
+package main
+
+fn main([]string args) error {
+    string s = "a\xZZ"
+    _ = s
+    return null
+}

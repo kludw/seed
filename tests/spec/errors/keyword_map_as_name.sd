@@ -1,0 +1,9 @@
+// expect-error: keyword_map_as_name.sd:6:
+// grammar "Lexical structure": map is a keyword, not an identifier.
+package main
+
+fn main([]string args) error {
+    int map = 1
+    _ = map
+    return null
+}

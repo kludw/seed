@@ -1,0 +1,9 @@
+// expect-error: conv_string_of_int.sd:6:
+// SPEC "Types": text is made with .string(); string(x) only converts a []byte.
+package main
+
+fn main([]string args) error {
+    string s = string(65)
+    _ = s
+    return null
+}

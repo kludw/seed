@@ -1,0 +1,16 @@
+// expect-error: group_in_condition.sd:10:
+// SPEC "Groups": a group can only be used whole (not compared inside a condition).
+package main
+
+fn work() error {
+    return null
+}
+
+fn main([]string args) error {
+    if (group {
+        spawn work()
+    } != null) {
+        return null
+    }
+    return null
+}

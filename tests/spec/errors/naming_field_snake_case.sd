@@ -1,0 +1,11 @@
+// expect-error: first_name
+// SPEC "Syntax basics": everything except types and enum cases uses camelCase (struct fields too).
+package main
+
+type User struct {
+    string first_name
+}
+
+fn main([]string args) error {
+    return null
+}

@@ -1,0 +1,10 @@
+// expect-error: op_ternary.sd:7:
+// SPEC "Operators": there is no ternary ?: operator.
+package main
+
+fn main([]string args) error {
+    int a = 5
+    int b = a > 3 ? 1 : 2
+    _ = b
+    return null
+}

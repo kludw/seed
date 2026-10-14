@@ -1,0 +1,26 @@
+// SPEC "Variables and constants": with several return values, a name with a
+// type is declared, and a name without one (a variable, field or element)
+// is assigned; _ discards a value.
+package main
+
+import "fmt"
+
+type Box struct {
+    int n
+    string label
+}
+
+fn pair(int a) (int, string) {
+    return a * 2, "v" + a.string()
+}
+
+fn main([]string args) error {
+    Box b = Box{n: 0, label: ""}
+    []int xs = []int{0, 0}
+    b.n, string s = pair(1)
+    xs[1], b.label = pair(2)
+    int k, _ = pair(3)
+    _, string t = pair(4)
+    fmt.println(b.n.string() + " " + s + " " + xs[1].string() + " " + b.label + " " + k.string() + " " + t)
+    return null
+}

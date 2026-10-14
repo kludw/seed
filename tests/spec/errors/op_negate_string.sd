@@ -1,0 +1,10 @@
+// expect-error: op_negate_string.sd:7:
+// SPEC "Operators": unary - works on numbers only.
+package main
+
+fn main([]string args) error {
+    string s = "a"
+    string x = -s
+    _ = x
+    return null
+}

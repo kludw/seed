@@ -1,0 +1,9 @@
+// expect-error: conv_int_of_string.sd:6:
+// SPEC "Types": text is parsed with s.toInt(), not converted with int(s).
+package main
+
+fn main([]string args) error {
+    int n = int("5")
+    _ = n
+    return null
+}

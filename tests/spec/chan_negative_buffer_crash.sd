@@ -1,0 +1,16 @@
+// SPEC "Channels": a negative buffer size crashes.
+package main
+
+import "fmt"
+
+fn size() int {
+    return -1
+}
+
+fn main([]string args) error {
+    fmt.println("making")
+    chan int ch = chan int(size())
+    ch.close()
+    fmt.println("not reached")
+    return null
+}

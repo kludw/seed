@@ -1,0 +1,13 @@
+// expect-error: fmt_blank_line_in_continuation.sd:9:1: error:
+// docs/formatting.md "Blank lines": no blank lines inside a statement that continues over several lines.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    int x = 1 +
+
+        2
+    fmt.println(x.string())
+    return null
+}
