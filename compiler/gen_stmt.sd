@@ -29,7 +29,12 @@ fn (Gen g) mut genStmts(int b) {
     }
     Block bl = g.c.ast.blocks[b]
     for (int i = 0; i < bl.count; i++) {
-        g.genStmt(g.c.ast.at(bl.list, i))
+        int s = g.c.ast.at(bl.list, i)
+        // The locals this statement may move out of (gen_move.sd).
+        map[string]bool saved = g.movable
+        g.movable = g.movesAt(s)
+        g.genStmt(s)
+        g.movable = saved
     }
 }
 

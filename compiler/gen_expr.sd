@@ -110,7 +110,30 @@ fn (Gen g) mut ownVal(string v, int t) string {
     if (isImmortal(v)) {
         return v
     }
+    if (g.movable[v] != null) {
+        // The statement reads the local for the last time (see
+        // movableIn): its value moves instead of being copied.
+        int l = g.findLocal(v)
+        if (l >= 0) {
+            g.movable.delete(v)
+            g.moveOut(l)
+            return v
+        }
+    }
     return g.retainExpr(t, v)
+}
+
+// The live slot of the local variable whose C name is v, or -1.
+fn (Gen g) findLocal(string v) int {
+    for (int i = g.slots.len() - 1; i >= 0; i--) {
+        if (g.slots[i].name == v && !g.slots[i].temp) {
+            if (g.slots[i].live) {
+                return i
+            }
+            return -1
+        }
+    }
+    return -1
 }
 
 // Whether the C value v needs no retain: a literal that is never counted
@@ -154,7 +177,77 @@ fn (Gen g) mut ownedTemp(int e) string {
     if (g.findTemp(v) >= 0) {
         return v
     }
-    return g.temp(t, g.retainExpr(t, v))
+    if (isImmortal(v) && g.counted(t)) {
+        // Owned and borrowed at once: nothing to retain or release.
+        return g.alias(t, v)
+    }
+    return g.temp(t, g.ownVal(v, t))
+}
+
+// The variable that the place or read e starts at (x in x, x.f, x[i].f),
+// or -1.
+fn (Gen g) rootVar(int e) int {
+    Expr x = g.c.ast.exprs[e]
+    ExprInfo i = g.c.info[e]
+    if (x.kind == ExprKind.Ident) {
+        if (i.res == Res.Local) {
+            return i.ref
+        }
+        return -1
+    }
+    if ((x.kind == ExprKind.Field && i.res == Res.Field) || x.kind == ExprKind.Index) {
+        return g.rootVar(x.a)
+    }
+    return -1
+}
+
+// Whether e reads a variable or a field path of one (x, x.f.g): its C
+// value is a part of the variable, and reading it cannot crash.
+fn (Gen g) isFieldRead(int e) bool {
+    Expr x = g.c.ast.exprs[e]
+    ExprInfo i = g.c.info[e]
+    if (i.ifaceFrom >= 0 || (i.wrap && !g.wrapIsIdentity(i.ty))) {
+        return false
+    }
+    if (x.kind == ExprKind.Ident) {
+        return i.res == Res.Local
+    }
+    return x.kind == ExprKind.Field && i.res == Res.Field && g.isFieldRead(x.a)
+}
+
+// The arguments of a mut call (a mut method or interface method, or a
+// mut built-in that borrows its argument) whose receiver is the place recv:
+// evaluated in order, before the receiver's place. The call can only change
+// what is reachable from the variable recv starts at, so an argument that
+// reads another variable (or a field path of one) is passed borrowed, as
+// long as no later argument and nothing in the receiver's place can change
+// it; a literal needs no copy either. Every other argument is kept in a
+// temporary of its own (bag.addAll(bag) passes a copy of bag).
+fn (Gen g) mut mutArgs(int recv, []int args) []string {
+    int root = g.rootVar(recv)
+    bool mutSeen = g.hasMutEffects(recv)
+    []bool laterMut = []bool{}
+    for (int i = 0; i < args.len(); i++) {
+        laterMut.push(false)
+    }
+    for (int j = args.len() - 1; j >= 0; j--) {
+        laterMut[j] = mutSeen
+        if (g.hasMutEffects(args[j])) {
+            mutSeen = true
+        }
+    }
+    []string vals = []string{}
+    for (int k = 0; k < args.len(); k++) {
+        int a = args[k]
+        int t = g.typeOf(a)
+        bool borrow = root >= 0 && !laterMut[k] && g.isFieldRead(a) && g.rootVar(a) != root
+        if (!borrow || !g.counted(t)) {
+            vals.push(g.ownedTemp(a))
+            continue
+        }
+        vals.push(g.gexpr(a))
+    }
+    return vals
 }
 
 fn (Gen g) mut releaseSlot(int i) {

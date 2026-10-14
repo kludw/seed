@@ -190,6 +190,7 @@ never return (`isNoReturn`).
 | `gen_call.sd` | gen | calls, places, built-in methods, conversions |
 | `gen_stmt.sd` | gen | statements, scopes, return, `defer`, `spawn`, `select`, `assert` |
 | `gen_int.sd` | gen | ints known to be small: the interval analysis of int locals, unboxed locals, plain C arithmetic |
+| `gen_move.sd` | gen | moving a local's value on its last use instead of copying it |
 
 ## Data structures
 
@@ -477,7 +478,11 @@ vtables, `sd_test_N` for tests); the names of a package other than `main`
 also carry its prefix (`sd_f_cart_newCart`, `sd_S_cart_Item`).
 
 *Memory management.* Ownership follows runtime/README.md section 3:
-parameters are borrowed, results are owned, stores consume. The generator
+parameters are borrowed, results are owned, stores consume. Parameters are
+read-only in Seed, so a callee never retains or releases one (unless it
+stores it), and a caller passes its arguments without retaining them: a
+call result passed on is released after the statement, anything else is
+passed as it is. The generator
 tracks the counted values the current function owns in a stack of *slots*
 (`Gen.slots`): local variables and the temporaries of the statement being
 generated.
@@ -505,7 +510,28 @@ generated.
 - `gplace` builds a pointer to a place, making every container on the way
   unique (`sd_list_at_mut`, `sd_box_mut`); `gstore` evaluates the value,
   then the place, releases the old value and stores. A mut call evaluates
-  (and keeps) its arguments before the receiver's place (`bag.addAll(bag)`).
+  its arguments before the receiver's place, and keeps a copy of those the
+  call could change (`bag.addAll(bag)`): `mutArgs` passes an argument
+  borrowed when it reads another variable than the one the receiver's place
+  starts at (or a field path of it), and no later argument nor the
+  receiver's place has mut effects, because a mut call can only change
+  what is reachable from its receiver's variable. Literals are never copied
+  (`ownedTemp` makes no retained temporary for an immortal value).
+- *Move on last use* (`gen_move.sd`): a store of a local `x` (into a
+  struct, list, map, box, interface, defer environment, another variable,
+  or a mut call's kept argument) moves `x`'s value instead of retaining it
+  when the statement is a simple one (expression, assignment, declaration,
+  return, local const, defer) directly in the block that declared `x`,
+  mentions `x` exactly once (not on the right of `&&`/`||`, not in a group
+  block), and no later statement of the block mentions `x`. `analyzeMoves`
+  finds these in one walk per function; `ownVal` does the move with
+  `moveOut`, like for a temporary: `x`'s slot stops being live, and its frame
+  field is set to null after the line that took the value. The rule is
+  syntactic, so every path through the statement moves `x` (or leaves it
+  early, before the move, with `x` still owned) and nothing touches `x`
+  afterwards; a local declared outside a loop is never moved inside it.
+  Besides a retain/release pair, a move keeps a list's count at 1, so
+  changing the copy later does not copy the list.
 - `x = x + a + b` on a local string appends in place (`sd_str_append`);
   other string `+` chains are one `sd_str_concat_n`. When a part of the
   chain is `n.string()` on an int, the chain is one `sd_str_concat_parts`

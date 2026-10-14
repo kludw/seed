@@ -1,0 +1,224 @@
+// Moves on last use and borrowed arguments of mut calls (compiler/gen_move.sd,
+// mutArgs): values must behave as copies whatever the generator does.
+package main
+
+import "errors"
+import "fmt"
+
+type Bag struct {
+    []string items
+    string name
+}
+
+fn (Bag b) mut add(string s) {
+    b.items.push(s)
+}
+
+fn (Bag b) mut addAll(Bag other) {
+    for (int i = 0; i < other.items.len(); i++) {
+        b.items.push(other.items[i])
+    }
+}
+
+fn (Bag b) mut addList([]string xs) {
+    b.items = concatList(b.items, xs)
+}
+
+fn (Bag b) mut rename(string n) {
+    b.name = n
+    b.items.push(n)
+}
+
+fn show([]string xs) string {
+    return "[" + xs.join(",") + "]"
+}
+
+fn concatList([]string a, []string b) []string {
+    []string out = []string{}
+    for (int i = 0; i < a.len(); i++) {
+        out.push(a[i])
+    }
+    for (int j = 0; j < b.len(); j++) {
+        out.push(b[j])
+    }
+    return out
+}
+
+fn mayFail(bool fail) (int, error) {
+    if (fail) {
+        return 0, errors.new("failed")
+    }
+    return 7, null
+}
+
+// A local moved into a struct, then the struct changed: nothing else sees it.
+fn moveIntoStruct() string {
+    []string xs = []string{"a", "b"}
+    Bag b = Bag{items: xs, name: "one"}
+    b.items.push("c")
+    return show(b.items)
+}
+
+// A copy that is not the last use: the original keeps its value.
+fn copyNotLast() string {
+    []string xs = []string{"a"}
+    Bag b = Bag{items: xs, name: "two"}
+    b.items.push("x")
+    xs.push("y")
+    return show(xs) + show(b.items)
+}
+
+// Declared outside the loop, stored inside it: copied every time.
+fn loopOuter() string {
+    []string xs = []string{"p"}
+    []Bag bags = []Bag{}
+    for (int i = 0; i < 3; i++) {
+        bags.push(Bag{items: xs, name: i.string()})
+        bags[i].items.push(i.string())
+    }
+    return show(xs) + show(bags[0].items) + show(bags[2].items)
+}
+
+// Declared inside the loop body: moved every iteration.
+fn loopInner() string {
+    []Bag bags = []Bag{}
+    for (int i = 0; i < 3; i++) {
+        []string xs = []string{"q", i.string()}
+        bags.push(Bag{items: xs, name: "n"})
+    }
+    bags[1].items.push("z")
+    return show(bags[0].items) + show(bags[1].items) + show(bags[2].items)
+}
+
+// Stored in one branch only, read afterwards.
+fn conditional(bool c) string {
+    []string xs = []string{"k"}
+    []string kept = []string{}
+    if (c) {
+        kept = xs
+        kept.push("c")
+    }
+    xs.push("after")
+    return show(xs) + show(kept)
+}
+
+// On the right of &&: evaluated on some paths only.
+fn shortCircuit(bool c) string {
+    []string xs = []string{"s"}
+    bool ok = c && show(concatList(xs, []string{"t"})) == "[s,t]"
+    return ok.string() + show(xs)
+}
+
+// Mut calls: arguments read from another variable are borrowed, arguments
+// read from the receiver's own variable are copied first.
+fn mutCalls() string {
+    Bag a = Bag{items: []string{"a1", "a2"}, name: "a"}
+    Bag b = Bag{items: []string{"b1"}, name: "b"}
+    b.add(a.items[0])
+    b.add(a.name)
+    b.addAll(a)
+    b.addAll(b)
+    b.addList(b.items)
+    b.rename(b.name + "!")
+    a.add("only-a")
+    return show(a.items) + show(b.items) + b.name
+}
+
+// A local moved into a map, which is then changed.
+fn intoMap() string {
+    map[string][]string m = map[string][]string{}
+    []string xs = []string{"m"}
+    m["k"] = xs
+    []string? got = m["k"]
+    if (got == null) {
+        return "missing"
+    }
+    []string ys = got
+    ys.push("n")
+    m["k"] = ys
+    []string? again = m["k"]
+    if (again == null) {
+        return "missing"
+    }
+    return show(again)
+}
+
+// A move in the same statement as a try that returns early.
+fn tryAfterMove(bool fail) ([]string, error) {
+    []string xs = []string{"t"}
+    int n = 0
+    Bag b = Bag{items: xs, name: "x"}
+    n = try mayFail(fail)
+    b.items.push(n.string())
+    return b.items, null
+}
+
+fn moveIntoReturn() Bag {
+    []string xs = []string{"r"}
+    string name = "ret"
+    return Bag{items: xs, name: name}
+}
+
+fn moveIntoDefer() {
+    []string xs = []string{"d"}
+    defer fmt.println("deferred " + show(xs))
+    fmt.println("before defer runs")
+}
+
+fn moveInGroup() error {
+    []string results = []string{}
+    error err = group {
+        []string xs = []string{"g"}
+        Bag b = Bag{items: xs, name: "g"}
+        results = b.items
+    }
+    if (err != null) {
+        return err
+    }
+    fmt.println("group " + show(results))
+    return null
+}
+
+fn optionals() string {
+    string? s = "opt"
+    string t = "none"
+    if (s != null) {
+        t = s
+    }
+    []string? xs = []string{"o"}
+    []string? ys = xs
+    if (ys != null) {
+        ys.push("p")
+    }
+    if (xs != null && ys != null) {
+        return t + show(xs) + show(ys)
+    }
+    return t
+}
+
+fn main([]string args) error {
+    fmt.println(moveIntoStruct())
+    fmt.println(copyNotLast())
+    fmt.println(loopOuter())
+    fmt.println(loopInner())
+    fmt.println(conditional(true))
+    fmt.println(conditional(false))
+    fmt.println(shortCircuit(true))
+    fmt.println(shortCircuit(false))
+    fmt.println(mutCalls())
+    fmt.println(intoMap())
+    []string? ok, error e1 = tryAfterMove(false)
+    if (ok != null) {
+        fmt.println(show(ok))
+    }
+    []string? bad, error e2 = tryAfterMove(true)
+    if (bad == null && e2 != null && e1 == null) {
+        fmt.println("error: " + e2.message())
+    }
+    Bag r = moveIntoReturn()
+    fmt.println(r.name + show(r.items))
+    moveIntoDefer()
+    try moveInGroup()
+    fmt.println(optionals())
+    return null
+}

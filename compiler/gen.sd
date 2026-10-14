@@ -101,6 +101,17 @@ type Gen struct {
     map[int]IntRange varRange
     []IntEvent intEvents
     map[int]bool intDeclared
+    // Move on last use (gen_move.sd): the C names of the locals the
+    // current statement may move out of, the locals each statement of the
+    // current function may move, and the analysis's state.
+    map[string]bool movable
+    map[int][]int moveAt
+    []int mvStmtAt
+    map[int]int mvLevel
+    map[int]int mvDecl
+    map[int]int mvLast
+    map[int]int mvCount
+    map[int]bool mvCond
 }
 
 fn newGen(Checker c) Gen {
@@ -140,6 +151,14 @@ fn newGen(Checker c) Gen {
         varRange: map[int]IntRange{},
         intEvents: []IntEvent{},
         intDeclared: map[int]bool{},
+        movable: map[string]bool{},
+        moveAt: map[int][]int{},
+        mvStmtAt: []int{},
+        mvLevel: map[int]int{},
+        mvDecl: map[int]int{},
+        mvLast: map[int]int{},
+        mvCount: map[int]int{},
+        mvCond: map[int]bool{},
     }
 }
 
@@ -1333,6 +1352,7 @@ fn (Gen g) mut genFn(int f) {
     g.slotDone = map[int]bool{}
     g.frameSlots = []Slot{}
     g.analyzeInts(fd.body)
+    g.analyzeMoves(fd.body)
     g.defers = g.blockHasDefer(fd.body)
     string sig = g.fnSig(f)
     g.protos.push(sig + ";\n")

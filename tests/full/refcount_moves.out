@@ -1,0 +1,17 @@
+[a,b,c]
+[a,y][a,x]
+[p][p,0][p,2]
+[q,0][q,1,z][q,2]
+[k,after][k,c]
+[k,after][]
+true[s]
+false[s]
+[a1,a2,only-a][b1,a1,a,a1,a2,b1,a1,a,a1,a2,b1,a1,a,a1,a2,b1,a1,a,a1,a2,b!]b!
+[m,n]
+[t,7]
+error: failed
+ret[r]
+before defer runs
+deferred [d]
+group [g]
+opt[o][o,p]

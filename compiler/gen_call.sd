@@ -88,16 +88,12 @@ fn (Gen g) mut finishCall(int e, string call) string {
     return g.temp(t, call)
 }
 
-// A call of a mut method: the arguments are evaluated (and kept) first,
-// because the call may change what they were read from (bag.addAll(bag)),
-// then the receiver's place.
+// A call of a mut method: the arguments are evaluated first (and kept
+// when the call may change what they were read from, bag.addAll(bag); see
+// mutArgs), then the receiver's place.
 fn (Gen g) mut gmutCall(int e) string {
     ExprInfo i = g.c.info[e]
-    []int args = g.argList(e)
-    []string vals = []string{}
-    for (int k = 0; k < args.len(); k++) {
-        vals.push(g.ownedTemp(args[k]))
-    }
+    []string vals = g.mutArgs(g.recvOf(e), g.argList(e))
     string place = g.gplace(g.recvOf(e))
     if (i.res == Res.Method) {
         []string margs = []string{place}
@@ -344,8 +340,13 @@ fn (Gen g) mut okOpt(int opt, string ok, string o) string {
 // arguments first (kept in temporaries), then the receiver's place.
 fn (Gen g) mut gmutBuiltin(int e, Builtin b, int r, int rt, []int args) string {
     []string vals = []string{}
-    for (int i = 0; i < args.len(); i++) {
-        vals.push(g.ownedTemp(args[i]))
+    if (b == Builtin.Delete) {
+        // delete borrows its key.
+        vals = g.mutArgs(r, args)
+    } else {
+        for (int i = 0; i < args.len(); i++) {
+            vals.push(g.ownedTemp(args[i]))
+        }
     }
     string ptype = "sd_list **"
     if (g.kindOf(rt) == Kind.Map) {
@@ -382,7 +383,7 @@ fn (Gen g) mut gmutBuiltin(int e, Builtin b, int r, int rt, []int args) string {
         g.emit("sd_list_sort_by(" + place + ", " + g.lessFn(g.typeOf(args[0])) + ", (void *)" + vals[0] + ");")
         return ""
     case Builtin.Delete:
-        g.emit("sd_map_delete(" + place + ", &" + vals[0] + ");")
+        g.emit("sd_map_delete(" + place + ", " + g.addr(g.typeOf(args[0]), vals[0]) + ");")
         return ""
     case Builtin.None, Builtin.Len, Builtin.String, Builtin.SSlice, Builtin.SContains, Builtin.SIndex, Builtin.SStarts:
         return ""

@@ -1,0 +1,226 @@
+// The C generator, continued: moving a local's value on its last use.
+//
+// A store copies the value it is given: reading a local x into a struct
+// literal, a list, a container, another variable or an argument kept by a
+// mut call retains x's value, and x's block releases it at its end. When
+// the store is x's last use the pair is wasted, and worse, the store's copy
+// shares x's container (count 2), so changing it later copies the whole
+// list. Moving instead hands x's own count over to the store.
+//
+// The rule is syntactic, so that it is right without a flow analysis: a
+// local x declared by a statement directly in a block B may be moved by a
+// later statement s directly in B when
+//
+//   - s is an expression statement, an assignment, a declaration, a return,
+//     a local const or a defer (a statement with no blocks of its own),
+//   - s mentions x exactly once, and not on the right of && or || nor in a
+//     group block (where the move would happen on some paths only),
+//   - no later statement of B mentions x (not even in a nested block).
+//
+// Then every path through s moves x (or leaves s early, by try or a crash,
+// before the move, with x still live), and nothing reads, assigns or
+// releases x afterwards. ownVal does the move: the local's slot stops being
+// live (moveOut), so the end of the block, return, break and continue do not
+// release it, and a frame field is set to null after the line that took the
+// value. A loop body is a block of its own, so a local declared outside a
+// loop is never moved inside it.
+package main
+
+// Computes g.moveAt (statement -> the locals it may move out of) for the
+// function whose body is b.
+fn (Gen g) mut analyzeMoves(int b) {
+    g.moveAt = map[int][]int{}
+    g.mvStmtAt = []int{}
+    g.mvLevel = map[int]int{}
+    g.mvDecl = map[int]int{}
+    g.mvLast = map[int]int{}
+    g.mvCount = map[int]int{}
+    g.mvCond = map[int]bool{}
+    g.mvBlock(b)
+    []int vs = g.mvLast.keys()
+    for (int i = 0; i < vs.len(); i++) {
+        int v = vs[i]
+        int? last = g.mvLast[v]
+        int? decl = g.mvDecl[v]
+        int? n = g.mvCount[v]
+        bool? cond = g.mvCond[v]
+        if (last == null || decl == null || n == null || last < 0 || last == decl || n != 1 || (cond != null && cond)) {
+            continue
+        }
+        StmtKind k = g.c.ast.stmts[last].kind
+        if (k != StmtKind.ExprStmt && k != StmtKind.Assign && k != StmtKind.Return && k != StmtKind.Const && k != StmtKind.Defer) {
+            continue
+        }
+        VarKind vk = g.c.vars[v].kind
+        if ((vk != VarKind.Local && vk != VarKind.LocalConst) || g.isUnboxed(v) || !g.counted(g.c.vars[v].ty)) {
+            continue
+        }
+        []int? at = g.moveAt[last]
+        if (at == null) {
+            g.moveAt[last] = []int{v}
+        } else {
+            []int more = at
+            more.push(v)
+            g.moveAt[last] = more
+        }
+    }
+}
+
+// The C names of the locals statement s may move out of (for ownVal).
+fn (Gen g) movesAt(int s) map[string]bool {
+    map[string]bool out = map[string]bool{}
+    []int? vs = g.moveAt[s]
+    if (vs == null) {
+        return out
+    }
+    for (int i = 0; i < vs.len(); i++) {
+        out[g.lname(vs[i])] = true
+    }
+    return out
+}
+
+// The walk keeps a stack with the statement being visited in each
+// enclosing block (mvStmtAt; -1 for a level that is not a block: the init
+// and post of a for, an else if, a select case's comm). For each local
+// declared directly in a block it records the level and statement of the
+// declaration, the last statement of that block that mentions it, how many
+// times that statement mentions it, and whether a mention there is
+// conditional (in a nested level, or on the right of && or ||).
+fn (Gen g) mut mvBlock(int b) {
+    if (b < 0) {
+        return
+    }
+    Block bl = g.c.ast.blocks[b]
+    int d = g.mvStmtAt.len()
+    g.mvStmtAt.push(-1)
+    for (int i = 0; i < bl.count; i++) {
+        int s = g.c.ast.at(bl.list, i)
+        g.mvStmtAt[d] = s
+        g.mvStmt(s)
+    }
+    g.mvStmtAt = g.mvStmtAt.slice(0, d)
+}
+
+// A statement that is not directly in a block.
+fn (Gen g) mut mvNested(int s) {
+    if (s < 0) {
+        return
+    }
+    int d = g.mvStmtAt.len()
+    g.mvStmtAt.push(-1)
+    g.mvStmt(s)
+    g.mvStmtAt = g.mvStmtAt.slice(0, d)
+}
+
+fn (Gen g) mut mvDeclare(int v, int s) {
+    int d = g.mvStmtAt.len() - 1
+    if (v >= 0 && g.mvStmtAt[d] >= 0) {
+        g.mvLevel[v] = d
+        g.mvDecl[v] = s
+    }
+}
+
+fn (Gen g) mut mvStmt(int s) {
+    Stmt st = g.c.ast.stmts[s]
+    switch (st.kind) {
+    case StmtKind.Const:
+        g.mvDeclare(g.c.stmtVar[s], s)
+        g.mvExpr(st.expr, false)
+    case StmtKind.Assign:
+        g.mvExpr(st.expr, false)
+        for (int i = 0; i < st.count; i++) {
+            int ti = g.c.ast.at(st.list, i)
+            Target tg = g.c.ast.targets[ti]
+            if (tg.kind == TargetKind.Place) {
+                g.mvExpr(tg.expr, false)
+            } else if (tg.kind == TargetKind.Decl) {
+                g.mvDeclare(g.c.targetVar[ti], s)
+            }
+        }
+    case StmtKind.Return:
+        for (int j = 0; j < st.count; j++) {
+            g.mvExpr(g.c.ast.at(st.list, j), false)
+        }
+    case StmtKind.If:
+        g.mvExpr(st.expr, false)
+        g.mvBlock(st.body)
+        g.mvNested(st.elseIf)
+        g.mvBlock(st.els)
+    case StmtKind.For:
+        // The init's locals live in the loop's own scope, which is not a
+        // block: they are never moved.
+        int d = g.mvStmtAt.len()
+        g.mvStmtAt.push(-1)
+        if (st.init >= 0) {
+            g.mvStmt(st.init)
+        }
+        g.mvExpr(st.expr, true)
+        if (st.post >= 0) {
+            g.mvStmt(st.post)
+        }
+        g.mvBlock(st.body)
+        g.mvStmtAt = g.mvStmtAt.slice(0, d)
+    case StmtKind.Switch, StmtKind.Select:
+        g.mvExpr(st.expr, false)
+        for (int k = 0; k < st.count; k++) {
+            Case cs = g.c.ast.cases[g.c.ast.at(st.list, k)]
+            for (int l = 0; l < cs.labelCount; l++) {
+                g.mvExpr(g.c.ast.labels[g.c.ast.at(cs.labels, l)].expr, true)
+            }
+            g.mvNested(cs.comm)
+            g.mvBlock(cs.body)
+        }
+    case StmtKind.ExprStmt, StmtKind.IncDec, StmtKind.Defer, StmtKind.Spawn, StmtKind.Assert:
+        g.mvExpr(st.expr, false)
+    case StmtKind.Break, StmtKind.Continue, StmtKind.Bad:
+        return
+    }
+}
+
+fn (Gen g) mut mvExpr(int e, bool cond) {
+    if (e < 0) {
+        return
+    }
+    Expr x = g.c.ast.exprs[e]
+    if (x.kind == ExprKind.Ident) {
+        ExprInfo i = g.c.info[e]
+        if (i.res == Res.Local) {
+            g.mvMention(i.ref, cond)
+        }
+        return
+    }
+    if (x.kind == ExprKind.Group) {
+        g.mvBlock(x.block)
+        return
+    }
+    g.mvExpr(x.a, cond)
+    bool short = x.kind == ExprKind.Binary && (x.op == Tok.AndAnd || x.op == Tok.OrOr)
+    g.mvExpr(x.b, cond || short)
+    for (int k = 0; k < x.count; k++) {
+        g.mvExpr(g.c.ast.at(x.list, k), cond)
+    }
+}
+
+// A mention of local v: counted for the statement of v's block it is in.
+fn (Gen g) mut mvMention(int v, bool cond) {
+    int? level = g.mvLevel[v]
+    if (level == null) {
+        return
+    }
+    int s = g.mvStmtAt[level]
+    int? last = g.mvLast[v]
+    int n = 0
+    if (last != null && last == s) {
+        int? c = g.mvCount[v]
+        if (c != null) {
+            n = c
+        }
+    } else {
+        g.mvLast[v] = s
+        g.mvCond[v] = false
+    }
+    g.mvCount[v] = n + 1
+    if (cond || g.mvStmtAt.len() - 1 > level) {
+        g.mvCond[v] = true
+    }
+}

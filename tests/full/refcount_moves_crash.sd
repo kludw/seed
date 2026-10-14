@@ -1,0 +1,82 @@
+// Crashes right after a local was moved (compiler/gen_move.sd) or passed
+// borrowed to a mut call (mutArgs): the value is released once, by whoever
+// owns it at the crash. tests/leaks.sh checks that nothing leaks, and the
+// address sanitizer that nothing is released twice.
+package main
+
+import "fmt"
+
+type Bag struct {
+    []string items
+    string name
+}
+
+fn (Bag b) mut add(string s, int at) {
+    b.items.push(s + b.items[at])
+}
+
+fn pick([]string xs, int i) string {
+    return xs[i]
+}
+
+fn heap(string s) string {
+    return s + "!"
+}
+
+// Moved into a struct, then a crash while the struct holds it.
+fn movedIntoStruct() error {
+    []string xs = []string{"a", "b"}
+    Bag b = Bag{items: xs, name: "one"}
+    fmt.println(pick(b.items, 5))
+    return null
+}
+
+// Moved into a list, then a crash in the same statement after the move.
+fn movedThenCrash() error {
+    string s = "x" + heap("y")
+    []string xs = []string{"z"}
+    []Bag bags = []Bag{Bag{items: xs, name: s}, Bag{items: []string{}, name: pick([]string{"w"}, 3)}}
+    fmt.println(bags.len().string())
+    return null
+}
+
+// A borrowed argument of a mut call that crashes.
+fn borrowedArg() error {
+    Bag a = Bag{items: []string{"a1"}, name: "a" + heap("!")}
+    Bag b = Bag{items: []string{"b1"}, name: "b"}
+    b.add(a.name, 0)
+    b.add(a.name, 9)
+    return null
+}
+
+// Moved into a map, then a crash.
+fn movedIntoMap() error {
+    map[string][]string m = map[string][]string{}
+    []string xs = []string{"m" + heap("1")}
+    m["k"] = xs
+    fmt.println(pick([]string{}, 0))
+    return null
+}
+
+fn main([]string args) error {
+    error e1 = group {
+        spawn movedIntoStruct()
+    }
+    fmt.println("struct: " + e1.message())
+    error e2 = group {
+        spawn movedThenCrash()
+    }
+    fmt.println("list: " + e2.message())
+    error e3 = group {
+        spawn borrowedArg()
+    }
+    fmt.println("borrowed: " + e3.message())
+    error e4 = group {
+        spawn movedIntoMap()
+    }
+    fmt.println("map: " + e4.message())
+    []string xs = []string{"main"}
+    Bag last = Bag{items: xs, name: "last"}
+    fmt.println(pick(last.items, 2))
+    return null
+}
