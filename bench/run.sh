@@ -29,8 +29,14 @@ best() {
   b=""
   i=0
   while [ $i -lt "$runs" ]; do
-    /usr/bin/time -p "$1" > "$2" 2> "$2.time" || { echo "FAILED"; return; }
-    t=$(awk '/^real/ {print $2}' "$2.time")
+    if [ -x /usr/bin/time ]; then
+      /usr/bin/time -p "$1" > "$2" 2> "$2.time" || { echo "FAILED"; return; }
+      t=$(awk '/^real/ {print $2}' "$2.time")
+    else # no time(1) (minimal Linux images): GNU date's nanoseconds
+      t0=$(date +%s%N)
+      "$1" > "$2" 2> "$2.time" || { echo "FAILED"; return; }
+      t=$(awk -v a="$t0" -v b="$(date +%s%N)" 'BEGIN { printf "%.3f", (b - a) / 1e9 }')
+    fi
     if [ -z "$b" ] || awk -v t="$t" -v b="$b" 'BEGIN { exit !(t < b) }'; then b=$t; fi
     i=$((i + 1))
   done
