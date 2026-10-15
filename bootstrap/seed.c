@@ -8640,7 +8640,7 @@ struct sd_S_Token { sd_box * f_kind; sd_S_Pos f_pos; sd_str f_text; sd_str f_raw
 struct sd_S_TypeDecl { sd_S_Pos f_pos; sd_int f_file; bool f_isPub; sd_str f_name; sd_box * f_kind; sd_int f_impls; sd_int f_implCount; sd_int f_fields; sd_int f_fieldCount; sd_int f_cases; sd_int f_caseCount; sd_int f_methods; sd_int f_methodCount; };
 struct sd_S_TypeExpr { sd_box * f_kind; sd_S_Pos f_pos; sd_str f_pkg; sd_str f_name; sd_int f_a; sd_int f_b; sd_int f_list; sd_int f_count; sd_int f_results; sd_int f_resultCount; };
 struct sd_S_Var { sd_str f_name; sd_int f_ty; sd_box * f_kind; sd_S_Pos f_pos; bool f_used; };
-struct sd_S_Gen { sd_S_Checker f_c; sd_list * f_out; sd_list * f_fnText; sd_list * f_decls; sd_list * f_gprotos; sd_list * f_protos; sd_list * f_helpers; sd_list * f_thunks; sd_list * f_consts; sd_list * f_queue; sd_list * f_slots; sd_list * f_scopes; sd_list * f_loops; sd_list * f_groups; sd_int f_indent; sd_int f_ntmp; sd_int f_ndefer; sd_int f_nspawn; sd_int f_curFn; bool f_defers; bool f_frameOn; sd_list * f_frame; sd_map * f_frameIdx; sd_map * f_varC; sd_list * f_moved; bool f_popped; sd_map * f_fcCache; sd_int f_crashSeq; sd_int f_nslot; sd_map * f_fieldNeeded; sd_map * f_slotDone; sd_list * f_frameSlots; sd_map * f_safeCalls; sd_map * f_varRange; sd_list * f_intEvents; sd_map * f_intDeclared; sd_map * f_movable; sd_map * f_moveAt; sd_list * f_mvStmtAt; sd_map * f_mvLevel; sd_map * f_mvDecl; sd_map * f_mvLast; sd_map * f_mvCount; sd_map * f_mvCond; sd_map * f_modSets; sd_map * f_borrowed; sd_map * f_borrowRoots; sd_list * f_bwEvents; sd_list * f_bwCands; bool f_bwOn; sd_map * f_fastFns; sd_list * f_fastCalls; sd_list * f_fastLoops; sd_map * f_preemptFns; sd_list * f_pcComp; sd_list * f_pcCyclic; sd_list * f_pcCallees; sd_int f_pcBody; bool f_pcSeen; bool f_pcTop; sd_int f_pcCond; bool f_split; sd_map * f_refs; };
+struct sd_S_Gen { sd_S_Checker f_c; sd_list * f_out; sd_list * f_fnText; sd_list * f_decls; sd_list * f_gprotos; sd_list * f_protos; sd_list * f_helpers; sd_list * f_thunks; sd_list * f_consts; sd_list * f_queue; sd_list * f_slots; sd_list * f_scopes; sd_list * f_loops; sd_list * f_groups; sd_int f_indent; sd_int f_ntmp; sd_int f_ndefer; sd_int f_nspawn; sd_int f_curFn; bool f_defers; bool f_frameOn; sd_list * f_frame; sd_map * f_frameIdx; sd_map * f_varC; sd_list * f_moved; bool f_popped; sd_map * f_fcCache; sd_int f_crashSeq; sd_int f_nslot; sd_map * f_fieldNeeded; sd_map * f_slotDone; sd_list * f_frameSlots; sd_map * f_safeCalls; sd_map * f_varRange; sd_list * f_intEvents; sd_map * f_intDeclared; sd_map * f_movable; sd_map * f_moveAt; sd_list * f_mvStmtAt; sd_map * f_mvLevel; sd_map * f_mvDecl; sd_map * f_mvLast; sd_map * f_mvCount; sd_map * f_mvCond; sd_map * f_modSets; sd_map * f_borrowed; sd_map * f_borrowRoots; sd_list * f_bwEvents; sd_list * f_bwCands; bool f_bwOn; sd_map * f_ownedParams; sd_map * f_fastFns; sd_list * f_fastCalls; sd_list * f_fastLoops; sd_map * f_preemptFns; sd_list * f_pcComp; sd_list * f_pcCyclic; sd_list * f_pcCallees; sd_int f_pcBody; bool f_pcSeen; bool f_pcTop; sd_int f_pcCond; bool f_split; sd_map * f_refs; };
 struct sd_S_Loader { sd_S_Parser f_p; sd_str f_seedRoot; sd_str f_projectRoot; sd_str f_libDir; sd_map * f_byDir; sd_list * f_unformatted; sd_map * f_overlay; };
 struct sd_S_LspAnalysis { sd_S_Checker f_c; sd_int f_file; bool f_clean; bool f_whole; sd_list * f_unformatted; sd_str f_src; };
 struct sd_E_Builtin { int32_t tag; };
@@ -8768,7 +8768,7 @@ static const sd_field sd_F_BorrowCand[] = {SD_FIELD(sd_S_BorrowCand, f_var, &sd_
 static const sd_type sd_D_BorrowCand = SD_STRUCT_TYPE("BorrowCand", sd_S_BorrowCand, sd_F_BorrowCand);
 static const sd_field sd_F_Build[] = {SD_FIELD(sd_S_Build, f_files, &sd_type_list), SD_FIELD(sd_S_Build, f_dir, &sd_type_str), SD_FIELD(sd_S_Build, f_projectRoot, &sd_type_str), SD_FIELD(sd_S_Build, f_name, &sd_type_str)};
 static const sd_type sd_D_Build = SD_STRUCT_TYPE("Build", sd_S_Build, sd_F_Build);
-static const sd_variant sd_V_Builtin[] = {{"None", NULL, 0}, {"Len", NULL, 0}, {"String", NULL, 0}, {"SSlice", NULL, 0}, {"SContains", NULL, 0}, {"SIndex", NULL, 0}, {"SStarts", NULL, 0}, {"SEnds", NULL, 0}, {"Split", NULL, 0}, {"Trim", NULL, 0}, {"Replace", NULL, 0}, {"Upper", NULL, 0}, {"Lower", NULL, 0}, {"ToInt", NULL, 0}, {"ToFloat", NULL, 0}, {"Bytes", NULL, 0}, {"Push", NULL, 0}, {"Pop", NULL, 0}, {"Insert", NULL, 0}, {"Remove", NULL, 0}, {"LContains", NULL, 0}, {"LIndex", NULL, 0}, {"LSlice", NULL, 0}, {"Reverse", NULL, 0}, {"Sort", NULL, 0}, {"Join", NULL, 0}, {"Delete", NULL, 0}, {"Keys", NULL, 0}, {"Message", NULL, 0}, {"Chars", NULL, 0}, {"SortBy", NULL, 0}, {"Send", NULL, 0}, {"Receive", NULL, 0}, {"Close", NULL, 0}};
+static const sd_variant sd_V_Builtin[] = {{"None", NULL, 0}, {"Len", NULL, 0}, {"String", NULL, 0}, {"SSlice", NULL, 0}, {"SContains", NULL, 0}, {"SIndex", NULL, 0}, {"SStarts", NULL, 0}, {"SEnds", NULL, 0}, {"Split", NULL, 0}, {"Trim", NULL, 0}, {"Replace", NULL, 0}, {"Upper", NULL, 0}, {"Lower", NULL, 0}, {"ToInt", NULL, 0}, {"ToFloat", NULL, 0}, {"Bytes", NULL, 0}, {"Push", NULL, 0}, {"Pop", NULL, 0}, {"Insert", NULL, 0}, {"Remove", NULL, 0}, {"LContains", NULL, 0}, {"LIndex", NULL, 0}, {"LSlice", NULL, 0}, {"Reverse", NULL, 0}, {"Sort", NULL, 0}, {"Join", NULL, 0}, {"Delete", NULL, 0}, {"Keys", NULL, 0}, {"Message", NULL, 0}, {"Chars", NULL, 0}, {"SortBy", NULL, 0}, {"Send", NULL, 0}, {"Receive", NULL, 0}, {"Close", NULL, 0}, {"GetOr", NULL, 0}, {"EnumName", NULL, 0}};
 static const sd_type sd_D_Builtin = SD_ENUM_TYPE("Builtin", sd_E_Builtin, sd_V_Builtin);
 static const sd_field sd_F_CDecl[] = {SD_FIELD(sd_S_CDecl, f_text, &sd_type_str), SD_FIELD(sd_S_CDecl, f_names, &sd_type_str), SD_FIELD(sd_S_CDecl, f_pkg, &sd_type_int)};
 static const sd_type sd_D_CDecl = SD_STRUCT_TYPE("CDecl", sd_S_CDecl, sd_F_CDecl);
@@ -8812,7 +8812,7 @@ static const sd_field sd_F_FnDecl[] = {SD_FIELD(sd_S_FnDecl, f_pos, &sd_D_Pos), 
 static const sd_type sd_D_FnDecl = SD_STRUCT_TYPE("FnDecl", sd_S_FnDecl, sd_F_FnDecl);
 static const sd_field sd_F_Formatter[] = {SD_FIELD(sd_S_Formatter, f_toks, &sd_type_list), SD_FIELD(sd_S_Formatter, f_nlBefore, &sd_type_list), SD_FIELD(sd_S_Formatter, f_comments, &sd_type_list), SD_FIELD(sd_S_Formatter, f_blanks, &sd_type_list), SD_FIELD(sd_S_Formatter, f_match, &sd_type_list), SD_FIELD(sd_S_Formatter, f_brace, &sd_type_list), SD_FIELD(sd_S_Formatter, f_paren, &sd_type_list), SD_FIELD(sd_S_Formatter, f_recv, &sd_type_list), SD_FIELD(sd_S_Formatter, f_sigClose, &sd_type_list), SD_FIELD(sd_S_Formatter, f_out, &sd_type_list), SD_FIELD(sd_S_Formatter, f_cur, &sd_type_list), SD_FIELD(sd_S_Formatter, f_curIndent, &sd_type_int), SD_FIELD(sd_S_Formatter, f_lineComment, &sd_type_bool), SD_FIELD(sd_S_Formatter, f_justOpened, &sd_type_bool), SD_FIELD(sd_S_Formatter, f_lastLine, &sd_type_int), SD_FIELD(sd_S_Formatter, f_prev, &sd_type_int), SD_FIELD(sd_S_Formatter, f_nextComment, &sd_type_int), SD_FIELD(sd_S_Formatter, f_prevTop, &sd_type_box), SD_FIELD(sd_S_Formatter, f_topLine, &sd_type_int), SD_FIELD(sd_S_Formatter, f_seenImport, &sd_type_bool), SD_FIELD(sd_S_Formatter, f_stack, &sd_type_list)};
 static const sd_type sd_D_Formatter = SD_STRUCT_TYPE("Formatter", sd_S_Formatter, sd_F_Formatter);
-static const sd_field sd_F_Gen[] = {SD_FIELD(sd_S_Gen, f_c, &sd_D_Checker), SD_FIELD(sd_S_Gen, f_out, &sd_type_list), SD_FIELD(sd_S_Gen, f_fnText, &sd_type_list), SD_FIELD(sd_S_Gen, f_decls, &sd_type_list), SD_FIELD(sd_S_Gen, f_gprotos, &sd_type_list), SD_FIELD(sd_S_Gen, f_protos, &sd_type_list), SD_FIELD(sd_S_Gen, f_helpers, &sd_type_list), SD_FIELD(sd_S_Gen, f_thunks, &sd_type_list), SD_FIELD(sd_S_Gen, f_consts, &sd_type_list), SD_FIELD(sd_S_Gen, f_queue, &sd_type_list), SD_FIELD(sd_S_Gen, f_slots, &sd_type_list), SD_FIELD(sd_S_Gen, f_scopes, &sd_type_list), SD_FIELD(sd_S_Gen, f_loops, &sd_type_list), SD_FIELD(sd_S_Gen, f_groups, &sd_type_list), SD_FIELD(sd_S_Gen, f_indent, &sd_type_int), SD_FIELD(sd_S_Gen, f_ntmp, &sd_type_int), SD_FIELD(sd_S_Gen, f_ndefer, &sd_type_int), SD_FIELD(sd_S_Gen, f_nspawn, &sd_type_int), SD_FIELD(sd_S_Gen, f_curFn, &sd_type_int), SD_FIELD(sd_S_Gen, f_defers, &sd_type_bool), SD_FIELD(sd_S_Gen, f_frameOn, &sd_type_bool), SD_FIELD(sd_S_Gen, f_frame, &sd_type_list), SD_FIELD(sd_S_Gen, f_frameIdx, &sd_type_map), SD_FIELD(sd_S_Gen, f_varC, &sd_type_map), SD_FIELD(sd_S_Gen, f_moved, &sd_type_list), SD_FIELD(sd_S_Gen, f_popped, &sd_type_bool), SD_FIELD(sd_S_Gen, f_fcCache, &sd_type_map), SD_FIELD(sd_S_Gen, f_crashSeq, &sd_type_int), SD_FIELD(sd_S_Gen, f_nslot, &sd_type_int), SD_FIELD(sd_S_Gen, f_fieldNeeded, &sd_type_map), SD_FIELD(sd_S_Gen, f_slotDone, &sd_type_map), SD_FIELD(sd_S_Gen, f_frameSlots, &sd_type_list), SD_FIELD(sd_S_Gen, f_safeCalls, &sd_type_map), SD_FIELD(sd_S_Gen, f_varRange, &sd_type_map), SD_FIELD(sd_S_Gen, f_intEvents, &sd_type_list), SD_FIELD(sd_S_Gen, f_intDeclared, &sd_type_map), SD_FIELD(sd_S_Gen, f_movable, &sd_type_map), SD_FIELD(sd_S_Gen, f_moveAt, &sd_type_map), SD_FIELD(sd_S_Gen, f_mvStmtAt, &sd_type_list), SD_FIELD(sd_S_Gen, f_mvLevel, &sd_type_map), SD_FIELD(sd_S_Gen, f_mvDecl, &sd_type_map), SD_FIELD(sd_S_Gen, f_mvLast, &sd_type_map), SD_FIELD(sd_S_Gen, f_mvCount, &sd_type_map), SD_FIELD(sd_S_Gen, f_mvCond, &sd_type_map), SD_FIELD(sd_S_Gen, f_modSets, &sd_type_map), SD_FIELD(sd_S_Gen, f_borrowed, &sd_type_map), SD_FIELD(sd_S_Gen, f_borrowRoots, &sd_type_map), SD_FIELD(sd_S_Gen, f_bwEvents, &sd_type_list), SD_FIELD(sd_S_Gen, f_bwCands, &sd_type_list), SD_FIELD(sd_S_Gen, f_bwOn, &sd_type_bool), SD_FIELD(sd_S_Gen, f_fastFns, &sd_type_map), SD_FIELD(sd_S_Gen, f_fastCalls, &sd_type_list), SD_FIELD(sd_S_Gen, f_fastLoops, &sd_type_list), SD_FIELD(sd_S_Gen, f_preemptFns, &sd_type_map), SD_FIELD(sd_S_Gen, f_pcComp, &sd_type_list), SD_FIELD(sd_S_Gen, f_pcCyclic, &sd_type_list), SD_FIELD(sd_S_Gen, f_pcCallees, &sd_type_list), SD_FIELD(sd_S_Gen, f_pcBody, &sd_type_int), SD_FIELD(sd_S_Gen, f_pcSeen, &sd_type_bool), SD_FIELD(sd_S_Gen, f_pcTop, &sd_type_bool), SD_FIELD(sd_S_Gen, f_pcCond, &sd_type_int), SD_FIELD(sd_S_Gen, f_split, &sd_type_bool), SD_FIELD(sd_S_Gen, f_refs, &sd_type_map)};
+static const sd_field sd_F_Gen[] = {SD_FIELD(sd_S_Gen, f_c, &sd_D_Checker), SD_FIELD(sd_S_Gen, f_out, &sd_type_list), SD_FIELD(sd_S_Gen, f_fnText, &sd_type_list), SD_FIELD(sd_S_Gen, f_decls, &sd_type_list), SD_FIELD(sd_S_Gen, f_gprotos, &sd_type_list), SD_FIELD(sd_S_Gen, f_protos, &sd_type_list), SD_FIELD(sd_S_Gen, f_helpers, &sd_type_list), SD_FIELD(sd_S_Gen, f_thunks, &sd_type_list), SD_FIELD(sd_S_Gen, f_consts, &sd_type_list), SD_FIELD(sd_S_Gen, f_queue, &sd_type_list), SD_FIELD(sd_S_Gen, f_slots, &sd_type_list), SD_FIELD(sd_S_Gen, f_scopes, &sd_type_list), SD_FIELD(sd_S_Gen, f_loops, &sd_type_list), SD_FIELD(sd_S_Gen, f_groups, &sd_type_list), SD_FIELD(sd_S_Gen, f_indent, &sd_type_int), SD_FIELD(sd_S_Gen, f_ntmp, &sd_type_int), SD_FIELD(sd_S_Gen, f_ndefer, &sd_type_int), SD_FIELD(sd_S_Gen, f_nspawn, &sd_type_int), SD_FIELD(sd_S_Gen, f_curFn, &sd_type_int), SD_FIELD(sd_S_Gen, f_defers, &sd_type_bool), SD_FIELD(sd_S_Gen, f_frameOn, &sd_type_bool), SD_FIELD(sd_S_Gen, f_frame, &sd_type_list), SD_FIELD(sd_S_Gen, f_frameIdx, &sd_type_map), SD_FIELD(sd_S_Gen, f_varC, &sd_type_map), SD_FIELD(sd_S_Gen, f_moved, &sd_type_list), SD_FIELD(sd_S_Gen, f_popped, &sd_type_bool), SD_FIELD(sd_S_Gen, f_fcCache, &sd_type_map), SD_FIELD(sd_S_Gen, f_crashSeq, &sd_type_int), SD_FIELD(sd_S_Gen, f_nslot, &sd_type_int), SD_FIELD(sd_S_Gen, f_fieldNeeded, &sd_type_map), SD_FIELD(sd_S_Gen, f_slotDone, &sd_type_map), SD_FIELD(sd_S_Gen, f_frameSlots, &sd_type_list), SD_FIELD(sd_S_Gen, f_safeCalls, &sd_type_map), SD_FIELD(sd_S_Gen, f_varRange, &sd_type_map), SD_FIELD(sd_S_Gen, f_intEvents, &sd_type_list), SD_FIELD(sd_S_Gen, f_intDeclared, &sd_type_map), SD_FIELD(sd_S_Gen, f_movable, &sd_type_map), SD_FIELD(sd_S_Gen, f_moveAt, &sd_type_map), SD_FIELD(sd_S_Gen, f_mvStmtAt, &sd_type_list), SD_FIELD(sd_S_Gen, f_mvLevel, &sd_type_map), SD_FIELD(sd_S_Gen, f_mvDecl, &sd_type_map), SD_FIELD(sd_S_Gen, f_mvLast, &sd_type_map), SD_FIELD(sd_S_Gen, f_mvCount, &sd_type_map), SD_FIELD(sd_S_Gen, f_mvCond, &sd_type_map), SD_FIELD(sd_S_Gen, f_modSets, &sd_type_map), SD_FIELD(sd_S_Gen, f_borrowed, &sd_type_map), SD_FIELD(sd_S_Gen, f_borrowRoots, &sd_type_map), SD_FIELD(sd_S_Gen, f_bwEvents, &sd_type_list), SD_FIELD(sd_S_Gen, f_bwCands, &sd_type_list), SD_FIELD(sd_S_Gen, f_bwOn, &sd_type_bool), SD_FIELD(sd_S_Gen, f_ownedParams, &sd_type_map), SD_FIELD(sd_S_Gen, f_fastFns, &sd_type_map), SD_FIELD(sd_S_Gen, f_fastCalls, &sd_type_list), SD_FIELD(sd_S_Gen, f_fastLoops, &sd_type_list), SD_FIELD(sd_S_Gen, f_preemptFns, &sd_type_map), SD_FIELD(sd_S_Gen, f_pcComp, &sd_type_list), SD_FIELD(sd_S_Gen, f_pcCyclic, &sd_type_list), SD_FIELD(sd_S_Gen, f_pcCallees, &sd_type_list), SD_FIELD(sd_S_Gen, f_pcBody, &sd_type_int), SD_FIELD(sd_S_Gen, f_pcSeen, &sd_type_bool), SD_FIELD(sd_S_Gen, f_pcTop, &sd_type_bool), SD_FIELD(sd_S_Gen, f_pcCond, &sd_type_int), SD_FIELD(sd_S_Gen, f_split, &sd_type_bool), SD_FIELD(sd_S_Gen, f_refs, &sd_type_map)};
 static const sd_type sd_D_Gen = SD_STRUCT_TYPE("Gen", sd_S_Gen, sd_F_Gen);
 static const sd_field sd_F_Global[] = {SD_FIELD(sd_S_Global, f_kind, &sd_type_box), SD_FIELD(sd_S_Global, f_index, &sd_type_int), SD_FIELD(sd_S_Global, f_pos, &sd_D_Pos), SD_FIELD(sd_S_Global, f_pkg, &sd_type_int), SD_FIELD(sd_S_Global, f_name, &sd_type_str)};
 static const sd_type sd_D_Global = SD_STRUCT_TYPE("Global", sd_S_Global, sd_F_Global);
@@ -8931,6 +8931,8 @@ SD_BOX_STATIC(sd_k_Builtin__Bytes, &sd_D_Builtin, sd_E_Builtin, {.tag = 15});
 SD_BOX_STATIC(sd_k_Builtin__Chars, &sd_D_Builtin, sd_E_Builtin, {.tag = 29});
 SD_BOX_STATIC(sd_k_Builtin__Close, &sd_D_Builtin, sd_E_Builtin, {.tag = 33});
 SD_BOX_STATIC(sd_k_Builtin__Delete, &sd_D_Builtin, sd_E_Builtin, {.tag = 26});
+SD_BOX_STATIC(sd_k_Builtin__EnumName, &sd_D_Builtin, sd_E_Builtin, {.tag = 35});
+SD_BOX_STATIC(sd_k_Builtin__GetOr, &sd_D_Builtin, sd_E_Builtin, {.tag = 34});
 SD_BOX_STATIC(sd_k_Builtin__Insert, &sd_D_Builtin, sd_E_Builtin, {.tag = 18});
 SD_BOX_STATIC(sd_k_Builtin__Join, &sd_D_Builtin, sd_E_Builtin, {.tag = 25});
 SD_BOX_STATIC(sd_k_Builtin__Keys, &sd_D_Builtin, sd_E_Builtin, {.tag = 27});
@@ -9266,6 +9268,7 @@ static bool sd_f_isCamelCase(sd_str l_name);
 static bool sd_f_isChanBuiltin(sd_box * l_b);
 static bool sd_f_isComparison(sd_box * l_op);
 static bool sd_f_isDigit(uint8_t l_c);
+static bool sd_f_isFormatName(sd_str l_name);
 static bool sd_f_isFrameName(sd_str l_v);
 static bool sd_f_isIdent(sd_str l_v);
 static bool sd_f_isIdentByte(uint8_t l_b);
@@ -9431,6 +9434,7 @@ static sd_err sd_f_runCC(sd_str l_opt, sd_list * l_args, sd_list * l_inputs, sd_
 static sd_T_T2Ose sd_f_runtimeObject(sd_str l_root);
 static sd_map * sd_f_safeCallSet(void);
 static bool sd_f_sameComments(sd_S_Ast l_a, sd_S_Ast l_b);
+SD_NO_TCE static sd_T_T2Lse sd_f_sdFilesUnder(sd_str l_dir, sd_list * l_found);
 static sd_box * sd_f_singleCharToken(uint8_t l_c);
 static sd_str sd_f_smallOf(sd_str l_v);
 static sd_T_T2Lse sd_f_sourceFiles(sd_str l_dir);
@@ -9565,6 +9569,7 @@ static void sd_m_Checker__endGuard(sd_S_Checker * l_c, sd_str l_key);
 static sd_S_EnumCase sd_m_Checker__enumCase(sd_S_Checker l_c, sd_int l_d, sd_int l_i);
 static void sd_m_Checker__error(sd_S_Checker * l_c, sd_S_Pos l_pos, sd_str l_message);
 static void sd_m_Checker__errorHint(sd_S_Checker * l_c, sd_S_Pos l_pos, sd_str l_message, sd_str l_hint);
+static bool sd_m_Checker__errorKnownNonNull(sd_S_Checker l_c, sd_int l_e);
 SD_NO_TCE static bool sd_m_Checker__exprReads(sd_S_Checker l_c, sd_int l_e, sd_int l_v);
 static sd_str sd_m_Checker__fieldName(sd_S_Checker l_c, sd_int l_d, sd_int l_i);
 static sd_int sd_m_Checker__fieldType(sd_S_Checker l_c, sd_int l_d, sd_int l_i);
@@ -9608,6 +9613,7 @@ static sd_list * sd_m_Checker__liveNarrows(sd_S_Checker l_c);
 static sd_int sd_m_Checker__lookupVar(sd_S_Checker l_c, sd_str l_name);
 static sd_list * sd_m_Checker__loopGuards(sd_S_Checker l_c);
 static void sd_m_Checker__narrowOn(sd_S_Checker * l_c, sd_int l_cond, bool l_when);
+static bool sd_m_Checker__narrowable(sd_S_Checker l_c, sd_int l_t);
 SD_NO_TCE static sd_int sd_m_Checker__nonConstant(sd_S_Checker l_c, sd_int l_e);
 static void sd_m_Checker__notValue(sd_S_Checker * l_c, sd_int l_e);
 static sd_str sd_m_Checker__nullHint(sd_S_Checker l_c, sd_int l_e, sd_int l_t, sd_str l_action);
@@ -9742,6 +9748,7 @@ static void sd_m_Gen__emit(sd_S_Gen * l_g, sd_str l_line);
 static void sd_m_Gen__emitMaterialise(sd_S_Gen * l_g, sd_list * l_acc, sd_int l_skip);
 static void sd_m_Gen__emitReturn(sd_S_Gen * l_g, sd_str l_value, sd_list * l_keep);
 static sd_str sd_m_Gen__enumDefText(sd_S_Gen l_g, sd_int l_d);
+static sd_str sd_m_Gen__enumNameChain(sd_S_Gen l_g, sd_int l_t, sd_str l_tag);
 SD_NO_TCE static sd_str sd_m_Gen__eqExpr(sd_S_Gen * l_g, sd_int l_t, sd_str l_a, sd_str l_b);
 static sd_str sd_m_Gen__errReturn(sd_S_Gen l_g, sd_str l_err);
 static bool sd_m_Gen__eventHits(sd_S_Gen l_g, sd_S_MutEvent l_ev, sd_str l_p);
@@ -9763,6 +9770,7 @@ static sd_str sd_m_Gen__fastTemp(sd_S_Gen * l_g, sd_str l_ctype, sd_str l_cexpr)
 static sd_str sd_m_Gen__fieldPath(sd_S_Gen l_g, sd_int l_e);
 static void sd_m_Gen__findFastFns(sd_S_Gen * l_g);
 static sd_int sd_m_Gen__findLocal(sd_S_Gen l_g, sd_str l_v);
+static void sd_m_Gen__findOwnedParams(sd_S_Gen * l_g, sd_int l_f);
 static void sd_m_Gen__findPreemptFns(sd_S_Gen * l_g);
 static sd_int sd_m_Gen__findTemp(sd_S_Gen l_g, sd_str l_v);
 static sd_str sd_m_Gen__finishCall(sd_S_Gen * l_g, sd_int l_e, sd_str l_call);
@@ -9799,7 +9807,7 @@ SD_NO_TCE static void sd_m_Gen__genMultiAssign(sd_S_Gen * l_g, sd_int l_s);
 static void sd_m_Gen__genNative(sd_S_Gen * l_g, sd_int l_f);
 static sd_str sd_m_Gen__genProgram(sd_S_Gen * l_g, sd_str l_natives);
 static void sd_m_Gen__genProtos(sd_S_Gen * l_g);
-static void sd_m_Gen__genReceived(sd_S_Gen * l_g, sd_int l_comm, sd_str l_ok, sd_str l_d);
+SD_NO_TCE static void sd_m_Gen__genReceived(sd_S_Gen * l_g, sd_int l_comm, sd_str l_ok, sd_str l_d);
 SD_NO_TCE static void sd_m_Gen__genReturn(sd_S_Gen * l_g, sd_S_Stmt l_st);
 SD_NO_TCE static void sd_m_Gen__genSelect(sd_S_Gen * l_g, sd_S_Stmt l_st);
 SD_NO_TCE static void sd_m_Gen__genSpawn(sd_S_Gen * l_g, sd_S_Stmt l_st);
@@ -9812,6 +9820,7 @@ static sd_list * sd_m_Gen__genUnits(sd_S_Gen * l_g, sd_list * l_natives);
 static void sd_m_Gen__genVtables(sd_S_Gen * l_g, sd_int l_unit);
 static sd_str sd_m_Gen__generalName(sd_S_Gen l_g, sd_int l_f);
 SD_NO_TCE static sd_str sd_m_Gen__genumIs(sd_S_Gen * l_g, sd_int l_e);
+static sd_str sd_m_Gen__genumName(sd_S_Gen * l_g, sd_int l_t, sd_str l_v);
 SD_NO_TCE static sd_str sd_m_Gen__genumNew(sd_S_Gen * l_g, sd_int l_e);
 SD_NO_TCE static sd_str sd_m_Gen__gexpr(sd_S_Gen * l_g, sd_int l_e);
 SD_NO_TCE static sd_str sd_m_Gen__ggroup(sd_S_Gen * l_g, sd_int l_e);
@@ -9845,6 +9854,7 @@ static bool sd_m_Gen__isFast(sd_S_Gen l_g, sd_int l_f);
 SD_NO_TCE static bool sd_m_Gen__isFieldRead(sd_S_Gen l_g, sd_int l_e);
 static bool sd_m_Gen__isIntString(sd_S_Gen l_g, sd_int l_e);
 static sd_str sd_m_Gen__isNull(sd_S_Gen l_g, sd_int l_t, sd_str l_v);
+static bool sd_m_Gen__isOwnedParam(sd_S_Gen l_g, sd_int l_v);
 SD_NO_TCE static bool sd_m_Gen__isPlaceRead(sd_S_Gen l_g, sd_int l_e);
 static bool sd_m_Gen__isPlainMove(sd_S_Gen l_g, sd_int l_e);
 SD_NO_TCE static bool sd_m_Gen__isSimpleSmall(sd_S_Gen l_g, sd_int l_e);
@@ -9882,6 +9892,7 @@ static bool sd_m_Gen__nullOnError(sd_S_Gen l_g, sd_S_Stmt l_st, sd_int l_i);
 static sd_str sd_m_Gen__okOpt(sd_S_Gen * l_g, sd_int l_opt, sd_str l_ok, sd_str l_o);
 SD_NO_TCE static sd_list * sd_m_Gen__operands(sd_S_Gen * l_g, sd_list * l_es);
 static sd_str sd_m_Gen__optFromPtr(sd_S_Gen * l_g, sd_int l_opt, sd_str l_p);
+static void sd_m_Gen__ownParams(sd_S_Gen * l_g, sd_int l_f);
 static sd_str sd_m_Gen__ownVal(sd_S_Gen * l_g, sd_str l_v, sd_int l_t);
 SD_NO_TCE static sd_list * sd_m_Gen__ownedOperands(sd_S_Gen * l_g, sd_list * l_es);
 SD_NO_TCE static sd_str sd_m_Gen__ownedTemp(sd_S_Gen * l_g, sd_int l_e);
@@ -10141,6 +10152,7 @@ static inline __attribute__((unused)) bool sd_eq_S3Pos(sd_S_Pos a, sd_S_Pos b);
 static inline __attribute__((unused)) sd_S_Diag sd_rt_S4Diag(sd_S_Diag v);
 static inline __attribute__((unused)) void sd_rl_S4Diag(sd_S_Diag v);
 static inline __attribute__((unused)) void sd_rl_S6Parser(sd_S_Parser v);
+static inline __attribute__((unused)) void sd_rl_T2Lse(sd_T_T2Lse v);
 static inline __attribute__((unused)) void sd_rl_T2se(sd_T_T2se v);
 static inline __attribute__((unused)) void sd_rl_S5Diags(sd_S_Diags v);
 static inline __attribute__((unused)) void sd_rl_S9Formatter(sd_S_Formatter v);
@@ -10162,7 +10174,6 @@ static inline __attribute__((unused)) sd_S_FnDecl sd_rt_S6FnDecl(sd_S_FnDecl v);
 static inline __attribute__((unused)) sd_S_Block sd_rt_S5Block(sd_S_Block v);
 static inline __attribute__((unused)) void sd_rl_S5Block(sd_S_Block v);
 static inline __attribute__((unused)) void sd_rl_S6FnDecl(sd_S_FnDecl v);
-static inline __attribute__((unused)) void sd_rl_T2Lse(sd_T_T2Lse v);
 static inline __attribute__((unused)) void sd_rl_S9AccUpdate(sd_S_AccUpdate v);
 static inline __attribute__((unused)) sd_S_IntRange sd_rt_S8IntRange(sd_S_IntRange v);
 static inline __attribute__((unused)) void sd_rl_S8IntRange(sd_S_IntRange v);
@@ -11294,6 +11305,10 @@ static inline __attribute__((unused)) void sd_rl_S6Parser(sd_S_Parser v) {
   sd_int_release(v.f_nesting);
   sd_list_release(v.f_depths);
 }
+static inline __attribute__((unused)) void sd_rl_T2Lse(sd_T_T2Lse v) {
+  sd_list_release(v.r0);
+  sd_iface_release(v.r1);
+}
 static inline __attribute__((unused)) void sd_rl_T2se(sd_T_T2se v) {
   sd_str_release(v.r0);
   sd_iface_release(v.r1);
@@ -11518,10 +11533,6 @@ static inline __attribute__((unused)) void sd_rl_S6FnDecl(sd_S_FnDecl v) {
   sd_int_release(v.f_resultCount);
   sd_int_release(v.f_body);
 }
-static inline __attribute__((unused)) void sd_rl_T2Lse(sd_T_T2Lse v) {
-  sd_list_release(v.r0);
-  sd_iface_release(v.r1);
-}
 static inline __attribute__((unused)) void sd_rl_S9AccUpdate(sd_S_AccUpdate v) {
   sd_int_release(v.f_var);
   sd_list_release(v.f_rest);
@@ -11636,6 +11647,7 @@ static inline __attribute__((unused)) sd_S_Gen sd_rt_S3Gen(sd_S_Gen v) {
   v.f_borrowRoots = sd_map_retain(v.f_borrowRoots);
   v.f_bwEvents = sd_list_retain(v.f_bwEvents);
   v.f_bwCands = sd_list_retain(v.f_bwCands);
+  v.f_ownedParams = sd_map_retain(v.f_ownedParams);
   v.f_fastFns = sd_map_retain(v.f_fastFns);
   v.f_fastCalls = sd_list_retain(v.f_fastCalls);
   v.f_fastLoops = sd_list_retain(v.f_fastLoops);
@@ -11695,6 +11707,7 @@ static inline __attribute__((unused)) void sd_rl_S3Gen(sd_S_Gen v) {
   sd_map_release(v.f_borrowRoots);
   sd_list_release(v.f_bwEvents);
   sd_list_release(v.f_bwCands);
+  sd_map_release(v.f_ownedParams);
   sd_map_release(v.f_fastFns);
   sd_list_release(v.f_fastCalls);
   sd_list_release(v.f_fastLoops);
@@ -12065,7 +12078,7 @@ static void sd_d4(void *p) {
 static sd_str sd_vt_errors_TextError__error__message(const void *self) { return sd_m_errors_TextError__message(*(sd_S_errors_TextError const *)self); }
 static const sd_error_vtable sd_vt_errors_TextError__error = {{"errors_TextError"}, sd_vt_errors_TextError__error__message};
 static sd_int sd_c_maxErrors(void) { return SD_INT(20); }
-static sd_str sd_c_fmtUsage(void) { return SD_STR_LIT("usage:\012  seed fmt <file.sd>...\012  seed fmt --check <file.sd>...\012  seed fmt --verify <file.sd>...\012"); }
+static sd_str sd_c_fmtUsage(void) { return SD_STR_LIT("usage:\012  seed fmt <file.sd | dir>...\012  seed fmt --check <file.sd | dir>...\012  seed fmt --verify <file.sd | dir>...\012"); }
 static sd_int sd_c_helperRetain(void) { return SD_INT(1); }
 static sd_int sd_c_helperRelease(void) { return SD_INT(2); }
 static sd_int sd_c_helperEq(void) { return SD_INT(4); }
@@ -12246,7 +12259,7 @@ static sd_list * sd_c_cLibs(void) {
   sd_goroutine_atexit(sd_cf_cLibs);
   return sd_cc_->v;
 }
-static sd_str sd_c_usage(void) { return SD_STR_LIT("usage:\012  seed build [-o out] <dir | file.sd>\012  seed run <dir | file.sd> [args...]\012  seed test [-v] [--run text] [dir...]\012  seed fmt [--check] <file.sd>...\012  seed c <dir | file.sd...>\012  seed ast <file.sd>...\012  seed lsp\012"); }
+static sd_str sd_c_usage(void) { return SD_STR_LIT("usage:\012  seed build [-o out] <dir | file.sd>\012  seed run <dir | file.sd> [args...]\012  seed test [-v] [--run text] [dir...]\012  seed fmt [--check] <file.sd | dir>...\012  seed c <dir | file.sd...>\012  seed ast <file.sd>...\012  seed lsp\012"); }
 static sd_int sd_c_maxNesting(void) { return SD_INT(256); }
 static sd_int sd_c_minInt(void) { return SD_INT_BIGLIT("-9223372036854775808"); }
 static sd_int sd_c_tyVoid(void) { return SD_INT(0); }
@@ -13160,13 +13173,13 @@ static sd_int sd_m_Checker__pkgNamed(sd_S_Checker * l_c, sd_int l_e) {
   return l_p;
 }
 
-typedef struct { sd_lframe h; sd_S_Suggest l_s; sd_str _t7; sd_str _t8; sd_str _t12; } sd_L_sd_m_Checker__pkgMember;
+typedef struct { sd_lframe h; sd_S_Suggest l_s; sd_str l_hint; sd_str _t11; sd_str _t15; } sd_L_sd_m_Checker__pkgMember;
 static void sd_lr_sd_m_Checker__pkgMember(sd_lframe *p) {
   sd_L_sd_m_Checker__pkgMember *L = (sd_L_sd_m_Checker__pkgMember *)p;
   sd_rl_S7Suggest(L->l_s);
-  sd_str_release(L->_t7);
-  sd_str_release(L->_t8);
-  sd_str_release(L->_t12);
+  sd_str_release(L->l_hint);
+  sd_str_release(L->_t11);
+  sd_str_release(L->_t15);
 }
 static sd_int sd_m_Checker__pkgMember(sd_S_Checker * l_c, sd_int l_pkg, sd_str l_name, sd_S_Pos l_pos) {
   sd_L_sd_m_Checker__pkgMember L = {{0}};
@@ -13197,32 +13210,59 @@ static sd_int sd_m_Checker__pkgMember(sd_S_Checker * l_c, sd_int l_pkg, sd_str l
         l_i++;
       }
     }
-    sd_str _t6[] = {SD_STR_LIT("package "), (l_pk).f_name, SD_STR_LIT(" has no "), l_name};
-    L._t7 = sd_str_concat_n(_t6, 4);
-    L._t8 = sd_m_Suggest__hint(L.l_s);
-    sd_m_Checker__errorHint(l_c, l_pos, L._t7, L._t8);
-    sd_str_release(L._t8); L._t8 = NULL;
-    sd_str_release(L._t7); L._t7 = NULL;
-    sd_int _t9 = SD_INT_NULL;
+    sd_str _t6 = sd_m_Suggest__hint(L.l_s);
+    L.l_hint = _t6;
+    bool _t8 = ((l_pk).f_isLib && sd_str_eq((l_pk).f_name, SD_STR_LIT("fmt")));
+    if (_t8) {
+      bool _t7 = sd_f_isFormatName(l_name);
+      _t8 = _t7;
+    }
+    if (_t8) {
+      sd_str _t9 = SD_STR_LIT("Seed has no format strings: join text with + and .string() (\"n=\" + n.string()), or use fmt.fixed(f, places) for a float");
+      sd_str_release(L.l_hint);
+      L.l_hint = _t9;
+    }
+    sd_str _t10[] = {SD_STR_LIT("package "), (l_pk).f_name, SD_STR_LIT(" has no "), l_name};
+    L._t11 = sd_str_concat_n(_t10, 4);
+    sd_m_Checker__errorHint(l_c, l_pos, L._t11, L.l_hint);
+    sd_str_release(L._t11); L._t11 = NULL;
+    sd_int _t12 = SD_INT_NULL;
     SD_LF_LEAVE(L);
+    sd_str_release(L.l_hint);
     sd_rl_S7Suggest(L.l_s);
     sd_int_release(l_g);
-    return _t9;
+    return _t12;
   }
-  bool _t10 = sd_m_Checker__globalPub((*l_c), l_g);
-  if ((!_t10)) {
-    sd_str _t11[] = {l_name, SD_STR_LIT(" is not pub in package "), (l_pk).f_name};
-    L._t12 = sd_str_concat_n(_t11, 3);
-    sd_str _t13 = SD_STR_LIT("only names declared pub can be used outside their package");
-    sd_m_Checker__errorHint(l_c, l_pos, L._t12, _t13);
-    sd_str_release(L._t12); L._t12 = NULL;
-    sd_int _t14 = SD_INT_NULL;
+  bool _t13 = sd_m_Checker__globalPub((*l_c), l_g);
+  if ((!_t13)) {
+    sd_str _t14[] = {l_name, SD_STR_LIT(" is not pub in package "), (l_pk).f_name};
+    L._t15 = sd_str_concat_n(_t14, 3);
+    sd_str _t16 = SD_STR_LIT("only names declared pub can be used outside their package");
+    sd_m_Checker__errorHint(l_c, l_pos, L._t15, _t16);
+    sd_str_release(L._t15); L._t15 = NULL;
+    sd_int _t17 = SD_INT_NULL;
     SD_LF_LEAVE(L);
     sd_int_release(l_g);
-    return _t14;
+    return _t17;
   }
   SD_LF_LEAVE(L);
   return l_g;
+}
+
+typedef struct { sd_lframe h; sd_str l_n; } sd_L_sd_f_isFormatName;
+static void sd_lr_sd_f_isFormatName(sd_lframe *p) {
+  sd_L_sd_f_isFormatName *L = (sd_L_sd_f_isFormatName *)p;
+  sd_str_release(L->l_n);
+}
+static bool sd_f_isFormatName(sd_str l_name) {
+  sd_L_sd_f_isFormatName L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_isFormatName);
+  sd_str _t1 = sd_str_to_lower(l_name);
+  L.l_n = _t1;
+  bool _t2 = (((((((sd_str_eq(L.l_n, SD_STR_LIT("printf")) || sd_str_eq(L.l_n, SD_STR_LIT("sprintf"))) || sd_str_eq(L.l_n, SD_STR_LIT("fprintf"))) || sd_str_eq(L.l_n, SD_STR_LIT("eprintf"))) || sd_str_eq(L.l_n, SD_STR_LIT("errorf"))) || sd_str_eq(L.l_n, SD_STR_LIT("format"))) || sd_str_eq(L.l_n, SD_STR_LIT("sprint"))) || sd_str_eq(L.l_n, SD_STR_LIT("sprintln")));
+  SD_LF_LEAVE(L);
+  sd_str_release(L.l_n);
+  return _t2;
 }
 
 static bool sd_m_Checker__globalPub(sd_S_Checker l_c, sd_int l_g) {
@@ -13670,19 +13710,20 @@ SD_NO_TCE static void sd_m_Checker__checkStructCycles(sd_S_Checker * l_c, sd_int
   SD_LF_LEAVE(L);
 }
 
-typedef struct { sd_lframe h; sd_list * l_rs; sd_str _t25; sd_str _t26; sd_str _t31; sd_str l_key; sd_str _t47; sd_str _t49; sd_str _t53; sd_str _t55; sd_str _t57; } sd_L_sd_m_Checker__resolveSignature;
+typedef struct { sd_lframe h; sd_list * l_rs; sd_str _t25; sd_str _t26; sd_str _t31; sd_str _t45; sd_str l_key; sd_str _t50; sd_str _t52; sd_str _t56; sd_str _t58; sd_str _t60; } sd_L_sd_m_Checker__resolveSignature;
 static void sd_lr_sd_m_Checker__resolveSignature(sd_lframe *p) {
   sd_L_sd_m_Checker__resolveSignature *L = (sd_L_sd_m_Checker__resolveSignature *)p;
   sd_list_release(L->l_rs);
   sd_str_release(L->_t25);
   sd_str_release(L->_t26);
   sd_str_release(L->_t31);
+  sd_str_release(L->_t45);
   sd_str_release(L->l_key);
-  sd_str_release(L->_t47);
-  sd_str_release(L->_t49);
-  sd_str_release(L->_t53);
-  sd_str_release(L->_t55);
-  sd_str_release(L->_t57);
+  sd_str_release(L->_t50);
+  sd_str_release(L->_t52);
+  sd_str_release(L->_t56);
+  sd_str_release(L->_t58);
+  sd_str_release(L->_t60);
 }
 static void sd_m_Checker__resolveSignature(sd_S_Checker * l_c, sd_int l_f) {
   sd_L_sd_m_Checker__resolveSignature L = {{0}};
@@ -13813,25 +13854,36 @@ static void sd_m_Checker__resolveSignature(sd_S_Checker * l_c, sd_int l_f) {
   sd_str _t42 = sd_str_concat_n(_t41, 5);
   sd_list ** _t43 = (&(l_c)->f_fnCName);
   SD_LIST_PUSH(_t43, sd_str, _t42);
-  sd_str _t44 = sd_f_methodKey(l_d, (l_fd).f_name);
-  L.l_key = _t44;
-  sd_int *_t45 = sd_map_get(((*l_c)).f_methods, &L.l_key);
-  if ((!sd_int_is_null((_t45 ? *_t45 : SD_INT_NULL)))) {
-    sd_str _t46[] = {SD_STR_LIT("method "), (l_td).f_name, SD_STR_LIT("."), (l_fd).f_name, SD_STR_LIT(" is declared twice")};
-    L._t47 = sd_str_concat_n(_t46, 5);
-    sd_m_Checker__error(l_c, (l_fd).f_pos, L._t47);
-    sd_str_release(L._t47); L._t47 = NULL;
+  if (((SD_BOX_GET((l_td).f_kind, sd_E_DeclKind).tag == 1) && sd_str_eq((l_fd).f_name, SD_STR_LIT("name")))) {
+    sd_str _t44[] = {SD_STR_LIT("enum "), (l_td).f_name, SD_STR_LIT(" cannot declare a method name: every enum has a built-in name() that returns the name of its case")};
+    L._t45 = sd_str_concat_n(_t44, 3);
+    sd_str _t46 = SD_STR_LIT("use the built-in name(), or give the method another name (such as label)");
+    sd_m_Checker__errorHint(l_c, (l_fd).f_pos, L._t45, _t46);
+    sd_str_release(L._t45); L._t45 = NULL;
+    SD_LF_LEAVE(L);
+    sd_int_release(l_g);
+    sd_list_release(L.l_rs);
+    return;
+  }
+  sd_str _t47 = sd_f_methodKey(l_d, (l_fd).f_name);
+  L.l_key = _t47;
+  sd_int *_t48 = sd_map_get(((*l_c)).f_methods, &L.l_key);
+  if ((!sd_int_is_null((_t48 ? *_t48 : SD_INT_NULL)))) {
+    sd_str _t49[] = {SD_STR_LIT("method "), (l_td).f_name, SD_STR_LIT("."), (l_fd).f_name, SD_STR_LIT(" is declared twice")};
+    L._t50 = sd_str_concat_n(_t49, 5);
+    sd_m_Checker__error(l_c, (l_fd).f_pos, L._t50);
+    sd_str_release(L._t50); L._t50 = NULL;
     SD_LF_LEAVE(L);
     sd_str_release(L.l_key);
     sd_int_release(l_g);
     sd_list_release(L.l_rs);
     return;
   }
-  sd_int _t48 = sd_int_retain(l_f);
-  L._t49 = L.l_key;
+  sd_int _t51 = sd_int_retain(l_f);
+  L._t52 = L.l_key;
   L.l_key = NULL;
-  sd_map_set((&(l_c)->f_methods), &L._t49, &_t48);
-  L._t49 = NULL;
+  sd_map_set((&(l_c)->f_methods), &L._t52, &_t51);
+  L._t52 = NULL;
   if ((SD_BOX_GET((l_td).f_kind, sd_E_DeclKind).tag == 0)) {
     {
       sd_int l_i = SD_INT(0);
@@ -13839,30 +13891,30 @@ static void sd_m_Checker__resolveSignature(sd_S_Checker * l_c, sd_int l_f) {
         SD_PREEMPT();
         if (!(sd_int_lt(l_i, (l_td).f_fieldCount))) break;
         {
-          sd_int _t51 = sd_m_Ast__at(((*l_c)).f_ast, (l_td).f_fields, l_i);
-          sd_S_Param l_fp = SD_LIST_GET((((*l_c)).f_ast).f_params, sd_S_Param, _t51);
-          sd_int_release(_t51);
+          sd_int _t54 = sd_m_Ast__at(((*l_c)).f_ast, (l_td).f_fields, l_i);
+          sd_S_Param l_fp = SD_LIST_GET((((*l_c)).f_ast).f_params, sd_S_Param, _t54);
+          sd_int_release(_t54);
           if (sd_str_eq((l_fp).f_name, (l_fd).f_name)) {
-            sd_str _t52[] = {SD_STR_LIT("struct "), (l_td).f_name, SD_STR_LIT(" has a field and a method both named "), (l_fd).f_name};
-            L._t53 = sd_str_concat_n(_t52, 4);
-            sd_str _t54[] = {SD_STR_LIT("rename the method or the field ("), (l_td).f_name, SD_STR_LIT("."), (l_fd).f_name, SD_STR_LIT(" must name one thing)")};
-            L._t55 = sd_str_concat_n(_t54, 5);
-            sd_m_Checker__errorHint(l_c, (l_fd).f_pos, L._t53, L._t55);
-            sd_str_release(L._t55); L._t55 = NULL;
-            sd_str_release(L._t53); L._t53 = NULL;
+            sd_str _t55[] = {SD_STR_LIT("struct "), (l_td).f_name, SD_STR_LIT(" has a field and a method both named "), (l_fd).f_name};
+            L._t56 = sd_str_concat_n(_t55, 4);
+            sd_str _t57[] = {SD_STR_LIT("rename the method or the field ("), (l_td).f_name, SD_STR_LIT("."), (l_fd).f_name, SD_STR_LIT(" must name one thing)")};
+            L._t58 = sd_str_concat_n(_t57, 5);
+            sd_m_Checker__errorHint(l_c, (l_fd).f_pos, L._t56, L._t58);
+            sd_str_release(L._t58); L._t58 = NULL;
+            sd_str_release(L._t56); L._t56 = NULL;
           }
         }
-        _c50:;
+        _c53:;
         { int64_t r_; if (SD_LIKELY((((l_i).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_i).w, SD_INT(1).w, &r_))) (l_i).w = r_; else { sd_int s_ = sd_int_add_slow((l_i), SD_INT(1)); sd_int_release((l_i)); (l_i) = s_; } }
       }
       sd_int_release(l_i);
     }
   }
   if ((l_fd).f_recvMut) {
-    bool _t56 = true;
-    L._t57 = sd_str_retain((l_fd).f_name);
-    sd_map_set((&(l_c)->f_mutNames), &L._t57, &_t56);
-    L._t57 = NULL;
+    bool _t59 = true;
+    L._t60 = sd_str_retain((l_fd).f_name);
+    sd_map_set((&(l_c)->f_mutNames), &L._t60, &_t59);
+    L._t60 = NULL;
   }
   sd_int_release(l_g);
   sd_list_release(L.l_rs); L.l_rs = NULL;
@@ -15384,20 +15436,56 @@ static void sd_m_Checker__joinNarrows(sd_S_Checker * l_c, sd_list * l_other, sd_
 static bool sd_m_Checker__isNonNullValue(sd_S_Checker l_c, sd_int l_e) {
   sd_int _t1 = sd_m_Checker__typeOf(l_c, l_e);
   sd_int l_t = _t1;
-  if ((((sd_int_eq(l_t, sd_c_tyNull()) || sd_int_eq(l_t, sd_c_tyInvalid())) || sd_int_eq(l_t, sd_c_tyVoid())) || sd_int_eq(l_t, sd_c_tyError()))) {
-    bool _t2 = false;
+  if (sd_int_eq(l_t, sd_c_tyError())) {
+    bool _t2 = sd_m_Checker__errorKnownNonNull(l_c, l_e);
+    bool _t3 = _t2;
     sd_int_release(l_t);
-    return _t2;
+    return _t3;
   }
-  bool _t3 = sd_m_Types__isOpt((l_c).f_types, l_t);
-  bool _t5 = (!_t3);
-  if (_t5) {
-    bool _t4 = sd_m_Types__isTuple((l_c).f_types, l_t);
-    _t5 = (!_t4);
+  if (((sd_int_eq(l_t, sd_c_tyNull()) || sd_int_eq(l_t, sd_c_tyInvalid())) || sd_int_eq(l_t, sd_c_tyVoid()))) {
+    bool _t4 = false;
+    sd_int_release(l_t);
+    return _t4;
   }
-  bool _t6 = _t5;
+  bool _t5 = sd_m_Types__isOpt((l_c).f_types, l_t);
+  bool _t7 = (!_t5);
+  if (_t7) {
+    bool _t6 = sd_m_Types__isTuple((l_c).f_types, l_t);
+    _t7 = (!_t6);
+  }
+  bool _t8 = _t7;
   sd_int_release(l_t);
-  return _t6;
+  return _t8;
+}
+
+typedef struct { sd_lframe h; sd_str l_key; } sd_L_sd_m_Checker__errorKnownNonNull;
+static void sd_lr_sd_m_Checker__errorKnownNonNull(sd_lframe *p) {
+  sd_L_sd_m_Checker__errorKnownNonNull *L = (sd_L_sd_m_Checker__errorKnownNonNull *)p;
+  sd_str_release(L->l_key);
+}
+static bool sd_m_Checker__errorKnownNonNull(sd_S_Checker l_c, sd_int l_e) {
+  sd_L_sd_m_Checker__errorKnownNonNull L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_m_Checker__errorKnownNonNull);
+  sd_str _t1 = sd_m_Checker__pathKey(l_c, l_e);
+  L.l_key = _t1;
+  bool _t3 = (!sd_str_eq(L.l_key, SD_STR_LIT("")));
+  if (_t3) {
+    bool _t2 = sd_m_Checker__isNarrowed(l_c, L.l_key);
+    _t3 = _t2;
+  }
+  bool _t4 = _t3;
+  SD_LF_LEAVE(L);
+  sd_str_release(L.l_key);
+  return _t4;
+}
+
+static bool sd_m_Checker__narrowable(sd_S_Checker l_c, sd_int l_t) {
+  bool _t2 = sd_int_eq(l_t, sd_c_tyError());
+  if (!_t2) {
+    bool _t1 = sd_m_Types__isOpt((l_c).f_types, l_t);
+    _t2 = _t1;
+  }
+  return _t2;
 }
 
 static bool sd_f_keyExtends(sd_str l_key, sd_str l_prefix, bool l_strict) {
@@ -16579,23 +16667,24 @@ SD_NO_TCE static void sd_m_Checker__checkConversion(sd_S_Checker * l_c, sd_int l
   SD_LF_LEAVE(L);
 }
 
-typedef struct { sd_lframe h; sd_str _t4; sd_str l_tname; sd_str _t11; sd_str _t26; sd_S_Suggest l_s; sd_str _t29; sd_str _t31; sd_str _t32; sd_str _t37; sd_str _t39; sd_str _t41; sd_str _t42; sd_list * l_ps; sd_str _t54; } sd_L_sd_m_Checker__checkSelectorCall;
+typedef struct { sd_lframe h; sd_str _t4; sd_str l_tname; sd_str _t11; sd_list * _t32; sd_str _t35; sd_S_Suggest l_s; sd_str _t38; sd_str _t40; sd_str _t41; sd_str _t46; sd_str _t48; sd_str _t50; sd_str _t51; sd_list * l_ps; sd_str _t63; } sd_L_sd_m_Checker__checkSelectorCall;
 static void sd_lr_sd_m_Checker__checkSelectorCall(sd_lframe *p) {
   sd_L_sd_m_Checker__checkSelectorCall *L = (sd_L_sd_m_Checker__checkSelectorCall *)p;
   sd_str_release(L->_t4);
   sd_str_release(L->l_tname);
   sd_str_release(L->_t11);
-  sd_str_release(L->_t26);
+  sd_list_release(L->_t32);
+  sd_str_release(L->_t35);
   sd_rl_S7Suggest(L->l_s);
-  sd_str_release(L->_t29);
-  sd_str_release(L->_t31);
-  sd_str_release(L->_t32);
-  sd_str_release(L->_t37);
-  sd_str_release(L->_t39);
+  sd_str_release(L->_t38);
+  sd_str_release(L->_t40);
   sd_str_release(L->_t41);
-  sd_str_release(L->_t42);
+  sd_str_release(L->_t46);
+  sd_str_release(L->_t48);
+  sd_str_release(L->_t50);
+  sd_str_release(L->_t51);
   sd_list_release(L->l_ps);
-  sd_str_release(L->_t54);
+  sd_str_release(L->_t63);
 }
 SD_NO_TCE static void sd_m_Checker__checkSelectorCall(sd_S_Checker * l_c, sd_int l_e) {
   sd_L_sd_m_Checker__checkSelectorCall L = {{0}};
@@ -16718,15 +16807,46 @@ SD_NO_TCE static void sd_m_Checker__checkSelectorCall(sd_S_Checker * l_c, sd_int
       sd_int_release(l_pkg);
       return;
     }
+    if (((sd_int_is_null(l_m) && (SD_BOX_GET(l_k, sd_E_Kind).tag == 13)) && sd_str_eq(l_name, SD_STR_LIT("name")))) {
+      sd_box * _t25 = SD_BOX_REF(sd_k_Res__Builtin);
+      sd_int _t26 = sd_int_retain(l_e);
+      sd_box * *_t27 = (&(((sd_S_ExprInfo *)sd_list_at_mut((&(l_c)->f_info), _t26)))->f_res);
+      sd_box_release(*_t27);
+      *_t27 = _t25;
+      sd_int_release(_t26);
+      sd_box * _t28 = SD_BOX_REF(sd_k_Builtin__EnumName);
+      sd_int _t29 = sd_int_retain(l_e);
+      sd_box * *_t30 = (&(((sd_S_ExprInfo *)sd_list_at_mut((&(l_c)->f_info), _t29)))->f_builtin);
+      sd_box_release(*_t30);
+      *_t30 = _t28;
+      sd_int_release(_t29);
+      sd_int _t31 = sd_int_retain(sd_c_tyString());
+      sd_m_Checker__setType(l_c, l_e, _t31);
+      sd_int_release(_t31);
+      L._t32 = sd_list_new(&sd_type_int, 0);
+      sd_str _t33 = SD_STR_LIT("name()");
+      sd_m_Checker__checkArgs(l_c, l_e, L._t32, _t33);
+      sd_list_release(L._t32); L._t32 = NULL;
+      SD_LF_LEAVE(L);
+      sd_int_release(l_fi);
+      sd_int_release(l_m);
+      sd_str_release(L.l_tname);
+      sd_int_release(l_rd);
+      sd_box_release(l_k);
+      sd_int_release(l_bt);
+      sd_int_release(l_d);
+      sd_int_release(l_pkg);
+      return;
+    }
     if (sd_int_is_null(l_m)) {
       if (sd_int_ge(l_fi, SD_INT(0))) {
-        sd_str _t25[] = {l_name, SD_STR_LIT(" is a field of "), L.l_tname, SD_STR_LIT(", not a method")};
-        L._t26 = sd_str_concat_n(_t25, 4);
-        sd_m_Checker__error(l_c, (l_callee).f_pos, L._t26);
-        sd_str_release(L._t26); L._t26 = NULL;
+        sd_str _t34[] = {l_name, SD_STR_LIT(" is a field of "), L.l_tname, SD_STR_LIT(", not a method")};
+        L._t35 = sd_str_concat_n(_t34, 4);
+        sd_m_Checker__error(l_c, (l_callee).f_pos, L._t35);
+        sd_str_release(L._t35); L._t35 = NULL;
       } else {
-        sd_S_Suggest _t27 = sd_f_newSuggest(l_name);
-        L.l_s = _t27;
+        sd_S_Suggest _t36 = sd_f_newSuggest(l_name);
+        L.l_s = _t36;
         {
           int64_t l_i = ((int64_t)0);
           for (;;) {
@@ -16734,21 +16854,21 @@ SD_NO_TCE static void sd_m_Checker__checkSelectorCall(sd_S_Checker * l_c, sd_int
             if (!((l_i < SD_SMALL(sd_list_len((((*l_c)).f_ast).f_fns))))) break;
             {
               if (((SD_SMALL(sd_list_len(((*l_c)).f_fnRecv)) > l_i) && sd_int_eq(SD_LIST_GET(((*l_c)).f_fnRecv, sd_int, SD_INT_S(l_i)), l_rd))) {
-                L._t29 = sd_str_retain((SD_LIST_GET((((*l_c)).f_ast).f_fns, sd_S_FnDecl, SD_INT_S(l_i))).f_name);
-                sd_m_Suggest__consider((&L.l_s), L._t29);
-                sd_str_release(L._t29); L._t29 = NULL;
+                L._t38 = sd_str_retain((SD_LIST_GET((((*l_c)).f_ast).f_fns, sd_S_FnDecl, SD_INT_S(l_i))).f_name);
+                sd_m_Suggest__consider((&L.l_s), L._t38);
+                sd_str_release(L._t38); L._t38 = NULL;
               }
             }
-            _c28:;
+            _c37:;
             l_i++;
           }
         }
-        sd_str _t30[] = {L.l_tname, SD_STR_LIT(" has no method "), l_name};
-        L._t31 = sd_str_concat_n(_t30, 3);
-        L._t32 = sd_m_Suggest__hint(L.l_s);
-        sd_m_Checker__errorHint(l_c, (l_callee).f_pos, L._t31, L._t32);
-        sd_str_release(L._t32); L._t32 = NULL;
-        sd_str_release(L._t31); L._t31 = NULL;
+        sd_str _t39[] = {L.l_tname, SD_STR_LIT(" has no method "), l_name};
+        L._t40 = sd_str_concat_n(_t39, 3);
+        L._t41 = sd_m_Suggest__hint(L.l_s);
+        sd_m_Checker__errorHint(l_c, (l_callee).f_pos, L._t40, L._t41);
+        sd_str_release(L._t41); L._t41 = NULL;
+        sd_str_release(L._t40); L._t40 = NULL;
         sd_rl_S7Suggest(L.l_s); L.l_s = ((sd_S_Suggest){0});
       }
       sd_m_Checker__checkArgsLoosely(l_c, l_e);
@@ -16764,23 +16884,23 @@ SD_NO_TCE static void sd_m_Checker__checkSelectorCall(sd_S_Checker * l_c, sd_int
       return;
     }
     sd_S_FnDecl l_md = SD_LIST_GET((((*l_c)).f_ast).f_fns, sd_S_FnDecl, l_m);
-    bool _t35 = (!(l_md).f_isPub);
-    if (_t35) {
-      sd_int _t33 = sd_m_Checker__fnPkg((*l_c), l_m);
-      sd_int _t34 = sd_m_Checker__pkgOf((*l_c), (l_callee).f_pos);
-      _t35 = (!sd_int_eq(_t33, _t34));
-      sd_int_release(_t34);
-      sd_int_release(_t33);
+    bool _t44 = (!(l_md).f_isPub);
+    if (_t44) {
+      sd_int _t42 = sd_m_Checker__fnPkg((*l_c), l_m);
+      sd_int _t43 = sd_m_Checker__pkgOf((*l_c), (l_callee).f_pos);
+      _t44 = (!sd_int_eq(_t42, _t43));
+      sd_int_release(_t43);
+      sd_int_release(_t42);
     }
-    if (_t35) {
-      sd_str _t36[] = {SD_STR_LIT("the method "), l_name, SD_STR_LIT(" of "), L.l_tname, SD_STR_LIT(" is not pub")};
-      L._t37 = sd_str_concat_n(_t36, 5);
-      sd_int _t38 = sd_m_Checker__fnPkg((*l_c), l_m);
-      L._t39 = sd_str_concat(SD_STR_LIT("only pub methods can be called outside package "), (SD_LIST_GET((((*l_c)).f_ast).f_pkgs, sd_S_Package, _t38)).f_name);
-      sd_m_Checker__errorHint(l_c, (l_callee).f_pos, L._t37, L._t39);
-      sd_str_release(L._t39); L._t39 = NULL;
-      sd_int_release(_t38);
-      sd_str_release(L._t37); L._t37 = NULL;
+    if (_t44) {
+      sd_str _t45[] = {SD_STR_LIT("the method "), l_name, SD_STR_LIT(" of "), L.l_tname, SD_STR_LIT(" is not pub")};
+      L._t46 = sd_str_concat_n(_t45, 5);
+      sd_int _t47 = sd_m_Checker__fnPkg((*l_c), l_m);
+      L._t48 = sd_str_concat(SD_STR_LIT("only pub methods can be called outside package "), (SD_LIST_GET((((*l_c)).f_ast).f_pkgs, sd_S_Package, _t47)).f_name);
+      sd_m_Checker__errorHint(l_c, (l_callee).f_pos, L._t46, L._t48);
+      sd_str_release(L._t48); L._t48 = NULL;
+      sd_int_release(_t47);
+      sd_str_release(L._t46); L._t46 = NULL;
       sd_m_Checker__checkArgsLoosely(l_c, l_e);
       SD_LF_LEAVE(L);
       sd_int_release(l_fi);
@@ -16794,49 +16914,49 @@ SD_NO_TCE static void sd_m_Checker__checkSelectorCall(sd_S_Checker * l_c, sd_int
       return;
     }
     if ((l_md).f_recvMut) {
-      sd_str _t40[] = {SD_STR_LIT("call the mut method "), l_name, SD_STR_LIT("() on")};
-      L._t41 = sd_str_concat_n(_t40, 3);
-      sd_m_Checker__requireMutable(l_c, l_base, L._t41);
-      sd_str_release(L._t41); L._t41 = NULL;
-      L._t42 = sd_m_Checker__pathKey((*l_c), l_base);
-      sd_m_Checker__killMut(l_c, L._t42);
-      sd_str_release(L._t42); L._t42 = NULL;
+      sd_str _t49[] = {SD_STR_LIT("call the mut method "), l_name, SD_STR_LIT("() on")};
+      L._t50 = sd_str_concat_n(_t49, 3);
+      sd_m_Checker__requireMutable(l_c, l_base, L._t50);
+      sd_str_release(L._t50); L._t50 = NULL;
+      L._t51 = sd_m_Checker__pathKey((*l_c), l_base);
+      sd_m_Checker__killMut(l_c, L._t51);
+      sd_str_release(L._t51); L._t51 = NULL;
     }
-    sd_list * _t43 = sd_list_new(&sd_type_int, 0);
-    L.l_ps = _t43;
+    sd_list * _t52 = sd_list_new(&sd_type_int, 0);
+    L.l_ps = _t52;
     {
       sd_int l_j = SD_INT(0);
       for (;;) {
         SD_PREEMPT();
         if (!(sd_int_lt(l_j, (l_md).f_paramCount))) break;
         {
-          sd_int _t45 = sd_m_Checker__paramType((*l_c), l_m, l_j);
-          SD_LIST_PUSH((&L.l_ps), sd_int, _t45);
+          sd_int _t54 = sd_m_Checker__paramType((*l_c), l_m, l_j);
+          SD_LIST_PUSH((&L.l_ps), sd_int, _t54);
         }
-        _c44:;
+        _c53:;
         { int64_t r_; if (SD_LIKELY((((l_j).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_j).w, SD_INT(1).w, &r_))) (l_j).w = r_; else { sd_int s_ = sd_int_add_slow((l_j), SD_INT(1)); sd_int_release((l_j)); (l_j) = s_; } }
       }
       sd_int_release(l_j);
     }
-    sd_box * _t46 = SD_BOX_REF(sd_k_Res__Method);
-    sd_int _t47 = sd_int_retain(l_e);
-    sd_box * *_t48 = (&(((sd_S_ExprInfo *)sd_list_at_mut((&(l_c)->f_info), _t47)))->f_res);
-    sd_box_release(*_t48);
-    *_t48 = _t46;
-    sd_int_release(_t47);
-    sd_int _t49 = sd_int_retain(l_m);
-    sd_int _t50 = sd_int_retain(l_e);
-    sd_int *_t51 = (&(((sd_S_ExprInfo *)sd_list_at_mut((&(l_c)->f_info), _t50)))->f_ref);
-    sd_int_release(*_t51);
-    *_t51 = _t49;
-    sd_int_release(_t50);
-    sd_int _t52 = sd_int_retain(SD_LIST_GET(((*l_c)).f_fnRet, sd_int, l_m));
-    sd_m_Checker__setType(l_c, l_e, _t52);
-    sd_int_release(_t52);
-    sd_str _t53[] = {L.l_tname, SD_STR_LIT("."), l_name, SD_STR_LIT("()")};
-    L._t54 = sd_str_concat_n(_t53, 4);
-    sd_m_Checker__checkArgs(l_c, l_e, L.l_ps, L._t54);
-    sd_str_release(L._t54); L._t54 = NULL;
+    sd_box * _t55 = SD_BOX_REF(sd_k_Res__Method);
+    sd_int _t56 = sd_int_retain(l_e);
+    sd_box * *_t57 = (&(((sd_S_ExprInfo *)sd_list_at_mut((&(l_c)->f_info), _t56)))->f_res);
+    sd_box_release(*_t57);
+    *_t57 = _t55;
+    sd_int_release(_t56);
+    sd_int _t58 = sd_int_retain(l_m);
+    sd_int _t59 = sd_int_retain(l_e);
+    sd_int *_t60 = (&(((sd_S_ExprInfo *)sd_list_at_mut((&(l_c)->f_info), _t59)))->f_ref);
+    sd_int_release(*_t60);
+    *_t60 = _t58;
+    sd_int_release(_t59);
+    sd_int _t61 = sd_int_retain(SD_LIST_GET(((*l_c)).f_fnRet, sd_int, l_m));
+    sd_m_Checker__setType(l_c, l_e, _t61);
+    sd_int_release(_t61);
+    sd_str _t62[] = {L.l_tname, SD_STR_LIT("."), l_name, SD_STR_LIT("()")};
+    L._t63 = sd_str_concat_n(_t62, 4);
+    sd_m_Checker__checkArgs(l_c, l_e, L.l_ps, L._t63);
+    sd_str_release(L._t63); L._t63 = NULL;
     SD_LF_LEAVE(L);
     sd_list_release(L.l_ps);
     sd_int_release(l_fi);
@@ -17132,7 +17252,7 @@ SD_NO_TCE static void sd_m_Checker__checkEnumNew(sd_S_Checker * l_c, sd_int l_e,
   SD_LF_LEAVE(L);
 }
 
-typedef struct { sd_lframe h; sd_list * l_ps; sd_list * _t11; sd_list * _t14; sd_list * _t17; sd_list * _t21; sd_list * _t24; sd_list * _t27; sd_list * _t33; sd_str _t61; sd_str _t62; sd_list * _t67; sd_list * _t70; sd_list * _t80; sd_str _t84; sd_str _t85; sd_str _t88; sd_str _t89; sd_list * _t91; sd_list * _t94; sd_str _t118; sd_str _t119; sd_str _t121; sd_str _t123; sd_str _t124; sd_str _t125; sd_str _t127; sd_str _t129; sd_str _t130; sd_str _t137; } sd_L_sd_m_Checker__checkBuiltin;
+typedef struct { sd_lframe h; sd_list * l_ps; sd_list * _t11; sd_list * _t14; sd_list * _t17; sd_list * _t21; sd_list * _t24; sd_list * _t27; sd_list * _t33; sd_str _t61; sd_str _t62; sd_list * _t67; sd_list * _t70; sd_list * _t80; sd_str _t84; sd_str _t85; sd_str _t88; sd_str _t89; sd_list * _t91; sd_list * _t94; sd_str _t118; sd_str _t119; sd_str _t121; sd_str _t122; sd_str _t131; sd_str _t132; sd_str _t134; sd_str _t136; sd_str _t137; sd_str _t138; sd_str _t140; sd_str _t142; sd_str _t143; sd_str _t150; } sd_L_sd_m_Checker__checkBuiltin;
 static void sd_lr_sd_m_Checker__checkBuiltin(sd_lframe *p) {
   sd_L_sd_m_Checker__checkBuiltin *L = (sd_L_sd_m_Checker__checkBuiltin *)p;
   sd_list_release(L->l_ps);
@@ -17157,13 +17277,17 @@ static void sd_lr_sd_m_Checker__checkBuiltin(sd_lframe *p) {
   sd_str_release(L->_t118);
   sd_str_release(L->_t119);
   sd_str_release(L->_t121);
-  sd_str_release(L->_t123);
-  sd_str_release(L->_t124);
-  sd_str_release(L->_t125);
-  sd_str_release(L->_t127);
-  sd_str_release(L->_t129);
-  sd_str_release(L->_t130);
+  sd_str_release(L->_t122);
+  sd_str_release(L->_t131);
+  sd_str_release(L->_t132);
+  sd_str_release(L->_t134);
+  sd_str_release(L->_t136);
   sd_str_release(L->_t137);
+  sd_str_release(L->_t138);
+  sd_str_release(L->_t140);
+  sd_str_release(L->_t142);
+  sd_str_release(L->_t143);
+  sd_str_release(L->_t150);
 }
 SD_NO_TCE static void sd_m_Checker__checkBuiltin(sd_S_Checker * l_c, sd_int l_e, sd_int l_recv, sd_str l_name) {
   sd_L_sd_m_Checker__checkBuiltin L = {{0}};
@@ -17625,70 +17749,114 @@ SD_NO_TCE static void sd_m_Checker__checkBuiltin(sd_S_Checker * l_c, sd_int l_e,
                 sd_int_release(l_res);
                 l_res = _t107;
                 sd_int_release(_t106);
+              } else {
+                if (sd_str_eq(l_name, SD_STR_LIT("getOr"))) {
+                  sd_box * _t108 = SD_BOX_REF(sd_k_Builtin__GetOr);
+                  sd_box_release(l_b);
+                  l_b = _t108;
+                  sd_int _t109 = sd_m_Types__key(((*l_c)).f_types, l_rt);
+                  sd_int _t110 = sd_m_Types__elem(((*l_c)).f_types, l_rt);
+                  sd_list * _t111 = sd_list_new(&sd_type_int, 2);
+                  SD_LIST_PUSH(&_t111, sd_int, _t109);
+                  SD_LIST_PUSH(&_t111, sd_int, _t110);
+                  sd_list_release(L.l_ps);
+                  L.l_ps = _t111;
+                  sd_int _t112 = sd_m_Types__elem(((*l_c)).f_types, l_rt);
+                  sd_int_release(l_res);
+                  l_res = _t112;
+                }
               }
             }
           }
         } else {
           if ((SD_BOX_GET(l_k, sd_E_Kind).tag == 6)) {
             if (sd_str_eq(l_name, SD_STR_LIT("message"))) {
-              sd_box * _t108 = SD_BOX_REF(sd_k_Builtin__Message);
+              sd_box * _t113 = SD_BOX_REF(sd_k_Builtin__Message);
               sd_box_release(l_b);
-              l_b = _t108;
-              sd_int _t109 = sd_int_retain(sd_c_tyString());
+              l_b = _t113;
+              sd_int _t114 = sd_int_retain(sd_c_tyString());
               sd_int_release(l_res);
-              l_res = _t109;
+              l_res = _t114;
+            }
+            bool _t116 = (!(SD_BOX_GET(l_b, sd_E_Builtin).tag == 0));
+            if (_t116) {
+              bool _t115 = sd_m_Checker__errorKnownNonNull((*l_c), l_recv);
+              _t116 = (!_t115);
+            }
+            if (_t116) {
+              sd_S_Pos _t117 = sd_rt_S3Pos((SD_LIST_GET((((*l_c)).f_ast).f_exprs, sd_S_Expr, l_recv)).f_pos);
+              L._t118 = sd_m_Checker__describe((*l_c), l_recv);
+              L._t119 = sd_str_concat(L._t118, SD_STR_LIT(" may be null (an error is null when there is no error)"));
+              sd_str _t120[] = {SD_STR_LIT("calling "), l_name, SD_STR_LIT("()")};
+              L._t121 = sd_str_concat_n(_t120, 3);
+              L._t122 = sd_m_Checker__nullHint((*l_c), l_recv, l_rt, L._t121);
+              sd_m_Checker__errorHint(l_c, _t117, L._t119, L._t122);
+              sd_str_release(L._t122); L._t122 = NULL;
+              sd_str_release(L._t121); L._t121 = NULL;
+              sd_str_release(L._t119); L._t119 = NULL;
+              sd_str_release(L._t118); L._t118 = NULL;
+              sd_rl_S3Pos(_t117);
+              SD_PREEMPT();
+              sd_m_Checker__checkArgsLoosely(l_c, l_e);
+              SD_LF_LEAVE(L);
+              sd_int_release(l_res);
+              sd_list_release(L.l_ps);
+              sd_box_release(l_b);
+              sd_box_release(l_k);
+              sd_int_release(l_rt);
+              return;
             }
           } else {
             if ((SD_BOX_GET(l_k, sd_E_Kind).tag == 17)) {
-              sd_int _t110 = sd_m_Types__elem(((*l_c)).f_types, l_rt);
-              sd_int l_ce = _t110;
+              sd_int _t123 = sd_m_Types__elem(((*l_c)).f_types, l_rt);
+              sd_int l_ce = _t123;
               if (sd_str_eq(l_name, SD_STR_LIT("send"))) {
-                sd_box * _t111 = SD_BOX_REF(sd_k_Builtin__Send);
+                sd_box * _t124 = SD_BOX_REF(sd_k_Builtin__Send);
                 sd_box_release(l_b);
-                l_b = _t111;
-                sd_list * _t112 = sd_list_new(&sd_type_int, 1);
-                SD_LIST_PUSH(&_t112, sd_int, sd_int_retain(l_ce));
+                l_b = _t124;
+                sd_list * _t125 = sd_list_new(&sd_type_int, 1);
+                SD_LIST_PUSH(&_t125, sd_int, sd_int_retain(l_ce));
                 sd_list_release(L.l_ps);
-                L.l_ps = _t112;
+                L.l_ps = _t125;
               } else {
                 if (sd_str_eq(l_name, SD_STR_LIT("receive"))) {
-                  sd_box * _t113 = SD_BOX_REF(sd_k_Builtin__Receive);
+                  sd_box * _t126 = SD_BOX_REF(sd_k_Builtin__Receive);
                   sd_box_release(l_b);
-                  l_b = _t113;
-                  sd_int _t114 = sd_int_retain(l_ce);
+                  l_b = _t126;
+                  sd_int _t127 = sd_int_retain(l_ce);
                   sd_int_release(l_res);
-                  l_res = _t114;
+                  l_res = _t127;
                   if ((!sd_int_eq(l_ce, sd_c_tyError()))) {
-                    sd_int _t115 = sd_m_Types__optOf((&(l_c)->f_types), l_ce);
+                    sd_int _t128 = sd_m_Types__optOf((&(l_c)->f_types), l_ce);
                     sd_int_release(l_res);
-                    l_res = _t115;
+                    l_res = _t128;
                   }
                 } else {
                   if (sd_str_eq(l_name, SD_STR_LIT("close"))) {
-                    sd_box * _t116 = SD_BOX_REF(sd_k_Builtin__Close);
+                    sd_box * _t129 = SD_BOX_REF(sd_k_Builtin__Close);
                     sd_box_release(l_b);
-                    l_b = _t116;
+                    l_b = _t129;
                   }
                 }
               }
               sd_int_release(l_ce);
             } else {
               if ((SD_BOX_GET(l_k, sd_E_Kind).tag == 11)) {
-                sd_S_Pos _t117 = sd_rt_S3Pos((SD_LIST_GET((((*l_c)).f_ast).f_exprs, sd_S_Expr, l_recv)).f_pos);
-                L._t118 = sd_m_Checker__describe((*l_c), l_recv);
-                L._t119 = sd_m_Checker__typeName((*l_c), l_rt);
-                sd_str _t120[] = {L._t118, SD_STR_LIT(" is nullable ("), L._t119, SD_STR_LIT(")")};
-                L._t121 = sd_str_concat_n(_t120, 4);
-                sd_str _t122[] = {SD_STR_LIT("calling "), l_name, SD_STR_LIT("()")};
-                L._t123 = sd_str_concat_n(_t122, 3);
-                L._t124 = sd_m_Checker__nullHint((*l_c), l_recv, l_rt, L._t123);
-                sd_m_Checker__errorHint(l_c, _t117, L._t121, L._t124);
-                sd_str_release(L._t124); L._t124 = NULL;
-                sd_str_release(L._t123); L._t123 = NULL;
-                sd_str_release(L._t121); L._t121 = NULL;
-                sd_str_release(L._t119); L._t119 = NULL;
-                sd_str_release(L._t118); L._t118 = NULL;
-                sd_rl_S3Pos(_t117);
+                sd_S_Pos _t130 = sd_rt_S3Pos((SD_LIST_GET((((*l_c)).f_ast).f_exprs, sd_S_Expr, l_recv)).f_pos);
+                L._t131 = sd_m_Checker__describe((*l_c), l_recv);
+                L._t132 = sd_m_Checker__typeName((*l_c), l_rt);
+                sd_str _t133[] = {L._t131, SD_STR_LIT(" is nullable ("), L._t132, SD_STR_LIT(")")};
+                L._t134 = sd_str_concat_n(_t133, 4);
+                sd_str _t135[] = {SD_STR_LIT("calling "), l_name, SD_STR_LIT("()")};
+                L._t136 = sd_str_concat_n(_t135, 3);
+                L._t137 = sd_m_Checker__nullHint((*l_c), l_recv, l_rt, L._t136);
+                sd_m_Checker__errorHint(l_c, _t130, L._t134, L._t137);
+                sd_str_release(L._t137); L._t137 = NULL;
+                sd_str_release(L._t136); L._t136 = NULL;
+                sd_str_release(L._t134); L._t134 = NULL;
+                sd_str_release(L._t132); L._t132 = NULL;
+                sd_str_release(L._t131); L._t131 = NULL;
+                sd_rl_S3Pos(_t130);
                 SD_PREEMPT();
                 sd_m_Checker__checkArgsLoosely(l_c, l_e);
                 SD_LF_LEAVE(L);
@@ -17706,12 +17874,12 @@ SD_NO_TCE static void sd_m_Checker__checkBuiltin(sd_S_Checker * l_c, sd_int l_e,
     }
   }
   if ((SD_BOX_GET(l_b, sd_E_Builtin).tag == 0)) {
-    L._t125 = sd_m_Checker__typeName((*l_c), l_rt);
-    sd_str _t126[] = {L._t125, SD_STR_LIT(" has no method "), l_name};
-    L._t127 = sd_str_concat_n(_t126, 3);
-    sd_m_Checker__error(l_c, l_cpos, L._t127);
-    sd_str_release(L._t127); L._t127 = NULL;
-    sd_str_release(L._t125); L._t125 = NULL;
+    L._t138 = sd_m_Checker__typeName((*l_c), l_rt);
+    sd_str _t139[] = {L._t138, SD_STR_LIT(" has no method "), l_name};
+    L._t140 = sd_str_concat_n(_t139, 3);
+    sd_m_Checker__error(l_c, l_cpos, L._t140);
+    sd_str_release(L._t140); L._t140 = NULL;
+    sd_str_release(L._t138); L._t138 = NULL;
     SD_PREEMPT();
     sd_m_Checker__checkArgsLoosely(l_c, l_e);
     SD_LF_LEAVE(L);
@@ -17723,31 +17891,31 @@ SD_NO_TCE static void sd_m_Checker__checkBuiltin(sd_S_Checker * l_c, sd_int l_e,
     return;
   }
   if (l_isMut) {
-    sd_str _t128[] = {SD_STR_LIT("call the mut method "), l_name, SD_STR_LIT("() on")};
-    L._t129 = sd_str_concat_n(_t128, 3);
-    sd_m_Checker__requireMutable(l_c, l_recv, L._t129);
-    sd_str_release(L._t129); L._t129 = NULL;
-    L._t130 = sd_m_Checker__pathKey((*l_c), l_recv);
-    sd_m_Checker__killMut(l_c, L._t130);
-    sd_str_release(L._t130); L._t130 = NULL;
+    sd_str _t141[] = {SD_STR_LIT("call the mut method "), l_name, SD_STR_LIT("() on")};
+    L._t142 = sd_str_concat_n(_t141, 3);
+    sd_m_Checker__requireMutable(l_c, l_recv, L._t142);
+    sd_str_release(L._t142); L._t142 = NULL;
+    L._t143 = sd_m_Checker__pathKey((*l_c), l_recv);
+    sd_m_Checker__killMut(l_c, L._t143);
+    sd_str_release(L._t143); L._t143 = NULL;
   }
-  sd_box * _t131 = SD_BOX_REF(sd_k_Res__Builtin);
-  sd_int _t132 = sd_int_retain(l_e);
-  sd_box * *_t133 = (&(((sd_S_ExprInfo *)sd_list_at_mut((&(l_c)->f_info), _t132)))->f_res);
-  sd_box_release(*_t133);
-  *_t133 = _t131;
-  sd_int_release(_t132);
-  sd_box * _t134 = l_b;
-  sd_int _t135 = sd_int_retain(l_e);
-  sd_box * *_t136 = (&(((sd_S_ExprInfo *)sd_list_at_mut((&(l_c)->f_info), _t135)))->f_builtin);
-  sd_box_release(*_t136);
-  *_t136 = _t134;
-  sd_int_release(_t135);
+  sd_box * _t144 = SD_BOX_REF(sd_k_Res__Builtin);
+  sd_int _t145 = sd_int_retain(l_e);
+  sd_box * *_t146 = (&(((sd_S_ExprInfo *)sd_list_at_mut((&(l_c)->f_info), _t145)))->f_res);
+  sd_box_release(*_t146);
+  *_t146 = _t144;
+  sd_int_release(_t145);
+  sd_box * _t147 = l_b;
+  sd_int _t148 = sd_int_retain(l_e);
+  sd_box * *_t149 = (&(((sd_S_ExprInfo *)sd_list_at_mut((&(l_c)->f_info), _t148)))->f_builtin);
+  sd_box_release(*_t149);
+  *_t149 = _t147;
+  sd_int_release(_t148);
   sd_m_Checker__setType(l_c, l_e, l_res);
-  L._t137 = sd_str_concat(l_name, SD_STR_LIT("()"));
+  L._t150 = sd_str_concat(l_name, SD_STR_LIT("()"));
   SD_PREEMPT();
-  sd_m_Checker__checkArgs(l_c, l_e, L.l_ps, L._t137);
-  sd_str_release(L._t137); L._t137 = NULL;
+  sd_m_Checker__checkArgs(l_c, l_e, L.l_ps, L._t150);
+  sd_str_release(L._t150); L._t150 = NULL;
   sd_int_release(l_res);
   sd_list_release(L.l_ps); L.l_ps = NULL;
   sd_box_release(l_k);
@@ -17755,14 +17923,17 @@ SD_NO_TCE static void sd_m_Checker__checkBuiltin(sd_S_Checker * l_c, sd_int l_e,
   SD_LF_LEAVE(L);
 }
 
-typedef struct { sd_lframe h; sd_str _t3; sd_str _t4; sd_str _t7; sd_str _t9; sd_str _t11; } sd_L_sd_m_Checker__notValue;
+typedef struct { sd_lframe h; sd_str _t3; sd_str _t4; sd_str l_hint; sd_str l_src; sd_str l_vals; sd_str _t15; sd_str _t17; sd_str _t19; } sd_L_sd_m_Checker__notValue;
 static void sd_lr_sd_m_Checker__notValue(sd_lframe *p) {
   sd_L_sd_m_Checker__notValue *L = (sd_L_sd_m_Checker__notValue *)p;
   sd_str_release(L->_t3);
   sd_str_release(L->_t4);
-  sd_str_release(L->_t7);
-  sd_str_release(L->_t9);
-  sd_str_release(L->_t11);
+  sd_str_release(L->l_hint);
+  sd_str_release(L->l_src);
+  sd_str_release(L->l_vals);
+  sd_str_release(L->_t15);
+  sd_str_release(L->_t17);
+  sd_str_release(L->_t19);
 }
 static void sd_m_Checker__notValue(sd_S_Checker * l_c, sd_int l_e) {
   sd_L_sd_m_Checker__notValue L = {{0}};
@@ -17780,19 +17951,45 @@ static void sd_m_Checker__notValue(sd_S_Checker * l_c, sd_int l_e) {
   } else {
     bool _t5 = sd_m_Types__isTuple(((*l_c)).f_types, l_t);
     if (_t5) {
-      sd_S_Pos _t6 = sd_rt_S3Pos((SD_LIST_GET((((*l_c)).f_ast).f_exprs, sd_S_Expr, l_e)).f_pos);
-      L._t7 = sd_m_Checker__describe((*l_c), l_e);
-      sd_int _t8 = sd_m_Types__count(((*l_c)).f_types, l_t);
-      L._t9 = sd_m_Checker__typeName((*l_c), l_t);
-      sd_str_part _t10[] = {{L._t7}, {SD_STR_LIT(" returns ")}, {NULL, _t8}, {SD_STR_LIT(" values ")}, {L._t9}};
-      L._t11 = sd_str_concat_parts(_t10, 5);
-      sd_str _t12 = SD_STR_LIT("assign them with a declaration such as T a, error err = ...");
-      sd_m_Checker__errorHint(l_c, _t6, L._t11, _t12);
-      sd_str_release(L._t11); L._t11 = NULL;
-      sd_str_release(L._t9); L._t9 = NULL;
-      sd_int_release(_t8);
-      sd_str_release(L._t7); L._t7 = NULL;
-      sd_rl_S3Pos(_t6);
+      L.l_hint = SD_STR_LIT("assign them with a declaration such as T a, error err = ...");
+      bool _t6 = sd_m_Types__endsWithError(((*l_c)).f_types, l_t);
+      if ((_t6 && (SD_BOX_GET((SD_LIST_GET((((*l_c)).f_ast).f_exprs, sd_S_Expr, l_e)).f_kind, sd_E_ExprKind).tag == 10))) {
+        sd_str _t7 = sd_m_Ast__fullText(((*l_c)).f_ast, l_e);
+        L.l_src = _t7;
+        if (sd_str_eq(L.l_src, SD_STR_LIT(""))) {
+          sd_str _t8 = SD_STR_LIT("...");
+          sd_str_release(L.l_src);
+          L.l_src = _t8;
+        }
+        L.l_vals = SD_STR_LIT("T a");
+        sd_int _t9 = sd_m_Types__count(((*l_c)).f_types, l_t);
+        bool _t10 = sd_int_gt(_t9, SD_INT(2));
+        sd_int_release(_t9);
+        if (_t10) {
+          sd_str _t11 = SD_STR_LIT("T a, U b");
+          sd_str_release(L.l_vals);
+          L.l_vals = _t11;
+        }
+        sd_str _t12[] = {SD_STR_LIT("use try to pass the error up (try "), L.l_src, SD_STR_LIT("), or handle it yourself: "), L.l_vals, SD_STR_LIT(", error err = "), L.l_src};
+        sd_str _t13 = sd_str_concat_n(_t12, 6);
+        sd_str_release(L.l_hint);
+        L.l_hint = _t13;
+        sd_str_release(L.l_vals); L.l_vals = NULL;
+        sd_str_release(L.l_src); L.l_src = NULL;
+      }
+      sd_S_Pos _t14 = sd_rt_S3Pos((SD_LIST_GET((((*l_c)).f_ast).f_exprs, sd_S_Expr, l_e)).f_pos);
+      L._t15 = sd_m_Checker__describe((*l_c), l_e);
+      sd_int _t16 = sd_m_Types__count(((*l_c)).f_types, l_t);
+      L._t17 = sd_m_Checker__typeName((*l_c), l_t);
+      sd_str_part _t18[] = {{L._t15}, {SD_STR_LIT(" returns ")}, {NULL, _t16}, {SD_STR_LIT(" values ")}, {L._t17}};
+      L._t19 = sd_str_concat_parts(_t18, 5);
+      sd_m_Checker__errorHint(l_c, _t14, L._t19, L.l_hint);
+      sd_str_release(L._t19); L._t19 = NULL;
+      sd_str_release(L._t17); L._t17 = NULL;
+      sd_int_release(_t16);
+      sd_str_release(L._t15); L._t15 = NULL;
+      sd_rl_S3Pos(_t14);
+      sd_str_release(L.l_hint); L.l_hint = NULL;
     }
   }
   sd_int_release(l_t);
@@ -18377,7 +18574,7 @@ static void sd_m_Checker__requireMutable(sd_S_Checker * l_c, sd_int l_e, sd_str 
     L.l_target = _t12;
   }
   if ((SD_BOX_GET((l_v).f_kind, sd_E_VarKind).tag == 2)) {
-    sd_str _t13[] = {SD_STR_LIT("cannot "), l_what, SD_STR_LIT(" "), L.l_target, SD_STR_LIT(": parameters are read-only, and "), (l_v).f_name, SD_STR_LIT(" is the receiver of a method that is not mut")};
+    sd_str _t13[] = {SD_STR_LIT("cannot "), l_what, SD_STR_LIT(" "), L.l_target, SD_STR_LIT(": "), (l_v).f_name, SD_STR_LIT(" is the receiver of a method that is not mut, so it is read-only")};
     L._t14 = sd_str_concat_n(_t13, 7);
     sd_str _t15[] = {SD_STR_LIT("make the method mut, or copy "), (l_v).f_name, SD_STR_LIT(" into a local variable first")};
     L._t16 = sd_str_concat_n(_t15, 3);
@@ -18385,8 +18582,8 @@ static void sd_m_Checker__requireMutable(sd_S_Checker * l_c, sd_int l_e, sd_str 
     sd_str_release(L._t16); L._t16 = NULL;
     sd_str_release(L._t14); L._t14 = NULL;
   } else {
-    if ((SD_BOX_GET((l_v).f_kind, sd_E_VarKind).tag == 1)) {
-      sd_str _t17[] = {SD_STR_LIT("cannot "), l_what, SD_STR_LIT(" "), L.l_target, SD_STR_LIT(": parameters are read-only")};
+    if (((SD_BOX_GET((l_v).f_kind, sd_E_VarKind).tag == 1) && ((!sd_int_eq(l_r, l_e)) || (!sd_str_eq(l_what, SD_STR_LIT("assign to")))))) {
+      sd_str _t17[] = {SD_STR_LIT("cannot "), l_what, SD_STR_LIT(" "), L.l_target, SD_STR_LIT(": a parameter can be assigned a new value, but not changed in place")};
       L._t18 = sd_str_concat_n(_t17, 5);
       sd_str _t19 = SD_STR_LIT("copy it into a local variable and change that; return the new value if the caller needs it");
       sd_m_Checker__errorHint(l_c, l_pos, L._t18, _t19);
@@ -19527,7 +19724,7 @@ static bool sd_f_isComparison(sd_box * l_op) {
   return _t2;
 }
 
-typedef struct { sd_lframe h; sd_str l_ops; sd_str _t3; sd_list * l_savedGuards; sd_str _t9; sd_str _t29; sd_str _t30; sd_str _t32; sd_list * _t40; sd_str _t43; sd_str _t45; sd_str _t58; sd_str _t59; sd_str _t61; sd_str _t62; sd_str _t64; sd_str _t65; sd_str _t66; sd_str _t68; sd_str _t70; sd_str _t72; sd_str _t73; sd_str _t74; sd_str _t76; sd_str _t81; sd_str _t82; sd_str _t84; sd_str _t85; sd_str _t87; sd_str _t92; sd_str _t93; sd_str _t95; sd_str _t96; sd_str _t98; sd_str _t99; sd_str _t100; sd_str _t102; sd_str _t111; sd_str _t112; sd_str _t114; sd_str _t115; sd_str _t117; sd_str _t118; sd_str _t120; } sd_L_sd_m_Checker__checkBinary;
+typedef struct { sd_lframe h; sd_str l_ops; sd_str _t3; sd_list * l_savedGuards; sd_str _t9; sd_str _t29; sd_str _t30; sd_str _t32; sd_list * _t40; sd_str _t43; sd_str _t45; sd_list * _t58; sd_str _t62; sd_str _t64; sd_str _t67; sd_str _t68; sd_str _t70; sd_str _t72; sd_str _t74; sd_str _t75; sd_str _t76; sd_str _t78; sd_str _t83; sd_str _t84; sd_str _t86; sd_str _t87; sd_str _t89; sd_str _t94; sd_str _t95; sd_str _t97; sd_str _t98; sd_str _t100; sd_str _t101; sd_str _t102; sd_str _t104; sd_str _t113; sd_str _t114; sd_str _t116; sd_str _t117; sd_str _t119; sd_str _t120; sd_str _t122; } sd_L_sd_m_Checker__checkBinary;
 static void sd_lr_sd_m_Checker__checkBinary(sd_lframe *p) {
   sd_L_sd_m_Checker__checkBinary *L = (sd_L_sd_m_Checker__checkBinary *)p;
   sd_str_release(L->l_ops);
@@ -19540,39 +19737,37 @@ static void sd_lr_sd_m_Checker__checkBinary(sd_lframe *p) {
   sd_list_release(L->_t40);
   sd_str_release(L->_t43);
   sd_str_release(L->_t45);
-  sd_str_release(L->_t58);
-  sd_str_release(L->_t59);
-  sd_str_release(L->_t61);
+  sd_list_release(L->_t58);
   sd_str_release(L->_t62);
   sd_str_release(L->_t64);
-  sd_str_release(L->_t65);
-  sd_str_release(L->_t66);
+  sd_str_release(L->_t67);
   sd_str_release(L->_t68);
   sd_str_release(L->_t70);
   sd_str_release(L->_t72);
-  sd_str_release(L->_t73);
   sd_str_release(L->_t74);
+  sd_str_release(L->_t75);
   sd_str_release(L->_t76);
-  sd_str_release(L->_t81);
-  sd_str_release(L->_t82);
+  sd_str_release(L->_t78);
+  sd_str_release(L->_t83);
   sd_str_release(L->_t84);
-  sd_str_release(L->_t85);
+  sd_str_release(L->_t86);
   sd_str_release(L->_t87);
-  sd_str_release(L->_t92);
-  sd_str_release(L->_t93);
+  sd_str_release(L->_t89);
+  sd_str_release(L->_t94);
   sd_str_release(L->_t95);
-  sd_str_release(L->_t96);
+  sd_str_release(L->_t97);
   sd_str_release(L->_t98);
-  sd_str_release(L->_t99);
   sd_str_release(L->_t100);
+  sd_str_release(L->_t101);
   sd_str_release(L->_t102);
-  sd_str_release(L->_t111);
-  sd_str_release(L->_t112);
+  sd_str_release(L->_t104);
+  sd_str_release(L->_t113);
   sd_str_release(L->_t114);
-  sd_str_release(L->_t115);
+  sd_str_release(L->_t116);
   sd_str_release(L->_t117);
-  sd_str_release(L->_t118);
+  sd_str_release(L->_t119);
   sd_str_release(L->_t120);
+  sd_str_release(L->_t122);
 }
 SD_NO_TCE static void sd_m_Checker__checkBinary(sd_S_Checker * l_c, sd_int l_e) {
   sd_L_sd_m_Checker__checkBinary L = {{0}};
@@ -19763,43 +19958,54 @@ SD_NO_TCE static void sd_m_Checker__checkBinary(sd_S_Checker * l_c, sd_int l_e) 
         _t53 = _t52;
       }
       if (_t53) {
-        sd_int l_n = sd_int_retain(l_a);
+        sd_int l_plain = sd_int_retain(l_b);
         sd_int l_nt = sd_int_retain(l_at);
         bool _t54 = sd_m_Types__isOpt(((*l_c)).f_types, l_bt);
         if (_t54) {
-          sd_int _t55 = sd_int_retain(l_b);
-          sd_int_release(l_n);
-          l_n = _t55;
+          sd_int _t55 = sd_int_retain(l_a);
+          sd_int_release(l_plain);
+          l_plain = _t55;
           sd_int _t56 = sd_int_retain(l_bt);
           sd_int_release(l_nt);
           l_nt = _t56;
         }
-        sd_S_Pos _t57 = sd_rt_S3Pos((SD_LIST_GET((((*l_c)).f_ast).f_exprs, sd_S_Expr, l_n)).f_pos);
-        L._t58 = sd_m_Checker__describe((*l_c), l_n);
-        L._t59 = sd_m_Checker__typeName((*l_c), l_nt);
-        sd_str _t60[] = {L._t58, SD_STR_LIT(" is nullable ("), L._t59, SD_STR_LIT("), so it can only be compared with null")};
-        L._t61 = sd_str_concat_n(_t60, 4);
-        L._t62 = sd_m_Checker__describe((*l_c), l_n);
-        sd_str _t63[] = {SD_STR_LIT("check "), L._t62, SD_STR_LIT(" != null first, then compare it")};
-        L._t64 = sd_str_concat_n(_t63, 3);
-        sd_m_Checker__errorHint(l_c, _t57, L._t61, L._t64);
-        sd_str_release(L._t64); L._t64 = NULL;
-        sd_str_release(L._t62); L._t62 = NULL;
-        sd_str_release(L._t61); L._t61 = NULL;
-        sd_str_release(L._t59); L._t59 = NULL;
-        sd_str_release(L._t58); L._t58 = NULL;
-        sd_rl_S3Pos(_t57);
+        sd_int _t57 = sd_m_Types__elem(((*l_c)).f_types, l_nt);
+        L._t58 = sd_list_new(&sd_type_int, 0);
+        bool _t59 = sd_m_Checker__comparable((*l_c), _t57, L._t58);
+        bool _t60 = (!_t59);
+        sd_list_release(L._t58); L._t58 = NULL;
+        sd_int_release(_t57);
+        if (_t60) {
+          sd_int _t61 = sd_m_Types__elem(((*l_c)).f_types, l_nt);
+          L._t62 = sd_m_Checker__typeName((*l_c), _t61);
+          sd_str _t63[] = {SD_STR_LIT("values of type "), L._t62, SD_STR_LIT(" cannot be compared with "), L.l_ops};
+          L._t64 = sd_str_concat_n(_t63, 4);
+          sd_str _t65 = SD_STR_LIT("function values and channels (and types that contain them) have no ==");
+          sd_m_Checker__errorHint(l_c, (l_x).f_pos, L._t64, _t65);
+          sd_str_release(L._t64); L._t64 = NULL;
+          sd_str_release(L._t62); L._t62 = NULL;
+          sd_int_release(_t61);
+          SD_LF_LEAVE(L);
+          sd_int_release(l_nt);
+          sd_int_release(l_plain);
+          sd_int_release(l_bt);
+          sd_int_release(l_at);
+          sd_str_release(L.l_ops);
+          return;
+        }
+        sd_str _t66 = SD_STR_LIT("in the comparison");
+        sd_m_Checker__coerce(l_c, l_plain, l_nt, _t66);
         sd_int_release(l_nt);
-        sd_int_release(l_n);
+        sd_int_release(l_plain);
       } else {
-        L._t65 = sd_m_Checker__typeName((*l_c), l_at);
-        L._t66 = sd_m_Checker__typeName((*l_c), l_bt);
-        sd_str _t67[] = {SD_STR_LIT("mismatched types "), L._t65, SD_STR_LIT(" and "), L._t66, SD_STR_LIT(" for "), L.l_ops};
-        L._t68 = sd_str_concat_n(_t67, 6);
-        sd_m_Checker__error(l_c, (l_x).f_pos, L._t68);
+        L._t67 = sd_m_Checker__typeName((*l_c), l_at);
+        L._t68 = sd_m_Checker__typeName((*l_c), l_bt);
+        sd_str _t69[] = {SD_STR_LIT("mismatched types "), L._t67, SD_STR_LIT(" and "), L._t68, SD_STR_LIT(" for "), L.l_ops};
+        L._t70 = sd_str_concat_n(_t69, 6);
+        sd_m_Checker__error(l_c, (l_x).f_pos, L._t70);
+        sd_str_release(L._t70); L._t70 = NULL;
         sd_str_release(L._t68); L._t68 = NULL;
-        sd_str_release(L._t66); L._t66 = NULL;
-        sd_str_release(L._t65); L._t65 = NULL;
+        sd_str_release(L._t67); L._t67 = NULL;
       }
       SD_LF_LEAVE(L);
       sd_int_release(l_bt);
@@ -19807,21 +20013,21 @@ SD_NO_TCE static void sd_m_Checker__checkBinary(sd_S_Checker * l_c, sd_int l_e) 
       sd_str_release(L.l_ops);
       return;
     }
-    bool _t69 = sd_m_Types__isOpt(((*l_c)).f_types, l_at);
-    if (_t69) {
-      L._t70 = sd_m_Checker__typeName((*l_c), l_at);
-      sd_str _t71[] = {SD_STR_LIT("nullable values ("), L._t70, SD_STR_LIT(") can only be compared with null")};
-      L._t72 = sd_str_concat_n(_t71, 3);
-      L._t73 = sd_m_Checker__describe((*l_c), l_a);
-      L._t74 = sd_m_Checker__describe((*l_c), l_b);
-      sd_str _t75[] = {SD_STR_LIT("check "), L._t73, SD_STR_LIT(" and "), L._t74, SD_STR_LIT(" against null first, then compare them")};
-      L._t76 = sd_str_concat_n(_t75, 5);
-      sd_m_Checker__errorHint(l_c, (l_x).f_pos, L._t72, L._t76);
+    bool _t71 = sd_m_Types__isOpt(((*l_c)).f_types, l_at);
+    if (_t71) {
+      L._t72 = sd_m_Checker__typeName((*l_c), l_at);
+      sd_str _t73[] = {SD_STR_LIT("nullable values ("), L._t72, SD_STR_LIT(") can only be compared with null")};
+      L._t74 = sd_str_concat_n(_t73, 3);
+      L._t75 = sd_m_Checker__describe((*l_c), l_a);
+      L._t76 = sd_m_Checker__describe((*l_c), l_b);
+      sd_str _t77[] = {SD_STR_LIT("check "), L._t75, SD_STR_LIT(" and "), L._t76, SD_STR_LIT(" against null first, then compare them")};
+      L._t78 = sd_str_concat_n(_t77, 5);
+      sd_m_Checker__errorHint(l_c, (l_x).f_pos, L._t74, L._t78);
+      sd_str_release(L._t78); L._t78 = NULL;
       sd_str_release(L._t76); L._t76 = NULL;
+      sd_str_release(L._t75); L._t75 = NULL;
       sd_str_release(L._t74); L._t74 = NULL;
-      sd_str_release(L._t73); L._t73 = NULL;
       sd_str_release(L._t72); L._t72 = NULL;
-      sd_str_release(L._t70); L._t70 = NULL;
     }
     SD_LF_LEAVE(L);
     sd_int_release(l_bt);
@@ -19830,68 +20036,68 @@ SD_NO_TCE static void sd_m_Checker__checkBinary(sd_S_Checker * l_c, sd_int l_e) 
     return;
   }
   if ((!sd_int_eq(l_at, l_bt))) {
-    bool _t77 = sd_m_Types__isOpt(((*l_c)).f_types, l_at);
-    bool _t79 = _t77;
-    if (_t79) {
-      sd_int _t78 = sd_m_Types__elem(((*l_c)).f_types, l_at);
-      _t79 = sd_int_eq(_t78, l_bt);
-      sd_int_release(_t78);
+    bool _t79 = sd_m_Types__isOpt(((*l_c)).f_types, l_at);
+    bool _t81 = _t79;
+    if (_t81) {
+      sd_int _t80 = sd_m_Types__elem(((*l_c)).f_types, l_at);
+      _t81 = sd_int_eq(_t80, l_bt);
+      sd_int_release(_t80);
     }
-    if (_t79) {
-      sd_S_Pos _t80 = sd_rt_S3Pos((SD_LIST_GET((((*l_c)).f_ast).f_exprs, sd_S_Expr, l_a)).f_pos);
-      L._t81 = sd_m_Checker__describe((*l_c), l_a);
-      L._t82 = sd_m_Checker__typeName((*l_c), l_at);
-      sd_str _t83[] = {L._t81, SD_STR_LIT(" is nullable ("), L._t82, SD_STR_LIT(")")};
-      L._t84 = sd_str_concat_n(_t83, 4);
-      L._t85 = sd_m_Checker__describe((*l_c), l_a);
-      sd_str _t86[] = {SD_STR_LIT("check "), L._t85, SD_STR_LIT(" != null first")};
-      L._t87 = sd_str_concat_n(_t86, 3);
-      sd_m_Checker__errorHint(l_c, _t80, L._t84, L._t87);
+    if (_t81) {
+      sd_S_Pos _t82 = sd_rt_S3Pos((SD_LIST_GET((((*l_c)).f_ast).f_exprs, sd_S_Expr, l_a)).f_pos);
+      L._t83 = sd_m_Checker__describe((*l_c), l_a);
+      L._t84 = sd_m_Checker__typeName((*l_c), l_at);
+      sd_str _t85[] = {L._t83, SD_STR_LIT(" is nullable ("), L._t84, SD_STR_LIT(")")};
+      L._t86 = sd_str_concat_n(_t85, 4);
+      L._t87 = sd_m_Checker__describe((*l_c), l_a);
+      sd_str _t88[] = {SD_STR_LIT("check "), L._t87, SD_STR_LIT(" != null first")};
+      L._t89 = sd_str_concat_n(_t88, 3);
+      sd_m_Checker__errorHint(l_c, _t82, L._t86, L._t89);
+      sd_str_release(L._t89); L._t89 = NULL;
       sd_str_release(L._t87); L._t87 = NULL;
-      sd_str_release(L._t85); L._t85 = NULL;
+      sd_str_release(L._t86); L._t86 = NULL;
       sd_str_release(L._t84); L._t84 = NULL;
-      sd_str_release(L._t82); L._t82 = NULL;
-      sd_str_release(L._t81); L._t81 = NULL;
-      sd_rl_S3Pos(_t80);
+      sd_str_release(L._t83); L._t83 = NULL;
+      sd_rl_S3Pos(_t82);
     } else {
-      bool _t88 = sd_m_Types__isOpt(((*l_c)).f_types, l_bt);
-      bool _t90 = _t88;
-      if (_t90) {
-        sd_int _t89 = sd_m_Types__elem(((*l_c)).f_types, l_bt);
-        _t90 = sd_int_eq(_t89, l_at);
-        sd_int_release(_t89);
+      bool _t90 = sd_m_Types__isOpt(((*l_c)).f_types, l_bt);
+      bool _t92 = _t90;
+      if (_t92) {
+        sd_int _t91 = sd_m_Types__elem(((*l_c)).f_types, l_bt);
+        _t92 = sd_int_eq(_t91, l_at);
+        sd_int_release(_t91);
       }
-      if (_t90) {
-        sd_S_Pos _t91 = sd_rt_S3Pos((SD_LIST_GET((((*l_c)).f_ast).f_exprs, sd_S_Expr, l_b)).f_pos);
-        L._t92 = sd_m_Checker__describe((*l_c), l_b);
-        L._t93 = sd_m_Checker__typeName((*l_c), l_bt);
-        sd_str _t94[] = {L._t92, SD_STR_LIT(" is nullable ("), L._t93, SD_STR_LIT(")")};
-        L._t95 = sd_str_concat_n(_t94, 4);
-        L._t96 = sd_m_Checker__describe((*l_c), l_b);
-        sd_str _t97[] = {SD_STR_LIT("check "), L._t96, SD_STR_LIT(" != null first")};
-        L._t98 = sd_str_concat_n(_t97, 3);
-        sd_m_Checker__errorHint(l_c, _t91, L._t95, L._t98);
-        sd_str_release(L._t98); L._t98 = NULL;
-        sd_str_release(L._t96); L._t96 = NULL;
-        sd_str_release(L._t95); L._t95 = NULL;
-        sd_str_release(L._t93); L._t93 = NULL;
-        sd_str_release(L._t92); L._t92 = NULL;
-        sd_rl_S3Pos(_t91);
-      } else {
-        L._t99 = sd_m_Checker__typeName((*l_c), l_at);
-        L._t100 = sd_m_Checker__typeName((*l_c), l_bt);
-        sd_str _t101[] = {SD_STR_LIT("mismatched types "), L._t99, SD_STR_LIT(" and "), L._t100, SD_STR_LIT(" for "), L.l_ops};
-        L._t102 = sd_str_concat_n(_t101, 6);
-        sd_str _t103 = SD_STR_LIT("there are no implicit conversions; use float(x), int(x), x.string(), ...");
-        sd_m_Checker__errorHint(l_c, (l_x).f_pos, L._t102, _t103);
-        sd_str_release(L._t102); L._t102 = NULL;
+      if (_t92) {
+        sd_S_Pos _t93 = sd_rt_S3Pos((SD_LIST_GET((((*l_c)).f_ast).f_exprs, sd_S_Expr, l_b)).f_pos);
+        L._t94 = sd_m_Checker__describe((*l_c), l_b);
+        L._t95 = sd_m_Checker__typeName((*l_c), l_bt);
+        sd_str _t96[] = {L._t94, SD_STR_LIT(" is nullable ("), L._t95, SD_STR_LIT(")")};
+        L._t97 = sd_str_concat_n(_t96, 4);
+        L._t98 = sd_m_Checker__describe((*l_c), l_b);
+        sd_str _t99[] = {SD_STR_LIT("check "), L._t98, SD_STR_LIT(" != null first")};
+        L._t100 = sd_str_concat_n(_t99, 3);
+        sd_m_Checker__errorHint(l_c, _t93, L._t97, L._t100);
         sd_str_release(L._t100); L._t100 = NULL;
-        sd_str_release(L._t99); L._t99 = NULL;
+        sd_str_release(L._t98); L._t98 = NULL;
+        sd_str_release(L._t97); L._t97 = NULL;
+        sd_str_release(L._t95); L._t95 = NULL;
+        sd_str_release(L._t94); L._t94 = NULL;
+        sd_rl_S3Pos(_t93);
+      } else {
+        L._t101 = sd_m_Checker__typeName((*l_c), l_at);
+        L._t102 = sd_m_Checker__typeName((*l_c), l_bt);
+        sd_str _t103[] = {SD_STR_LIT("mismatched types "), L._t101, SD_STR_LIT(" and "), L._t102, SD_STR_LIT(" for "), L.l_ops};
+        L._t104 = sd_str_concat_n(_t103, 6);
+        sd_str _t105 = SD_STR_LIT("there are no implicit conversions; use float(x), int(x), x.string(), ...");
+        sd_m_Checker__errorHint(l_c, (l_x).f_pos, L._t104, _t105);
+        sd_str_release(L._t104); L._t104 = NULL;
+        sd_str_release(L._t102); L._t102 = NULL;
+        sd_str_release(L._t101); L._t101 = NULL;
       }
     }
-    sd_int _t104 = sd_int_retain(sd_c_tyInvalid());
-    sd_m_Checker__setType(l_c, l_e, _t104);
-    sd_int_release(_t104);
+    sd_int _t106 = sd_int_retain(sd_c_tyInvalid());
+    sd_m_Checker__setType(l_c, l_e, _t106);
+    sd_int_release(_t106);
     SD_LF_LEAVE(L);
     sd_int_release(l_bt);
     sd_int_release(l_at);
@@ -19900,65 +20106,65 @@ SD_NO_TCE static void sd_m_Checker__checkBinary(sd_S_Checker * l_c, sd_int l_e) 
   }
   bool l_ok = false;
   if ((SD_BOX_GET(l_op, sd_E_Tok).tag == 39)) {
-    bool _t105 = ((sd_int_eq(l_at, sd_c_tyInt()) || sd_int_eq(l_at, sd_c_tyFloat())) || sd_int_eq(l_at, sd_c_tyString()));
-    l_ok = _t105;
+    bool _t107 = ((sd_int_eq(l_at, sd_c_tyInt()) || sd_int_eq(l_at, sd_c_tyFloat())) || sd_int_eq(l_at, sd_c_tyString()));
+    l_ok = _t107;
   } else {
     if ((((SD_BOX_GET(l_op, sd_E_Tok).tag == 40) || (SD_BOX_GET(l_op, sd_E_Tok).tag == 41)) || (SD_BOX_GET(l_op, sd_E_Tok).tag == 42))) {
-      bool _t106 = (sd_int_eq(l_at, sd_c_tyInt()) || sd_int_eq(l_at, sd_c_tyFloat()));
-      l_ok = _t106;
+      bool _t108 = (sd_int_eq(l_at, sd_c_tyInt()) || sd_int_eq(l_at, sd_c_tyFloat()));
+      l_ok = _t108;
     } else {
       if ((SD_BOX_GET(l_op, sd_E_Tok).tag == 43)) {
-        bool _t107 = sd_int_eq(l_at, sd_c_tyInt());
-        l_ok = _t107;
+        bool _t109 = sd_int_eq(l_at, sd_c_tyInt());
+        l_ok = _t109;
       } else {
         if ((((((SD_BOX_GET(l_op, sd_E_Tok).tag == 44) || (SD_BOX_GET(l_op, sd_E_Tok).tag == 45)) || (SD_BOX_GET(l_op, sd_E_Tok).tag == 46)) || (SD_BOX_GET(l_op, sd_E_Tok).tag == 47)) || (SD_BOX_GET(l_op, sd_E_Tok).tag == 48))) {
-          bool _t108 = (sd_int_eq(l_at, sd_c_tyInt()) || sd_int_eq(l_at, sd_c_tyByte()));
-          l_ok = _t108;
+          bool _t110 = (sd_int_eq(l_at, sd_c_tyInt()) || sd_int_eq(l_at, sd_c_tyByte()));
+          l_ok = _t110;
         } else {
-          bool _t109 = (((sd_int_eq(l_at, sd_c_tyInt()) || sd_int_eq(l_at, sd_c_tyFloat())) || sd_int_eq(l_at, sd_c_tyString())) || sd_int_eq(l_at, sd_c_tyByte()));
-          l_ok = _t109;
+          bool _t111 = (((sd_int_eq(l_at, sd_c_tyInt()) || sd_int_eq(l_at, sd_c_tyFloat())) || sd_int_eq(l_at, sd_c_tyString())) || sd_int_eq(l_at, sd_c_tyByte()));
+          l_ok = _t111;
         }
       }
     }
   }
   if ((!l_ok)) {
-    bool _t110 = sd_m_Types__isOpt(((*l_c)).f_types, l_at);
-    if (_t110) {
-      L._t111 = sd_m_Checker__describe((*l_c), l_a);
-      L._t112 = sd_m_Checker__typeName((*l_c), l_at);
-      sd_str _t113[] = {L._t111, SD_STR_LIT(" is nullable ("), L._t112, SD_STR_LIT(")")};
-      L._t114 = sd_str_concat_n(_t113, 4);
-      L._t115 = sd_m_Checker__describe((*l_c), l_a);
-      sd_str _t116[] = {SD_STR_LIT("check "), L._t115, SD_STR_LIT(" != null first")};
-      L._t117 = sd_str_concat_n(_t116, 3);
-      sd_m_Checker__errorHint(l_c, (l_x).f_pos, L._t114, L._t117);
+    bool _t112 = sd_m_Types__isOpt(((*l_c)).f_types, l_at);
+    if (_t112) {
+      L._t113 = sd_m_Checker__describe((*l_c), l_a);
+      L._t114 = sd_m_Checker__typeName((*l_c), l_at);
+      sd_str _t115[] = {L._t113, SD_STR_LIT(" is nullable ("), L._t114, SD_STR_LIT(")")};
+      L._t116 = sd_str_concat_n(_t115, 4);
+      L._t117 = sd_m_Checker__describe((*l_c), l_a);
+      sd_str _t118[] = {SD_STR_LIT("check "), L._t117, SD_STR_LIT(" != null first")};
+      L._t119 = sd_str_concat_n(_t118, 3);
+      sd_m_Checker__errorHint(l_c, (l_x).f_pos, L._t116, L._t119);
+      sd_str_release(L._t119); L._t119 = NULL;
       sd_str_release(L._t117); L._t117 = NULL;
-      sd_str_release(L._t115); L._t115 = NULL;
+      sd_str_release(L._t116); L._t116 = NULL;
       sd_str_release(L._t114); L._t114 = NULL;
-      sd_str_release(L._t112); L._t112 = NULL;
-      sd_str_release(L._t111); L._t111 = NULL;
+      sd_str_release(L._t113); L._t113 = NULL;
     } else {
-      L._t118 = sd_m_Checker__typeName((*l_c), l_at);
-      sd_str _t119[] = {SD_STR_LIT("operator "), L.l_ops, SD_STR_LIT(" is not defined on "), L._t118};
-      L._t120 = sd_str_concat_n(_t119, 4);
-      sd_m_Checker__error(l_c, (l_x).f_pos, L._t120);
+      L._t120 = sd_m_Checker__typeName((*l_c), l_at);
+      sd_str _t121[] = {SD_STR_LIT("operator "), L.l_ops, SD_STR_LIT(" is not defined on "), L._t120};
+      L._t122 = sd_str_concat_n(_t121, 4);
+      sd_m_Checker__error(l_c, (l_x).f_pos, L._t122);
+      sd_str_release(L._t122); L._t122 = NULL;
       sd_str_release(L._t120); L._t120 = NULL;
-      sd_str_release(L._t118); L._t118 = NULL;
     }
-    sd_int _t121 = sd_int_retain(sd_c_tyInvalid());
-    sd_m_Checker__setType(l_c, l_e, _t121);
-    sd_int_release(_t121);
+    sd_int _t123 = sd_int_retain(sd_c_tyInvalid());
+    sd_m_Checker__setType(l_c, l_e, _t123);
+    sd_int_release(_t123);
     SD_LF_LEAVE(L);
     sd_int_release(l_bt);
     sd_int_release(l_at);
     sd_str_release(L.l_ops);
     return;
   }
-  bool _t122 = sd_f_isComparison(l_op);
-  if (_t122) {
-    sd_int _t123 = sd_int_retain(sd_c_tyBool());
-    sd_m_Checker__setType(l_c, l_e, _t123);
-    sd_int_release(_t123);
+  bool _t124 = sd_f_isComparison(l_op);
+  if (_t124) {
+    sd_int _t125 = sd_int_retain(sd_c_tyBool());
+    sd_m_Checker__setType(l_c, l_e, _t125);
+    sd_int_release(_t125);
   } else {
     sd_m_Checker__setType(l_c, l_e, l_at);
   }
@@ -20831,7 +21037,7 @@ static void sd_m_Checker__checkImplements(sd_S_Checker * l_c) {
   SD_LF_LEAVE(L);
 }
 
-typedef struct { sd_lframe h; sd_str l_tname; sd_str l_iname; sd_str l_name; sd_str _t9; sd_str l_sig; sd_str _t11; sd_str _t14; sd_str _t16; sd_str _t19; sd_str _t20; sd_str _t22; sd_str _t24; } sd_L_sd_m_Checker__checkImplementsOne;
+typedef struct { sd_lframe h; sd_str l_tname; sd_str l_iname; sd_str l_name; sd_str _t9; sd_str l_sig; sd_str _t11; sd_list * _t14; sd_str _t19; sd_str _t22; sd_str _t24; sd_str _t27; sd_str _t28; sd_str _t30; sd_str _t32; } sd_L_sd_m_Checker__checkImplementsOne;
 static void sd_lr_sd_m_Checker__checkImplementsOne(sd_lframe *p) {
   sd_L_sd_m_Checker__checkImplementsOne *L = (sd_L_sd_m_Checker__checkImplementsOne *)p;
   sd_str_release(L->l_tname);
@@ -20840,12 +21046,14 @@ static void sd_lr_sd_m_Checker__checkImplementsOne(sd_lframe *p) {
   sd_str_release(L->_t9);
   sd_str_release(L->l_sig);
   sd_str_release(L->_t11);
-  sd_str_release(L->_t14);
-  sd_str_release(L->_t16);
+  sd_list_release(L->_t14);
   sd_str_release(L->_t19);
-  sd_str_release(L->_t20);
   sd_str_release(L->_t22);
   sd_str_release(L->_t24);
+  sd_str_release(L->_t27);
+  sd_str_release(L->_t28);
+  sd_str_release(L->_t30);
+  sd_str_release(L->_t32);
 }
 static void sd_m_Checker__checkImplementsOne(sd_S_Checker * l_c, sd_int l_d, sd_int l_iface, sd_S_Pos l_pos) {
   sd_L_sd_m_Checker__checkImplementsOne L = {{0}};
@@ -20877,14 +21085,40 @@ static void sd_m_Checker__checkImplementsOne(sd_S_Checker * l_c, sd_int l_d, sd_
         sd_int *_t12 = sd_map_get(((*l_c)).f_methods, &L._t11);
         sd_int l_m = sd_int_retain((_t12 ? *_t12 : SD_INT_NULL));
         sd_str_release(L._t11); L._t11 = NULL;
+        if (((sd_int_is_null(l_m) && (SD_BOX_GET((SD_LIST_GET((((*l_c)).f_ast).f_typeDecls, sd_S_TypeDecl, l_d)).f_kind, sd_E_DeclKind).tag == 1)) && sd_str_eq(L.l_name, SD_STR_LIT("name")))) {
+          bool _t17 = (!sd_int_eq(l_want, sd_c_tyInvalid()));
+          if (_t17) {
+            sd_int _t13 = sd_int_retain(l_want);
+            L._t14 = sd_list_new(&sd_type_int, 0);
+            sd_int _t15 = sd_int_retain(sd_c_tyString());
+            sd_int _t16 = sd_m_Types__funcOf((&(l_c)->f_types), L._t14, _t15);
+            _t17 = ((!sd_int_eq(_t13, _t16)) || l_wantMut);
+            sd_int_release(_t16);
+            sd_int_release(_t15);
+            sd_list_release(L._t14); L._t14 = NULL;
+            sd_int_release(_t13);
+          }
+          if (_t17) {
+            sd_str _t18[] = {L.l_tname, SD_STR_LIT(" does not implement "), L.l_iname, SD_STR_LIT(": its built-in method name() string does not match "), L.l_iname, SD_STR_LIT("."), L.l_sig};
+            L._t19 = sd_str_concat_n(_t18, 7);
+            sd_str _t20 = SD_STR_LIT("an enum's name() is built in and returns the name of its case; rename the interface's method");
+            sd_m_Checker__errorHint(l_c, l_pos, L._t19, _t20);
+            sd_str_release(L._t19); L._t19 = NULL;
+          }
+          sd_int_release(l_m);
+          sd_str_release(L.l_sig); L.l_sig = NULL;
+          sd_int_release(l_want);
+          sd_str_release(L.l_name); L.l_name = NULL;
+          goto _c3;
+        }
         if (sd_int_is_null(l_m)) {
-          sd_str _t13[] = {L.l_tname, SD_STR_LIT(" does not implement "), L.l_iname, SD_STR_LIT(": it has no method "), L.l_sig};
-          L._t14 = sd_str_concat_n(_t13, 5);
-          sd_str _t15[] = {SD_STR_LIT("add the method: fn ("), (SD_LIST_GET((((*l_c)).f_ast).f_typeDecls, sd_S_TypeDecl, l_d)).f_name, SD_STR_LIT(" v) "), L.l_sig, SD_STR_LIT(" { ... }")};
-          L._t16 = sd_str_concat_n(_t15, 5);
-          sd_m_Checker__errorHint(l_c, l_pos, L._t14, L._t16);
-          sd_str_release(L._t16); L._t16 = NULL;
-          sd_str_release(L._t14); L._t14 = NULL;
+          sd_str _t21[] = {L.l_tname, SD_STR_LIT(" does not implement "), L.l_iname, SD_STR_LIT(": it has no method "), L.l_sig};
+          L._t22 = sd_str_concat_n(_t21, 5);
+          sd_str _t23[] = {SD_STR_LIT("add the method: fn ("), (SD_LIST_GET((((*l_c)).f_ast).f_typeDecls, sd_S_TypeDecl, l_d)).f_name, SD_STR_LIT(" v) "), L.l_sig, SD_STR_LIT(" { ... }")};
+          L._t24 = sd_str_concat_n(_t23, 5);
+          sd_m_Checker__errorHint(l_c, l_pos, L._t22, L._t24);
+          sd_str_release(L._t24); L._t24 = NULL;
+          sd_str_release(L._t22); L._t22 = NULL;
           sd_int_release(l_m);
           sd_str_release(L.l_sig); L.l_sig = NULL;
           sd_int_release(l_want);
@@ -20898,23 +21132,23 @@ static void sd_m_Checker__checkImplementsOne(sd_S_Checker * l_c, sd_int l_d, sd_
           sd_str_release(L.l_name); L.l_name = NULL;
           goto _c3;
         }
-        sd_int _t17 = sd_m_Checker__fnType(l_c, l_m);
-        sd_int l_have = _t17;
+        sd_int _t25 = sd_m_Checker__fnType(l_c, l_m);
+        sd_int l_have = _t25;
         bool l_haveMut = (SD_LIST_GET((((*l_c)).f_ast).f_fns, sd_S_FnDecl, l_m)).f_recvMut;
         if (((!sd_int_eq(l_have, l_want)) || (!((l_haveMut) == (l_wantMut))))) {
-          sd_S_Pos _t18 = sd_rt_S3Pos((SD_LIST_GET((((*l_c)).f_ast).f_fns, sd_S_FnDecl, l_m)).f_pos);
-          L._t19 = sd_m_Checker__typeName((*l_c), l_have);
-          L._t20 = sd_f_methodSigText(L.l_name, L._t19, l_haveMut);
-          sd_str _t21[] = {SD_STR_LIT("method "), L.l_tname, SD_STR_LIT("."), L._t20, SD_STR_LIT(" does not match "), L.l_iname, SD_STR_LIT("."), L.l_sig};
-          L._t22 = sd_str_concat_n(_t21, 8);
-          sd_str _t23[] = {L.l_tname, SD_STR_LIT(" declares implements "), L.l_iname, SD_STR_LIT(", so the signatures must be the same")};
-          L._t24 = sd_str_concat_n(_t23, 4);
-          sd_m_Checker__errorHint(l_c, _t18, L._t22, L._t24);
-          sd_str_release(L._t24); L._t24 = NULL;
-          sd_str_release(L._t22); L._t22 = NULL;
-          sd_str_release(L._t20); L._t20 = NULL;
-          sd_str_release(L._t19); L._t19 = NULL;
-          sd_rl_S3Pos(_t18);
+          sd_S_Pos _t26 = sd_rt_S3Pos((SD_LIST_GET((((*l_c)).f_ast).f_fns, sd_S_FnDecl, l_m)).f_pos);
+          L._t27 = sd_m_Checker__typeName((*l_c), l_have);
+          L._t28 = sd_f_methodSigText(L.l_name, L._t27, l_haveMut);
+          sd_str _t29[] = {SD_STR_LIT("method "), L.l_tname, SD_STR_LIT("."), L._t28, SD_STR_LIT(" does not match "), L.l_iname, SD_STR_LIT("."), L.l_sig};
+          L._t30 = sd_str_concat_n(_t29, 8);
+          sd_str _t31[] = {L.l_tname, SD_STR_LIT(" declares implements "), L.l_iname, SD_STR_LIT(", so the signatures must be the same")};
+          L._t32 = sd_str_concat_n(_t31, 4);
+          sd_m_Checker__errorHint(l_c, _t26, L._t30, L._t32);
+          sd_str_release(L._t32); L._t32 = NULL;
+          sd_str_release(L._t30); L._t30 = NULL;
+          sd_str_release(L._t28); L._t28 = NULL;
+          sd_str_release(L._t27); L._t27 = NULL;
+          sd_rl_S3Pos(_t26);
         }
         sd_int_release(l_have);
         sd_int_release(l_m);
@@ -22779,7 +23013,7 @@ SD_NO_TCE static void sd_m_Checker__checkAssign(sd_S_Checker * l_c, sd_int l_s) 
         sd_int_release(_t14);
         bool _t16 = l_declNonNull;
         if (_t16) {
-          bool _t15 = sd_m_Types__isOpt(((*l_c)).f_types, l_t);
+          bool _t15 = sd_m_Checker__narrowable((*l_c), l_t);
           _t16 = _t15;
         }
         if (_t16) {
@@ -22839,7 +23073,7 @@ SD_NO_TCE static void sd_m_Checker__checkAssign(sd_S_Checker * l_c, sd_int l_s) 
         sd_m_Checker__assigned(l_c, L.l_key);
         bool _t35 = (l_nonNull && (!sd_str_eq(L.l_key, SD_STR_LIT(""))));
         if (_t35) {
-          bool _t34 = sd_m_Types__isOpt(((*l_c)).f_types, l_lt);
+          bool _t34 = sd_m_Checker__narrowable((*l_c), l_lt);
           _t35 = _t34;
         }
         if (_t35) {
@@ -23139,7 +23373,7 @@ static void sd_m_Checker__addGuards(sd_S_Checker * l_c, sd_int l_s, sd_int l_rt)
           sd_int_release(l_v);
           l_v = _t17;
         } else {
-          if ((((SD_BOX_GET((SD_LIST_GET((((*l_c)).f_ast).f_exprs, sd_S_Expr, (l_tg).f_expr)).f_kind, sd_E_ExprKind).tag == 7) && (SD_BOX_GET((SD_LIST_GET(((*l_c)).f_info, sd_S_ExprInfo, (l_tg).f_expr)).f_res, sd_E_Res).tag == 1)) && (SD_BOX_GET((SD_LIST_GET(((*l_c)).f_vars, sd_S_Var, (SD_LIST_GET(((*l_c)).f_info, sd_S_ExprInfo, (l_tg).f_expr)).f_ref)).f_kind, sd_E_VarKind).tag == 0))) {
+          if ((((SD_BOX_GET((SD_LIST_GET((((*l_c)).f_ast).f_exprs, sd_S_Expr, (l_tg).f_expr)).f_kind, sd_E_ExprKind).tag == 7) && (SD_BOX_GET((SD_LIST_GET(((*l_c)).f_info, sd_S_ExprInfo, (l_tg).f_expr)).f_res, sd_E_Res).tag == 1)) && ((SD_BOX_GET((SD_LIST_GET(((*l_c)).f_vars, sd_S_Var, (SD_LIST_GET(((*l_c)).f_info, sd_S_ExprInfo, (l_tg).f_expr)).f_ref)).f_kind, sd_E_VarKind).tag == 0) || (SD_BOX_GET((SD_LIST_GET(((*l_c)).f_vars, sd_S_Var, (SD_LIST_GET(((*l_c)).f_info, sd_S_ExprInfo, (l_tg).f_expr)).f_ref)).f_kind, sd_E_VarKind).tag == 1)))) {
             sd_int _t18 = sd_int_retain((SD_LIST_GET(((*l_c)).f_info, sd_S_ExprInfo, (l_tg).f_expr)).f_ref);
             sd_int_release(l_v);
             l_v = _t18;
@@ -24063,18 +24297,28 @@ SD_NO_TCE static void sd_m_Checker__checkSelect(sd_S_Checker * l_c, sd_S_Stmt l_
   SD_LF_LEAVE(L);
 }
 
-typedef struct { sd_lframe h; sd_str l_hint; sd_str l_d; sd_str _t13; sd_str _t15; sd_str _t29; sd_str _t30; sd_str _t32; sd_str _t33; sd_str _t35; } sd_L_sd_m_Checker__checkSelectComm;
+typedef struct { sd_lframe h; sd_str l_hint; sd_str l_d; sd_str _t13; sd_str _t15; sd_str _t24; sd_str _t25; sd_str _t30; sd_str _t31; sd_str _t32; sd_str _t34; sd_str _t35; sd_str _t36; sd_str _t38; sd_str _t39; sd_str _t43; sd_str _t44; sd_str _t46; sd_str _t47; sd_str _t49; } sd_L_sd_m_Checker__checkSelectComm;
 static void sd_lr_sd_m_Checker__checkSelectComm(sd_lframe *p) {
   sd_L_sd_m_Checker__checkSelectComm *L = (sd_L_sd_m_Checker__checkSelectComm *)p;
   sd_str_release(L->l_hint);
   sd_str_release(L->l_d);
   sd_str_release(L->_t13);
   sd_str_release(L->_t15);
-  sd_str_release(L->_t29);
+  sd_str_release(L->_t24);
+  sd_str_release(L->_t25);
   sd_str_release(L->_t30);
+  sd_str_release(L->_t31);
   sd_str_release(L->_t32);
-  sd_str_release(L->_t33);
+  sd_str_release(L->_t34);
   sd_str_release(L->_t35);
+  sd_str_release(L->_t36);
+  sd_str_release(L->_t38);
+  sd_str_release(L->_t39);
+  sd_str_release(L->_t43);
+  sd_str_release(L->_t44);
+  sd_str_release(L->_t46);
+  sd_str_release(L->_t47);
+  sd_str_release(L->_t49);
 }
 SD_NO_TCE static void sd_m_Checker__checkSelectComm(sd_S_Checker * l_c, sd_int l_s) {
   sd_L_sd_m_Checker__checkSelectComm L = {{0}};
@@ -24084,7 +24328,7 @@ SD_NO_TCE static void sd_m_Checker__checkSelectComm(sd_S_Checker * l_c, sd_int l
     return;
   }
   sd_S_Stmt l_st = SD_LIST_GET((((*l_c)).f_ast).f_stmts, sd_S_Stmt, l_s);
-  L.l_hint = SD_STR_LIT("a case is ch.send(v), ch.receive() or T\? v = ch.receive()");
+  L.l_hint = SD_STR_LIT("a case is ch.send(v), ch.receive(), T\? v = ch.receive() or v = ch.receive()");
   if ((SD_BOX_GET((l_st).f_kind, sd_E_StmtKind).tag == 1)) {
     SD_PREEMPT();
     sd_m_Checker__checkExpr(l_c, (l_st).f_expr);
@@ -24160,10 +24404,51 @@ SD_NO_TCE static void sd_m_Checker__checkSelectComm(sd_S_Checker * l_c, sd_int l
     l_rt = _t23;
   }
   if ((SD_BOX_GET((l_tg).f_kind, sd_E_TargetKind).tag == 1)) {
-    sd_str _t24 = SD_STR_LIT("a select case cannot assign to an existing variable");
-    sd_str _t25 = SD_STR_LIT("declare a new one (T\? v = ch.receive()) and assign it in the case body");
-    sd_m_Checker__errorHint(l_c, (l_tg).f_pos, _t24, _t25);
+    if ((!(SD_BOX_GET((SD_LIST_GET((((*l_c)).f_ast).f_exprs, sd_S_Expr, (l_tg).f_expr)).f_kind, sd_E_ExprKind).tag == 7))) {
+      sd_m_Checker__checkExpr(l_c, (l_tg).f_expr);
+      L._t24 = sd_m_Checker__describe((*l_c), (l_tg).f_expr);
+      L._t25 = sd_str_concat(SD_STR_LIT("a select case can only receive into a variable, not into "), L._t24);
+      sd_str _t26 = SD_STR_LIT("receive into a variable (T\? v = ch.receive()) and store it in the case body");
+      sd_m_Checker__errorHint(l_c, (l_tg).f_pos, L._t25, _t26);
+      sd_str_release(L._t25); L._t25 = NULL;
+      sd_str_release(L._t24); L._t24 = NULL;
+      SD_LF_LEAVE(L);
+      sd_int_release(l_rt);
+      sd_int_release(l_ti);
+      sd_str_release(L.l_hint);
+      return;
+    }
+    sd_m_Checker__checkLvalue(l_c, (l_tg).f_expr);
+    sd_int _t27 = sd_m_Checker__typeOf((*l_c), (l_tg).f_expr);
+    sd_int l_lt = _t27;
+    sd_int _t28 = sd_int_retain(l_lt);
+    sd_int _t29 = sd_int_retain(l_ti);
+    sd_list_set((&(l_c)->f_targetType), _t29, &_t28);
+    sd_int_release(_t29);
+    if ((((!sd_int_eq(l_lt, sd_c_tyInvalid())) && (!sd_int_eq(l_rt, sd_c_tyInvalid()))) && (!sd_int_eq(l_lt, l_rt)))) {
+      L._t30 = sd_m_Checker__typeName((*l_c), l_rt);
+      L._t31 = sd_m_Checker__describe((*l_c), (l_tg).f_expr);
+      L._t32 = sd_m_Checker__typeName((*l_c), l_lt);
+      sd_str _t33[] = {SD_STR_LIT("the received value has type "), L._t30, SD_STR_LIT(", which cannot be assigned to "), L._t31, SD_STR_LIT(" (type "), L._t32, SD_STR_LIT(")")};
+      L._t34 = sd_str_concat_n(_t33, 7);
+      L._t35 = sd_m_Checker__typeName((*l_c), l_rt);
+      L._t36 = sd_m_Checker__typeName((*l_c), l_rt);
+      sd_str _t37[] = {SD_STR_LIT("receive into a variable of type "), L._t35, SD_STR_LIT(", such as a new one: case "), L._t36, SD_STR_LIT(" v = ...:")};
+      L._t38 = sd_str_concat_n(_t37, 5);
+      sd_m_Checker__errorHint(l_c, (l_tg).f_pos, L._t34, L._t38);
+      sd_str_release(L._t38); L._t38 = NULL;
+      sd_str_release(L._t36); L._t36 = NULL;
+      sd_str_release(L._t35); L._t35 = NULL;
+      sd_str_release(L._t34); L._t34 = NULL;
+      sd_str_release(L._t32); L._t32 = NULL;
+      sd_str_release(L._t31); L._t31 = NULL;
+      sd_str_release(L._t30); L._t30 = NULL;
+    }
+    L._t39 = sd_m_Checker__pathKey((*l_c), (l_tg).f_expr);
+    sd_m_Checker__assigned(l_c, L._t39);
+    sd_str_release(L._t39); L._t39 = NULL;
     SD_LF_LEAVE(L);
+    sd_int_release(l_lt);
     sd_int_release(l_rt);
     sd_int_release(l_ti);
     sd_str_release(L.l_hint);
@@ -24176,32 +24461,32 @@ SD_NO_TCE static void sd_m_Checker__checkSelectComm(sd_S_Checker * l_c, sd_int l
     sd_str_release(L.l_hint);
     return;
   }
-  sd_int _t26 = sd_m_Checker__resolve(l_c, (l_tg).f_typeExpr);
-  sd_int l_t = _t26;
-  sd_int _t27 = sd_int_retain(l_t);
-  sd_int _t28 = sd_int_retain(l_ti);
-  sd_list_set((&(l_c)->f_targetType), _t28, &_t27);
-  sd_int_release(_t28);
+  sd_int _t40 = sd_m_Checker__resolve(l_c, (l_tg).f_typeExpr);
+  sd_int l_t = _t40;
+  sd_int _t41 = sd_int_retain(l_t);
+  sd_int _t42 = sd_int_retain(l_ti);
+  sd_list_set((&(l_c)->f_targetType), _t42, &_t41);
+  sd_int_release(_t42);
   if ((((!sd_int_eq(l_t, sd_c_tyInvalid())) && (!sd_int_eq(l_rt, sd_c_tyInvalid()))) && (!sd_int_eq(l_t, l_rt)))) {
-    L._t29 = sd_m_Checker__typeName((*l_c), l_rt);
-    L._t30 = sd_m_Checker__typeName((*l_c), l_t);
-    sd_str _t31[] = {SD_STR_LIT("the received value has type "), L._t29, SD_STR_LIT(", not "), L._t30};
-    L._t32 = sd_str_concat_n(_t31, 4);
-    L._t33 = sd_m_Checker__typeName((*l_c), l_rt);
-    sd_str _t34[] = {SD_STR_LIT("declare it as "), L._t33, SD_STR_LIT(" "), (l_tg).f_name};
-    L._t35 = sd_str_concat_n(_t34, 4);
-    sd_m_Checker__errorHint(l_c, (l_tg).f_pos, L._t32, L._t35);
-    sd_str_release(L._t35); L._t35 = NULL;
-    sd_str_release(L._t33); L._t33 = NULL;
-    sd_str_release(L._t32); L._t32 = NULL;
-    sd_str_release(L._t30); L._t30 = NULL;
-    sd_str_release(L._t29); L._t29 = NULL;
+    L._t43 = sd_m_Checker__typeName((*l_c), l_rt);
+    L._t44 = sd_m_Checker__typeName((*l_c), l_t);
+    sd_str _t45[] = {SD_STR_LIT("the received value has type "), L._t43, SD_STR_LIT(", not "), L._t44};
+    L._t46 = sd_str_concat_n(_t45, 4);
+    L._t47 = sd_m_Checker__typeName((*l_c), l_rt);
+    sd_str _t48[] = {SD_STR_LIT("declare it as "), L._t47, SD_STR_LIT(" "), (l_tg).f_name};
+    L._t49 = sd_str_concat_n(_t48, 4);
+    sd_m_Checker__errorHint(l_c, (l_tg).f_pos, L._t46, L._t49);
+    sd_str_release(L._t49); L._t49 = NULL;
+    sd_str_release(L._t47); L._t47 = NULL;
+    sd_str_release(L._t46); L._t46 = NULL;
+    sd_str_release(L._t44); L._t44 = NULL;
+    sd_str_release(L._t43); L._t43 = NULL;
   }
-  sd_box * _t36 = SD_BOX_REF(sd_k_VarKind__Local);
-  sd_int _t37 = sd_m_Checker__declare(l_c, (l_tg).f_name, l_t, _t36, (l_tg).f_pos);
-  sd_int _t38 = l_ti;
-  sd_list_set((&(l_c)->f_targetVar), _t38, &_t37);
-  sd_int_release(_t38);
+  sd_box * _t50 = SD_BOX_REF(sd_k_VarKind__Local);
+  sd_int _t51 = sd_m_Checker__declare(l_c, (l_tg).f_name, l_t, _t50, (l_tg).f_pos);
+  sd_int _t52 = l_ti;
+  sd_list_set((&(l_c)->f_targetVar), _t52, &_t51);
+  sd_int_release(_t52);
   sd_int_release(l_t);
   sd_int_release(l_rt);
   sd_str_release(L.l_hint); L.l_hint = NULL;
@@ -26549,38 +26834,71 @@ static sd_str sd_f_withArticle(sd_str l_word) {
   return _t7;
 }
 
-typedef struct { sd_lframe h; sd_str l_mode; sd_list * l_files; sd_str _t6; sd_err _t7; sd_T_T2se _t9; sd_str l_src; sd_S_Parser _t12; sd_str l_out; sd_str _t19; sd_str _t20; sd_err _t21; sd_str _t25; } sd_L_sd_f_fmtCommand;
+typedef struct { sd_lframe h; sd_str l_mode; sd_list * l_named; sd_list * l_files; sd_T_T2Lse _t6; sd_T_T2se _t11; sd_str l_src; sd_S_Parser _t14; sd_str l_out; sd_str _t21; sd_str _t22; sd_err _t23; sd_str _t27; } sd_L_sd_f_fmtCommand;
 static void sd_lr_sd_f_fmtCommand(sd_lframe *p) {
   sd_L_sd_f_fmtCommand *L = (sd_L_sd_f_fmtCommand *)p;
   sd_str_release(L->l_mode);
+  sd_list_release(L->l_named);
   sd_list_release(L->l_files);
-  sd_str_release(L->_t6);
-  sd_iface_release(L->_t7);
-  sd_rl_T2se(L->_t9);
+  sd_rl_T2Lse(L->_t6);
+  sd_rl_T2se(L->_t11);
   sd_str_release(L->l_src);
-  sd_rl_S6Parser(L->_t12);
+  sd_rl_S6Parser(L->_t14);
   sd_str_release(L->l_out);
-  sd_str_release(L->_t19);
-  sd_str_release(L->_t20);
-  sd_iface_release(L->_t21);
-  sd_str_release(L->_t25);
+  sd_str_release(L->_t21);
+  sd_str_release(L->_t22);
+  sd_iface_release(L->_t23);
+  sd_str_release(L->_t27);
 }
 static sd_T_T2ie sd_f_fmtCommand(sd_list * l_args) {
   sd_L_sd_f_fmtCommand L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_f_fmtCommand);
   L.l_mode = SD_STR_LIT("");
-  L.l_files = sd_list_retain(l_args);
+  L.l_named = sd_list_retain(l_args);
   if (((SD_SMALL(sd_list_len(l_args)) > ((int64_t)0)) && (sd_str_eq(SD_LIST_GET(l_args, sd_str, SD_INT(0)), SD_STR_LIT("--check")) || sd_str_eq(SD_LIST_GET(l_args, sd_str, SD_INT(0)), SD_STR_LIT("--verify"))))) {
     sd_str _t1 = sd_str_retain(SD_LIST_GET(l_args, sd_str, SD_INT(0)));
     sd_str_release(L.l_mode);
     L.l_mode = _t1;
     sd_list * _t2 = sd_list_slice(l_args, SD_INT(1), sd_list_len(l_args));
-    sd_list_release(L.l_files);
-    L.l_files = _t2;
+    sd_list_release(L.l_named);
+    L.l_named = _t2;
   }
-  if ((SD_SMALL(sd_list_len(L.l_files)) == ((int64_t)0))) {
+  if ((SD_SMALL(sd_list_len(L.l_named)) == ((int64_t)0))) {
     sd_f_fmt_eprint(sd_c_fmtUsage());
     sd_f_os_exit(SD_INT(2));
+  }
+  sd_list * _t3 = sd_list_new(&sd_type_str, 0);
+  L.l_files = _t3;
+  {
+    int64_t l_n = ((int64_t)0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!((l_n < SD_SMALL(sd_list_len(L.l_named))))) break;
+      {
+        bool _t5 = sd_f_fs_isDir(SD_LIST_GET(L.l_named, sd_str, SD_INT_S(l_n)));
+        if (_t5) {
+          L._t6 = sd_f_sdFilesUnder(SD_LIST_GET(L.l_named, sd_str, SD_INT_S(l_n)), L.l_files);
+          if (!sd_err_is_null(L._t6.r1)) {
+            sd_list_release(L._t6.r0);
+            sd_T_T2ie _t7 = (sd_T_T2ie){.r1 = L._t6.r1};
+            SD_LF_LEAVE(L);
+            sd_list_release(L.l_files);
+            sd_list_release(L.l_named);
+            sd_str_release(L.l_mode);
+            return _t7;
+          }
+          sd_list * _t8 = L._t6.r0;
+          L._t6 = ((sd_T_T2Lse){0});
+          sd_list_release(L.l_files);
+          L.l_files = _t8;
+        } else {
+          sd_str _t9 = sd_str_retain(SD_LIST_GET(L.l_named, sd_str, SD_INT_S(l_n)));
+          SD_LIST_PUSH((&L.l_files), sd_str, _t9);
+        }
+      }
+      _c4:;
+      l_n++;
+    }
   }
   int64_t l_code = ((int64_t)0);
   sd_int l_skipped = SD_INT(0);
@@ -26591,110 +26909,187 @@ static sd_T_T2ie sd_f_fmtCommand(sd_list * l_args) {
       if (!((l_i < SD_SMALL(sd_list_len(L.l_files))))) break;
       {
         sd_str l_path = SD_LIST_GET(L.l_files, sd_str, SD_INT_S(l_i));
-        bool _t4 = sd_f_fs_isDir(l_path);
-        if (_t4) {
-          sd_str _t5[] = {SD_STR_LIT("seed fmt: "), l_path, SD_STR_LIT(" is a directory; name the .sd files, such as seed fmt "), l_path, SD_STR_LIT("/*.sd")};
-          L._t6 = sd_str_concat_n(_t5, 5);
-          L._t7 = sd_f_errors_new(L._t6);
-          if (sd_err_is_null(L._t7)) sd_crash("%s", "fmtCommand returned null as result 1 without an error");
-          sd_T_T2ie _t8 = (sd_T_T2ie){SD_INT(0), L._t7};
-          SD_LF_LEAVE(L);
-          sd_str_release(L._t6);
-          sd_int_release(l_skipped);
-          sd_list_release(L.l_files);
-          sd_str_release(L.l_mode);
-          return _t8;
-        }
-        L._t9 = sd_f_fs_read(l_path);
-        if (!sd_err_is_null(L._t9.r1)) {
-          sd_str_release(L._t9.r0);
-          sd_T_T2ie _t10 = (sd_T_T2ie){.r1 = L._t9.r1};
+        L._t11 = sd_f_fs_read(l_path);
+        if (!sd_err_is_null(L._t11.r1)) {
+          sd_str_release(L._t11.r0);
+          sd_T_T2ie _t12 = (sd_T_T2ie){.r1 = L._t11.r1};
           SD_LF_LEAVE(L);
           sd_int_release(l_skipped);
           sd_list_release(L.l_files);
+          sd_list_release(L.l_named);
           sd_str_release(L.l_mode);
-          return _t10;
+          return _t12;
         }
-        sd_str _t11 = L._t9.r0;
-        L._t9 = ((sd_T_T2se){0});
-        L.l_src = _t11;
+        sd_str _t13 = L._t11.r0;
+        L._t11 = ((sd_T_T2se){0});
+        L.l_src = _t13;
         if (sd_str_eq(L.l_mode, SD_STR_LIT("--verify"))) {
-          L._t12 = sd_f_fmtParse(l_path, L.l_src);
-          sd_int _t13 = sd_m_Diags__count((L._t12).f_diags);
-          bool _t14 = sd_int_gt(_t13, SD_INT(0));
-          sd_int_release(_t13);
-          sd_rl_S6Parser(L._t12); L._t12 = ((sd_S_Parser){0});
-          if (_t14) {
+          L._t14 = sd_f_fmtParse(l_path, L.l_src);
+          sd_int _t15 = sd_m_Diags__count((L._t14).f_diags);
+          bool _t16 = sd_int_gt(_t15, SD_INT(0));
+          sd_int_release(_t15);
+          sd_rl_S6Parser(L._t14); L._t14 = ((sd_S_Parser){0});
+          if (_t16) {
             { int64_t r_; if (SD_LIKELY((((l_skipped).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_skipped).w, SD_INT(1).w, &r_))) (l_skipped).w = r_; else { sd_int s_ = sd_int_add_slow((l_skipped), SD_INT(1)); sd_int_release((l_skipped)); (l_skipped) = s_; } }
           } else {
-            bool _t15 = sd_f_verifyFormat(l_path, L.l_src);
-            if ((!_t15)) {
+            bool _t17 = sd_f_verifyFormat(l_path, L.l_src);
+            if ((!_t17)) {
               l_code = ((int64_t)1);
             }
           }
           sd_str_release(L.l_src); L.l_src = NULL;
-          goto _c3;
+          goto _c10;
         }
-        sd_str _t16 = sd_f_formatFile(l_path, L.l_src);
-        L.l_out = _t16;
+        sd_str _t18 = sd_f_formatFile(l_path, L.l_src);
+        L.l_out = _t18;
         if (((L.l_out) == NULL)) {
           l_code = ((int64_t)1);
           sd_str_release(L.l_out); L.l_out = NULL;
           sd_str_release(L.l_src); L.l_src = NULL;
-          goto _c3;
+          goto _c10;
         }
         if (sd_str_eq(L.l_out, L.l_src)) {
           sd_str_release(L.l_out); L.l_out = NULL;
           sd_str_release(L.l_src); L.l_src = NULL;
-          goto _c3;
+          goto _c10;
         }
         if (sd_str_eq(L.l_mode, SD_STR_LIT("--check"))) {
-          sd_int _t17 = sd_f_firstDiffLine(L.l_src, L.l_out);
-          sd_str_part _t18[] = {{l_path}, {SD_STR_LIT(":")}, {NULL, _t17}, {SD_STR_LIT(": not formatted")}};
-          L._t19 = sd_str_concat_parts(_t18, 4);
-          sd_f_fmt_eprintln(L._t19);
-          sd_str_release(L._t19); L._t19 = NULL;
-          sd_int_release(_t17);
-          L._t20 = sd_str_concat(SD_STR_LIT("    hint: run: seed fmt "), l_path);
-          sd_f_fmt_eprintln(L._t20);
-          sd_str_release(L._t20); L._t20 = NULL;
+          sd_int _t19 = sd_f_firstDiffLine(L.l_src, L.l_out);
+          sd_str_part _t20[] = {{l_path}, {SD_STR_LIT(":")}, {NULL, _t19}, {SD_STR_LIT(": not formatted")}};
+          L._t21 = sd_str_concat_parts(_t20, 4);
+          sd_f_fmt_eprintln(L._t21);
+          sd_str_release(L._t21); L._t21 = NULL;
+          sd_int_release(_t19);
+          L._t22 = sd_str_concat(SD_STR_LIT("    hint: run: seed fmt "), l_path);
+          sd_f_fmt_eprintln(L._t22);
+          sd_str_release(L._t22); L._t22 = NULL;
           l_code = ((int64_t)1);
         } else {
-          L._t21 = sd_f_fs_write(l_path, L.l_out);
-          if (!sd_err_is_null(L._t21)) {
-            sd_T_T2ie _t22 = (sd_T_T2ie){.r1 = L._t21};
+          L._t23 = sd_f_fs_write(l_path, L.l_out);
+          if (!sd_err_is_null(L._t23)) {
+            sd_T_T2ie _t24 = (sd_T_T2ie){.r1 = L._t23};
             SD_LF_LEAVE(L);
             sd_str_release(L.l_out);
             sd_str_release(L.l_src);
             sd_int_release(l_skipped);
             sd_list_release(L.l_files);
+            sd_list_release(L.l_named);
             sd_str_release(L.l_mode);
-            return _t22;
+            return _t24;
           }
         }
-        L._t21 = SD_IFACE_NULL;
+        L._t23 = SD_IFACE_NULL;
         sd_str_release(L.l_out); L.l_out = NULL;
         sd_str_release(L.l_src); L.l_src = NULL;
       }
-      _c3:;
+      _c10:;
       l_i++;
     }
   }
   if (sd_str_eq(L.l_mode, SD_STR_LIT("--verify"))) {
-    sd_int _t23 = sd_int_sub(sd_list_len(L.l_files), l_skipped);
-    sd_int l_checked = _t23;
-    sd_str_part _t24[] = {{SD_STR_LIT("seed fmt --verify: ")}, {NULL, l_checked}, {SD_STR_LIT(" files checked, ")}, {NULL, l_skipped}, {SD_STR_LIT(" skipped (syntax errors)")}};
-    L._t25 = sd_str_concat_parts(_t24, 5);
-    sd_f_fmt_println(L._t25);
-    sd_str_release(L._t25); L._t25 = NULL;
+    sd_int _t25 = sd_int_sub(sd_list_len(L.l_files), l_skipped);
+    sd_int l_checked = _t25;
+    sd_str_part _t26[] = {{SD_STR_LIT("seed fmt --verify: ")}, {NULL, l_checked}, {SD_STR_LIT(" files checked, ")}, {NULL, l_skipped}, {SD_STR_LIT(" skipped (syntax errors)")}};
+    L._t27 = sd_str_concat_parts(_t26, 5);
+    sd_f_fmt_println(L._t27);
+    sd_str_release(L._t27); L._t27 = NULL;
     sd_int_release(l_checked);
   }
-  sd_T_T2ie _t26 = (sd_T_T2ie){SD_INT_S(l_code), SD_IFACE_NULL};
+  sd_T_T2ie _t28 = (sd_T_T2ie){SD_INT_S(l_code), SD_IFACE_NULL};
   SD_LF_LEAVE(L);
   sd_int_release(l_skipped);
   sd_list_release(L.l_files);
+  sd_list_release(L.l_named);
   sd_str_release(L.l_mode);
-  return _t26;
+  return _t28;
+}
+
+typedef struct { sd_lframe h; sd_list * l_out; sd_T_T2Lse _t1; sd_list * l_names; sd_list * l_subs; sd_str l_path; sd_T_T2Lse _t11; } sd_L_sd_f_sdFilesUnder;
+static void sd_lr_sd_f_sdFilesUnder(sd_lframe *p) {
+  sd_L_sd_f_sdFilesUnder *L = (sd_L_sd_f_sdFilesUnder *)p;
+  sd_list_release(L->l_out);
+  sd_rl_T2Lse(L->_t1);
+  sd_list_release(L->l_names);
+  sd_list_release(L->l_subs);
+  sd_str_release(L->l_path);
+  sd_rl_T2Lse(L->_t11);
+}
+SD_NO_TCE static sd_T_T2Lse sd_f_sdFilesUnder(sd_str l_dir, sd_list * l_found) {
+  sd_L_sd_f_sdFilesUnder L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_sdFilesUnder);
+  L.l_out = sd_list_retain(l_found);
+  L._t1 = sd_f_fs_list(l_dir);
+  if (!sd_err_is_null(L._t1.r1)) {
+    sd_list_release(L._t1.r0);
+    sd_T_T2Lse _t2 = (sd_T_T2Lse){.r1 = L._t1.r1};
+    SD_LF_LEAVE(L);
+    sd_list_release(L.l_out);
+    return _t2;
+  }
+  sd_list * _t3 = L._t1.r0;
+  L._t1 = ((sd_T_T2Lse){0});
+  L.l_names = _t3;
+  sd_list_sort((&L.l_names));
+  sd_list * _t4 = sd_list_new(&sd_type_str, 0);
+  L.l_subs = _t4;
+  {
+    int64_t l_i = ((int64_t)0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!((l_i < SD_SMALL(sd_list_len(L.l_names))))) break;
+      {
+        if (sd_str_starts_with(SD_LIST_GET(L.l_names, sd_str, SD_INT_S(l_i)), SD_STR_LIT("."))) {
+          goto _c5;
+        }
+        sd_str _t6 = sd_f_joinPath(l_dir, SD_LIST_GET(L.l_names, sd_str, SD_INT_S(l_i)));
+        L.l_path = _t6;
+        bool _t7 = sd_f_fs_isDir(L.l_path);
+        if (_t7) {
+          sd_str _t8 = sd_str_retain(L.l_path);
+          SD_LIST_PUSH((&L.l_subs), sd_str, _t8);
+        } else {
+          if (sd_str_ends_with(SD_LIST_GET(L.l_names, sd_str, SD_INT_S(l_i)), SD_STR_LIT(".sd"))) {
+            sd_str _t9 = sd_str_retain(L.l_path);
+            SD_LIST_PUSH((&L.l_out), sd_str, _t9);
+          }
+        }
+        sd_str_release(L.l_path); L.l_path = NULL;
+      }
+      _c5:;
+      l_i++;
+    }
+  }
+  {
+    int64_t l_j = ((int64_t)0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!((l_j < SD_SMALL(sd_list_len(L.l_subs))))) break;
+      {
+        SD_PREEMPT();
+        L._t11 = sd_f_sdFilesUnder(SD_LIST_GET(L.l_subs, sd_str, SD_INT_S(l_j)), L.l_out);
+        if (!sd_err_is_null(L._t11.r1)) {
+          sd_list_release(L._t11.r0);
+          sd_T_T2Lse _t12 = (sd_T_T2Lse){.r1 = L._t11.r1};
+          SD_LF_LEAVE(L);
+          sd_list_release(L.l_subs);
+          sd_list_release(L.l_names);
+          sd_list_release(L.l_out);
+          return _t12;
+        }
+        sd_list * _t13 = L._t11.r0;
+        L._t11 = ((sd_T_T2Lse){0});
+        sd_list_release(L.l_out);
+        L.l_out = _t13;
+      }
+      _c10:;
+      l_j++;
+    }
+  }
+  sd_T_T2Lse _t14 = (sd_T_T2Lse){L.l_out, SD_IFACE_NULL};
+  SD_LF_LEAVE(L);
+  sd_list_release(L.l_subs);
+  sd_list_release(L.l_names);
+  return _t14;
 }
 
 typedef struct { sd_lframe h; sd_S_Diags _t1; sd_S_Parser l_p; } sd_L_sd_f_fmtParse;
@@ -28740,14 +29135,15 @@ static sd_S_Gen sd_f_newGen(sd_S_Checker l_c) {
   sd_list * _t37 = sd_list_new(&sd_D_MutEvent, 0);
   sd_list * _t38 = sd_list_new(&sd_D_BorrowCand, 0);
   sd_map * _t39 = sd_map_new(&sd_type_int, &sd_type_bool);
-  sd_list * _t40 = sd_list_new(&sd_type_int, 0);
+  sd_map * _t40 = sd_map_new(&sd_type_int, &sd_type_bool);
   sd_list * _t41 = sd_list_new(&sd_type_int, 0);
-  sd_map * _t42 = sd_map_new(&sd_type_int, &sd_type_bool);
-  sd_list * _t43 = sd_list_new(&sd_type_int, 0);
-  sd_list * _t44 = sd_list_new(&sd_type_bool, 0);
-  sd_list * _t45 = sd_list_new(&sd_type_int, 0);
-  sd_map * _t46 = sd_map_new(&sd_type_str, &sd_type_bool);
-  sd_S_Gen _t47 = (sd_S_Gen){.f_c = sd_rt_S7Checker(l_c), .f_out = L._t1, .f_fnText = L._t2, .f_decls = L._t3, .f_gprotos = L._t4, .f_protos = L._t5, .f_helpers = L._t6, .f_thunks = L._t7, .f_consts = L._t8, .f_queue = L._t9, .f_slots = L._t10, .f_scopes = L._t11, .f_loops = L._t12, .f_groups = L._t13, .f_indent = SD_INT(0), .f_ntmp = SD_INT(0), .f_ndefer = SD_INT(0), .f_nspawn = SD_INT(0), .f_curFn = SD_INT(-1), .f_defers = false, .f_frameOn = false, .f_frame = L._t14, .f_frameIdx = L._t15, .f_varC = L._t16, .f_moved = L._t17, .f_popped = false, .f_fcCache = L._t18, .f_crashSeq = SD_INT(0), .f_nslot = SD_INT(0), .f_fieldNeeded = L._t19, .f_slotDone = L._t20, .f_frameSlots = L._t21, .f_safeCalls = _t22, .f_varRange = _t23, .f_intEvents = _t24, .f_intDeclared = _t25, .f_movable = _t26, .f_moveAt = _t27, .f_mvStmtAt = _t28, .f_mvLevel = _t29, .f_mvDecl = _t30, .f_mvLast = _t31, .f_mvCount = _t32, .f_mvCond = _t33, .f_modSets = _t34, .f_borrowed = _t35, .f_borrowRoots = _t36, .f_bwEvents = _t37, .f_bwCands = _t38, .f_bwOn = false, .f_fastFns = _t39, .f_fastCalls = _t40, .f_fastLoops = _t41, .f_preemptFns = _t42, .f_pcComp = _t43, .f_pcCyclic = _t44, .f_pcCallees = _t45, .f_pcBody = SD_INT(-1), .f_pcSeen = false, .f_pcTop = false, .f_pcCond = SD_INT(0), .f_split = false, .f_refs = _t46};
+  sd_list * _t42 = sd_list_new(&sd_type_int, 0);
+  sd_map * _t43 = sd_map_new(&sd_type_int, &sd_type_bool);
+  sd_list * _t44 = sd_list_new(&sd_type_int, 0);
+  sd_list * _t45 = sd_list_new(&sd_type_bool, 0);
+  sd_list * _t46 = sd_list_new(&sd_type_int, 0);
+  sd_map * _t47 = sd_map_new(&sd_type_str, &sd_type_bool);
+  sd_S_Gen _t48 = (sd_S_Gen){.f_c = sd_rt_S7Checker(l_c), .f_out = L._t1, .f_fnText = L._t2, .f_decls = L._t3, .f_gprotos = L._t4, .f_protos = L._t5, .f_helpers = L._t6, .f_thunks = L._t7, .f_consts = L._t8, .f_queue = L._t9, .f_slots = L._t10, .f_scopes = L._t11, .f_loops = L._t12, .f_groups = L._t13, .f_indent = SD_INT(0), .f_ntmp = SD_INT(0), .f_ndefer = SD_INT(0), .f_nspawn = SD_INT(0), .f_curFn = SD_INT(-1), .f_defers = false, .f_frameOn = false, .f_frame = L._t14, .f_frameIdx = L._t15, .f_varC = L._t16, .f_moved = L._t17, .f_popped = false, .f_fcCache = L._t18, .f_crashSeq = SD_INT(0), .f_nslot = SD_INT(0), .f_fieldNeeded = L._t19, .f_slotDone = L._t20, .f_frameSlots = L._t21, .f_safeCalls = _t22, .f_varRange = _t23, .f_intEvents = _t24, .f_intDeclared = _t25, .f_movable = _t26, .f_moveAt = _t27, .f_mvStmtAt = _t28, .f_mvLevel = _t29, .f_mvDecl = _t30, .f_mvLast = _t31, .f_mvCount = _t32, .f_mvCond = _t33, .f_modSets = _t34, .f_borrowed = _t35, .f_borrowRoots = _t36, .f_bwEvents = _t37, .f_bwCands = _t38, .f_bwOn = false, .f_ownedParams = _t39, .f_fastFns = _t40, .f_fastCalls = _t41, .f_fastLoops = _t42, .f_preemptFns = _t43, .f_pcComp = _t44, .f_pcCyclic = _t45, .f_pcCallees = _t46, .f_pcBody = SD_INT(-1), .f_pcSeen = false, .f_pcTop = false, .f_pcCond = SD_INT(0), .f_split = false, .f_refs = _t47};
   L._t1 = NULL;
   L._t2 = NULL;
   L._t3 = NULL;
@@ -28770,7 +29166,7 @@ static sd_S_Gen sd_f_newGen(sd_S_Checker l_c) {
   L._t20 = NULL;
   L._t21 = NULL;
   SD_LF_LEAVE(L);
-  return _t47;
+  return _t48;
 }
 
 typedef struct { sd_lframe h; sd_list * l_parts; } sd_L_sd_m_Gen__genProgram;
@@ -31934,7 +32330,7 @@ static sd_str sd_m_Gen__vtableTypeText(sd_S_Gen l_g, sd_int l_d) {
   return _t14;
 }
 
-typedef struct { sd_lframe h; sd_str l_tname; sd_str l_vt; sd_list * l_entries; sd_str l_name; sd_str _t17; sd_str l_thunk; sd_str l_self; sd_list * l_args; sd_str _t33; sd_str l_call; sd_str l_ret; sd_str _t46; sd_str _t47; } sd_L_sd_m_Gen__genVtables;
+typedef struct { sd_lframe h; sd_str l_tname; sd_str l_vt; sd_list * l_entries; sd_str l_name; sd_str _t17; sd_str l_thunk; sd_str l_tag; sd_str l_self; sd_list * l_args; sd_str _t43; sd_str l_call; sd_str l_ret; sd_str _t56; sd_str _t57; } sd_L_sd_m_Gen__genVtables;
 static void sd_lr_sd_m_Gen__genVtables(sd_lframe *p) {
   sd_L_sd_m_Gen__genVtables *L = (sd_L_sd_m_Gen__genVtables *)p;
   sd_str_release(L->l_tname);
@@ -31943,13 +32339,14 @@ static void sd_lr_sd_m_Gen__genVtables(sd_lframe *p) {
   sd_str_release(L->l_name);
   sd_str_release(L->_t17);
   sd_str_release(L->l_thunk);
+  sd_str_release(L->l_tag);
   sd_str_release(L->l_self);
   sd_list_release(L->l_args);
-  sd_str_release(L->_t33);
+  sd_str_release(L->_t43);
   sd_str_release(L->l_call);
   sd_str_release(L->l_ret);
-  sd_str_release(L->_t46);
-  sd_str_release(L->_t47);
+  sd_str_release(L->_t56);
+  sd_str_release(L->_t57);
 }
 static void sd_m_Gen__genVtables(sd_S_Gen * l_g, sd_int l_unit) {
   sd_L_sd_m_Gen__genVtables L = {{0}};
@@ -32002,76 +32399,104 @@ static void sd_m_Gen__genVtables(sd_S_Gen * l_g, sd_int l_unit) {
               sd_int *_t18 = sd_map_get((((*l_g)).f_c).f_methods, &L._t17);
               sd_int l_m = sd_int_retain((_t18 ? *_t18 : SD_INT_NULL));
               sd_str_release(L._t17); L._t17 = NULL;
-              if (sd_int_is_null(l_m)) {
+              sd_str _t19[] = {L.l_vt, SD_STR_LIT("__"), L.l_name};
+              sd_str _t20 = sd_str_concat_n(_t19, 3);
+              L.l_thunk = _t20;
+              bool _t22 = sd_int_is_null(l_m);
+              if (_t22) {
+                sd_box * _t21 = sd_m_Gen__kindOf((*l_g), l_t);
+                _t22 = (SD_BOX_GET(_t21, sd_E_Kind).tag == 13);
+                sd_box_release(_t21);
+              }
+              if ((_t22 && sd_str_eq(L.l_name, SD_STR_LIT("name")))) {
+                sd_str _t23 = sd_m_Gen__declName((*l_g), l_t);
+                sd_str _t24[] = {SD_STR_LIT("SD_BOX_GET(*(sd_box * const *)self, sd_E_"), _t23, SD_STR_LIT(").tag")};
+                sd_str _t25 = sd_str_concat_n(_t24, 3);
+                L.l_tag = _t25;
+                sd_str_release(_t23); 
+                sd_str _t26 = sd_m_Gen__enumNameChain((*l_g), l_t, SD_STR_LIT("tag_"));
+                sd_str _t27[] = {SD_STR_LIT("static sd_str "), L.l_thunk, SD_STR_LIT("(const void *self) { int32_t tag_ = "), L.l_tag, SD_STR_LIT("; return "), _t26, SD_STR_LIT("; }\012")};
+                sd_str _t28 = sd_str_concat_n(_t27, 7);
+                sd_list ** _t29 = (&(l_g)->f_thunks);
+                SD_LIST_PUSH(_t29, sd_str, _t28);
+                sd_str_release(_t26); 
+                sd_str _t30 = sd_str_retain(L.l_thunk);
+                SD_LIST_PUSH((&L.l_entries), sd_str, _t30);
+                sd_str_release(L.l_tag); L.l_tag = NULL;
+                sd_str_release(L.l_thunk); L.l_thunk = NULL;
                 sd_int_release(l_m);
                 sd_int_release(l_sig);
                 sd_str_release(L.l_name); L.l_name = NULL;
                 goto _c11;
               }
-              sd_str _t19[] = {L.l_vt, SD_STR_LIT("__"), L.l_name};
-              sd_str _t20 = sd_str_concat_n(_t19, 3);
-              L.l_thunk = _t20;
-              sd_str _t21 = sd_m_Gen__ctype((*l_g), l_t);
-              sd_str _t22[] = {SD_STR_LIT("*("), _t21, SD_STR_LIT(" const *)self")};
-              sd_str _t23 = sd_str_concat_n(_t22, 3);
-              L.l_self = _t23;
-              sd_str_release(_t21); 
-              if (l_isMut) {
-                sd_str _t24 = sd_m_Gen__ctype((*l_g), l_t);
-                sd_str _t25[] = {SD_STR_LIT("("), _t24, SD_STR_LIT(" *)self")};
-                sd_str _t26 = sd_str_concat_n(_t25, 3);
-                sd_str_release(L.l_self);
-                L.l_self = _t26;
-                sd_str_release(_t24); 
+              if (sd_int_is_null(l_m)) {
+                sd_str_release(L.l_thunk); L.l_thunk = NULL;
+                sd_int_release(l_m);
+                sd_int_release(l_sig);
+                sd_str_release(L.l_name); L.l_name = NULL;
+                goto _c11;
               }
-              sd_list * _t27 = sd_list_new(&sd_type_str, 1);
-              SD_LIST_PUSH(&_t27, sd_str, L.l_self);
+              sd_str _t31 = sd_m_Gen__ctype((*l_g), l_t);
+              sd_str _t32[] = {SD_STR_LIT("*("), _t31, SD_STR_LIT(" const *)self")};
+              sd_str _t33 = sd_str_concat_n(_t32, 3);
+              L.l_self = _t33;
+              sd_str_release(_t31); 
+              if (l_isMut) {
+                sd_str _t34 = sd_m_Gen__ctype((*l_g), l_t);
+                sd_str _t35[] = {SD_STR_LIT("("), _t34, SD_STR_LIT(" *)self")};
+                sd_str _t36 = sd_str_concat_n(_t35, 3);
+                sd_str_release(L.l_self);
+                L.l_self = _t36;
+                sd_str_release(_t34); 
+              }
+              sd_list * _t37 = sd_list_new(&sd_type_str, 1);
+              SD_LIST_PUSH(&_t37, sd_str, L.l_self);
               L.l_self = NULL;
-              L.l_args = _t27;
+              L.l_args = _t37;
               {
                 sd_int l_k = SD_INT(0);
                 for (;;) {
                   SD_PREEMPT();
-                  sd_int _t29 = sd_m_Types__count((((*l_g)).f_c).f_types, l_sig);
-                  bool _t30 = sd_int_lt(l_k, _t29);
-                  sd_int_release(_t29);
-                  if (!(_t30)) break;
+                  sd_int _t39 = sd_m_Types__count((((*l_g)).f_c).f_types, l_sig);
+                  bool _t40 = sd_int_lt(l_k, _t39);
+                  sd_int_release(_t39);
+                  if (!(_t40)) break;
                   {
-                    sd_str_part _t31[] = {{SD_STR_LIT("a")}, {NULL, l_k}};
-                    sd_str _t32 = sd_str_concat_parts(_t31, 2);
-                    SD_LIST_PUSH((&L.l_args), sd_str, _t32);
+                    sd_str_part _t41[] = {{SD_STR_LIT("a")}, {NULL, l_k}};
+                    sd_str _t42 = sd_str_concat_parts(_t41, 2);
+                    SD_LIST_PUSH((&L.l_args), sd_str, _t42);
                   }
-                  _c28:;
+                  _c38:;
                   { int64_t r_; if (SD_LIKELY((((l_k).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_k).w, SD_INT(1).w, &r_))) (l_k).w = r_; else { sd_int s_ = sd_int_add_slow((l_k), SD_INT(1)); sd_int_release((l_k)); (l_k) = s_; } }
                 }
                 sd_int_release(l_k);
               }
-              L._t33 = sd_list_join(L.l_args, SD_STR_LIT(", "));
-              sd_str _t34[] = {SD_LIST_GET((((*l_g)).f_c).f_fnCName, sd_str, l_m), SD_STR_LIT("("), L._t33, SD_STR_LIT(")")};
-              sd_str _t35 = sd_str_concat_n(_t34, 4);
-              L.l_call = _t35;
-              sd_str_release(L._t33); L._t33 = NULL;
-              sd_int _t36 = sd_m_Gen__elemOf((*l_g), l_sig);
-              sd_str _t37 = sd_m_Gen__ctype((*l_g), _t36);
-              L.l_ret = _t37;
-              sd_int_release(_t36);
-              sd_int _t38 = sd_m_Gen__elemOf((*l_g), l_sig);
-              bool _t39 = (!sd_int_eq(_t38, sd_c_tyVoid()));
-              sd_int_release(_t38);
-              if (_t39) {
-                sd_str _t40 = sd_str_concat(SD_STR_LIT("return "), L.l_call);
+              L._t43 = sd_list_join(L.l_args, SD_STR_LIT(", "));
+              sd_str _t44[] = {SD_LIST_GET((((*l_g)).f_c).f_fnCName, sd_str, l_m), SD_STR_LIT("("), L._t43, SD_STR_LIT(")")};
+              sd_str _t45 = sd_str_concat_n(_t44, 4);
+              L.l_call = _t45;
+              sd_str_release(L._t43); L._t43 = NULL;
+              sd_int _t46 = sd_m_Gen__elemOf((*l_g), l_sig);
+              sd_str _t47 = sd_m_Gen__ctype((*l_g), _t46);
+              L.l_ret = _t47;
+              sd_int_release(_t46);
+              sd_int _t48 = sd_m_Gen__elemOf((*l_g), l_sig);
+              bool _t49 = (!sd_int_eq(_t48, sd_c_tyVoid()));
+              sd_int_release(_t48);
+              if (_t49) {
+                sd_str _t50 = sd_str_concat(SD_STR_LIT("return "), L.l_call);
                 sd_str_release(L.l_call);
-                L.l_call = _t40;
+                L.l_call = _t50;
               }
-              sd_str _t41 = sd_m_Gen__vtParams((*l_g), l_sig, l_isMut, true);
-              sd_str _t42[] = {SD_STR_LIT("static "), L.l_ret, SD_STR_LIT(" "), L.l_thunk, SD_STR_LIT("("), _t41, SD_STR_LIT(") { "), L.l_call, SD_STR_LIT("; }\012")};
-              sd_str _t43 = sd_str_concat_n(_t42, 9);
-              sd_list ** _t44 = (&(l_g)->f_thunks);
-              SD_LIST_PUSH(_t44, sd_str, _t43);
-              sd_str_release(_t41); 
-              sd_str _t45 = L.l_thunk;
+              sd_str _t51 = sd_m_Gen__vtParams((*l_g), l_sig, l_isMut, true);
+              sd_str _t52[] = {SD_STR_LIT("static "), L.l_ret, SD_STR_LIT(" "), L.l_thunk, SD_STR_LIT("("), _t51, SD_STR_LIT(") { "), L.l_call, SD_STR_LIT("; }\012")};
+              sd_str _t53 = sd_str_concat_n(_t52, 9);
+              sd_list ** _t54 = (&(l_g)->f_thunks);
+              SD_LIST_PUSH(_t54, sd_str, _t53);
+              sd_str_release(_t51); 
+              sd_str _t55 = L.l_thunk;
               L.l_thunk = NULL;
-              SD_LIST_PUSH((&L.l_entries), sd_str, _t45);
+              SD_LIST_PUSH((&L.l_entries), sd_str, _t55);
               sd_str_release(L.l_ret); L.l_ret = NULL;
               sd_str_release(L.l_call); L.l_call = NULL;
               sd_list_release(L.l_args); L.l_args = NULL;
@@ -32084,16 +32509,16 @@ static void sd_m_Gen__genVtables(sd_S_Gen * l_g, sd_int l_unit) {
           }
           sd_int_release(l_j);
         }
-        L._t46 = sd_m_Gen__linkage((*l_g));
-        L._t47 = sd_m_Gen__vtableTypeOf((*l_g), (l_im).f_iface);
-        sd_str _t48 = sd_list_join(L.l_entries, SD_STR_LIT(", "));
-        sd_str _t49[] = {L._t46, SD_STR_LIT("const "), L._t47, SD_STR_LIT(" "), L.l_vt, SD_STR_LIT(" = {"), _t48, SD_STR_LIT("};\012")};
-        sd_str _t50 = sd_str_concat_n(_t49, 8);
-        sd_list ** _t51 = (&(l_g)->f_thunks);
-        SD_LIST_PUSH(_t51, sd_str, _t50);
-        sd_str_release(_t48); 
-        sd_str_release(L._t47); L._t47 = NULL;
-        sd_str_release(L._t46); L._t46 = NULL;
+        L._t56 = sd_m_Gen__linkage((*l_g));
+        L._t57 = sd_m_Gen__vtableTypeOf((*l_g), (l_im).f_iface);
+        sd_str _t58 = sd_list_join(L.l_entries, SD_STR_LIT(", "));
+        sd_str _t59[] = {L._t56, SD_STR_LIT("const "), L._t57, SD_STR_LIT(" "), L.l_vt, SD_STR_LIT(" = {"), _t58, SD_STR_LIT("};\012")};
+        sd_str _t60 = sd_str_concat_n(_t59, 8);
+        sd_list ** _t61 = (&(l_g)->f_thunks);
+        SD_LIST_PUSH(_t61, sd_str, _t60);
+        sd_str_release(_t58); 
+        sd_str_release(L._t57); L._t57 = NULL;
+        sd_str_release(L._t56); L._t56 = NULL;
         sd_list_release(L.l_entries); L.l_entries = NULL;
         sd_str_release(L.l_vt); L.l_vt = NULL;
         sd_str_release(L.l_tname); L.l_tname = NULL;
@@ -32778,7 +33203,7 @@ static void sd_m_Gen__genNative(sd_S_Gen * l_g, sd_int l_f) {
   SD_LF_LEAVE(L);
 }
 
-typedef struct { sd_lframe h; sd_S_FnDecl l_fd; sd_str l_sig; sd_str _t41; sd_str _t42; sd_str _t44; sd_str _t46; sd_str _t53; sd_list * _t60; sd_str _t62; sd_str _t72; sd_list * l_fields; sd_list * l_rels; sd_str _t81; sd_list * l_text; sd_str l_line; } sd_L_sd_m_Gen__genFn;
+typedef struct { sd_lframe h; sd_S_FnDecl l_fd; sd_str l_sig; sd_str _t41; sd_str _t42; sd_str _t44; sd_str _t46; sd_str _t55; sd_list * _t62; sd_str _t64; sd_str _t74; sd_list * l_fields; sd_list * l_rels; sd_str _t83; sd_list * l_text; sd_str l_line; } sd_L_sd_m_Gen__genFn;
 static void sd_lr_sd_m_Gen__genFn(sd_lframe *p) {
   sd_L_sd_m_Gen__genFn *L = (sd_L_sd_m_Gen__genFn *)p;
   sd_rl_S6FnDecl(L->l_fd);
@@ -32787,13 +33212,13 @@ static void sd_lr_sd_m_Gen__genFn(sd_lframe *p) {
   sd_str_release(L->_t42);
   sd_str_release(L->_t44);
   sd_str_release(L->_t46);
-  sd_str_release(L->_t53);
-  sd_list_release(L->_t60);
-  sd_str_release(L->_t62);
-  sd_str_release(L->_t72);
+  sd_str_release(L->_t55);
+  sd_list_release(L->_t62);
+  sd_str_release(L->_t64);
+  sd_str_release(L->_t74);
   sd_list_release(L->l_fields);
   sd_list_release(L->l_rels);
-  sd_str_release(L->_t81);
+  sd_str_release(L->_t83);
   sd_list_release(L->l_text);
   sd_str_release(L->l_line);
 }
@@ -32870,6 +33295,7 @@ static void sd_m_Gen__genFn(sd_S_Gen * l_g, sd_int l_f) {
   sd_m_Gen__analyzeInts(l_g, (L.l_fd).f_body);
   sd_m_Gen__analyzeBorrows(l_g, (L.l_fd).f_body);
   sd_m_Gen__analyzeMoves(l_g, (L.l_fd).f_body);
+  sd_m_Gen__findOwnedParams(l_g, l_f);
   sd_m_Gen__pcStart(l_g, (L.l_fd).f_body);
   bool _t35 = sd_m_Gen__blockHasDefer((*l_g), (L.l_fd).f_body);
   bool _t36 = _t35;
@@ -32905,56 +33331,61 @@ static void sd_m_Gen__genFn(sd_S_Gen * l_g, sd_int l_f) {
     sd_str _t50 = SD_STR_LIT("size_t _dm = sd_defer_mark();");
     sd_m_Gen__emit(l_g, _t50);
   }
+  sd_m_Gen__pushScope(l_g);
+  sd_m_Gen__ownParams(l_g, l_f);
   sd_m_Gen__genBody(l_g, (L.l_fd).f_body);
-  bool _t52 = sd_int_eq((L.l_fd).f_resultCount, SD_INT(0));
-  if (_t52) {
-    bool _t51 = sd_m_Checker__blockExits(((*l_g)).f_c, (L.l_fd).f_body);
-    _t52 = (!_t51);
+  bool _t51 = sd_m_Checker__blockExits(((*l_g)).f_c, (L.l_fd).f_body);
+  bool _t52 = (!_t51);
+  sd_m_Gen__popScope(l_g, _t52);
+  bool _t54 = sd_int_eq((L.l_fd).f_resultCount, SD_INT(0));
+  if (_t54) {
+    bool _t53 = sd_m_Checker__blockExits(((*l_g)).f_c, (L.l_fd).f_body);
+    _t54 = (!_t53);
   }
-  if (_t52) {
-    L._t53 = sd_str_retain(sd_c_leaveFrame());
-    sd_m_Gen__emit(l_g, L._t53);
-    sd_str_release(L._t53); L._t53 = NULL;
+  if (_t54) {
+    L._t55 = sd_str_retain(sd_c_leaveFrame());
+    sd_m_Gen__emit(l_g, L._t55);
+    sd_str_release(L._t55); L._t55 = NULL;
     if (((*l_g)).f_defers) {
-      sd_str _t54 = SD_STR_LIT("sd_defer_run(_dm);");
-      sd_m_Gen__emit(l_g, _t54);
+      sd_str _t56 = SD_STR_LIT("sd_defer_run(_dm);");
+      sd_m_Gen__emit(l_g, _t56);
     }
   }
   sd_S_Block l_body = sd_rt_S5Block(SD_LIST_GET(((((*l_g)).f_c).f_ast).f_blocks, sd_S_Block, (L.l_fd).f_body));
-  bool _t57 = sd_int_gt((l_body).f_count, SD_INT(0));
-  if (_t57) {
-    sd_int _t55 = sd_int_sub((l_body).f_count, SD_INT(1));
-    sd_int _t56 = sd_m_Ast__at((((*l_g)).f_c).f_ast, (l_body).f_list, _t55);
-    _t57 = (SD_BOX_GET((SD_LIST_GET(((((*l_g)).f_c).f_ast).f_stmts, sd_S_Stmt, _t56)).f_kind, sd_E_StmtKind).tag == 8);
-    sd_int_release(_t56);
-    sd_int_release(_t55);
+  bool _t59 = sd_int_gt((l_body).f_count, SD_INT(0));
+  if (_t59) {
+    sd_int _t57 = sd_int_sub((l_body).f_count, SD_INT(1));
+    sd_int _t58 = sd_m_Ast__at((((*l_g)).f_c).f_ast, (l_body).f_list, _t57);
+    _t59 = (SD_BOX_GET((SD_LIST_GET(((((*l_g)).f_c).f_ast).f_stmts, sd_S_Stmt, _t58)).f_kind, sd_E_StmtKind).tag == 8);
+    sd_int_release(_t58);
+    sd_int_release(_t57);
   }
-  bool l_endsInReturn = _t57;
+  bool l_endsInReturn = _t59;
   if ((L.l_fd).f_isTest) {
-    bool _t58 = sd_m_Checker__blockExits(((*l_g)).f_c, (L.l_fd).f_body);
-    if ((!_t58)) {
-      sd_str _t59 = SD_STR_LIT("SD_ERR_NULL");
-      L._t60 = sd_list_new(&sd_type_str, 0);
-      sd_m_Gen__emitReturn(l_g, _t59, L._t60);
-      sd_list_release(L._t60); L._t60 = NULL;
+    bool _t60 = sd_m_Checker__blockExits(((*l_g)).f_c, (L.l_fd).f_body);
+    if ((!_t60)) {
+      sd_str _t61 = SD_STR_LIT("SD_ERR_NULL");
+      L._t62 = sd_list_new(&sd_type_str, 0);
+      sd_m_Gen__emitReturn(l_g, _t61, L._t62);
+      sd_list_release(L._t62); L._t62 = NULL;
     }
   } else {
     if ((sd_int_gt((L.l_fd).f_resultCount, SD_INT(0)) && (!l_endsInReturn))) {
-      sd_str _t61[] = {SD_STR_LIT("sd_crash(\"internal error: "), (L.l_fd).f_name, SD_STR_LIT(" reached its end without returning\");")};
-      L._t62 = sd_str_concat_n(_t61, 3);
-      sd_m_Gen__emit(l_g, L._t62);
-      sd_str_release(L._t62); L._t62 = NULL;
+      sd_str _t63[] = {SD_STR_LIT("sd_crash(\"internal error: "), (L.l_fd).f_name, SD_STR_LIT(" reached its end without returning\");")};
+      L._t64 = sd_str_concat_n(_t63, 3);
+      sd_m_Gen__emit(l_g, L._t64);
+      sd_str_release(L._t64); L._t64 = NULL;
     }
   }
-  sd_int *_t63 = (&(l_g)->f_indent);
-  { int64_t r_; if (SD_LIKELY((((*_t63).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_sub_overflow((*_t63).w, SD_INT(1).w, &r_))) (*_t63).w = r_; else { sd_int s_ = sd_int_sub_slow((*_t63), SD_INT(1)); sd_int_release((*_t63)); (*_t63) = s_; } }
-  sd_str _t64 = SD_STR_LIT("}");
-  sd_m_Gen__emit(l_g, _t64);
-  sd_str _t65 = SD_STR_LIT("");
-  sd_m_Gen__emit(l_g, _t65);
-  bool _t66 = false;
-  bool *_t67 = (&(l_g)->f_frameOn);
-  *_t67 = _t66;
+  sd_int *_t65 = (&(l_g)->f_indent);
+  { int64_t r_; if (SD_LIKELY((((*_t65).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_sub_overflow((*_t65).w, SD_INT(1).w, &r_))) (*_t65).w = r_; else { sd_int s_ = sd_int_sub_slow((*_t65), SD_INT(1)); sd_int_release((*_t65)); (*_t65) = s_; } }
+  sd_str _t66 = SD_STR_LIT("}");
+  sd_m_Gen__emit(l_g, _t66);
+  sd_str _t67 = SD_STR_LIT("");
+  sd_m_Gen__emit(l_g, _t67);
+  bool _t68 = false;
+  bool *_t69 = (&(l_g)->f_frameOn);
+  *_t69 = _t68;
   {
     int64_t l_s = ((int64_t)0);
     for (;;) {
@@ -32962,23 +33393,23 @@ static void sd_m_Gen__genFn(sd_S_Gen * l_g, sd_int l_f) {
       if (!((l_s < SD_SMALL(sd_list_len(((*l_g)).f_frameSlots))))) break;
       {
         sd_S_Slot l_frs = SD_LIST_GET(((*l_g)).f_frameSlots, sd_S_Slot, SD_INT_S(l_s));
-        sd_int _t69 = (l_frs).f_id;
-        bool *_t70 = sd_map_get(((*l_g)).f_slotDone, &_t69);
-        if ((!((_t70 ? (sd_opt_bool){true, *_t70} : (sd_opt_bool){false, 0})).has)) {
-          bool _t71 = true;
-          L._t72 = sd_str_slice((l_frs).f_name, SD_INT(1), SD_INT_S((SD_SMALL(sd_str_len((l_frs).f_name)) - ((int64_t)1))));
-          sd_map_set((&(l_g)->f_fieldNeeded), &L._t72, &_t71);
-          L._t72 = NULL;
+        sd_int _t71 = (l_frs).f_id;
+        bool *_t72 = sd_map_get(((*l_g)).f_slotDone, &_t71);
+        if ((!((_t72 ? (sd_opt_bool){true, *_t72} : (sd_opt_bool){false, 0})).has)) {
+          bool _t73 = true;
+          L._t74 = sd_str_slice((l_frs).f_name, SD_INT(1), SD_INT_S((SD_SMALL(sd_str_len((l_frs).f_name)) - ((int64_t)1))));
+          sd_map_set((&(l_g)->f_fieldNeeded), &L._t74, &_t73);
+          L._t74 = NULL;
         }
       }
-      _c68:;
+      _c70:;
       l_s++;
     }
   }
-  sd_list * _t73 = sd_list_new(&sd_type_str, 0);
-  L.l_fields = _t73;
-  sd_list * _t74 = sd_list_new(&sd_type_str, 0);
-  L.l_rels = _t74;
+  sd_list * _t75 = sd_list_new(&sd_type_str, 0);
+  L.l_fields = _t75;
+  sd_list * _t76 = sd_list_new(&sd_type_str, 0);
+  L.l_rels = _t76;
   {
     int64_t l_j = ((int64_t)0);
     for (;;) {
@@ -32986,53 +33417,53 @@ static void sd_m_Gen__genFn(sd_S_Gen * l_g, sd_int l_f) {
       if (!((l_j < SD_SMALL(sd_list_len(((*l_g)).f_frame))))) break;
       {
         sd_S_Slot l_fld = SD_LIST_GET(((*l_g)).f_frame, sd_S_Slot, SD_INT_S(l_j));
-        sd_str _t76 = (l_fld).f_name;
-        bool *_t77 = sd_map_get(((*l_g)).f_fieldNeeded, &_t76);
-        if ((!(!((_t77 ? (sd_opt_bool){true, *_t77} : (sd_opt_bool){false, 0})).has))) {
-          sd_str _t78 = sd_m_Gen__ctype((*l_g), (l_fld).f_ty);
-          sd_str _t79[] = {SD_STR_LIT(" "), _t78, SD_STR_LIT(" "), (l_fld).f_name, SD_STR_LIT(";")};
-          sd_str _t80 = sd_str_concat_n(_t79, 5);
-          SD_LIST_PUSH((&L.l_fields), sd_str, _t80);
-          sd_str_release(_t78); 
-          L._t81 = sd_str_concat(SD_STR_LIT("L->"), (l_fld).f_name);
-          sd_str _t82 = sd_m_Gen__releaseCall(l_g, (l_fld).f_ty, L._t81);
-          sd_str _t83[] = {SD_STR_LIT("  "), _t82, SD_STR_LIT(";\012")};
-          sd_str _t84 = sd_str_concat_n(_t83, 3);
-          SD_LIST_PUSH((&L.l_rels), sd_str, _t84);
-          sd_str_release(_t82); 
-          sd_str_release(L._t81); L._t81 = NULL;
+        sd_str _t78 = (l_fld).f_name;
+        bool *_t79 = sd_map_get(((*l_g)).f_fieldNeeded, &_t78);
+        if ((!(!((_t79 ? (sd_opt_bool){true, *_t79} : (sd_opt_bool){false, 0})).has))) {
+          sd_str _t80 = sd_m_Gen__ctype((*l_g), (l_fld).f_ty);
+          sd_str _t81[] = {SD_STR_LIT(" "), _t80, SD_STR_LIT(" "), (l_fld).f_name, SD_STR_LIT(";")};
+          sd_str _t82 = sd_str_concat_n(_t81, 5);
+          SD_LIST_PUSH((&L.l_fields), sd_str, _t82);
+          sd_str_release(_t80); 
+          L._t83 = sd_str_concat(SD_STR_LIT("L->"), (l_fld).f_name);
+          sd_str _t84 = sd_m_Gen__releaseCall(l_g, (l_fld).f_ty, L._t83);
+          sd_str _t85[] = {SD_STR_LIT("  "), _t84, SD_STR_LIT(";\012")};
+          sd_str _t86 = sd_str_concat_n(_t85, 3);
+          SD_LIST_PUSH((&L.l_rels), sd_str, _t86);
+          sd_str_release(_t84); 
+          sd_str_release(L._t83); L._t83 = NULL;
         }
       }
-      _c75:;
+      _c77:;
       l_j++;
     }
   }
-  sd_list * _t85 = sd_list_new(&sd_type_str, 0);
-  L.l_text = _t85;
+  sd_list * _t87 = sd_list_new(&sd_type_str, 0);
+  L.l_text = _t87;
   bool l_hasFrame = (SD_SMALL(sd_list_len(L.l_fields)) > ((int64_t)0));
   if (l_hasFrame) {
     sd_str l_cn = SD_LIST_GET((((*l_g)).f_c).f_fnCName, sd_str, l_f);
-    sd_str _t86 = sd_list_join(L.l_fields, SD_STR_LIT(""));
-    sd_str _t87[] = {SD_STR_LIT("typedef struct { sd_lframe h;"), _t86, SD_STR_LIT(" } sd_L_"), l_cn, SD_STR_LIT(";\012")};
-    sd_str _t88 = sd_str_concat_n(_t87, 5);
-    SD_LIST_PUSH((&L.l_text), sd_str, _t88);
-    sd_str_release(_t86); 
-    sd_str _t89 = sd_list_join(L.l_rels, SD_STR_LIT(""));
-    sd_str _t90[] = {SD_STR_LIT("static void sd_lr_"), l_cn, SD_STR_LIT("(sd_lframe *p) {\012  sd_L_"), l_cn, SD_STR_LIT(" *L = (sd_L_"), l_cn, SD_STR_LIT(" *)p;\012"), _t89, SD_STR_LIT("}\012")};
-    sd_str _t91 = sd_str_concat_n(_t90, 9);
-    SD_LIST_PUSH((&L.l_text), sd_str, _t91);
-    sd_str_release(_t89); 
-    sd_str _t92 = sd_str_retain(SD_LIST_GET(((*l_g)).f_out, sd_str, SD_INT(0)));
-    SD_LIST_PUSH((&L.l_text), sd_str, _t92);
-    sd_str _t93[] = {SD_STR_LIT("  sd_L_"), l_cn, SD_STR_LIT(" L = {{0}};\012")};
-    sd_str _t94 = sd_str_concat_n(_t93, 3);
+    sd_str _t88 = sd_list_join(L.l_fields, SD_STR_LIT(""));
+    sd_str _t89[] = {SD_STR_LIT("typedef struct { sd_lframe h;"), _t88, SD_STR_LIT(" } sd_L_"), l_cn, SD_STR_LIT(";\012")};
+    sd_str _t90 = sd_str_concat_n(_t89, 5);
+    SD_LIST_PUSH((&L.l_text), sd_str, _t90);
+    sd_str_release(_t88); 
+    sd_str _t91 = sd_list_join(L.l_rels, SD_STR_LIT(""));
+    sd_str _t92[] = {SD_STR_LIT("static void sd_lr_"), l_cn, SD_STR_LIT("(sd_lframe *p) {\012  sd_L_"), l_cn, SD_STR_LIT(" *L = (sd_L_"), l_cn, SD_STR_LIT(" *)p;\012"), _t91, SD_STR_LIT("}\012")};
+    sd_str _t93 = sd_str_concat_n(_t92, 9);
+    SD_LIST_PUSH((&L.l_text), sd_str, _t93);
+    sd_str_release(_t91); 
+    sd_str _t94 = sd_str_retain(SD_LIST_GET(((*l_g)).f_out, sd_str, SD_INT(0)));
     SD_LIST_PUSH((&L.l_text), sd_str, _t94);
-    sd_str _t95[] = {SD_STR_LIT("  SD_LF_ENTER(L, sd_lr_"), l_cn, SD_STR_LIT(");\012")};
+    sd_str _t95[] = {SD_STR_LIT("  sd_L_"), l_cn, SD_STR_LIT(" L = {{0}};\012")};
     sd_str _t96 = sd_str_concat_n(_t95, 3);
     SD_LIST_PUSH((&L.l_text), sd_str, _t96);
+    sd_str _t97[] = {SD_STR_LIT("  SD_LF_ENTER(L, sd_lr_"), l_cn, SD_STR_LIT(");\012")};
+    sd_str _t98 = sd_str_concat_n(_t97, 3);
+    SD_LIST_PUSH((&L.l_text), sd_str, _t98);
   } else {
-    sd_str _t97 = sd_str_retain(SD_LIST_GET(((*l_g)).f_out, sd_str, SD_INT(0)));
-    SD_LIST_PUSH((&L.l_text), sd_str, _t97);
+    sd_str _t99 = sd_str_retain(SD_LIST_GET(((*l_g)).f_out, sd_str, SD_INT(0)));
+    SD_LIST_PUSH((&L.l_text), sd_str, _t99);
   }
   {
     int64_t l_k = ((int64_t)1);
@@ -33041,44 +33472,183 @@ static void sd_m_Gen__genFn(sd_S_Gen * l_g, sd_int l_f) {
       if (!((l_k < SD_SMALL(sd_list_len(((*l_g)).f_out))))) break;
       {
         L.l_line = sd_str_retain(SD_LIST_GET(((*l_g)).f_out, sd_str, SD_INT_S(l_k)));
-        bool _t100 = (!l_hasFrame);
-        if (_t100) {
-          sd_str _t99 = sd_str_concat(sd_c_leaveFrame(), SD_STR_LIT("\012"));
-          _t100 = sd_str_ends_with(L.l_line, _t99);
-          sd_str_release(_t99); 
+        bool _t102 = (!l_hasFrame);
+        if (_t102) {
+          sd_str _t101 = sd_str_concat(sd_c_leaveFrame(), SD_STR_LIT("\012"));
+          _t102 = sd_str_ends_with(L.l_line, _t101);
+          sd_str_release(_t101); 
         }
-        if (_t100) {
+        if (_t102) {
           sd_str_release(L.l_line); L.l_line = NULL;
-          goto _c98;
+          goto _c100;
         }
         if (sd_str_contains(L.l_line, SD_STR_LIT("\001"))) {
-          sd_str _t101 = sd_m_Gen__expandFrame((*l_g), L.l_line);
+          sd_str _t103 = sd_m_Gen__expandFrame((*l_g), L.l_line);
           sd_str_release(L.l_line);
-          L.l_line = _t101;
-          sd_str _t102 = sd_str_trim(L.l_line);
-          bool _t103 = sd_str_eq(_t102, SD_STR_LIT(""));
-          sd_str_release(_t102); 
-          if (_t103) {
+          L.l_line = _t103;
+          sd_str _t104 = sd_str_trim(L.l_line);
+          bool _t105 = sd_str_eq(_t104, SD_STR_LIT(""));
+          sd_str_release(_t104); 
+          if (_t105) {
             sd_str_release(L.l_line); L.l_line = NULL;
-            goto _c98;
+            goto _c100;
           }
         }
-        sd_str _t104 = L.l_line;
+        sd_str _t106 = L.l_line;
         L.l_line = NULL;
-        SD_LIST_PUSH((&L.l_text), sd_str, _t104);
+        SD_LIST_PUSH((&L.l_text), sd_str, _t106);
       }
-      _c98:;
+      _c100:;
       l_k++;
     }
   }
-  sd_str _t105 = sd_list_join(L.l_text, SD_STR_LIT(""));
-  sd_list ** _t106 = (&(l_g)->f_fnText);
-  SD_LIST_PUSH(_t106, sd_str, _t105);
+  sd_str _t107 = sd_list_join(L.l_text, SD_STR_LIT(""));
+  sd_list ** _t108 = (&(l_g)->f_fnText);
+  SD_LIST_PUSH(_t108, sd_str, _t107);
   sd_list_release(L.l_text); L.l_text = NULL;
   sd_list_release(L.l_rels); L.l_rels = NULL;
   sd_list_release(L.l_fields); L.l_fields = NULL;
   sd_rl_S5Block(l_body);
   sd_str_release(L.l_sig); L.l_sig = NULL;
+  sd_rl_S6FnDecl(L.l_fd); L.l_fd = ((sd_S_FnDecl){0});
+  SD_LF_LEAVE(L);
+}
+
+static void sd_m_Gen__findOwnedParams(sd_S_Gen * l_g, sd_int l_f) {
+  sd_map * _t1 = sd_map_new(&sd_type_int, &sd_type_bool);
+  sd_map * *_t2 = (&(l_g)->f_ownedParams);
+  sd_map_release(*_t2);
+  *_t2 = _t1;
+  sd_S_FnDecl l_fd = SD_LIST_GET(((((*l_g)).f_c).f_ast).f_fns, sd_S_FnDecl, l_f);
+  {
+    sd_int l_i = SD_INT(0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!(sd_int_lt(l_i, (l_fd).f_paramCount))) break;
+      {
+        sd_int _t4 = sd_m_Ast__at((((*l_g)).f_c).f_ast, (l_fd).f_params, l_i);
+        sd_int l_v = SD_LIST_GET((((*l_g)).f_c).f_paramVar, sd_int, _t4);
+        sd_int_release(_t4);
+        if (sd_int_lt(l_v, SD_INT(0))) {
+          goto _c3;
+        }
+        {
+          int64_t l_j = ((int64_t)0);
+          for (;;) {
+            SD_PREEMPT();
+            if (!((l_j < SD_SMALL(sd_list_len(((*l_g)).f_bwEvents))))) break;
+            {
+              if (sd_int_eq((SD_LIST_GET(((*l_g)).f_bwEvents, sd_S_MutEvent, SD_INT_S(l_j))).f_root, l_v)) {
+                bool _t6 = true;
+                sd_int _t7 = sd_int_retain(l_v);
+                sd_map_set((&(l_g)->f_ownedParams), &_t7, &_t6);
+                break;
+              }
+            }
+            _c5:;
+            l_j++;
+          }
+        }
+      }
+      _c3:;
+      { int64_t r_; if (SD_LIKELY((((l_i).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_i).w, SD_INT(1).w, &r_))) (l_i).w = r_; else { sd_int s_ = sd_int_add_slow((l_i), SD_INT(1)); sd_int_release((l_i)); (l_i) = s_; } }
+    }
+    sd_int_release(l_i);
+  }
+}
+
+static bool sd_m_Gen__isOwnedParam(sd_S_Gen l_g, sd_int l_v) {
+  bool *_t1 = sd_map_get((l_g).f_ownedParams, &l_v);
+  return (!(!((_t1 ? (sd_opt_bool){true, *_t1} : (sd_opt_bool){false, 0})).has));
+}
+
+typedef struct { sd_lframe h; sd_S_FnDecl l_fd; sd_str l_n; sd_str _t6; sd_str l_val; sd_str l_fld; sd_str _t10; sd_str _t12; sd_str _t13; sd_str _t15; sd_str _t16; sd_str _t18; sd_str _t20; } sd_L_sd_m_Gen__ownParams;
+static void sd_lr_sd_m_Gen__ownParams(sd_lframe *p) {
+  sd_L_sd_m_Gen__ownParams *L = (sd_L_sd_m_Gen__ownParams *)p;
+  sd_rl_S6FnDecl(L->l_fd);
+  sd_str_release(L->l_n);
+  sd_str_release(L->_t6);
+  sd_str_release(L->l_val);
+  sd_str_release(L->l_fld);
+  sd_str_release(L->_t10);
+  sd_str_release(L->_t12);
+  sd_str_release(L->_t13);
+  sd_str_release(L->_t15);
+  sd_str_release(L->_t16);
+  sd_str_release(L->_t18);
+  sd_str_release(L->_t20);
+}
+static void sd_m_Gen__ownParams(sd_S_Gen * l_g, sd_int l_f) {
+  sd_L_sd_m_Gen__ownParams L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_m_Gen__ownParams);
+  L.l_fd = sd_rt_S6FnDecl(SD_LIST_GET(((((*l_g)).f_c).f_ast).f_fns, sd_S_FnDecl, l_f));
+  {
+    sd_int l_i = SD_INT(0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!(sd_int_lt(l_i, (L.l_fd).f_paramCount))) break;
+      {
+        sd_int _t2 = sd_m_Ast__at((((*l_g)).f_c).f_ast, (L.l_fd).f_params, l_i);
+        sd_int l_pi = _t2;
+        sd_int l_v = sd_int_retain(SD_LIST_GET((((*l_g)).f_c).f_paramVar, sd_int, l_pi));
+        bool _t4 = sd_int_lt(l_v, SD_INT(0));
+        if (!_t4) {
+          bool _t3 = sd_m_Gen__isOwnedParam((*l_g), l_v);
+          _t4 = (!_t3);
+        }
+        if (_t4) {
+          sd_int_release(l_v);
+          sd_int_release(l_pi);
+          goto _c1;
+        }
+        sd_int l_t = sd_int_retain((SD_LIST_GET((((*l_g)).f_c).f_vars, sd_S_Var, l_v)).f_ty);
+        sd_str _t5 = sd_str_concat(SD_STR_LIT("o_"), (SD_LIST_GET((((*l_g)).f_c).f_vars, sd_S_Var, l_v)).f_name);
+        L.l_n = _t5;
+        L._t6 = sd_str_concat(SD_STR_LIT("l_"), (SD_LIST_GET((((*l_g)).f_c).f_vars, sd_S_Var, l_v)).f_name);
+        sd_str _t7 = sd_m_Gen__retainExpr(l_g, l_t, L._t6);
+        L.l_val = _t7;
+        sd_str_release(L._t6); L._t6 = NULL;
+        bool _t8 = sd_m_Gen__inFrame(l_g, l_t);
+        if (_t8) {
+          sd_str _t9 = sd_m_Gen__frameField(l_g, L.l_n, l_t);
+          L.l_fld = _t9;
+          L._t10 = sd_str_retain(L.l_fld);
+          sd_int _t11 = sd_int_retain(l_v);
+          sd_map_set((&(l_g)->f_varC), &_t11, &L._t10);
+          L._t10 = NULL;
+          L._t12 = sd_m_Gen__ctype((*l_g), l_t);
+          L._t13 = sd_f_declText(L._t12, L.l_fld);
+          sd_str _t14[] = {L._t13, SD_STR_LIT(" = "), L.l_val, SD_STR_LIT(";")};
+          L._t15 = sd_str_concat_n(_t14, 4);
+          sd_m_Gen__emit(l_g, L._t15);
+          sd_str_release(L._t15); L._t15 = NULL;
+          sd_str_release(L._t13); L._t13 = NULL;
+          sd_str_release(L._t12); L._t12 = NULL;
+          sd_str_release(L.l_fld); L.l_fld = NULL;
+        } else {
+          L._t16 = sd_str_retain(L.l_n);
+          sd_int _t17 = sd_int_retain(l_v);
+          sd_map_set((&(l_g)->f_varC), &_t17, &L._t16);
+          L._t16 = NULL;
+          L._t18 = sd_m_Gen__ctype((*l_g), l_t);
+          sd_str _t19[] = {L._t18, SD_STR_LIT(" "), L.l_n, SD_STR_LIT(" = "), L.l_val, SD_STR_LIT(";")};
+          L._t20 = sd_str_concat_n(_t19, 6);
+          sd_m_Gen__emit(l_g, L._t20);
+          sd_str_release(L._t20); L._t20 = NULL;
+          sd_str_release(L._t18); L._t18 = NULL;
+        }
+        sd_m_Gen__pushLocal(l_g, l_v, l_t);
+        sd_str_release(L.l_val); L.l_val = NULL;
+        sd_str_release(L.l_n); L.l_n = NULL;
+        sd_int_release(l_t);
+        sd_int_release(l_v);
+        sd_int_release(l_pi);
+      }
+      _c1:;
+      { int64_t r_; if (SD_LIKELY((((l_i).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_i).w, SD_INT(1).w, &r_))) (l_i).w = r_; else { sd_int s_ = sd_int_add_slow((l_i), SD_INT(1)); sd_int_release((l_i)); (l_i) = s_; } }
+    }
+    sd_int_release(l_i);
+  }
   sd_rl_S6FnDecl(L.l_fd); L.l_fd = ((sd_S_FnDecl){0});
   SD_LF_LEAVE(L);
 }
@@ -33680,7 +34250,7 @@ static sd_list * sd_m_Gen__accVars(sd_S_Gen l_g, sd_S_Stmt l_st) {
         {
           int64_t l_j = ((int64_t)0);
           if (SD_LIKELY(((l_want.w) & 1) == 0)) {
-            int64_t r_want_1900 = SD_SMALL(l_want);
+            int64_t r_want_1941 = SD_SMALL(l_want);
             for (;;) {
               SD_PREEMPT();
               if (!((l_j < SD_SMALL(sd_list_len(L.l_sites))))) break;
@@ -33691,8 +34261,8 @@ static sd_list * sd_m_Gen__accVars(sd_S_Gen l_g, sd_S_Stmt l_st) {
                   sd_S_Stmt l_us = SD_LIST_GET((((l_g).f_c).f_ast).f_stmts, sd_S_Stmt, SD_LIST_GET(L.l_sites, sd_int, SD_INT_S(l_j)));
                   if ((SD_BOX_GET((l_us).f_kind, sd_E_StmtKind).tag == 3)) {
                     int64_t _t20 = ((int64_t)1);
-                    if (SD_UNLIKELY(__builtin_add_overflow(r_want_1900, _t20, &r_want_1900))) {
-                      sd_int _t21 = sd_int_from_i64((int64_t)((uint64_t)r_want_1900 - (uint64_t)_t20));
+                    if (SD_UNLIKELY(__builtin_add_overflow(r_want_1941, _t20, &r_want_1941))) {
+                      sd_int _t21 = sd_int_from_i64((int64_t)((uint64_t)r_want_1941 - (uint64_t)_t20));
                       l_want = sd_int_add(_t21, SD_INT_S(_t20));
                       sd_int_release(_t21);
                       sd_rl_S9AccUpdate(L.l_u); L.l_u = ((sd_S_AccUpdate){0});
@@ -33700,8 +34270,8 @@ static sd_list * sd_m_Gen__accVars(sd_S_Gen l_g, sd_S_Stmt l_st) {
                     }
                   } else {
                     int64_t _t22 = ((int64_t)2);
-                    if (SD_UNLIKELY(__builtin_add_overflow(r_want_1900, _t22, &r_want_1900))) {
-                      sd_int _t23 = sd_int_from_i64((int64_t)((uint64_t)r_want_1900 - (uint64_t)_t22));
+                    if (SD_UNLIKELY(__builtin_add_overflow(r_want_1941, _t22, &r_want_1941))) {
+                      sd_int _t23 = sd_int_from_i64((int64_t)((uint64_t)r_want_1941 - (uint64_t)_t22));
                       l_want = sd_int_add(_t23, SD_INT_S(_t22));
                       sd_int_release(_t23);
                       sd_rl_S9AccUpdate(L.l_u); L.l_u = ((sd_S_AccUpdate){0});
@@ -33714,7 +34284,7 @@ static sd_list * sd_m_Gen__accVars(sd_S_Gen l_g, sd_S_Stmt l_st) {
               _c18:;
               l_j++;
             }
-            l_want = sd_int_from_i64(r_want_1900);
+            l_want = sd_int_from_i64(r_want_1941);
             goto _d16;
           }
           for (;;) {
@@ -33881,7 +34451,7 @@ SD_NO_TCE static sd_int sd_m_Gen__accSize(sd_S_Gen l_g, sd_int l_b) {
   {
     sd_int l_i = SD_INT(0);
     if (SD_LIKELY(((l_n.w) & 1) == 0)) {
-      int64_t r_n_1925 = SD_SMALL(l_n);
+      int64_t r_n_1966 = SD_SMALL(l_n);
       for (;;) {
         SD_PREEMPT();
         if (!(sd_int_lt(l_i, (l_bl).f_count))) break;
@@ -33889,22 +34459,22 @@ SD_NO_TCE static sd_int sd_m_Gen__accSize(sd_S_Gen l_g, sd_int l_b) {
           sd_int _t4 = sd_m_Ast__at(((l_g).f_c).f_ast, (l_bl).f_list, l_i);
           SD_PREEMPT();
           sd_int _t5 = sd_m_Gen__accSizeStmt(l_g, _t4);
-          int64_t _t6; if (SD_UNLIKELY((_t5.w & 1) != 0 || __builtin_add_overflow(r_n_1925, _t5.w >> 1, &_t6))) {
-            sd_int _t7 = sd_int_from_i64(r_n_1925);
+          int64_t _t6; if (SD_UNLIKELY((_t5.w & 1) != 0 || __builtin_add_overflow(r_n_1966, _t5.w >> 1, &_t6))) {
+            sd_int _t7 = sd_int_from_i64(r_n_1966);
             l_n = sd_int_add(_t7, _t5);
             sd_int_release(_t7);
             sd_int_release(_t5);
             sd_int_release(_t4);
             goto _c2;
           }
-          r_n_1925 = _t6;
+          r_n_1966 = _t6;
           sd_int_release(_t5);
           sd_int_release(_t4);
         }
         _c3:;
         { int64_t r_; if (SD_LIKELY((((l_i).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_i).w, SD_INT(1).w, &r_))) (l_i).w = r_; else { sd_int s_ = sd_int_add_slow((l_i), SD_INT(1)); sd_int_release((l_i)); (l_i) = s_; } }
       }
-      l_n = sd_int_from_i64(r_n_1925);
+      l_n = sd_int_from_i64(r_n_1966);
       goto _d1;
     }
     for (;;) {
@@ -33970,7 +34540,7 @@ SD_NO_TCE static sd_int sd_m_Gen__accSizeStmt(sd_S_Gen l_g, sd_int l_s) {
       {
         sd_int l_k = SD_INT(0);
         if (SD_LIKELY(((l_n.w) & 1) == 0)) {
-          int64_t r_n_1931 = SD_SMALL(l_n);
+          int64_t r_n_1972 = SD_SMALL(l_n);
           for (;;) {
             SD_PREEMPT();
             if (!(sd_int_lt(l_k, (l_st).f_count))) break;
@@ -33978,22 +34548,22 @@ SD_NO_TCE static sd_int sd_m_Gen__accSizeStmt(sd_S_Gen l_g, sd_int l_s) {
               sd_int _t16 = sd_m_Ast__at(((l_g).f_c).f_ast, (l_st).f_list, l_k);
               SD_PREEMPT();
               sd_int _t17 = sd_m_Gen__accSize(l_g, (SD_LIST_GET((((l_g).f_c).f_ast).f_cases, sd_S_Case, _t16)).f_body);
-              int64_t _t18; if (SD_UNLIKELY((_t17.w & 1) != 0 || __builtin_add_overflow(r_n_1931, _t17.w >> 1, &_t18))) {
-                sd_int _t19 = sd_int_from_i64(r_n_1931);
+              int64_t _t18; if (SD_UNLIKELY((_t17.w & 1) != 0 || __builtin_add_overflow(r_n_1972, _t17.w >> 1, &_t18))) {
+                sd_int _t19 = sd_int_from_i64(r_n_1972);
                 l_n = sd_int_add(_t19, _t17);
                 sd_int_release(_t19);
                 sd_int_release(_t17);
                 sd_int_release(_t16);
                 goto _c14;
               }
-              r_n_1931 = _t18;
+              r_n_1972 = _t18;
               sd_int_release(_t17);
               sd_int_release(_t16);
             }
             _c15:;
             { int64_t r_; if (SD_LIKELY((((l_k).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_k).w, SD_INT(1).w, &r_))) (l_k).w = r_; else { sd_int s_ = sd_int_add_slow((l_k), SD_INT(1)); sd_int_release((l_k)); (l_k) = s_; } }
           }
-          l_n = sd_int_from_i64(r_n_1931);
+          l_n = sd_int_from_i64(r_n_1972);
           goto _d13;
         }
         for (;;) {
@@ -34227,29 +34797,29 @@ SD_NO_TCE static sd_int sd_m_Gen__countVarExpr(sd_S_Gen l_g, sd_int l_e, sd_int 
   {
     sd_int l_k = SD_INT(0);
     if (SD_LIKELY(((l_n.w) & 1) == 0)) {
-      int64_t r_n_1950 = SD_SMALL(l_n);
+      int64_t r_n_1991 = SD_SMALL(l_n);
       for (;;) {
         SD_PREEMPT();
         if (!(sd_int_lt(l_k, (l_x).f_count))) break;
         {
           sd_int _t11 = sd_m_Ast__at(((l_g).f_c).f_ast, (l_x).f_list, l_k);
           sd_int _t12 = sd_m_Gen__countVarExpr(l_g, _t11, l_v);
-          int64_t _t13; if (SD_UNLIKELY((_t12.w & 1) != 0 || __builtin_add_overflow(r_n_1950, _t12.w >> 1, &_t13))) {
-            sd_int _t14 = sd_int_from_i64(r_n_1950);
+          int64_t _t13; if (SD_UNLIKELY((_t12.w & 1) != 0 || __builtin_add_overflow(r_n_1991, _t12.w >> 1, &_t13))) {
+            sd_int _t14 = sd_int_from_i64(r_n_1991);
             l_n = sd_int_add(_t14, _t12);
             sd_int_release(_t14);
             sd_int_release(_t12);
             sd_int_release(_t11);
             goto _c9;
           }
-          r_n_1950 = _t13;
+          r_n_1991 = _t13;
           sd_int_release(_t12);
           sd_int_release(_t11);
         }
         _c10:;
         { int64_t r_; if (SD_LIKELY((((l_k).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_k).w, SD_INT(1).w, &r_))) (l_k).w = r_; else { sd_int s_ = sd_int_add_slow((l_k), SD_INT(1)); sd_int_release((l_k)); (l_k) = s_; } }
       }
-      l_n = sd_int_from_i64(r_n_1950);
+      l_n = sd_int_from_i64(r_n_1991);
       goto _d8;
     }
     for (;;) {
@@ -34280,7 +34850,7 @@ SD_NO_TCE static sd_int sd_m_Gen__countVarBlock(sd_S_Gen l_g, sd_int l_b, sd_int
   {
     sd_int l_i = SD_INT(0);
     if (SD_LIKELY(((l_n.w) & 1) == 0)) {
-      int64_t r_n_1955 = SD_SMALL(l_n);
+      int64_t r_n_1996 = SD_SMALL(l_n);
       for (;;) {
         SD_PREEMPT();
         if (!(sd_int_lt(l_i, (l_bl).f_count))) break;
@@ -34288,22 +34858,22 @@ SD_NO_TCE static sd_int sd_m_Gen__countVarBlock(sd_S_Gen l_g, sd_int l_b, sd_int
           sd_int _t4 = sd_m_Ast__at(((l_g).f_c).f_ast, (l_bl).f_list, l_i);
           SD_PREEMPT();
           sd_int _t5 = sd_m_Gen__countVarStmt(l_g, _t4, l_v);
-          int64_t _t6; if (SD_UNLIKELY((_t5.w & 1) != 0 || __builtin_add_overflow(r_n_1955, _t5.w >> 1, &_t6))) {
-            sd_int _t7 = sd_int_from_i64(r_n_1955);
+          int64_t _t6; if (SD_UNLIKELY((_t5.w & 1) != 0 || __builtin_add_overflow(r_n_1996, _t5.w >> 1, &_t6))) {
+            sd_int _t7 = sd_int_from_i64(r_n_1996);
             l_n = sd_int_add(_t7, _t5);
             sd_int_release(_t7);
             sd_int_release(_t5);
             sd_int_release(_t4);
             goto _c2;
           }
-          r_n_1955 = _t6;
+          r_n_1996 = _t6;
           sd_int_release(_t5);
           sd_int_release(_t4);
         }
         _c3:;
         { int64_t r_; if (SD_LIKELY((((l_i).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_i).w, SD_INT(1).w, &r_))) (l_i).w = r_; else { sd_int s_ = sd_int_add_slow((l_i), SD_INT(1)); sd_int_release((l_i)); (l_i) = s_; } }
       }
-      l_n = sd_int_from_i64(r_n_1955);
+      l_n = sd_int_from_i64(r_n_1996);
       goto _d1;
     }
     for (;;) {
@@ -34341,29 +34911,29 @@ SD_NO_TCE static sd_int sd_m_Gen__countVarStmt(sd_S_Gen l_g, sd_int l_s, sd_int 
       {
         sd_int l_i = SD_INT(0);
         if (SD_LIKELY(((l_n.w) & 1) == 0)) {
-          int64_t r_n_1962 = SD_SMALL(l_n);
+          int64_t r_n_2003 = SD_SMALL(l_n);
           for (;;) {
             SD_PREEMPT();
             if (!(sd_int_lt(l_i, (l_st).f_count))) break;
             {
               sd_int _t7 = sd_m_Ast__at(((l_g).f_c).f_ast, (l_st).f_list, l_i);
               sd_int _t8 = sd_m_Gen__countVarExpr(l_g, (SD_LIST_GET((((l_g).f_c).f_ast).f_targets, sd_S_Target, _t7)).f_expr, l_v);
-              int64_t _t9; if (SD_UNLIKELY((_t8.w & 1) != 0 || __builtin_add_overflow(r_n_1962, _t8.w >> 1, &_t9))) {
-                sd_int _t10 = sd_int_from_i64(r_n_1962);
+              int64_t _t9; if (SD_UNLIKELY((_t8.w & 1) != 0 || __builtin_add_overflow(r_n_2003, _t8.w >> 1, &_t9))) {
+                sd_int _t10 = sd_int_from_i64(r_n_2003);
                 l_n = sd_int_add(_t10, _t8);
                 sd_int_release(_t10);
                 sd_int_release(_t8);
                 sd_int_release(_t7);
                 goto _c5;
               }
-              r_n_1962 = _t9;
+              r_n_2003 = _t9;
               sd_int_release(_t8);
               sd_int_release(_t7);
             }
             _c6:;
             { int64_t r_; if (SD_LIKELY((((l_i).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_i).w, SD_INT(1).w, &r_))) (l_i).w = r_; else { sd_int s_ = sd_int_add_slow((l_i), SD_INT(1)); sd_int_release((l_i)); (l_i) = s_; } }
           }
-          l_n = sd_int_from_i64(r_n_1962);
+          l_n = sd_int_from_i64(r_n_2003);
           goto _d4;
         }
         for (;;) {
@@ -34386,29 +34956,29 @@ SD_NO_TCE static sd_int sd_m_Gen__countVarStmt(sd_S_Gen l_g, sd_int l_s, sd_int 
       {
         sd_int l_j = SD_INT(0);
         if (SD_LIKELY(((l_n.w) & 1) == 0)) {
-          int64_t r_n_1962 = SD_SMALL(l_n);
+          int64_t r_n_2003 = SD_SMALL(l_n);
           for (;;) {
             SD_PREEMPT();
             if (!(sd_int_lt(l_j, (l_st).f_count))) break;
             {
               sd_int _t16 = sd_m_Ast__at(((l_g).f_c).f_ast, (l_st).f_list, l_j);
               sd_int _t17 = sd_m_Gen__countVarExpr(l_g, _t16, l_v);
-              int64_t _t18; if (SD_UNLIKELY((_t17.w & 1) != 0 || __builtin_add_overflow(r_n_1962, _t17.w >> 1, &_t18))) {
-                sd_int _t19 = sd_int_from_i64(r_n_1962);
+              int64_t _t18; if (SD_UNLIKELY((_t17.w & 1) != 0 || __builtin_add_overflow(r_n_2003, _t17.w >> 1, &_t18))) {
+                sd_int _t19 = sd_int_from_i64(r_n_2003);
                 l_n = sd_int_add(_t19, _t17);
                 sd_int_release(_t19);
                 sd_int_release(_t17);
                 sd_int_release(_t16);
                 goto _c14;
               }
-              r_n_1962 = _t18;
+              r_n_2003 = _t18;
               sd_int_release(_t17);
               sd_int_release(_t16);
             }
             _c15:;
             { int64_t r_; if (SD_LIKELY((((l_j).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_j).w, SD_INT(1).w, &r_))) (l_j).w = r_; else { sd_int s_ = sd_int_add_slow((l_j), SD_INT(1)); sd_int_release((l_j)); (l_j) = s_; } }
           }
-          l_n = sd_int_from_i64(r_n_1962);
+          l_n = sd_int_from_i64(r_n_2003);
           goto _d13;
         }
         for (;;) {
@@ -34464,29 +35034,29 @@ SD_NO_TCE static sd_int sd_m_Gen__countVarStmt(sd_S_Gen l_g, sd_int l_s, sd_int 
             {
               sd_int l_l = SD_INT(0);
               if (SD_LIKELY(((l_n.w) & 1) == 0)) {
-                int64_t r_n_1962 = SD_SMALL(l_n);
+                int64_t r_n_2003 = SD_SMALL(l_n);
                 for (;;) {
                   SD_PREEMPT();
                   if (!(sd_int_lt(l_l, (l_cs).f_labelCount))) break;
                   {
                     sd_int _t37 = sd_m_Ast__at(((l_g).f_c).f_ast, (l_cs).f_labels, l_l);
                     sd_int _t38 = sd_m_Gen__countVarExpr(l_g, (SD_LIST_GET((((l_g).f_c).f_ast).f_labels, sd_S_Label, _t37)).f_expr, l_v);
-                    int64_t _t39; if (SD_UNLIKELY((_t38.w & 1) != 0 || __builtin_add_overflow(r_n_1962, _t38.w >> 1, &_t39))) {
-                      sd_int _t40 = sd_int_from_i64(r_n_1962);
+                    int64_t _t39; if (SD_UNLIKELY((_t38.w & 1) != 0 || __builtin_add_overflow(r_n_2003, _t38.w >> 1, &_t39))) {
+                      sd_int _t40 = sd_int_from_i64(r_n_2003);
                       l_n = sd_int_add(_t40, _t38);
                       sd_int_release(_t40);
                       sd_int_release(_t38);
                       sd_int_release(_t37);
                       goto _c35;
                     }
-                    r_n_1962 = _t39;
+                    r_n_2003 = _t39;
                     sd_int_release(_t38);
                     sd_int_release(_t37);
                   }
                   _c36:;
                   { int64_t r_; if (SD_LIKELY((((l_l).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_l).w, SD_INT(1).w, &r_))) (l_l).w = r_; else { sd_int s_ = sd_int_add_slow((l_l), SD_INT(1)); sd_int_release((l_l)); (l_l) = s_; } }
                 }
-                l_n = sd_int_from_i64(r_n_1962);
+                l_n = sd_int_from_i64(r_n_2003);
                 goto _d34;
               }
               for (;;) {
@@ -36242,7 +36812,7 @@ SD_NO_TCE static sd_str sd_m_Gen__gconv(sd_S_Gen * l_g, sd_int l_e) {
   return _t25;
 }
 
-typedef struct { sd_lframe h; sd_list * l_args; sd_list * l_ops; sd_list * l_vals; sd_str _t27; sd_str _t32; sd_str _t37; sd_str _t42; sd_str _t46; sd_str _t49; sd_str _t61; sd_str _t62; sd_str _t64; sd_str _t67; sd_str _t68; sd_str _t70; sd_str _t73; sd_str _t75; sd_str _t76; sd_str _t81; sd_str _t83; sd_str _t84; sd_str _t86; sd_str _t89; sd_str _t91; sd_str _t92; sd_str _t94; sd_str l_o; sd_str l_ok; sd_str _t99; sd_str _t101; sd_str _t103; sd_str _t105; sd_str _t109; } sd_L_sd_m_Gen__gbuiltin;
+typedef struct { sd_lframe h; sd_list * l_args; sd_list * l_ops; sd_list * l_vals; sd_str _t27; sd_str _t32; sd_str _t37; sd_str _t42; sd_str _t46; sd_str _t49; sd_str _t61; sd_str _t62; sd_str _t64; sd_str _t67; sd_str _t68; sd_str _t70; sd_str _t73; sd_str _t75; sd_str _t76; sd_str _t81; sd_str _t83; sd_str _t84; sd_str _t86; sd_str _t89; sd_str _t91; sd_str _t92; sd_str _t94; sd_str l_o; sd_str l_ok; sd_str _t99; sd_str _t101; sd_str _t103; sd_str _t105; sd_str _t109; sd_str l_p; sd_str _t113; sd_str _t114; sd_str _t115; sd_str _t117; sd_str _t118; sd_str _t120; } sd_L_sd_m_Gen__gbuiltin;
 static void sd_lr_sd_m_Gen__gbuiltin(sd_lframe *p) {
   sd_L_sd_m_Gen__gbuiltin *L = (sd_L_sd_m_Gen__gbuiltin *)p;
   sd_list_release(L->l_args);
@@ -36278,6 +36848,13 @@ static void sd_lr_sd_m_Gen__gbuiltin(sd_lframe *p) {
   sd_str_release(L->_t103);
   sd_str_release(L->_t105);
   sd_str_release(L->_t109);
+  sd_str_release(L->l_p);
+  sd_str_release(L->_t113);
+  sd_str_release(L->_t114);
+  sd_str_release(L->_t115);
+  sd_str_release(L->_t117);
+  sd_str_release(L->_t118);
+  sd_str_release(L->_t120);
 }
 SD_NO_TCE static sd_str sd_m_Gen__gbuiltin(sd_S_Gen * l_g, sd_int l_e) {
   sd_L_sd_m_Gen__gbuiltin L = {{0}};
@@ -36665,8 +37242,53 @@ SD_NO_TCE static sd_str sd_m_Gen__gbuiltin(sd_S_Gen * l_g, sd_int l_e) {
       sd_list_release(L.l_args);
       sd_int_release(l_rt);
       return _t110;
+    } else if (_t12 == 34) {
+      sd_int _t111 = sd_m_Gen__elemOf((*l_g), l_rt);
+      sd_int l_vt = _t111;
+      sd_str _t112 = sd_m_Gen__newTmp(l_g);
+      L.l_p = _t112;
+      L._t113 = sd_m_Gen__ctype((*l_g), l_vt);
+      L._t114 = sd_str_retain(L.l_p);
+      L._t115 = sd_str_retain(l_v);
+      sd_int _t116 = sd_m_Types__key((((*l_g)).f_c).f_types, l_rt);
+      L._t117 = sd_str_retain(SD_LIST_GET(L.l_vals, sd_str, SD_INT(1)));
+      L._t118 = sd_m_Gen__addr(l_g, _t116, L._t117);
+      sd_str _t119[] = {L._t113, SD_STR_LIT(" *"), L._t114, SD_STR_LIT(" = sd_map_get("), L._t115, SD_STR_LIT(", "), L._t118, SD_STR_LIT(");")};
+      L._t120 = sd_str_concat_n(_t119, 8);
+      sd_m_Gen__emit(l_g, L._t120);
+      sd_str_release(L._t120); L._t120 = NULL;
+      sd_str_release(L._t118); L._t118 = NULL;
+      sd_str_release(L._t117); L._t117 = NULL;
+      sd_int_release(_t116);
+      sd_str_release(L._t115); L._t115 = NULL;
+      sd_str_release(L._t114); L._t114 = NULL;
+      sd_str_release(L._t113); L._t113 = NULL;
+      sd_str _t121[] = {SD_STR_LIT("("), L.l_p, SD_STR_LIT(" \? *"), L.l_p, SD_STR_LIT(" : "), SD_LIST_GET(L.l_vals, sd_str, SD_INT(2)), SD_STR_LIT(")")};
+      sd_str _t122 = sd_str_concat_n(_t121, 7);
+      sd_str _t123 = _t122;
+      SD_LF_LEAVE(L);
+      sd_str_release(L.l_p);
+      sd_int_release(l_vt);
+      sd_list_release(L.l_vals);
+      sd_list_release(L.l_ops);
+      sd_box_release(l_b);
+      sd_int_release(l_t);
+      sd_list_release(L.l_args);
+      sd_int_release(l_rt);
+      return _t123;
+    } else if (_t12 == 35) {
+      sd_str _t124 = sd_m_Gen__genumName(l_g, l_rt, l_v);
+      sd_str _t125 = _t124;
+      SD_LF_LEAVE(L);
+      sd_list_release(L.l_vals);
+      sd_list_release(L.l_ops);
+      sd_box_release(l_b);
+      sd_int_release(l_t);
+      sd_list_release(L.l_args);
+      sd_int_release(l_rt);
+      return _t125;
     } else if (_t12 == 0 || _t12 == 16 || _t12 == 17 || _t12 == 18 || _t12 == 19 || _t12 == 23 || _t12 == 24) {
-      sd_str _t111 = SD_STR_LIT("/* internal error: builtin */");
+      sd_str _t126 = SD_STR_LIT("/* internal error: builtin */");
       SD_LF_LEAVE(L);
       sd_list_release(L.l_vals);
       sd_list_release(L.l_ops);
@@ -36674,9 +37296,9 @@ SD_NO_TCE static sd_str sd_m_Gen__gbuiltin(sd_S_Gen * l_g, sd_int l_e) {
       sd_int_release(l_t);
       sd_list_release(L.l_args);
       sd_int_release(l_rt);
-      return _t111;
+      return _t126;
     } else if (_t12 == 30 || _t12 == 26) {
-      sd_str _t112 = SD_STR_LIT("/* internal error: builtin */");
+      sd_str _t127 = SD_STR_LIT("/* internal error: builtin */");
       SD_LF_LEAVE(L);
       sd_list_release(L.l_vals);
       sd_list_release(L.l_ops);
@@ -36684,7 +37306,7 @@ SD_NO_TCE static sd_str sd_m_Gen__gbuiltin(sd_S_Gen * l_g, sd_int l_e) {
       sd_int_release(l_t);
       sd_list_release(L.l_args);
       sd_int_release(l_rt);
-      return _t112;
+      return _t127;
     }
   }
   sd_crash("internal error: gbuiltin reached its end without returning");
@@ -36725,9 +37347,102 @@ static sd_str sd_f_builtinFn(sd_box * l_b) {
       return SD_STR_LIT("");
     } else if (_t1 == 23 || _t1 == 24 || _t1 == 30 || _t1 == 26 || _t1 == 31 || _t1 == 32 || _t1 == 33) {
       return SD_STR_LIT("");
+    } else if (_t1 == 34 || _t1 == 35) {
+      return SD_STR_LIT("");
     }
   }
   sd_crash("internal error: builtinFn reached its end without returning");
+}
+
+typedef struct { sd_lframe h; sd_str l_tag; sd_str _t5; sd_str _t7; } sd_L_sd_m_Gen__genumName;
+static void sd_lr_sd_m_Gen__genumName(sd_lframe *p) {
+  sd_L_sd_m_Gen__genumName *L = (sd_L_sd_m_Gen__genumName *)p;
+  sd_str_release(L->l_tag);
+  sd_str_release(L->_t5);
+  sd_str_release(L->_t7);
+}
+static sd_str sd_m_Gen__genumName(sd_S_Gen * l_g, sd_int l_t, sd_str l_v) {
+  sd_L_sd_m_Gen__genumName L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_m_Gen__genumName);
+  sd_int _t1 = sd_m_Types__decl((((*l_g)).f_c).f_types, l_t);
+  sd_int l_d = _t1;
+  sd_S_TypeDecl l_td = SD_LIST_GET(((((*l_g)).f_c).f_ast).f_typeDecls, sd_S_TypeDecl, l_d);
+  if (sd_int_lt((l_td).f_caseCount, SD_INT(2))) {
+    sd_str _t2 = sd_m_Gen__enumNameChain((*l_g), l_t, SD_STR_LIT("0"));
+    sd_str _t3 = _t2;
+    SD_LF_LEAVE(L);
+    sd_int_release(l_d);
+    return _t3;
+  }
+  sd_str _t4 = sd_m_Gen__newTmp(l_g);
+  L.l_tag = _t4;
+  L._t5 = sd_m_Gen__declName((*l_g), l_t);
+  sd_str _t6[] = {SD_STR_LIT("int32_t "), L.l_tag, SD_STR_LIT(" = SD_BOX_GET("), l_v, SD_STR_LIT(", sd_E_"), L._t5, SD_STR_LIT(").tag;")};
+  L._t7 = sd_str_concat_n(_t6, 7);
+  sd_m_Gen__emit(l_g, L._t7);
+  sd_str_release(L._t7); L._t7 = NULL;
+  sd_str_release(L._t5); L._t5 = NULL;
+  sd_str _t8 = sd_m_Gen__enumNameChain((*l_g), l_t, L.l_tag);
+  sd_str _t9 = _t8;
+  SD_LF_LEAVE(L);
+  sd_str_release(L.l_tag);
+  sd_int_release(l_d);
+  return _t9;
+}
+
+typedef struct { sd_lframe h; sd_S_EnumCase _t4; sd_str l_out; sd_S_EnumCase _t10; } sd_L_sd_m_Gen__enumNameChain;
+static void sd_lr_sd_m_Gen__enumNameChain(sd_lframe *p) {
+  sd_L_sd_m_Gen__enumNameChain *L = (sd_L_sd_m_Gen__enumNameChain *)p;
+  sd_rl_S8EnumCase(L->_t4);
+  sd_str_release(L->l_out);
+  sd_rl_S8EnumCase(L->_t10);
+}
+static sd_str sd_m_Gen__enumNameChain(sd_S_Gen l_g, sd_int l_t, sd_str l_tag) {
+  sd_L_sd_m_Gen__enumNameChain L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_m_Gen__enumNameChain);
+  sd_int _t1 = sd_m_Types__decl(((l_g).f_c).f_types, l_t);
+  sd_int l_d = _t1;
+  sd_S_TypeDecl l_td = SD_LIST_GET((((l_g).f_c).f_ast).f_typeDecls, sd_S_TypeDecl, l_d);
+  if (sd_int_eq((l_td).f_caseCount, SD_INT(0))) {
+    sd_str _t2 = SD_STR_LIT("SD_STR_LIT(\"\")");
+    SD_LF_LEAVE(L);
+    sd_int_release(l_d);
+    return _t2;
+  }
+  sd_int _t3 = sd_int_sub((l_td).f_caseCount, SD_INT(1));
+  L._t4 = sd_m_Checker__enumCase((l_g).f_c, l_d, _t3);
+  sd_str _t5 = sd_f_cString((L._t4).f_name);
+  sd_str _t6[] = {SD_STR_LIT("SD_STR_LIT("), _t5, SD_STR_LIT(")")};
+  sd_str _t7 = sd_str_concat_n(_t6, 3);
+  L.l_out = _t7;
+  sd_str_release(_t5); 
+  sd_rl_S8EnumCase(L._t4); L._t4 = ((sd_S_EnumCase){0});
+  sd_int_release(_t3);
+  {
+    sd_int _t8 = sd_int_sub((l_td).f_caseCount, SD_INT(2));
+    sd_int l_i = _t8;
+    for (;;) {
+      SD_PREEMPT();
+      if (!(sd_int_ge(l_i, SD_INT(0)))) break;
+      {
+        L._t10 = sd_m_Checker__enumCase((l_g).f_c, l_d, l_i);
+        sd_str _t11 = sd_f_cString((L._t10).f_name);
+        sd_str_part _t12[] = {{SD_STR_LIT("(")}, {l_tag}, {SD_STR_LIT(" == ")}, {NULL, l_i}, {SD_STR_LIT(" \? SD_STR_LIT(")}, {_t11}, {SD_STR_LIT(") : ")}, {L.l_out}, {SD_STR_LIT(")")}};
+        sd_str _t13 = sd_str_concat_parts(_t12, 9);
+        sd_str_release(L.l_out);
+        L.l_out = _t13;
+        sd_str_release(_t11); 
+        sd_rl_S8EnumCase(L._t10); L._t10 = ((sd_S_EnumCase){0});
+      }
+      _c9:;
+      { int64_t r_; if (SD_LIKELY((((l_i).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_sub_overflow((l_i).w, SD_INT(1).w, &r_))) (l_i).w = r_; else { sd_int s_ = sd_int_sub_slow((l_i), SD_INT(1)); sd_int_release((l_i)); (l_i) = s_; } }
+    }
+    sd_int_release(l_i);
+  }
+  sd_str _t14 = L.l_out;
+  SD_LF_LEAVE(L);
+  sd_int_release(l_d);
+  return _t14;
 }
 
 typedef struct { sd_lframe h; sd_str _t2; sd_str _t3; sd_str _t9; sd_str _t13; } sd_L_sd_m_Gen__okOpt;
@@ -37005,7 +37720,7 @@ SD_NO_TCE static sd_str sd_m_Gen__gmutBuiltin(sd_S_Gen * l_g, sd_int l_e, sd_box
       sd_str_release(L.l_place);
       sd_list_release(L.l_vals);
       return _t59;
-    } else if (_t13 == 28 || _t13 == 29 || _t13 == 31 || _t13 == 32 || _t13 == 33) {
+    } else if (_t13 == 28 || _t13 == 29 || _t13 == 31 || _t13 == 32 || _t13 == 33 || _t13 == 34 || _t13 == 35) {
       sd_str _t60 = SD_STR_LIT("");
       SD_LF_LEAVE(L);
       sd_int_release(l_el);
@@ -46146,12 +46861,12 @@ SD_NO_TCE static bool sd_m_Gen__mentionsVar(sd_S_Gen l_g, sd_int l_e, sd_int l_v
   return false;
 }
 
-typedef struct { sd_lframe h; sd_S_Expr l_lx; sd_S_Expr l_rx; sd_list * _t5; sd_list * l_leaves; sd_list * l_rest; sd_list * l_ops; sd_list * l_ints; sd_list * l_vals; sd_str l_dest; sd_str l_pt; sd_str _t25; sd_str _t26; sd_str _t28; sd_str _t31; sd_list * l_parts; sd_str l_arr; sd_str _t40; sd_str _t42; sd_str _t44; } sd_L_sd_m_Gen__genAppend;
+typedef struct { sd_lframe h; sd_S_Expr l_lx; sd_S_Expr l_rx; sd_list * _t8; sd_list * l_leaves; sd_list * l_rest; sd_list * l_ops; sd_list * l_ints; sd_list * l_vals; sd_str l_dest; sd_str l_pt; sd_str _t28; sd_str _t29; sd_str _t31; sd_str _t34; sd_list * l_parts; sd_str l_arr; sd_str _t43; sd_str _t45; sd_str _t47; } sd_L_sd_m_Gen__genAppend;
 static void sd_lr_sd_m_Gen__genAppend(sd_lframe *p) {
   sd_L_sd_m_Gen__genAppend *L = (sd_L_sd_m_Gen__genAppend *)p;
   sd_rl_S4Expr(L->l_lx);
   sd_rl_S4Expr(L->l_rx);
-  sd_list_release(L->_t5);
+  sd_list_release(L->_t8);
   sd_list_release(L->l_leaves);
   sd_list_release(L->l_rest);
   sd_list_release(L->l_ops);
@@ -46159,15 +46874,15 @@ static void sd_lr_sd_m_Gen__genAppend(sd_lframe *p) {
   sd_list_release(L->l_vals);
   sd_str_release(L->l_dest);
   sd_str_release(L->l_pt);
-  sd_str_release(L->_t25);
-  sd_str_release(L->_t26);
   sd_str_release(L->_t28);
+  sd_str_release(L->_t29);
   sd_str_release(L->_t31);
+  sd_str_release(L->_t34);
   sd_list_release(L->l_parts);
   sd_str_release(L->l_arr);
-  sd_str_release(L->_t40);
-  sd_str_release(L->_t42);
-  sd_str_release(L->_t44);
+  sd_str_release(L->_t43);
+  sd_str_release(L->_t45);
+  sd_str_release(L->_t47);
 }
 SD_NO_TCE static bool sd_m_Gen__genAppend(sd_S_Gen * l_g, sd_S_Stmt l_st, sd_S_Target l_tg) {
   sd_L_sd_m_Gen__genAppend L = {{0}};
@@ -46183,36 +46898,45 @@ SD_NO_TCE static bool sd_m_Gen__genAppend(sd_S_Gen * l_g, sd_S_Stmt l_st, sd_S_T
   }
   sd_int _t2 = sd_m_Gen__appendRoot((*l_g), (l_tg).f_expr);
   sd_int l_v = _t2;
-  if ((sd_int_lt(l_v, SD_INT(0)) || ((SD_BOX_GET((L.l_lx).f_kind, sd_E_ExprKind).tag == 7) && (!(SD_BOX_GET((SD_LIST_GET((((*l_g)).f_c).f_vars, sd_S_Var, l_v)).f_kind, sd_E_VarKind).tag == 0))))) {
-    bool _t3 = false;
+  bool _t5 = sd_int_lt(l_v, SD_INT(0));
+  if (!_t5) {
+    bool _t4 = ((SD_BOX_GET((L.l_lx).f_kind, sd_E_ExprKind).tag == 7) && (!(SD_BOX_GET((SD_LIST_GET((((*l_g)).f_c).f_vars, sd_S_Var, l_v)).f_kind, sd_E_VarKind).tag == 0)));
+    if (_t4) {
+      bool _t3 = sd_m_Gen__isOwnedParam((*l_g), l_v);
+      _t4 = (!_t3);
+    }
+    _t5 = _t4;
+  }
+  if (_t5) {
+    bool _t6 = false;
     SD_LF_LEAVE(L);
     sd_int_release(l_v);
     sd_rl_S8ExprInfo(l_li);
     sd_rl_S4Expr(L.l_lx);
-    return _t3;
+    return _t6;
   }
   L.l_rx = sd_rt_S4Expr(SD_LIST_GET(((((*l_g)).f_c).f_ast).f_exprs, sd_S_Expr, (l_st).f_expr));
   sd_S_ExprInfo l_ri = sd_rt_S8ExprInfo(SD_LIST_GET((((*l_g)).f_c).f_info, sd_S_ExprInfo, (l_st).f_expr));
   if (((((!(SD_BOX_GET((L.l_rx).f_kind, sd_E_ExprKind).tag == 12)) || (!(SD_BOX_GET((L.l_rx).f_op, sd_E_Tok).tag == 39))) || (!sd_int_eq((l_ri).f_ty, sd_c_tyString()))) || (l_ri).f_wrap)) {
-    bool _t4 = false;
+    bool _t7 = false;
     SD_LF_LEAVE(L);
     sd_rl_S8ExprInfo(l_ri);
     sd_rl_S4Expr(L.l_rx);
     sd_int_release(l_v);
     sd_rl_S8ExprInfo(l_li);
     sd_rl_S4Expr(L.l_lx);
-    return _t4;
+    return _t7;
   }
-  L._t5 = sd_list_new(&sd_type_int, 0);
-  sd_list * _t6 = sd_m_Gen__concatLeaves((*l_g), (L.l_rx).f_a, L._t5);
-  L.l_leaves = _t6;
-  sd_list_release(L._t5); L._t5 = NULL;
-  sd_list * _t7 = sd_m_Gen__concatLeaves((*l_g), (L.l_rx).f_b, L.l_leaves);
+  L._t8 = sd_list_new(&sd_type_int, 0);
+  sd_list * _t9 = sd_m_Gen__concatLeaves((*l_g), (L.l_rx).f_a, L._t8);
+  L.l_leaves = _t9;
+  sd_list_release(L._t8); L._t8 = NULL;
+  sd_list * _t10 = sd_m_Gen__concatLeaves((*l_g), (L.l_rx).f_b, L.l_leaves);
   sd_list_release(L.l_leaves);
-  L.l_leaves = _t7;
-  bool _t8 = sd_m_Gen__samePlace((*l_g), SD_LIST_GET(L.l_leaves, sd_int, SD_INT(0)), (l_tg).f_expr);
-  if ((!_t8)) {
-    bool _t9 = false;
+  L.l_leaves = _t10;
+  bool _t11 = sd_m_Gen__samePlace((*l_g), SD_LIST_GET(L.l_leaves, sd_int, SD_INT(0)), (l_tg).f_expr);
+  if ((!_t11)) {
+    bool _t12 = false;
     SD_LF_LEAVE(L);
     sd_list_release(L.l_leaves);
     sd_rl_S8ExprInfo(l_ri);
@@ -46220,19 +46944,19 @@ SD_NO_TCE static bool sd_m_Gen__genAppend(sd_S_Gen * l_g, sd_S_Stmt l_st, sd_S_T
     sd_int_release(l_v);
     sd_rl_S8ExprInfo(l_li);
     sd_rl_S4Expr(L.l_lx);
-    return _t9;
+    return _t12;
   }
-  sd_list * _t10 = sd_list_slice(L.l_leaves, SD_INT(1), sd_list_len(L.l_leaves));
-  L.l_rest = _t10;
+  sd_list * _t13 = sd_list_slice(L.l_leaves, SD_INT(1), sd_list_len(L.l_leaves));
+  L.l_rest = _t13;
   {
     int64_t l_i = ((int64_t)0);
     for (;;) {
       SD_PREEMPT();
       if (!((l_i < SD_SMALL(sd_list_len(L.l_rest))))) break;
       {
-        bool _t12 = sd_m_Gen__mentionsVar((*l_g), SD_LIST_GET(L.l_rest, sd_int, SD_INT_S(l_i)), l_v);
-        if (_t12) {
-          bool _t13 = false;
+        bool _t15 = sd_m_Gen__mentionsVar((*l_g), SD_LIST_GET(L.l_rest, sd_int, SD_INT_S(l_i)), l_v);
+        if (_t15) {
+          bool _t16 = false;
           SD_LF_LEAVE(L);
           sd_list_release(L.l_rest);
           sd_list_release(L.l_leaves);
@@ -46241,67 +46965,67 @@ SD_NO_TCE static bool sd_m_Gen__genAppend(sd_S_Gen * l_g, sd_S_Stmt l_st, sd_S_T
           sd_int_release(l_v);
           sd_rl_S8ExprInfo(l_li);
           sd_rl_S4Expr(L.l_lx);
-          return _t13;
+          return _t16;
         }
       }
-      _c11:;
+      _c14:;
       l_i++;
     }
   }
-  sd_list * _t14 = sd_list_new(&sd_type_int, 0);
-  L.l_ops = _t14;
-  sd_list * _t15 = sd_list_new(&sd_type_bool, 0);
-  L.l_ints = _t15;
+  sd_list * _t17 = sd_list_new(&sd_type_int, 0);
+  L.l_ops = _t17;
+  sd_list * _t18 = sd_list_new(&sd_type_bool, 0);
+  L.l_ints = _t18;
   {
     int64_t l_j = ((int64_t)0);
     for (;;) {
       SD_PREEMPT();
       if (!((l_j < SD_SMALL(sd_list_len(L.l_rest))))) break;
       {
-        bool _t17 = sd_m_Gen__isIntString((*l_g), SD_LIST_GET(L.l_rest, sd_int, SD_INT_S(l_j)));
-        if (_t17) {
-          sd_int _t18 = sd_m_Gen__recvOf((*l_g), SD_LIST_GET(L.l_rest, sd_int, SD_INT_S(l_j)));
-          SD_LIST_PUSH((&L.l_ops), sd_int, _t18);
-          bool _t19 = true;
-          SD_LIST_PUSH((&L.l_ints), bool, _t19);
+        bool _t20 = sd_m_Gen__isIntString((*l_g), SD_LIST_GET(L.l_rest, sd_int, SD_INT_S(l_j)));
+        if (_t20) {
+          sd_int _t21 = sd_m_Gen__recvOf((*l_g), SD_LIST_GET(L.l_rest, sd_int, SD_INT_S(l_j)));
+          SD_LIST_PUSH((&L.l_ops), sd_int, _t21);
+          bool _t22 = true;
+          SD_LIST_PUSH((&L.l_ints), bool, _t22);
         } else {
-          sd_int _t20 = sd_int_retain(SD_LIST_GET(L.l_rest, sd_int, SD_INT_S(l_j)));
-          SD_LIST_PUSH((&L.l_ops), sd_int, _t20);
-          bool _t21 = false;
-          SD_LIST_PUSH((&L.l_ints), bool, _t21);
+          sd_int _t23 = sd_int_retain(SD_LIST_GET(L.l_rest, sd_int, SD_INT_S(l_j)));
+          SD_LIST_PUSH((&L.l_ops), sd_int, _t23);
+          bool _t24 = false;
+          SD_LIST_PUSH((&L.l_ints), bool, _t24);
         }
       }
-      _c16:;
+      _c19:;
       l_j++;
     }
   }
   SD_PREEMPT();
-  sd_list * _t22 = sd_m_Gen__operands(l_g, L.l_ops);
-  L.l_vals = _t22;
-  sd_str _t23 = sd_m_Gen__lname((*l_g), l_v);
-  L.l_dest = _t23;
+  sd_list * _t25 = sd_m_Gen__operands(l_g, L.l_ops);
+  L.l_vals = _t25;
+  sd_str _t26 = sd_m_Gen__lname((*l_g), l_v);
+  L.l_dest = _t26;
   if ((!(SD_BOX_GET((L.l_lx).f_kind, sd_E_ExprKind).tag == 7))) {
-    sd_str _t24 = sd_m_Gen__newTmp(l_g);
-    L.l_pt = _t24;
-    L._t25 = sd_str_retain(L.l_pt);
-    L._t26 = sd_m_Gen__gplace(l_g, (l_tg).f_expr);
-    sd_str _t27[] = {SD_STR_LIT("sd_str *"), L._t25, SD_STR_LIT(" = "), L._t26, SD_STR_LIT(";")};
-    L._t28 = sd_str_concat_n(_t27, 5);
-    sd_m_Gen__emit(l_g, L._t28);
+    sd_str _t27 = sd_m_Gen__newTmp(l_g);
+    L.l_pt = _t27;
+    L._t28 = sd_str_retain(L.l_pt);
+    L._t29 = sd_m_Gen__gplace(l_g, (l_tg).f_expr);
+    sd_str _t30[] = {SD_STR_LIT("sd_str *"), L._t28, SD_STR_LIT(" = "), L._t29, SD_STR_LIT(";")};
+    L._t31 = sd_str_concat_n(_t30, 5);
+    sd_m_Gen__emit(l_g, L._t31);
+    sd_str_release(L._t31); L._t31 = NULL;
+    sd_str_release(L._t29); L._t29 = NULL;
     sd_str_release(L._t28); L._t28 = NULL;
-    sd_str_release(L._t26); L._t26 = NULL;
-    sd_str_release(L._t25); L._t25 = NULL;
-    sd_str _t29 = sd_str_concat(SD_STR_LIT("*"), L.l_pt);
+    sd_str _t32 = sd_str_concat(SD_STR_LIT("*"), L.l_pt);
     sd_str_release(L.l_dest);
-    L.l_dest = _t29;
+    L.l_dest = _t32;
     sd_str_release(L.l_pt); L.l_pt = NULL;
   }
   if (((SD_SMALL(sd_list_len(L.l_vals)) == ((int64_t)1)) && (!SD_LIST_GET(L.l_ints, bool, SD_INT(0))))) {
-    sd_str _t30[] = {L.l_dest, SD_STR_LIT(" = sd_str_append("), L.l_dest, SD_STR_LIT(", "), SD_LIST_GET(L.l_vals, sd_str, SD_INT(0)), SD_STR_LIT(");")};
-    L._t31 = sd_str_concat_n(_t30, 6);
-    sd_m_Gen__emit(l_g, L._t31);
-    sd_str_release(L._t31); L._t31 = NULL;
-    bool _t32 = true;
+    sd_str _t33[] = {L.l_dest, SD_STR_LIT(" = sd_str_append("), L.l_dest, SD_STR_LIT(", "), SD_LIST_GET(L.l_vals, sd_str, SD_INT(0)), SD_STR_LIT(");")};
+    L._t34 = sd_str_concat_n(_t33, 6);
+    sd_m_Gen__emit(l_g, L._t34);
+    sd_str_release(L._t34); L._t34 = NULL;
+    bool _t35 = true;
     SD_LF_LEAVE(L);
     sd_str_release(L.l_dest);
     sd_list_release(L.l_vals);
@@ -46314,10 +47038,10 @@ SD_NO_TCE static bool sd_m_Gen__genAppend(sd_S_Gen * l_g, sd_S_Stmt l_st, sd_S_T
     sd_int_release(l_v);
     sd_rl_S8ExprInfo(l_li);
     sd_rl_S4Expr(L.l_lx);
-    return _t32;
+    return _t35;
   }
-  sd_list * _t33 = sd_list_new(&sd_type_str, 0);
-  L.l_parts = _t33;
+  sd_list * _t36 = sd_list_new(&sd_type_str, 0);
+  L.l_parts = _t36;
   {
     int64_t l_k = ((int64_t)0);
     for (;;) {
@@ -46325,32 +47049,32 @@ SD_NO_TCE static bool sd_m_Gen__genAppend(sd_S_Gen * l_g, sd_S_Stmt l_st, sd_S_T
       if (!((l_k < SD_SMALL(sd_list_len(L.l_vals))))) break;
       {
         if (SD_LIST_GET(L.l_ints, bool, SD_INT_S(l_k))) {
-          sd_str _t35[] = {SD_STR_LIT("{NULL, "), SD_LIST_GET(L.l_vals, sd_str, SD_INT_S(l_k)), SD_STR_LIT("}")};
-          sd_str _t36 = sd_str_concat_n(_t35, 3);
-          SD_LIST_PUSH((&L.l_parts), sd_str, _t36);
+          sd_str _t38[] = {SD_STR_LIT("{NULL, "), SD_LIST_GET(L.l_vals, sd_str, SD_INT_S(l_k)), SD_STR_LIT("}")};
+          sd_str _t39 = sd_str_concat_n(_t38, 3);
+          SD_LIST_PUSH((&L.l_parts), sd_str, _t39);
         } else {
-          sd_str _t37[] = {SD_STR_LIT("{"), SD_LIST_GET(L.l_vals, sd_str, SD_INT_S(l_k)), SD_STR_LIT("}")};
-          sd_str _t38 = sd_str_concat_n(_t37, 3);
-          SD_LIST_PUSH((&L.l_parts), sd_str, _t38);
+          sd_str _t40[] = {SD_STR_LIT("{"), SD_LIST_GET(L.l_vals, sd_str, SD_INT_S(l_k)), SD_STR_LIT("}")};
+          sd_str _t41 = sd_str_concat_n(_t40, 3);
+          SD_LIST_PUSH((&L.l_parts), sd_str, _t41);
         }
       }
-      _c34:;
+      _c37:;
       l_k++;
     }
   }
-  sd_str _t39 = sd_m_Gen__newTmp(l_g);
-  L.l_arr = _t39;
-  L._t40 = sd_list_join(L.l_parts, SD_STR_LIT(", "));
-  sd_str _t41[] = {SD_STR_LIT("sd_str_part "), L.l_arr, SD_STR_LIT("[] = {"), L._t40, SD_STR_LIT("};")};
-  L._t42 = sd_str_concat_n(_t41, 5);
-  sd_m_Gen__emit(l_g, L._t42);
-  sd_str_release(L._t42); L._t42 = NULL;
-  sd_str_release(L._t40); L._t40 = NULL;
-  sd_str_part _t43[] = {{L.l_dest}, {SD_STR_LIT(" = sd_str_append_parts(")}, {L.l_dest}, {SD_STR_LIT(", ")}, {L.l_arr}, {SD_STR_LIT(", ")}, {NULL, sd_list_len(L.l_vals)}, {SD_STR_LIT(");")}};
-  L._t44 = sd_str_concat_parts(_t43, 8);
-  sd_m_Gen__emit(l_g, L._t44);
-  sd_str_release(L._t44); L._t44 = NULL;
-  bool _t45 = true;
+  sd_str _t42 = sd_m_Gen__newTmp(l_g);
+  L.l_arr = _t42;
+  L._t43 = sd_list_join(L.l_parts, SD_STR_LIT(", "));
+  sd_str _t44[] = {SD_STR_LIT("sd_str_part "), L.l_arr, SD_STR_LIT("[] = {"), L._t43, SD_STR_LIT("};")};
+  L._t45 = sd_str_concat_n(_t44, 5);
+  sd_m_Gen__emit(l_g, L._t45);
+  sd_str_release(L._t45); L._t45 = NULL;
+  sd_str_release(L._t43); L._t43 = NULL;
+  sd_str_part _t46[] = {{L.l_dest}, {SD_STR_LIT(" = sd_str_append_parts(")}, {L.l_dest}, {SD_STR_LIT(", ")}, {L.l_arr}, {SD_STR_LIT(", ")}, {NULL, sd_list_len(L.l_vals)}, {SD_STR_LIT(");")}};
+  L._t47 = sd_str_concat_parts(_t46, 8);
+  sd_m_Gen__emit(l_g, L._t47);
+  sd_str_release(L._t47); L._t47 = NULL;
+  bool _t48 = true;
   SD_LF_LEAVE(L);
   sd_str_release(L.l_arr);
   sd_list_release(L.l_parts);
@@ -46365,7 +47089,7 @@ SD_NO_TCE static bool sd_m_Gen__genAppend(sd_S_Gen * l_g, sd_S_Stmt l_st, sd_S_T
   sd_int_release(l_v);
   sd_rl_S8ExprInfo(l_li);
   sd_rl_S4Expr(L.l_lx);
-  return _t45;
+  return _t48;
 }
 
 SD_NO_TCE static sd_int sd_m_Gen__appendRoot(sd_S_Gen l_g, sd_int l_e) {
@@ -46384,23 +47108,28 @@ SD_NO_TCE static sd_int sd_m_Gen__appendRoot(sd_S_Gen l_g, sd_int l_e) {
       return SD_INT(-1);
     }
     sd_box * l_k = (SD_LIST_GET(((l_g).f_c).f_vars, sd_S_Var, (l_i).f_ref)).f_kind;
-    if (((!(SD_BOX_GET(l_k, sd_E_VarKind).tag == 0)) && (!(SD_BOX_GET(l_k, sd_E_VarKind).tag == 3)))) {
+    bool _t4 = ((!(SD_BOX_GET(l_k, sd_E_VarKind).tag == 0)) && (!(SD_BOX_GET(l_k, sd_E_VarKind).tag == 3)));
+    if (_t4) {
+      bool _t3 = sd_m_Gen__isOwnedParam(l_g, (l_i).f_ref);
+      _t4 = (!_t3);
+    }
+    if (_t4) {
       return SD_INT(-1);
     }
     return sd_int_retain((l_i).f_ref);
   }
-  bool _t5 = ((SD_BOX_GET((l_x).f_kind, sd_E_ExprKind).tag == 8) && (SD_BOX_GET((l_i).f_res, sd_E_Res).tag == 9));
-  if (_t5) {
-    sd_int _t3 = sd_m_Gen__typeOf(l_g, (l_x).f_a);
-    sd_box * _t4 = sd_m_Gen__kindOf(l_g, _t3);
-    _t5 = (SD_BOX_GET(_t4, sd_E_Kind).tag == 12);
-    sd_box_release(_t4);
-    sd_int_release(_t3);
+  bool _t7 = ((SD_BOX_GET((l_x).f_kind, sd_E_ExprKind).tag == 8) && (SD_BOX_GET((l_i).f_res, sd_E_Res).tag == 9));
+  if (_t7) {
+    sd_int _t5 = sd_m_Gen__typeOf(l_g, (l_x).f_a);
+    sd_box * _t6 = sd_m_Gen__kindOf(l_g, _t5);
+    _t7 = (SD_BOX_GET(_t6, sd_E_Kind).tag == 12);
+    sd_box_release(_t6);
+    sd_int_release(_t5);
   }
-  if (_t5) {
+  if (_t7) {
     SD_PREEMPT();
-    sd_int _t6 = sd_m_Gen__appendRoot(l_g, (l_x).f_a);
-    return _t6;
+    sd_int _t8 = sd_m_Gen__appendRoot(l_g, (l_x).f_a);
+    return _t8;
   }
   return SD_INT(-1);
 }
@@ -48607,15 +49336,18 @@ SD_NO_TCE static void sd_m_Gen__genSelect(sd_S_Gen * l_g, sd_S_Stmt l_st) {
   SD_LF_LEAVE(L);
 }
 
-typedef struct { sd_lframe h; sd_S_Stmt l_st; sd_str _t6; sd_str l_rel; sd_str _t12; } sd_L_sd_m_Gen__genReceived;
+typedef struct { sd_lframe h; sd_S_Stmt l_st; sd_S_Target l_tg; sd_str _t5; sd_str _t6; sd_str _t11; sd_str l_rel; sd_str _t17; } sd_L_sd_m_Gen__genReceived;
 static void sd_lr_sd_m_Gen__genReceived(sd_lframe *p) {
   sd_L_sd_m_Gen__genReceived *L = (sd_L_sd_m_Gen__genReceived *)p;
   sd_rl_S4Stmt(L->l_st);
+  sd_rl_S6Target(L->l_tg);
+  sd_str_release(L->_t5);
   sd_str_release(L->_t6);
+  sd_str_release(L->_t11);
   sd_str_release(L->l_rel);
-  sd_str_release(L->_t12);
+  sd_str_release(L->_t17);
 }
-static void sd_m_Gen__genReceived(sd_S_Gen * l_g, sd_int l_comm, sd_str l_ok, sd_str l_d) {
+SD_NO_TCE static void sd_m_Gen__genReceived(sd_S_Gen * l_g, sd_int l_comm, sd_str l_ok, sd_str l_d) {
   sd_L_sd_m_Gen__genReceived L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__genReceived);
   L.l_st = sd_rt_S4Stmt(SD_LIST_GET(((((*l_g)).f_c).f_ast).f_stmts, sd_S_Stmt, l_comm));
@@ -48625,38 +49357,62 @@ static void sd_m_Gen__genReceived(sd_S_Gen * l_g, sd_int l_comm, sd_str l_ok, sd
   sd_int l_v = SD_INT(-1);
   if ((SD_BOX_GET((L.l_st).f_kind, sd_E_StmtKind).tag == 2)) {
     sd_int _t2 = sd_m_Ast__at((((*l_g)).f_c).f_ast, (L.l_st).f_list, SD_INT(0));
-    sd_int _t3 = sd_int_retain(SD_LIST_GET((((*l_g)).f_c).f_targetVar, sd_int, _t2));
-    sd_int_release(l_v);
-    l_v = _t3;
+    L.l_tg = sd_rt_S6Target(SD_LIST_GET(((((*l_g)).f_c).f_ast).f_targets, sd_S_Target, _t2));
     sd_int_release(_t2);
+    if ((SD_BOX_GET((L.l_tg).f_kind, sd_E_TargetKind).tag == 1)) {
+      int64_t l_mark = SD_SMALL(sd_list_len(((*l_g)).f_slots));
+      sd_int _t3 = sd_int_retain((L.l_tg).f_expr);
+      sd_int _t4 = sd_int_retain(l_opt);
+      L._t5 = sd_m_Gen__okOpt(l_g, l_opt, l_ok, l_d);
+      L._t6 = sd_m_Gen__alias(l_g, _t4, L._t5);
+      SD_PREEMPT();
+      sd_m_Gen__gstore(l_g, _t3, L._t6);
+      sd_str_release(L._t6); L._t6 = NULL;
+      sd_str_release(L._t5); L._t5 = NULL;
+      sd_int_release(_t4);
+      sd_int_release(_t3);
+      sd_m_Gen__releaseTo(l_g, SD_INT_S(l_mark));
+      SD_LF_LEAVE(L);
+      sd_rl_S6Target(L.l_tg);
+      sd_int_release(l_v);
+      sd_int_release(l_opt);
+      sd_rl_S4Stmt(L.l_st);
+      return;
+    }
+    sd_int _t7 = sd_m_Ast__at((((*l_g)).f_c).f_ast, (L.l_st).f_list, SD_INT(0));
+    sd_int _t8 = sd_int_retain(SD_LIST_GET((((*l_g)).f_c).f_targetVar, sd_int, _t7));
+    sd_int_release(l_v);
+    l_v = _t8;
+    sd_int_release(_t7);
+    sd_rl_S6Target(L.l_tg); L.l_tg = ((sd_S_Target){0});
   }
   if (sd_int_ge(l_v, SD_INT(0))) {
-    sd_int _t4 = sd_int_retain(l_v);
-    sd_int _t5 = sd_int_retain(l_opt);
-    L._t6 = sd_m_Gen__okOpt(l_g, l_opt, l_ok, l_d);
-    sd_m_Gen__declareLocal(l_g, _t4, _t5, L._t6);
-    sd_str_release(L._t6); L._t6 = NULL;
-    sd_int_release(_t5);
-    sd_int_release(_t4);
+    sd_int _t9 = sd_int_retain(l_v);
+    sd_int _t10 = sd_int_retain(l_opt);
+    L._t11 = sd_m_Gen__okOpt(l_g, l_opt, l_ok, l_d);
+    sd_m_Gen__declareLocal(l_g, _t9, _t10, L._t11);
+    sd_str_release(L._t11); L._t11 = NULL;
+    sd_int_release(_t10);
+    sd_int_release(_t9);
     SD_LF_LEAVE(L);
     sd_int_release(l_v);
     sd_int_release(l_opt);
     sd_rl_S4Stmt(L.l_st);
     return;
   }
-  sd_int _t7 = sd_m_Gen__recvOf((*l_g), l_e);
-  sd_int _t8 = sd_m_Gen__typeOf((*l_g), _t7);
-  sd_int _t9 = sd_m_Gen__elemOf((*l_g), _t8);
-  sd_str _t10 = sd_m_Gen__releaseCall(l_g, _t9, l_d);
-  L.l_rel = _t10;
-  sd_int_release(_t9);
-  sd_int_release(_t8);
-  sd_int_release(_t7);
+  sd_int _t12 = sd_m_Gen__recvOf((*l_g), l_e);
+  sd_int _t13 = sd_m_Gen__typeOf((*l_g), _t12);
+  sd_int _t14 = sd_m_Gen__elemOf((*l_g), _t13);
+  sd_str _t15 = sd_m_Gen__releaseCall(l_g, _t14, l_d);
+  L.l_rel = _t15;
+  sd_int_release(_t14);
+  sd_int_release(_t13);
+  sd_int_release(_t12);
   if ((!sd_str_eq(L.l_rel, SD_STR_LIT("")))) {
-    sd_str _t11[] = {SD_STR_LIT("if ("), l_ok, SD_STR_LIT(") "), L.l_rel, SD_STR_LIT(";")};
-    L._t12 = sd_str_concat_n(_t11, 5);
-    sd_m_Gen__emit(l_g, L._t12);
-    sd_str_release(L._t12); L._t12 = NULL;
+    sd_str _t16[] = {SD_STR_LIT("if ("), l_ok, SD_STR_LIT(") "), L.l_rel, SD_STR_LIT(";")};
+    L._t17 = sd_str_concat_n(_t16, 5);
+    sd_m_Gen__emit(l_g, L._t17);
+    sd_str_release(L._t17); L._t17 = NULL;
   }
   sd_str_release(L.l_rel); L.l_rel = NULL;
   sd_int_release(l_v);
@@ -49459,7 +50215,7 @@ static void sd_m_Lexer__lexNumber(sd_S_Lexer * l_lx) {
     sd_int l_digits = SD_INT(0);
     {
       if (SD_LIKELY(((l_digits.w) & 1) == 0)) {
-        int64_t r_digits_3420 = SD_SMALL(l_digits);
+        int64_t r_digits_3478 = SD_SMALL(l_digits);
         for (;;) {
           SD_PREEMPT();
           bool _t12 = sd_int_lt(((*l_lx)).f_i, SD_INT_S(l_n));
@@ -49472,8 +50228,8 @@ static void sd_m_Lexer__lexNumber(sd_S_Lexer * l_lx) {
           {
             sd_int *_t13 = (&(l_lx)->f_i);
             { int64_t r_; if (SD_LIKELY((((*_t13).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((*_t13).w, SD_INT(1).w, &r_))) (*_t13).w = r_; else { sd_int s_ = sd_int_add_slow((*_t13), SD_INT(1)); sd_int_release((*_t13)); (*_t13) = s_; } }
-            if (SD_UNLIKELY(__builtin_add_overflow(r_digits_3420, ((int64_t)1), &r_digits_3420))) {
-              sd_int _t14 = sd_int_from_i64((int64_t)((uint64_t)r_digits_3420 - (uint64_t)((int64_t)1)));
+            if (SD_UNLIKELY(__builtin_add_overflow(r_digits_3478, ((int64_t)1), &r_digits_3478))) {
+              sd_int _t14 = sd_int_from_i64((int64_t)((uint64_t)r_digits_3478 - (uint64_t)((int64_t)1)));
               l_digits = sd_int_add(_t14, SD_INT_S(((int64_t)1)));
               sd_int_release(_t14);
               goto _c9;
@@ -49481,7 +50237,7 @@ static void sd_m_Lexer__lexNumber(sd_S_Lexer * l_lx) {
           }
           _c10:;
         }
-        l_digits = sd_int_from_i64(r_digits_3420);
+        l_digits = sd_int_from_i64(r_digits_3478);
         goto _d8;
       }
       for (;;) {
@@ -52688,7 +53444,7 @@ static sd_T_T2S11LspAnalysise sd_f_lspAnalyze(sd_S_LspJob l_job, bool l_checkBro
     {
       int64_t l_i = ((int64_t)0);
       if (SD_LIKELY(((l_mains.w) & 1) == 0)) {
-        int64_t r_mains_3684 = SD_SMALL(l_mains);
+        int64_t r_mains_3742 = SD_SMALL(l_mains);
         for (;;) {
           SD_PREEMPT();
           if (!((l_i < SD_SMALL(sd_list_len(L.l_files))))) break;
@@ -52710,14 +53466,14 @@ static sd_T_T2S11LspAnalysise sd_f_lspAnalyze(sd_S_LspJob l_job, bool l_checkBro
             L.l_other = _t21;
             bool _t22 = sd_f_lspHasMain(L.l_other);
             if (_t22) {
-              r_mains_3684 += ((int64_t)1);
+              r_mains_3742 += ((int64_t)1);
             }
             sd_str_release(L.l_other); L.l_other = NULL;
           }
           _c18:;
           l_i++;
         }
-        l_mains = sd_int_from_i64(r_mains_3684);
+        l_mains = sd_int_from_i64(r_mains_3742);
         goto _d16;
       }
       for (;;) {
@@ -56300,16 +57056,20 @@ static sd_list * sd_f_lspTypeItems(sd_S_Checker l_c, sd_int l_t, sd_S_Pos l_at) 
         l_f++;
       }
     }
-    sd_list * _t18 = L.l_items;
+    if ((SD_BOX_GET(l_k, sd_E_Kind).tag == 13)) {
+      sd_box * _t18 = sd_f_lspItem(SD_STR_LIT("name"), SD_INT(2), SD_STR_LIT("fn name() string"), SD_STR_LIT("built-in method: the name of the case (docs/builtins.md)"));
+      SD_LIST_PUSH((&L.l_items), sd_box *, _t18);
+    }
+    sd_list * _t19 = L.l_items;
     SD_LF_LEAVE(L);
     sd_int_release(l_d);
     sd_box_release(l_k);
     sd_int_release(l_ty);
-    return _t18;
+    return _t19;
   }
   if ((SD_BOX_GET(l_k, sd_E_Kind).tag == 14)) {
-    sd_int _t19 = sd_m_Types__decl((l_c).f_types, l_ty);
-    sd_int l_idecl = _t19;
+    sd_int _t20 = sd_m_Types__decl((l_c).f_types, l_ty);
+    sd_int l_idecl = _t20;
     sd_S_TypeDecl l_itd = SD_LIST_GET(((l_c).f_ast).f_typeDecls, sd_S_TypeDecl, l_idecl);
     {
       sd_int l_m = SD_INT(0);
@@ -56317,33 +57077,33 @@ static sd_list * sd_f_lspTypeItems(sd_S_Checker l_c, sd_int l_t, sd_S_Pos l_at) 
         SD_PREEMPT();
         if (!(sd_int_lt(l_m, (l_itd).f_methodCount))) break;
         {
-          sd_S_LspSym _t21 = sd_f_lspIfaceMethodSym(l_c, l_idecl, l_m);
-          L.l_ms = _t21;
-          sd_int _t22 = sd_m_Ast__at((l_c).f_ast, (l_itd).f_methods, l_m);
-          sd_box * _t23 = sd_f_lspItem((SD_LIST_GET(((l_c).f_ast).f_methodSigs, sd_S_MethodSig, _t22)).f_name, SD_INT(2), (L.l_ms).f_sig, (L.l_ms).f_doc);
-          SD_LIST_PUSH((&L.l_items), sd_box *, _t23);
-          sd_int_release(_t22);
+          sd_S_LspSym _t22 = sd_f_lspIfaceMethodSym(l_c, l_idecl, l_m);
+          L.l_ms = _t22;
+          sd_int _t23 = sd_m_Ast__at((l_c).f_ast, (l_itd).f_methods, l_m);
+          sd_box * _t24 = sd_f_lspItem((SD_LIST_GET(((l_c).f_ast).f_methodSigs, sd_S_MethodSig, _t23)).f_name, SD_INT(2), (L.l_ms).f_sig, (L.l_ms).f_doc);
+          SD_LIST_PUSH((&L.l_items), sd_box *, _t24);
+          sd_int_release(_t23);
           sd_rl_S6LspSym(L.l_ms); L.l_ms = ((sd_S_LspSym){0});
         }
-        _c20:;
+        _c21:;
         { int64_t r_; if (SD_LIKELY((((l_m).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_m).w, SD_INT(1).w, &r_))) (l_m).w = r_; else { sd_int s_ = sd_int_add_slow((l_m), SD_INT(1)); sd_int_release((l_m)); (l_m) = s_; } }
       }
       sd_int_release(l_m);
     }
-    sd_list * _t24 = L.l_items;
+    sd_list * _t25 = L.l_items;
     SD_LF_LEAVE(L);
     sd_int_release(l_idecl);
     sd_box_release(l_k);
     sd_int_release(l_ty);
-    return _t24;
+    return _t25;
   }
-  sd_list * _t25 = sd_f_lspBuiltinItems(l_c, l_ty);
-  sd_list * _t26 = _t25;
+  sd_list * _t26 = sd_f_lspBuiltinItems(l_c, l_ty);
+  sd_list * _t27 = _t26;
   SD_LF_LEAVE(L);
   sd_box_release(l_k);
   sd_int_release(l_ty);
   sd_list_release(L.l_items);
-  return _t26;
+  return _t27;
 }
 
 typedef struct { sd_lframe h; sd_list * l_specs; sd_str l_elem; sd_str l_key; sd_list * _t3; sd_list * _t4; sd_list * _t7; sd_list * _t15; sd_list * _t18; sd_list * _t19; sd_list * l_items; sd_list * l_parts; sd_str l_sig; } sd_L_sd_f_lspBuiltinItems;
@@ -56440,8 +57200,9 @@ static sd_list * sd_f_lspBuiltinItems(sd_S_Checker l_c, sd_int l_ty) {
           sd_str_release(L.l_key);
           L.l_key = _t14;
           sd_int_release(_t13);
-          L._t15 = sd_list_new(&sd_type_str, 3);
+          L._t15 = sd_list_new(&sd_type_str, 4);
           SD_LIST_PUSH(&L._t15, sd_str, SD_STR_LIT("len|fn len() int"));
+          SD_LIST_PUSH(&L._t15, sd_str, SD_STR_LIT("getOr|fn getOr(K key, T default) T"));
           SD_LIST_PUSH(&L._t15, sd_str, SD_STR_LIT("delete|fn mut delete(K key)"));
           SD_LIST_PUSH(&L._t15, sd_str, SD_STR_LIT("keys|fn keys() []K"));
           sd_list_release(L.l_specs);
@@ -59369,7 +60130,7 @@ static sd_T_T2ie sd_f_testCommand(sd_str l_root, sd_list * l_args) {
         {
           int64_t l_j = ((int64_t)0);
           if (SD_LIKELY(((l_failed.w) & 1) == 0)) {
-            int64_t r_failed_4330 = SD_SMALL(l_failed);
+            int64_t r_failed_4388 = SD_SMALL(l_failed);
             for (;;) {
               SD_PREEMPT();
               if (!((l_j < SD_SMALL(sd_list_len(L.l_pkgs))))) break;
@@ -59425,22 +60186,22 @@ static sd_T_T2ie sd_f_testCommand(sd_str l_root, sd_list * l_args) {
                 sd_int _t52 = SD_LIST_GET(L.l_counts, sd_int, SD_INT(0));
                 { int64_t r_; if (SD_LIKELY((((l_passed).w | _t52.w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_passed).w, _t52.w, &r_))) (l_passed).w = r_; else { sd_int s_ = sd_int_add_slow((l_passed), _t52); sd_int_release((l_passed)); (l_passed) = s_; } }
                 sd_int _t53 = SD_LIST_GET(L.l_counts, sd_int, SD_INT(1));
-                int64_t _t54; if (SD_UNLIKELY((_t53.w & 1) != 0 || __builtin_add_overflow(r_failed_4330, _t53.w >> 1, &_t54))) {
-                  sd_int _t55 = sd_int_from_i64(r_failed_4330);
+                int64_t _t54; if (SD_UNLIKELY((_t53.w & 1) != 0 || __builtin_add_overflow(r_failed_4388, _t53.w >> 1, &_t54))) {
+                  sd_int _t55 = sd_int_from_i64(r_failed_4388);
                   l_failed = sd_int_add(_t55, _t53);
                   sd_int_release(_t55);
                   sd_list_release(L.l_counts); L.l_counts = NULL;
                   sd_str_release(L.l_work); L.l_work = NULL;
                   goto _c42;
                 }
-                r_failed_4330 = _t54;
+                r_failed_4388 = _t54;
                 sd_list_release(L.l_counts); L.l_counts = NULL;
                 sd_str_release(L.l_work); L.l_work = NULL;
               }
               _c43:;
               l_j++;
             }
-            l_failed = sd_int_from_i64(r_failed_4330);
+            l_failed = sd_int_from_i64(r_failed_4388);
             goto _d41;
           }
           for (;;) {
@@ -64885,42 +65646,6 @@ static void sd_f_fmt_eprintln(sd_str l_s) { sd_lib_fmt_eprintln(l_s); }
 
 static sd_str sd_f_fmt_fixed(double l_f, sd_int l_places) { return sd_lib_fmt_fixed(l_f, l_places); }
 
-static sd_str sd_m_errors_TextError__message(sd_S_errors_TextError l_e) {
-  SD_PREEMPT();
-  return sd_str_retain((l_e).f_text);
-}
-
-static sd_err sd_f_errors_new(sd_str l_message) {
-  sd_S_errors_TextError _t1 = (sd_S_errors_TextError){.f_text = sd_str_retain(l_message)};
-  sd_S_errors_TextError _t2 = _t1;
-  sd_err _t3 = sd_iface_new(&sd_vt_errors_TextError__error.hdr, &sd_D_errors_TextError, &_t2);
-  return _t3;
-}
-
-typedef struct { sd_lframe h; sd_str _t1; } sd_L_sd_f_errors_wrap;
-static void sd_lr_sd_f_errors_wrap(sd_lframe *p) {
-  sd_L_sd_f_errors_wrap *L = (sd_L_sd_f_errors_wrap *)p;
-  sd_str_release(L->_t1);
-}
-static sd_err sd_f_errors_wrap(sd_err l_err, sd_str l_context) {
-  sd_L_sd_f_errors_wrap L = {{0}};
-  SD_LF_ENTER(L, sd_lr_sd_f_errors_wrap);
-  if (sd_iface_is_null(l_err)) {
-    sd_f_os_crash(SD_STR_LIT("errors.wrap: err is null"));
-  }
-  SD_PREEMPT();
-  L._t1 = sd_err_message(l_err);
-  sd_str _t2[] = {l_context, SD_STR_LIT(": "), L._t1};
-  sd_str _t3 = sd_str_concat_n(_t2, 3);
-  sd_S_errors_TextError _t4 = (sd_S_errors_TextError){.f_text = _t3};
-  sd_S_errors_TextError _t5 = _t4;
-  sd_err _t6 = sd_iface_new(&sd_vt_errors_TextError__error.hdr, &sd_D_errors_TextError, &_t5);
-  sd_err _t7 = _t6;
-  SD_LF_LEAVE(L);
-  sd_str_release(L._t1);
-  return _t7;
-}
-
 static void sd_f_os_exit(sd_int l_code) { sd_lib_os_exit(l_code); }
 
 static void sd_f_os_crash(sd_str l_message) { sd_lib_os_crash(l_message); }
@@ -64956,6 +65681,42 @@ static sd_T_T2se sd_f_os_hostname(void) {
   r_.r0 = NULL;
   r_.r1 = sd_lib_os_hostname(&r_.r0);
   return r_;
+}
+
+static sd_str sd_m_errors_TextError__message(sd_S_errors_TextError l_e) {
+  SD_PREEMPT();
+  return sd_str_retain((l_e).f_text);
+}
+
+static sd_err sd_f_errors_new(sd_str l_message) {
+  sd_S_errors_TextError _t1 = (sd_S_errors_TextError){.f_text = sd_str_retain(l_message)};
+  sd_S_errors_TextError _t2 = _t1;
+  sd_err _t3 = sd_iface_new(&sd_vt_errors_TextError__error.hdr, &sd_D_errors_TextError, &_t2);
+  return _t3;
+}
+
+typedef struct { sd_lframe h; sd_str _t1; } sd_L_sd_f_errors_wrap;
+static void sd_lr_sd_f_errors_wrap(sd_lframe *p) {
+  sd_L_sd_f_errors_wrap *L = (sd_L_sd_f_errors_wrap *)p;
+  sd_str_release(L->_t1);
+}
+static sd_err sd_f_errors_wrap(sd_err l_err, sd_str l_context) {
+  sd_L_sd_f_errors_wrap L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_errors_wrap);
+  if (sd_iface_is_null(l_err)) {
+    sd_f_os_crash(SD_STR_LIT("errors.wrap: err is null"));
+  }
+  SD_PREEMPT();
+  L._t1 = sd_err_message(l_err);
+  sd_str _t2[] = {l_context, SD_STR_LIT(": "), L._t1};
+  sd_str _t3 = sd_str_concat_n(_t2, 3);
+  sd_S_errors_TextError _t4 = (sd_S_errors_TextError){.f_text = _t3};
+  sd_S_errors_TextError _t5 = _t4;
+  sd_err _t6 = sd_iface_new(&sd_vt_errors_TextError__error.hdr, &sd_D_errors_TextError, &_t5);
+  sd_err _t7 = _t6;
+  SD_LF_LEAVE(L);
+  sd_str_release(L._t1);
+  return _t7;
 }
 
 static sd_T_T2Ose sd_f_io_readLine(void) {
