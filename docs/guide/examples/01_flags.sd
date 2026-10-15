@@ -1,0 +1,23 @@
+// Greets someone, as often as asked.
+//
+//     seed run 01_flags.sd -- --name Ada -n 2 -l
+package main
+
+import "flags"
+import "fmt"
+
+fn main([]string args) error {
+    flags.Spec spec = flags.spec("greet", "", "Greets someone.")
+    spec.addString("name", null, "world", "who to greet")
+    spec.addInt("times", 'n', 1, "how many times")
+    spec.addBool("loud", 'l', "shout")
+    flags.Parsed p = spec.parseOrExit(args)
+    string greeting = "Hello, " + p.getString("name") + "!"
+    if (p.getBool("loud")) {
+        greeting = greeting.toUpper()
+    }
+    for (int i = 0; i < p.getInt("times"); i++) {
+        fmt.println(greeting)
+    }
+    return null
+}

@@ -13,11 +13,16 @@ Every package and every function in this document is implemented, in [lib/](../l
 | [`fs`](#fs) | Files and directories. |
 | [`path`](#path) | Slash-separated paths as text. |
 | [`strings`](#strings) | Text helpers that are not built-in methods. |
+| [`regex`](#regex) | Regular expressions with Go's syntax, matched in linear time. |
 | [`math`](#math) | Numeric functions and constants. |
 | [`rand`](#rand) | Pseudo-random numbers, seeded or not. |
 | [`time`](#time) | Clocks, durations, sleeping, timeouts, RFC 3339 dates. |
 | [`encoding`](#encoding) | Hex, base64 and URL encoding. |
 | [`json`](#json) | Parsing and producing JSON through a dynamic `Value`. |
+| [`csv`](#csv) | Reading and writing comma-separated values (RFC 4180). |
+| [`url`](#url) | URLs: parsing, writing, resolving references, query strings. |
+| [`flags`](#flags) | Command-line flags for `main`'s arguments, with generated help. |
+| [`log`](#log) | Leveled logging in key=value lines. |
 | [`crypto`](#crypto) | SHA-256, HMAC, secure random bytes, constant-time comparison. |
 | [`net`](#net) | TCP connections. |
 | [`http`](#http) | An HTTP/1.1 server and client. |
@@ -790,6 +795,343 @@ if (resp.status != http.statusCreated) {
 }
 ```
 
+## regex
+
+Regular expressions with the syntax and the matching rules of Go's `regexp` package (RE2). There are no backreferences and no lookaround, so matching takes time linear in the length of the text whatever the pattern: `(a*)*b` on a million `a`s answers at once. Matching is leftmost-first, as in Go and Perl: of the matches that start leftmost, the one the pattern prefers (the first alternative, greedy repetition) wins.
+
+### Types
+
+```
+pub type Regex struct {
+    // opaque: the pattern, an id and the group names
+}
+
+pub type Match struct {
+    // opaque: the text, the positions of the match and of its groups
+}
+```
+
+A `Regex` is a plain value: it can be copied, stored in a struct, compared and sent to another goroutine. Its compiled form is kept in a cache of the goroutine that uses it (16 regexes per goroutine; a goroutine that uses more recompiles the ones it dropped), so nothing is shared between goroutines.
+
+### Functions
+
+| Function | Result |
+|---|---|
+| `regex.compile(string pattern) (Regex, error)` | The compiled pattern. The error names the pattern, the problem and its byte offset: `regex.compile: a(b: missing closing ')' at offset 1`. |
+| `regex.mustCompile(string pattern) Regex` | `compile` for a pattern written in the program: crashes with `regex.mustCompile: ...` instead of returning an error. |
+| `regex.quote(string text) string` | `text` with every metacharacter (`\.+*?()|[]{}^$`) escaped, so that it matches itself: `regex.quote("1.5+2")` is `"1\\.5\\+2"`. |
+
+### Regex methods
+
+| Method | Result |
+|---|---|
+| `r.matches(string s) bool` | Whether the regex matches anywhere in `s`. Faster than `find`: it stops at the first match. |
+| `r.find(string s) Match?` | The leftmost match, or `null`. |
+| `r.findAt(string s, int start) Match?` | The leftmost match that starts at or after byte offset `start`. Assertions see the whole text: `^` matches at `start` only if `start` is 0 (or, with `m`, follows a newline), and `\b` looks at the byte before. Crashes unless `0 <= start <= s.len()`. |
+| `r.findAll(string s) []Match` | Every match, left to right, not overlapping. As in Go, an empty match right after another match is skipped, and after an empty match the search moves on one character: `a*` in `"baaac"` matches `""` at 0, `"aaa"` at 1 and `""` at 5. |
+| `r.replace(string s, string template) string` | `s` with every match (`findAll`'s) replaced by `template`, in which `$1` or `${1}` is group 1, `$name` or `${name}` a named group, `$0` the whole match and `$$` a `$`. A group that did not take part gives `""`. `$1x` is group 1 then `x` (Go would read a group called `1x`). Crashes on a malformed template or a group the pattern lacks: `regex.Regex.replace: template "$2": the pattern has no group 2`. |
+| `r.replaceLiteral(string s, string text) string` | `s` with every match replaced by `text` as it is. |
+| `r.replaceWith(string s, fn(Match) string f) string` | `s` with every match `m` replaced by `f(m)`. |
+| `r.split(string s) []string` | `s` cut around the matches, as Go's `Split(s, -1)`: `,\s*` splits `"a, b,c"` into `"a"`, `"b"`, `"c"`. An empty `s` gives `[""]`. |
+| `r.groupCount() int` | The number of capturing groups. |
+| `r.groupNames() []string` | The name of each group by number; element 0 (the whole match) and unnamed groups are `""`. |
+| `r.string() string` | The pattern. |
+
+### Match methods
+
+| Method | Result |
+|---|---|
+| `m.start() int`, `m.end() int` | Byte offsets of the match: `m.end()` is just after it. |
+| `m.text() string` | The matched text. |
+| `m.groupText(int i) string?` | The text of group `i` (0 is the whole match), or `null` if the group did not take part. Crashes if the pattern has no group `i`. |
+| `m.groupStart(int i) int?`, `m.groupEnd(int i) int?` | Where group `i` starts and ends, or `null`. |
+| `m.named(string name) string?` | The text of the group called `name`, or `null` if it did not take part. Crashes if no group has that name. |
+| `m.groupCount() int` | The number of groups. |
+| `m.expand(string template) string` | `template` with `$1`, `${name}`, ... replaced by this match's groups, as in `replace`. |
+
+### Syntax
+
+The syntax is Go's (RE2's); `regexp/syntax` documents it in full.
+
+- Characters: any UTF-8 character matches itself; `.` any character but `\n` (any at all with `s`); escapes `\n \t \r \f \v \a`, `\x7F`, `\x{10FFFF}`, octal `\012`, `\` before any ASCII punctuation, and `\Q...\E` for literal text.
+- Classes: `[abc]`, `[^a-z]`, `\d \s \w` (ASCII, as in Go) and `\D \S \W`, `[[:alpha:]]` and the other POSIX classes (ASCII), `\pL`, `\p{Greek}`, `\PL`, `\p{^Lu}`: the Unicode general categories (one and two letters) and the scripts Arabic, Armenian, Bengali, Common, Cyrillic, Devanagari, Georgian, Greek, Gujarati, Gurmukhi, Han, Hangul, Hebrew, Hiragana, Inherited, Kannada, Katakana, Khmer, Lao, Latin, Malayalam, Myanmar, Sinhala, Tamil, Telugu, Thai and Tibetan (Unicode 15.0.0, Go's tables).
+- Repetition: `* + ?`, `{n}`, `{n,}`, `{n,m}` (at most 1000), each followed by `?` to prefer fewer. A `{` that does not start a count is a literal.
+- Groups: `(re)` captures, `(?P<name>re)` and `(?<name>re)` capture with a name (names are unique), `(?:re)` does not capture. Groups are numbered by their `(` from 1.
+- Assertions: `^` and `$` (start and end of the text, or of a line with `m`), `\A` and `\z` (always the text), `\b` and `\B` (ASCII word boundary).
+- Flags: `(?i)` ignores case (Unicode simple case folding, as in Go: `(?i)k` also matches the Kelvin sign), `(?m)` multi-line `^ $`, `(?s)` lets `.` match `\n`, `(?U)` swaps greedy and lazy. `(?i)` applies to the end of the enclosing group, `(?i:re)` to `re` only, `(?-i)` turns a flag off.
+- Not supported, with an error that says so: backreferences (`\1`), lookahead and lookbehind (`(?=`, `(?<=`), possessive and atomic forms.
+
+Matching works on bytes, with UTF-8 characters as units: positions are byte offsets, a match starts only at a character boundary, and a byte that cannot start a UTF-8 sequence counts as one character (U+FFFD), as in Go. A multi-byte sequence cut short (a lead byte without its continuation bytes) is not matched by `.` or a negated class, where Go matches its first byte as U+FFFD.
+
+```
+regex.Regex date = regex.mustCompile("(?P<year>\\d{4})-(?P<month>\\d{2})-(?P<day>\\d{2})")
+regex.Match? m = date.find("released 2026-10-15")
+if (m != null) {
+    fmt.println((m.named("month") == "10").string())       // true
+}
+fmt.println(date.replace("on 2026-10-15", "${day}/${month}/${year}"))   // on 15/10/2026
+```
+
+## csv
+
+Comma-separated values as RFC 4180 defines them: fields separated by a delimiter, records by line breaks, and a field that holds the delimiter, a `"` or a line break quoted with `"`, a `"` inside it written twice. Reading follows Go's `encoding/csv`: `\r\n` ends a line like `\n` (inside a quoted field too, where it becomes `\n`), empty lines are skipped, and a `"` inside an unquoted field is an error.
+
+The delimiter is a parameter of every function (`','`, or `';'`, `'\t'`, ...). One that is `"`, `\r`, `\n` or not ASCII crashes: `csv.parse: invalid delimiter '"'`.
+
+### Functions
+
+| Function | Result |
+|---|---|
+| `csv.parse(string text, byte delimiter) ([][]string, error)` | Every record of `text`. Records may have different numbers of fields. |
+| `csv.parseMaps(string text, byte delimiter) ([]map[string]string, error)` | The records after the first, each a map from the first record's column names to its fields (maps keep the column order). Errors when a name repeats or a record has a different number of fields: `csv.parseMaps: line 3: 2 fields, but the header has 3`. An empty text gives no records. |
+| `csv.format([][]string records, byte delimiter) string` | The records as CSV, each followed by `"\n"`, fields quoted only where needed (they hold the delimiter, `"`, `\r` or `\n`, or start with a space or a tab, as Go decides). |
+| `csv.formatRecord([]string fields, byte delimiter) string` | One record, without a line ending. Join records with `"\r\n"` for RFC 4180's line endings. |
+| `csv.reader(byte delimiter) Reader` | A reader that is fed one line at a time (below). |
+
+Errors give the line and the column (both from 1, the column in bytes) and the reason: `csv.parse: line 2, column 4: '"' in an unquoted field (quote the field and double the '"')`, `unexpected 'b' after a quoted field`, `quoted field not closed` (at the line and column of its opening `"`).
+
+### Reader
+
+```
+pub type Reader struct {
+    // opaque: the delimiter, the line number, the record being read
+}
+```
+
+| Method | Result |
+|---|---|
+| `r.feed(string? line) ([]string?, error)` | `mut`. Feeds the next line, without its line ending (a `\r` at its end is removed), as `fs.File.readLine` and `io.readLine` give it; `null` means the end of the input. Returns the record the line completes, or `null` when the line is empty or ends inside a quoted field (the record continues on the next line). At the end, the error is `quoted field not closed` if one is open. Errors start with `csv.reader:`. |
+
+The reader holds only the record in progress, so a file of any size can be read:
+
+```
+fs.File f = try fs.open("orders.csv")
+defer f.close()
+csv.Reader r = csv.reader(',')
+for (;;) {
+    string? line = try f.readLine()
+    []string? record = try r.feed(line)
+    if (record != null) {
+        fmt.println(record[0])
+    }
+    if (line == null) {
+        break
+    }
+}
+```
+
+## url
+
+URLs and relative references as RFC 3986 defines them. The parts are kept as written, still percent-encoded, so parsing and writing a URL loses nothing (`%2F` stays distinct from `/`); decode a part with `url.pathDecode` or `url.queryDecode` when its text is needed. Only the scheme is normalised, to lowercase.
+
+### Types
+
+```
+pub type Url struct {
+    pub string scheme         // lowercase; "" in a relative reference
+    pub string? userinfo      // "user:password", before '@'; null without '@'
+    pub string? host          // null without an authority ("//"); an IPv6 address without its brackets
+    pub int? port             // null without one (or with an empty one, "host:")
+    pub string path           // as written: "/a%20b/c"
+    pub string? query         // after '?', as written; null without '?'
+    pub string? fragment      // after '#', as written; null without '#'
+}
+
+pub type Param struct {
+    pub string key
+    pub string value
+}
+
+pub type Query struct {
+    pub []Param params      // in order; a key may repeat
+}
+```
+
+A part that is absent is `null`, so `http://h/p?` (an empty query) and `http://h/p` (none) stay different. A `Url` or a `Query` is built with a struct literal too: `url.Query{params: []url.Param{}}`.
+
+### Functions
+
+| Function | Result |
+|---|---|
+| `url.parse(string text) (Url, error)` | An absolute URL (`https://user@example.com:8080/a?q=1#top`) or a relative reference (`../b`, `//host/p`, `?q`, `#f`), split as RFC 3986's appendix B does. |
+| `url.parseQuery(string raw) (Query, error)` | The parameters of a query string (`a=1&b=two+words&flag`), decoded, in order. A parameter without `=` has the value `""`; empty ones (`a&&b`) are skipped. |
+| `url.pathEncode(string text) string` | Percent-encoding for one path segment, as Go's `url.PathEscape`: letters, digits, `-._~` and `$&+:=@` stay; everything else, `/` included, becomes `%XX` (uppercase hex). |
+| `url.pathDecode(string text) (string, error)` | `%XX` decoded; `+` stays `+`. |
+| `url.queryEncode(string text) string` | Encoding for a query key or value, as Go's `url.QueryEscape`: letters, digits and `-._~` stay, a space becomes `+`, everything else `%XX`. |
+| `url.queryDecode(string text) (string, error)` | `%XX` decoded, and `+` as a space. |
+
+Parse errors name the text and the problem: `url.parse: http://h:80x/: invalid port "80x"`, `port 70000 out of range`, `missing ']' in host`, `missing scheme before ':'`, `first path segment contains ':' (write ./ before it)`, `invalid character (space) at offset 8; percent-encode it` (spaces and control characters are rejected anywhere), `'%' at offset 10 must be followed by two hex digits`. The decoders fail on a bad `%` the same way: `url.pathDecode: offset 3: '%' must be followed by two hex digits`.
+
+### Url methods
+
+| Method | Result |
+|---|---|
+| `u.string() string` | The URL as text (RFC 3986, section 5.3): `parse(s).string()` is `s` for any `s` that parses, apart from the scheme's case and an empty port. A path that would be misread is adjusted: `/` is added before a relative path after a host, `/.` before a path starting with `//` without one. |
+| `u.resolve(Url ref) Url` | The URL that `ref` leads to from `u` (RFC 3986, section 5.2, the strict algorithm, dot segments removed): from `http://a/b/c/d;p?q`, `../g` is `http://a/b/g`, `?y` is `http://a/b/c/d;p?y` and `g:h` is `g:h`. |
+| `u.hostPort() string` | The host and port as `net.dial` takes them: `example.com:8080`, `[::1]:80`, the host alone without a port, `""` without a host. |
+| `u.params() (Query, error)` | `parseQuery` of the query (no parameters when it is `null`). |
+
+### Query methods
+
+| Method | Result |
+|---|---|
+| `q.get(string key) string?` | The value of the first parameter called `key`, or `null`. |
+| `q.all(string key) []string` | The values of every parameter called `key`, in order. |
+| `q.has(string key) bool` | Whether a parameter is called `key`. |
+| `q.add(string key, string value)` | `mut`. Adds a parameter at the end. |
+| `q.set(string key, string value)` | `mut`. The first parameter called `key` gets `value` and the others are removed; without one, it is added at the end. |
+| `q.remove(string key)` | `mut`. Removes every parameter called `key`. |
+| `q.string() string` | `key=value` pairs, encoded with `queryEncode`, joined with `&`, in order (Go's `Values.Encode` sorts them; this keeps them). |
+
+```
+url.Url page = try url.parse("https://example.com/docs/guide/intro.html")
+url.Url next = page.resolve(try url.parse("../api/?q=seed+lang"))
+fmt.println(next.string())                       // https://example.com/docs/api/?q=seed+lang
+url.Query q = try next.params()
+q.set("page", "2")
+next.query = q.string()
+fmt.println(next.string())                       // https://example.com/docs/api/?q=seed+lang&page=2
+```
+
+## flags
+
+Command-line flags for the `[]string args` that `main` receives. The syntax is GNU's: `--name value`, `--name=value`, `-x value`, `-xvalue`, `-x=value`, short bool flags bundled (`-vq`, `-vn5`), `--` to end the flags, and `-` as an argument. Flags and arguments may come in any order.
+
+Seed has no pointers, so a flag cannot be bound to a variable as Go's `flag.Int(&n)` binds one. Instead a `Spec` value declares the flags, `parse` returns a `Parsed` value, and the program reads each flag from it by name with a typed getter. Asking for a flag that was not declared, or with the wrong getter, crashes, so the mistake shows up the first time the program runs.
+
+### Types
+
+```
+pub type Spec struct {
+    // opaque: the program's name, its arguments' synopsis, its description and its flags
+}
+
+pub type Parsed struct {
+    // opaque: the value of every flag, which flags were given, the other arguments
+}
+```
+
+### Declaring flags
+
+| Function or method | Result |
+|---|---|
+| `flags.spec(string program, string args, string description) Spec` | A spec with no flags yet. `args` describes the arguments for the usage line (`"FILE..."`, or `""`); `description` is printed under it. |
+| `s.addBool(string name, byte? short, string help)` | `mut`. `--name` (and `-short`, unless `short` is `null`), false unless given. `--name` and `--name=true` set it, `--name=false` clears it; a bool flag never takes the next argument as its value. |
+| `s.addInt(string name, byte? short, int initial, string help)` | `mut`. An int flag with a default. |
+| `s.addString(string name, byte? short, string initial, string help)` | `mut`. A string flag with a default. |
+| `s.addDuration(string name, byte? short, int initial, string help)` | `mut`. A duration in nanoseconds, written like Go's: `90s`, `1h30m`, `250ms`, `1.5h`, `0`. |
+| `s.addList(string name, byte? short, string help)` | `mut`. Each time the flag is given adds a value. |
+
+Names are lowercase letters, digits and `-`; short names are a letter or a digit. A bad name, or one declared twice, crashes: `flags.Spec.addInt: flag --count is declared twice`. Every spec also has `-h` and `--help`, unless it declares a flag named `help` or with the short name `h` itself (then only `--help`, or neither).
+
+### Parsing
+
+| Method | Result |
+|---|---|
+| `s.parse([]string args) (Parsed, error)` | Parses `main`'s arguments (`args[0]`, the program, is skipped). `--help` and `-h` are not errors: they set `helpRequested`. |
+| `s.parseOrExit([]string args) Parsed` | `parse` for `main`: on `--help` it prints the usage to stdout and exits with 0; on an error it prints `<program>: <reason>` and `run '<program> --help' for usage` to stderr and exits with 2. |
+| `s.usage() string` | The help text: a usage line, the description, and one line per flag with its names, its type, its help and its default (shown unless it is the zero value; lists say `(repeatable)`). |
+
+Errors name the flag as it was written: `flags.Spec.parse: --colour: unknown flag (did you mean --color?)`, `-x: unknown flag`, `--count: missing value`, `-n: invalid integer "x"`, `--verbose: invalid value "yes" for a bool flag (use true or false)`, `--timeout: invalid duration "5" (write it like 1h30m, 5s or 250ms)`. Given more than once, a flag keeps its last value (a list keeps them all). A value may start with `-` (`--offset -5`), but a negative number as an argument needs `--` before it, or it reads as short flags.
+
+### Reading the result
+
+| Method | Result |
+|---|---|
+| `p.getBool(string name) bool` | The value of bool flag `--name`. Crashes if no flag `--name` was declared (`flags.Parsed.getBool: no flag --nope was declared`) or it is not a bool flag (`flags.Parsed.getInt: --verbose is a bool flag`); the same for the other getters. |
+| `p.getInt(string name) int`, `p.getString(string name) string` | The value of an int or string flag. |
+| `p.getDuration(string name) int` | The value of a duration flag, in nanoseconds. |
+| `p.getList(string name) []string` | The values of a list flag, in the order given. |
+| `p.isSet(string name) bool` | Whether `--name` was given (rather than left at its default). |
+| `p.args() []string` | The arguments that are not flags, in order. |
+| `p.helpRequested() bool` | Whether `--help` or `-h` was given. |
+
+```
+fn main([]string args) error {
+    flags.Spec spec = flags.spec("fetch", "URL...", "Downloads URLs.")
+    spec.addInt("workers", 'w', 4, "downloads at a time")
+    spec.addDuration("timeout", null, 30 * time.second, "per download")
+    spec.addBool("verbose", 'v', "print each URL")
+    flags.Parsed p = spec.parseOrExit(args)
+    int workers = p.getInt("workers")
+    []string urls = p.args()
+    ...
+}
+```
+
+```
+$ fetch --help
+usage: fetch [flags] URL...
+
+Downloads URLs.
+
+flags:
+  -w, --workers int        downloads at a time (default 4)
+      --timeout duration   per download (default 30s)
+  -v, --verbose            print each URL
+  -h, --help               show this help and exit
+```
+
+## log
+
+Leveled logging: one line per message, in the key=value format of Go's `log/slog` text handler, with the time in UTC (RFC 3339, in milliseconds):
+
+```
+time=2026-10-15T08:30:00.123Z level=INFO msg=listening addr=:8080
+time=2026-10-15T08:30:01.007Z level=WARN msg="slow request" path=/todos ms=950
+```
+
+A value is quoted (with `"`, `\` and control characters escaped as Go's `strconv.Quote` does) when it is empty or holds a space, a control character, `=` or `"`.
+
+There are no package-level variables in Seed, so there is no default logger: a `Logger` is a value that the program makes once and passes to what needs it (a struct field, a parameter, a goroutine). Copies share the output.
+
+### Types
+
+```
+pub type Level enum {
+    Debug
+    Info
+    Warn
+    Error
+}
+
+pub type Output enum {
+    Stderr
+    Stdout
+    File(fs.File file)
+    Lines(chan string lines)     // each line, without its "\n"
+}
+
+pub type Logger struct {
+    // opaque: the minimum level, the output, the fields, the clock
+}
+```
+
+### Functions and methods
+
+| Function or method | Result |
+|---|---|
+| `log.new(Level min, Output out) Logger` | A logger that writes the messages at level `min` and above to `out`. |
+| `log.parseLevel(string text) (Level, error)` | `debug`, `info`, `warn` (or `warning`) or `error`, in any case: for a flag or an environment variable. The error is `log.parseLevel: verbose: unknown level (use debug, info, warn or error)`. |
+| `level.string() string` | `"DEBUG"`, `"INFO"`, `"WARN"` or `"ERROR"`. |
+| `l.debug(string msg)`, `l.info(string msg)`, `l.warn(string msg)`, `l.error(string msg)` | Writes `msg` at that level, if it is enabled. |
+| `l.log(Level level, string msg)` | The same with the level as a value. |
+| `l.with(string key, string value) Logger` | A copy whose lines also carry `key=value`, after the fields it has: `l.with("request", id).info("done")`. Crashes if the key is empty or holds a space, a control character, `=` or `"`. |
+| `l.enabled(Level level) bool` | Whether messages at `level` are written (to skip building costly ones). |
+| `l.withClock(fn() int now) Logger` | A copy that takes each line's time from `now` instead of `time.now`: for tests and reproducible output. |
+
+- Each line is written with one write (`fmt.eprint`, one `fs.File.write` or one send), so lines from concurrent goroutines never interleave.
+- Write errors are ignored, as `fmt`'s are. Sending to a closed `Lines` channel crashes, as any send does; a `Lines` channel that nobody reads blocks the logger once its buffer is full.
+
+```
+log.Logger logger = log.new(log.Level.Info, log.Output.Stderr)
+log.Logger reqLog = logger.with("method", req.method).with("path", req.path())
+reqLog.info("request")
+if (err != null) {
+    reqLog.with("error", err.message()).error("request failed")
+}
+```
+
 ## Tests
 
 There is no testing package. Tests are `test "..." { ... }` blocks in a package's `tests/` directory and use the built-in `assert(bool)`, as described in [SPEC.md](../SPEC.md#tests). A test that needs files uses `fs.makeTemp` and removes the directory with `defer`:
@@ -816,6 +1158,10 @@ fmt, io, os, fs, net, crypto, path      (no imports)
 errors, strings, math, rand             → os (for os.crash)
 encoding                                → errors
 time, json                              → errors, os
+regex                                   → os
+csv, url                                → errors (csv also os)
+flags                                   → errors, fmt, os, time
+log                                     → errors, fmt, fs, os, time
 http                                    → net, json, encoding, time, fmt, errors, os
 ```
 
@@ -853,6 +1199,8 @@ pub fn (Conn c) read(int max) (string?, error)
 | `crypto` | `sha256`, `hmacSha256` (64-bit wrapping arithmetic is slow with growing `int`s), `randomBytes`, `equal` (so that no compiler optimisation can make it exit early) | — |
 | `net` | everything | — |
 | `http` | — | all, on top of `net` |
+| `regex` | the engine: parsing, compiling, the DFAs and the Pike VM, the per-goroutine cache (`regex.c`), and the Unicode tables (`regex_tables.c`, generated from Go's) | the API: `Regex`, `Match`, templates, `replace`, `split` |
+| `csv`, `url`, `flags`, `log` | — | all |
 
 The SplitMix64 step in `rand` needs arithmetic modulo 2^64. With growing integers that is `(x * c) & 0xffffffffffffffff`, which is correct but allocates. If it proves too slow, `Source`'s step can become a native method without any change to its behaviour.
 

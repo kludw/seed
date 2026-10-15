@@ -1,0 +1,7 @@
+true
+2026-10-15 at 9
+month 10
+2 dates
+released 15/10/2026, patched 02/11/2026
+a|b|c
+regex.compile: (unclosed: missing closing ')' at offset 0

@@ -1,0 +1,33 @@
+package main
+
+import "fmt"
+import "regex"
+
+fn main([]string args) error {
+    // compile returns an error for a bad pattern; mustCompile crashes,
+    // which suits a pattern written in the program.
+    regex.Regex date = regex.mustCompile("(\\d{4})-(\\d{2})-(\\d{2})")
+    string text = "released 2026-10-15, patched 2026-11-02"
+
+    fmt.println(date.matches(text).string())
+    regex.Match? first = date.find(text)
+    if (first != null) {
+        fmt.println(first.text() + " at " + first.start().string())
+        string? month = first.groupText(2)
+        if (month != null) {
+            fmt.println("month " + month)
+        }
+    }
+    []regex.Match all = date.findAll(text)
+    fmt.println(all.len().string() + " dates")
+    fmt.println(date.replace(text, "$3/$2/$1"))
+
+    regex.Regex sep = regex.mustCompile("\\s*[,;]\\s*")
+    fmt.println(sep.split("a , b;c").join("|"))
+
+    _, error err = regex.compile("(unclosed")
+    if (err != null) {
+        fmt.println(err.message())
+    }
+    return null
+}
