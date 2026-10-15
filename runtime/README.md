@@ -278,6 +278,30 @@ sd_int_release(c);
   `SD_INT_S(x)` (to `sd_int`) and `SD_SMALL(a)` (back); the signed
   arithmetic in these macros lets the C compiler fold the tag tests of the
   inline operations away.
+- Algorithms for big integers (magnitudes in 32-bit limbs): short operands
+  use the schoolbook methods; long ones are subquadratic.
+  - Multiplication: Karatsuba from 64 limbs (128 for a square, with a
+    squaring of its own), on 64-bit words when the C compiler has
+    `unsigned __int128` (two limbs per word, a quarter of the
+    multiplications; otherwise on the limbs). An operand much shorter than
+    the other multiplies it slice by slice.
+  - Division: Knuth's algorithm D, O(n m); when both the divisor and the
+    quotient have at least 80 limbs, Burnikel and Ziegler's recursive
+    division (about twice a multiplication of the same size), with
+    algorithm D at its leaves.
+  - Decimal text: divide and conquer with the powers 10^(9 * 2^k), computed
+    by squaring for each conversion: `string()` divides by a power of about
+    half the number's length and converts both halves; parsing multiplies
+    the high half's value by the power and adds the low half's. Hex literals
+    are read in linear time.
+  - Times on x86_64 (one core): for 3^2,000,000 (954,243 digits), the power
+    by repeated squaring 0.15 s, `string()` 0.45 s, `toInt()` of the text
+    0.2 s, dividing by a 563,000-digit number 0.15 s; before these
+    algorithms, 3.6 s, 22.9 s, 4.3 s and 5.1 s. Go's `math/big` takes 0.11,
+    0.26, 1.5 and 0.13 s.
+  - `seed_int.c` keeps the schoolbook versions callable
+    (`sd_int_mul_basecase_` and the others in `seed_internal.h`), and
+    `test_int.c` compares the two on random operands across the thresholds.
 - byte: arithmetic is not defined on bytes; comparisons and `& | ^` are
   plain C; shifts use `sd_byte_shl`/`sd_byte_shr` (8 or more gives 0).
 
@@ -1376,7 +1400,7 @@ runtime/tests/run.sh asan     # or tsan, plain, bench
 
 | Test | What |
 |---|---|
-| `test_int.c` | factorial 30, 2^100, tests/full/bigint_arith values, ~400 Python-generated vectors (`int_vectors.h`: + - * / % & \| ^ << >> and float conversion with negatives and every boundary around 2^31, 2^32, 2^62, 2^63, 2^64), 200,000 random differential checks against `__int128`, algebraic identities on random 400-bit values, crash messages |
+| `test_int.c` | factorial 30, 2^100, tests/full/bigint_arith values, ~400 Python-generated vectors (`int_vectors.h`: + - * / % & \| ^ << >> and float conversion with negatives and every boundary around 2^31, 2^32, 2^62, 2^63, 2^64), 200,000 random differential checks against `__int128`, algebraic identities on random 400-bit values, Karatsuba, Burnikel-Ziegler and the divide-and-conquer text conversions against the schoolbook algorithms (400 random operand pairs of up to 900 limbs in patterns such as 2^k - 1, sparse and top-bit-set limbs, powers of ten and their neighbours up to 10^4612, every 2^(32k) +- 1), crash messages |
 | `test_str.c` | every string method, `chars` on UTF-8 and invalid UTF-8, float formatting (20,000 random doubles compared with seed0's formatter, kept in `ref_float.c`) |
 | `test_mem.c` | lists, maps, boxes, enums, struct descriptors, copy-on-write through nested places, stable `sortBy`, interfaces and user error types, deep copies share nothing, cleanup frames released by a crash (nested, and a crash contained by an inner `sd_catch`), a `sortBy` whose `less` crashes leaving the list unchanged, no leaks (live object count), and a stress test: 2M rounds / 54M allocations freed with flat resident memory; objects of every size class allocated on one thread and checked and freed on another, by threads that then end (300 rounds, 6M objects, flat resident memory) |
 | `test_pkg.c` | `os.env`, `os.run` (exit codes, program not found), `fs.*` |
@@ -1680,8 +1704,9 @@ Limitations and things left for later:
   native function holds in its own C locals when it crashes (natives free
   what they hold before `sd_stop`, but an `sd_crash` from inside a native
   leaks its locals). Section 17 has the history of the design.
-- Big integers use quadratic algorithms; `int.string()` of a number with
-  millions of digits is slow.
+- Big integer multiplication is Karatsuba at most (no Toom-Cook or FFT), so
+  products of millions of digits take seconds: 3^2,000,000 (954,243 digits)
+  takes about 0.15 s to compute and 0.4 s to print (section 5).
 - Goroutines use memory for their stacks as deep as they grow, a page or
   two for most (an idle goroutine costs about 8 KB plus its task); 100,000
   goroutines at once are fine. Past about 24,000 at once on Linux (the

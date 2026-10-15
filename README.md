@@ -159,7 +159,6 @@ The documentation:
 - Deadlock detection is global: it fires only when every goroutine is blocked. A goroutine stuck while others keep running waits forever, and defers do not run on a deadlock.
 - When a group fails, the code of the group block itself is not stopped, only the goroutines it started.
 - File I/O other than reading an `fs.File` is not a stop point, so a goroutine blocked in it (opening or writing a FIFO, for example) is stopped only when the call returns.
-- Big integers use quadratic algorithms, so converting a number with millions of digits to text is slow.
 - Tested on macOS (arm64) and Linux (x86_64, glibc). Other POSIX systems are untested.
 - The parser reports at most one syntax error per statement.
 - There is no debugger; generated programs are C, so `lldb` works on them. The language server (`seed lsp`) has no rename, references or signature help.
