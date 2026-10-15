@@ -172,63 +172,70 @@ enum { SD_PS_RUNNING = 0, SD_PS_NOTIFIED, SD_PS_PARKED, SD_PS_PARKED_COUNTED };
 enum { SD_WM_NONE = 0, SD_WM_PARK, SD_WM_PIPE };
 enum { SD_WR_PENDING = 0, SD_WR_READY, SD_WR_TIMEOUT, SD_WR_STOP, SD_WR_WOKEN };
 
+/* A goroutine. Its fields are grouped by cache line, by who uses them: a
+ * goroutine is spawned on one CPU, often runs on another and its structure
+ * is reused by a third, so each line it uses is pulled from cache to cache.
+ * sd_spawn writes the first line (and the arguments' line), and nothing
+ * else; the goroutine itself uses the next two lines while it runs and
+ * ends; the rest is for waits and other rarer uses, and is not written at
+ * all by a goroutine that does not use it, so that it stays shared in every
+ * cache. task_reset keeps to the same lines. */
 struct sd_task {
-  sd_frame *frame;   /* innermost protected frame */
-  int raise;         /* pending raise kind */
-  char *msg;         /* crash message (malloc'ed unless msg_static) */
-  bool msg_static;
+  /* Written by sd_spawn (and schedlink by the free lists). */
+  _Alignas(64) sd_task *schedlink; /* in a run queue or a free list */
+  sd_task_fn body;
+  void *args;
+  const sd_type *args_type;
+  sd_group *group;           /* the group this goroutine belongs to (NULL for main) */
+  _Atomic(sd_task *) *gslot; /* its slot in the group's members */
+  uint64_t rng;
+  /* For the deadlock report: the goroutine's name (the spawn expression,
+   * a test's description, or NULL). */
+  const char *name;
+  _Alignas(64) char argbuf[64]; /* the arguments, when they fit */
 
-  sd_cleanup *cl;
-  size_t ncl, capcl;
-  char *arena;
-  size_t arena_len, arena_cap;
-  sd_lframe *lf_top; /* the generated code's cleanup frames (seed.h) */
-
-  pthread_mutex_t mu; /* protects sel, waiting_group, wait_mode, wake_r/wake_w */
-  _Atomic int ps;     /* SD_PS_* */
-  sd_sel *sel;
-  sd_group *waiting_group;
+  /* Used by every goroutine as it starts, runs and ends. */
+  _Alignas(64) void *sp; /* saved stack pointer (or ucontext) while switched out */
+  sd_stack stk;
+  sd_frame *frame;       /* innermost protected frame */
+  sd_lframe *lf_top;     /* the generated code's cleanup frames (seed.h) */
+  _Atomic int ps;        /* SD_PS_* */
   atomic_int cancelled;
-  /* Blocking waits: the result, claimed by the first waker; how wakers reach
-   * the wait; the wake-up pipe of a wait that polls in the OS (created on
-   * first use, -1 before); the wait's deadline. */
+  int raise;             /* pending raise kind */
+  int blockdepth;        /* nesting of sd_block_begin */
+  /* Blocking waits: the result, claimed by the first waker; how wakers
+   * reach the wait. */
   _Atomic int wait_res;
   int wait_mode;
+  int blocked_kind;      /* for the deadlock report: what it is parked on (SD_BLOCK_*) */
+  int blocked_n;         /* number of cases of a select */
+  size_t ncl, arena_len; /* the cleanup stack's depth and its arena's use */
+  size_t natexit, ngls;
+  sd_err result;         /* what the body returned, handed to the group on g0 */
+  char *msg;             /* crash message (malloc'ed unless msg_static) */
+  sd_sel *sel;
+  sd_group *waiting_group;
+  /* the wake-up pipe of a wait that polls in the OS (created on first use,
+   * -1 before) */
   int wake_r, wake_w;
-  sd_timer wtimer;
-  sd_task *hnext;      /* in a handle's queue of goroutines waiting for its operation lock */
-  int blockdepth;      /* nesting of sd_block_begin */
+  bool msg_static;
 
+  /* Rarer: buffers (kept with the goroutine for the next), locks, waits. */
+  _Alignas(64) sd_cleanup *cl;
+  size_t capcl;
+  char *arena;
+  size_t arena_cap;
+  void (**atexit_fns)(void); /* sd_goroutine_atexit, run when the goroutine ends */
+  size_t capatexit;
+  void **gls;                /* goroutine-local storage (sd_goroutine_local) */
+  pthread_mutex_t mu;        /* protects sel, waiting_group, wait_mode, wake_r/wake_w */
+  sd_timer wtimer;           /* the wait's deadline */
+  sd_task *hnext;            /* in a handle's queue of goroutines waiting for its operation lock */
   /* A thread the scheduler does not run (a unit test's main thread, say)
    * that uses the runtime: it parks on pmu/cv. */
   bool foreign;
   pthread_mutex_t pmu;
   pthread_cond_t cv;
-
-  sd_group *group;          /* the group this goroutine belongs to (NULL for main) */
-  _Atomic(sd_task *) *gslot; /* its slot in the group's members */
-  sd_task_fn body;
-  void *args;
-  const sd_type *args_type;
-  sd_err result;            /* what the body returned, handed to the group on g0 */
-  _Alignas(16) char argbuf[64]; /* the arguments, when they fit */
-  uint64_t rng;
-  void (**atexit_fns)(void); /* sd_goroutine_atexit, run when the goroutine ends */
-  size_t natexit, capatexit;
-  void **gls;                /* goroutine-local storage (sd_goroutine_local) */
-  size_t ngls;
-  /* For the deadlock report: the goroutine's name (the spawn expression,
-   * a test's description, or NULL) and what it is parked on. */
-  const char *name;
-  int blocked_kind; /* SD_BLOCK_* */
-  int blocked_n;    /* number of cases of a select */
-
-  /* Scheduling. */
-  void *sp;           /* saved stack pointer (or ucontext) while switched out */
-  sd_stack stk;
-  sd_task *schedlink; /* in a run queue or a free list */
-  sd_task *gbatch;    /* in the shared free list: the next batch (on a batch's first) */
-  int gbatchn;        /* ... and this batch's length */
   void *tsan_fiber;
 };
 
@@ -281,7 +288,11 @@ typedef struct {
 } sd_waitq;
 
 struct sd_chan {
+  /* The reference count is changed by every goroutine that is handed the
+   * channel (a spawn's arguments) and by the end of each: away from the
+   * lock and the fields it protects, which senders and receivers use. */
   _Atomic int64_t rc;
+  char rc_pad_[64 - sizeof(int64_t)];
   pthread_mutex_t mu;
   const sd_type *et;
   int64_t cap, count, head;
@@ -311,6 +322,7 @@ struct sd_p {
   int64_t sm_swhen;
   _Atomic int preempt;           /* 1: the running goroutine is asked to yield (counted in sd_preempt_req_) */
   sd_p *link;                    /* in the idle list */
+  long ndec;                     /* goroutines parked or ended here, not yet off sd_running */
   sd_task *gfree;                /* finished goroutines kept for reuse (no stacks) */
   int ngfree;
   int nsfree;                    /* free stacks, the newest last */
@@ -340,6 +352,11 @@ struct sd_m {
   size_t g0_size;
 };
 
+typedef struct {
+  sd_task *head;
+  int n;
+} sd_gbatch;
+
 static struct {
   pthread_mutex_t mu;     /* the global run queue, the idle Ps and Ms */
   sd_task *runq_head, *runq_tail;
@@ -358,8 +375,9 @@ static struct {
   int nprocs;
   sd_p *allp;
   pthread_mutex_t gmu;    /* finished goroutines and free stacks shared by the Ps */
-  sd_task *gfree;         /* batches (linked by gbatch) of goroutines (by schedlink) */
-  _Atomic int ngfree;
+  sd_gbatch *gfree;       /* batches of goroutines (each linked by schedlink) */
+  size_t ngbatch, capgbatch;
+  _Atomic int ngfree;     /* goroutines in them (written under gmu) */
   sd_stack *sfree;
   _Atomic size_t nsfree;  /* written under gmu */
   size_t capsfree;
@@ -702,8 +720,9 @@ static uint64_t seed_new(const void *salt) {
 }
 
 static sd_task *task_alloc(void) {
-  sd_task *t = calloc(1, sizeof *t);
-  if (!t) sd_fatal("out of memory");
+  void *mem = NULL;
+  if (posix_memalign(&mem, 64, sizeof(sd_task)) != 0) sd_fatal("out of memory");
+  sd_task *t = memset(mem, 0, sizeof(sd_task));
   pthread_mutex_init(&t->mu, NULL);
   pthread_mutex_init(&t->pmu, NULL);
   pthread_cond_init(&t->cv, NULL);
@@ -737,15 +756,19 @@ static void task_destroy(sd_task *t) {
 }
 
 /* Readies a goroutine that finished for reuse: its state is reset, its
- * stack and buffers kept. */
+ * buffers kept. The fields sd_spawn sets are left as they are, and the
+ * rarely used ones are only read (see sd_task): a wait's timer is off and
+ * its handle queue link NULL after every wait. */
 static void task_reset(sd_task *t) {
-  if (t->wake_r >= 0) { /* descriptors are scarcer than memory */
+  if (SD_UNLIKELY(t->wake_r >= 0)) { /* descriptors are scarcer than memory */
     close(t->wake_r);
     close(t->wake_w);
     t->wake_r = t->wake_w = -1;
   }
-  free(t->msg_static ? NULL : t->msg);
-  t->msg = NULL;
+  if (SD_UNLIKELY(t->msg != NULL)) {
+    free(t->msg_static ? NULL : t->msg);
+    t->msg = NULL;
+  }
   t->msg_static = false;
   t->frame = NULL;
   t->raise = SD_RAISE_NONE;
@@ -758,19 +781,12 @@ static void task_reset(sd_task *t) {
   atomic_store_explicit(&t->ps, SD_PS_RUNNING, memory_order_relaxed);
   atomic_store_explicit(&t->wait_res, 0, memory_order_relaxed);
   t->wait_mode = SD_WM_NONE;
-  t->wtimer.idx = SD_TIMER_OFF;
-  t->hnext = NULL;
+  if (SD_UNLIKELY(t->wtimer.idx != SD_TIMER_OFF)) t->wtimer.idx = SD_TIMER_OFF;
+  if (SD_UNLIKELY(t->hnext != NULL)) t->hnext = NULL;
   t->blockdepth = 0;
-  t->group = NULL;
-  t->gslot = NULL;
-  t->body = NULL;
-  t->args = NULL;
-  t->args_type = NULL;
   t->natexit = 0;
-  t->name = NULL;
   t->blocked_kind = SD_BLOCK_NONE;
   t->blocked_n = 0;
-  t->schedlink = NULL;
   t->sp = NULL; /* its context is made when it first runs (switch_to_g) */
 }
 
@@ -789,7 +805,7 @@ static sd_p *cur_p(void) {
  * reuses the same few stacks, whose top pages are in its cache and TLB (each
  * stack is a mapping of its own, so a cold one costs a page walk as well as
  * cache misses). Each pool is a per-P cache in front of a shared one; the
- * shared list of goroutines holds batches, so that moving SD_GFREE_LOCAL / 2
+ * shared pool of goroutines holds batches, so that moving SD_GFREE_LOCAL / 2
  * of them between a P and it takes O(1) under the lock and touches none. */
 
 /* A goroutine without a stack (stack == SD_GOROUTINE_STACK: it gets one when
@@ -810,16 +826,13 @@ static sd_task *g_get(size_t stack) {
   if (p && !p->gfree && atomic_load_explicit(&sched.ngfree, memory_order_relaxed) > 0) {
     /* take a batch from the shared list */
     pthread_mutex_lock(&sched.gmu);
-    sd_task *b = sched.gfree;
-    if (b) {
-      sched.gfree = b->gbatch;
-      atomic_fetch_sub_explicit(&sched.ngfree, b->gbatchn, memory_order_relaxed);
+    if (sched.ngbatch > 0) {
+      sd_gbatch b = sched.gfree[--sched.ngbatch];
+      atomic_store_explicit(&sched.ngfree, sched.ngfree - b.n, memory_order_relaxed);
+      p->gfree = b.head;
+      p->ngfree = b.n;
     }
     pthread_mutex_unlock(&sched.gmu);
-    if (b) {
-      p->gfree = b;
-      p->ngfree = b->gbatchn;
-    }
   }
   if (p) {
     t = p->gfree;
@@ -828,26 +841,19 @@ static sd_task *g_get(size_t stack) {
       p->ngfree--;
     }
   } else if (atomic_load_explicit(&sched.ngfree, memory_order_relaxed) > 0) {
-    /* a thread without a P: one goroutine off the first batch */
+    /* a thread without a P: one goroutine off the last batch */
     pthread_mutex_lock(&sched.gmu);
-    t = sched.gfree;
-    if (t) {
-      sd_task *rest = t->schedlink;
-      if (rest) {
-        rest->gbatch = t->gbatch;
-        rest->gbatchn = t->gbatchn - 1;
-        sched.gfree = rest;
-      } else {
-        sched.gfree = t->gbatch;
-      }
-      atomic_fetch_sub_explicit(&sched.ngfree, 1, memory_order_relaxed);
+    if (sched.ngbatch > 0) {
+      sd_gbatch *b = &sched.gfree[sched.ngbatch - 1];
+      t = b->head;
+      b->head = t->schedlink;
+      if (--b->n == 0) sched.ngbatch--;
+      atomic_store_explicit(&sched.ngfree, sched.ngfree - 1, memory_order_relaxed);
     }
     pthread_mutex_unlock(&sched.gmu);
   }
   if (t) {
     t->schedlink = NULL;
-    t->gbatch = NULL;
-    t->gbatchn = 0;
     return t;
   }
   t = task_alloc();
@@ -861,12 +867,14 @@ static sd_task *g_get(size_t stack) {
  * shared list, or frees them if it is full. */
 static void gfree_push_batch(sd_task *head, int n) {
   pthread_mutex_lock(&sched.gmu);
-  bool keep = atomic_load_explicit(&sched.ngfree, memory_order_relaxed) + n <= SD_GFREE_GLOBAL;
+  bool keep = sched.ngfree + n <= SD_GFREE_GLOBAL;
   if (keep) {
-    head->gbatch = sched.gfree;
-    head->gbatchn = n;
-    sched.gfree = head;
-    atomic_fetch_add_explicit(&sched.ngfree, n, memory_order_relaxed);
+    if (sched.ngbatch == sched.capgbatch) {
+      sched.capgbatch = sched.capgbatch ? sched.capgbatch * 2 : 64;
+      sched.gfree = sd_realloc(sched.gfree, sched.capgbatch * sizeof *sched.gfree);
+    }
+    sched.gfree[sched.ngbatch++] = (sd_gbatch){head, n};
+    atomic_store_explicit(&sched.ngfree, sched.ngfree + n, memory_order_relaxed);
   }
   pthread_mutex_unlock(&sched.gmu);
   if (!keep) {
@@ -1091,6 +1099,26 @@ static SD_NORETURN void sd_deadlock(void) {
 
 static void running_dec(void) {
   if (atomic_fetch_sub(&sd_running, 1) == 1) sd_deadlock();
+}
+
+/* The goroutines that end or park on a P are taken off sd_running when the
+ * P goes idle (pidle_put_locked), not one at a time: the count is written
+ * by every CPU, and a spawn's increment on one CPU and the end on another
+ * made its cache line travel twice per goroutine. Increments are not
+ * deferred, so the count is never below the truth, and reaches zero only
+ * when every goroutine is blocked: then every P goes idle, and the last to
+ * flush finds the deadlock. */
+static void running_dec_p(sd_p *p) {
+  if (p) p->ndec++;
+  else running_dec();
+}
+
+static void running_flush(sd_p *p) {
+  long n = p->ndec;
+  if (n) {
+    p->ndec = 0;
+    if (atomic_fetch_sub(&sd_running, n) == n) sd_deadlock();
+  }
 }
 
 static int ncpu(void) {
@@ -1357,7 +1385,9 @@ static void sysmon_wake(void);
 
 /* ------------------------------------------------------- idle Ps and Ms */
 
+
 static void pidle_put_locked(sd_p *p) {
+  running_flush(p);
   preempt_clear(p);
   atomic_store_explicit(&p->status, SD_P_IDLE, memory_order_release);
   p->link = sched.pidle;
@@ -1701,7 +1731,7 @@ static sd_task *handle_act(sd_m *m, sd_task *g) {
     bool counted = act == SD_ACT_PARK_COUNTED;
     int exp = SD_PS_RUNNING;
     if (atomic_compare_exchange_strong(&g->ps, &exp, counted ? SD_PS_PARKED_COUNTED : SD_PS_PARKED)) {
-      if (counted) running_dec();
+      if (counted) running_dec_p(m->p);
       return NULL;
     }
     atomic_store_explicit(&g->ps, SD_PS_RUNNING, memory_order_relaxed); /* woken meanwhile */
@@ -2347,7 +2377,7 @@ static void goroutine_exit_g0(sd_m *m, sd_task *t) {
   if (atomic_fetch_sub_explicit(&g->state, 2, memory_order_acq_rel) == 3) unpark(g->waiter);
   if ((size_t)(t->stk.hi - t->stk.lo) == page_round(SD_GOROUTINE_STACK)) stack_put(m->p, &t->stk);
   g_put(m->p, t);
-  running_dec();
+  running_dec_p(m->p);
 }
 
 /* Called only by the goroutine that runs g's block (see sd_group). */
@@ -2364,7 +2394,7 @@ void sd_spawn(sd_group *g, sd_task_fn body, const sd_type *args_type, const void
   c->args_type = args_type;
   /* Generated code names the descriptor of a spawn's arguments after the
    * spawn ("spawn worker(i, jobs)"): the goroutine's name in reports. */
-  if (args_type && args_type->name && strncmp(args_type->name, "spawn ", 6) == 0) c->name = args_type->name + 6;
+  c->name = args_type && args_type->name && strncmp(args_type->name, "spawn ", 6) == 0 ? args_type->name + 6 : NULL;
   if (args_type) {
     c->args = args_type->size <= sizeof c->argbuf ? (void *)c->argbuf : sd_alloc(args_type->size);
     sd_clone_deep(args_type, c->args, args);
