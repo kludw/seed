@@ -1,0 +1,674 @@
+package flags
+
+// Command-line flags for main's []string args (docs/stdlib.md, "flags").
+// Pure Seed.
+//
+// Seed has no pointers, so flags cannot be bound to variables the way Go's
+// flag.Int(&n) does. Instead a Spec (a plain value) declares the flags,
+// parse returns a Parsed value, and the program reads each flag from it by
+// name with a typed getter. Asking for a flag that was not declared, or
+// with the wrong type, crashes at once, so such a mistake shows up the
+// first time the program runs.
+//
+// The syntax is GNU's: --name value, --name=value, -x value, -xvalue,
+// bundled short bools (-vq), "--" to end the flags, "-" as an argument.
+// Flags and arguments may be mixed in any order.
+
+import "errors"
+import "fmt"
+import "os"
+import "time"
+
+type Kind enum {
+    Bool
+    Int
+    Str
+    Duration
+    List
+}
+
+// A flag's value.
+type Value enum {
+    BoolValue(bool b)
+    IntValue(int n)
+    StrValue(string s)
+    DurationValue(int d)
+    ListValue([]string items)
+}
+
+type Flag struct {
+    string name
+    byte? short
+    Kind kind
+    Value initial
+    string help
+}
+
+// The flags a program accepts, for parse and usage. Make one with spec and
+// add flags with its mut methods.
+pub type Spec struct {
+    string program
+    string args
+    string description
+    []Flag flags
+}
+
+// The result of parsing: the value of every flag, which flags were given,
+// and the arguments that are not flags.
+pub type Parsed struct {
+    []Flag flags
+    map[string]Value values
+    map[string]bool given
+    []string rest
+    bool help
+}
+
+// A spec with no flags yet, for the program called program. args
+// describes its arguments for the usage line ("FILE...", or ""), and
+// description is a sentence or two printed under it. Every spec also has
+// -h and --help, unless it declares a flag named "help" or with short name
+// 'h' itself (then only --help, or neither).
+pub fn spec(string program, string args, string description) Spec {
+    return Spec{program: program, args: args, description: description, flags: []Flag{}}
+}
+
+fn kindName(Kind k) string {
+    switch (k) {
+    case Kind.Bool:
+        return "bool"
+    case Kind.Int:
+        return "int"
+    case Kind.Str:
+        return "string"
+    case Kind.Duration:
+        return "duration"
+    case Kind.List:
+        return "list"
+    }
+}
+
+// The flag called name, or null. (The element goes through a variable:
+// `return s.flags[i]` as a Flag? does not compile yet, lib/COMPILER_BUGS.md.)
+fn (Spec s) find(string name) Flag? {
+    for (int i = 0; i < s.flags.len(); i++) {
+        if (s.flags[i].name == name) {
+            Flag f = s.flags[i]
+            return f
+        }
+    }
+    return null
+}
+
+fn (Spec s) findShort(byte c) Flag? {
+    for (int i = 0; i < s.flags.len(); i++) {
+        byte? sh = s.flags[i].short
+        if (sh != null && sh == c) {
+            Flag f = s.flags[i]
+            return f
+        }
+    }
+    return null
+}
+
+fn isNameByte(byte b) bool {
+    return (b >= 'a' && b <= 'z') || (b >= '0' && b <= '9') || b == '-'
+}
+
+fn (Spec s) mut add(string method, string name, byte? short, Kind kind, Value initial, string help) {
+    string fnName = "flags.Spec." + method
+    bool ok = name.len() > 0 && name[0] != '-'
+    for (int i = 0; i < name.len(); i++) {
+        if (!isNameByte(name[i])) {
+            ok = false
+        }
+    }
+    if (!ok) {
+        os.crash(fnName + ": invalid flag name \"" + name + "\" (use lowercase letters, digits and '-')")
+    }
+    if (s.find(name) != null) {
+        os.crash(fnName + ": flag --" + name + " is declared twice")
+    }
+    if (short != null) {
+        byte c = short
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'))) {
+            os.crash(fnName + ": invalid short name for --" + name + " (use a letter or a digit)")
+        }
+        if (s.findShort(c) != null) {
+            os.crash(fnName + ": short name -" + string([]byte{c}) + " is declared twice")
+        }
+    }
+    s.flags.push(Flag{name: name, short: short, kind: kind, initial: initial, help: help})
+}
+
+// Declares --name (and -short, unless short is null): a bool flag, false
+// unless given. --name and --name=true set it, --name=false clears it.
+pub fn (Spec s) mut addBool(string name, byte? short, string help) {
+    s.add("addBool", name, short, Kind.Bool, Value.BoolValue(false), help)
+}
+
+// Declares an int flag with a default.
+pub fn (Spec s) mut addInt(string name, byte? short, int initial, string help) {
+    s.add("addInt", name, short, Kind.Int, Value.IntValue(initial), help)
+}
+
+// Declares a string flag with a default.
+pub fn (Spec s) mut addString(string name, byte? short, string initial, string help) {
+    s.add("addString", name, short, Kind.Str, Value.StrValue(initial), help)
+}
+
+// Declares a duration flag (nanoseconds, like every duration), written
+// like Go's: "90s", "1h30m", "250ms", "1.5h".
+pub fn (Spec s) mut addDuration(string name, byte? short, int initial, string help) {
+    s.add("addDuration", name, short, Kind.Duration, Value.DurationValue(initial), help)
+}
+
+// Declares a list flag: each time it is given adds a value, in order.
+pub fn (Spec s) mut addList(string name, byte? short, string help) {
+    s.add("addList", name, short, Kind.List, Value.ListValue([]string{}), help)
+}
+
+fn (Spec s) helpLong() bool {
+    return s.find("help") == null
+}
+
+fn (Spec s) helpShort() bool {
+    return s.helpLong() && s.findShort('h') == null
+}
+
+// The edit distance between a and b (for "did you mean").
+fn distance(string a, string b) int {
+    []int prev = []int{}
+    for (int j = 0; j <= b.len(); j++) {
+        prev.push(j)
+    }
+    for (int i = 1; i <= a.len(); i++) {
+        []int cur = []int{i}
+        for (int j = 1; j <= b.len(); j++) {
+            int cost = 1
+            if (a[i - 1] == b[j - 1]) {
+                cost = 0
+            }
+            int best = prev[j - 1] + cost
+            if (prev[j] + 1 < best) {
+                best = prev[j] + 1
+            }
+            if (cur[j - 1] + 1 < best) {
+                best = cur[j - 1] + 1
+            }
+            cur.push(best)
+        }
+        prev = cur
+    }
+    return prev[b.len()]
+}
+
+fn (Spec s) unknown(string name) string {
+    string best = ""
+    int bestDist = 3
+    for (int i = 0; i < s.flags.len(); i++) {
+        int d = distance(name, s.flags[i].name)
+        if (d < bestDist) {
+            bestDist = d
+            best = s.flags[i].name
+        }
+    }
+    if (best != "") {
+        return "--" + name + ": unknown flag (did you mean --" + best + "?)"
+    }
+    return "--" + name + ": unknown flag"
+}
+
+// Parses a duration written like Go's time.ParseDuration: a sign, then
+// numbers with units (ns, us or µs, ms, s, m, h), "1h30m", "1.5s"; "0".
+fn parseDuration(string text) int? {
+    string t = text
+    bool neg = false
+    if (t.startsWith("-") || t.startsWith("+")) {
+        neg = t.startsWith("-")
+        t = t.slice(1, t.len())
+    }
+    if (t == "0") {
+        return 0
+    }
+    if (t == "") {
+        return null
+    }
+    int total = 0
+    for (; t != ""; ) {
+        int i = 0
+        int whole = 0
+        int digits = 0
+        for (; i < t.len() && t[i] >= '0' && t[i] <= '9'; i++) {
+            whole = whole * 10 + (int(t[i]) - int('0'))
+            digits++
+        }
+        int frac = 0
+        int scale = 1
+        if (i < t.len() && t[i] == '.') {
+            i++
+            for (; i < t.len() && t[i] >= '0' && t[i] <= '9'; i++) {
+                frac = frac * 10 + (int(t[i]) - int('0'))
+                scale = scale * 10
+                digits++
+            }
+        }
+        if (digits == 0) {
+            return null
+        }
+        int u = i
+        for (; u < t.len() && !(t[u] >= '0' && t[u] <= '9') && t[u] != '.'; u++) {}
+        string unit = t.slice(i, u)
+        int ns = 0
+        switch (unit) {
+        case "ns":
+            ns = time.nanosecond
+        case "us", "µs", "μs":
+            ns = time.microsecond
+        case "ms":
+            ns = time.millisecond
+        case "s":
+            ns = time.second
+        case "m":
+            ns = time.minute
+        case "h":
+            ns = time.hour
+        default:
+            return null
+        }
+        total = total + whole * ns + frac * ns / scale
+        t = t.slice(u, t.len())
+    }
+    if (neg) {
+        return -total
+    }
+    return total
+}
+
+// A duration as Go's Duration.String writes it: "1h30m0s", "2.5s",
+// "250ms", "0s".
+fn formatDuration(int d) string {
+    if (d == 0) {
+        return "0s"
+    }
+    string sign = ""
+    int n = d
+    if (n < 0) {
+        sign = "-"
+        n = -n
+    }
+    if (n < time.second) {
+        if (n < time.microsecond) {
+            return sign + n.string() + "ns"
+        }
+        if (n < time.millisecond) {
+            return sign + fraction(n, time.microsecond) + "µs"
+        }
+        return sign + fraction(n, time.millisecond) + "ms"
+    }
+    string out = fraction(n % time.minute, time.second) + "s"
+    int mins = n / time.minute
+    if (mins > 0) {
+        out = (mins % 60).string() + "m" + out
+        if (mins >= 60) {
+            out = (mins / 60).string() + "h" + out
+        }
+    }
+    return sign + out
+}
+
+// n / unit with the fraction's digits, without trailing zeros.
+fn fraction(int n, int unit) string {
+    string whole = (n / unit).string()
+    int rest = n % unit
+    if (rest == 0) {
+        return whole
+    }
+    string digits = (unit + rest).string().slice(1, (unit + rest).string().len())
+    for (; digits.endsWith("0"); ) {
+        digits = digits.slice(0, digits.len() - 1)
+    }
+    return whole + "." + digits
+}
+
+// The value of flag f from text, or the reason it is not valid.
+fn (Flag f) convert(string shown, string text, Value old) (Value?, string) {
+    switch (f.kind) {
+    case Kind.Bool:
+        if (text == "true") {
+            return Value.BoolValue(true), ""
+        }
+        if (text == "false") {
+            return Value.BoolValue(false), ""
+        }
+        return null, shown + ": invalid value \"" + text + "\" for a bool flag (use true or false)"
+    case Kind.Int:
+        int? n, _ = text.toInt()
+        if (n == null) {
+            return null, shown + ": invalid integer \"" + text + "\""
+        }
+        return Value.IntValue(n), ""
+    case Kind.Str:
+        return Value.StrValue(text), ""
+    case Kind.Duration:
+        int? d = parseDuration(text)
+        if (d == null) {
+            return null, shown + ": invalid duration \"" + text + "\" (write it like 1h30m, 5s or 250ms)"
+        }
+        return Value.DurationValue(d), ""
+    case Kind.List:
+        []string items = old.items()
+        items.push(text)
+        return Value.ListValue(items), ""
+    }
+}
+
+// Parses the arguments as main receives them (args[0], the program, is
+// skipped). Errors name the flag: `flags.Spec.parse: --count: invalid
+// integer "x"`, `--colour: unknown flag (did you mean --color?)`, `-n:
+// missing value`. --help and -h are not errors: they set helpRequested.
+pub fn (Spec s) parse([]string args) (Parsed, error) {
+    Parsed? p, string reason = s.parseArgs(args)
+    if (p == null) {
+        return null, errors.new("flags.Spec.parse: " + reason)
+    }
+    return p, null
+}
+
+fn (Spec s) parseArgs([]string args) (Parsed?, string) {
+    map[string]Value values = map[string]Value{}
+    for (int i = 0; i < s.flags.len(); i++) {
+        values[s.flags[i].name] = s.flags[i].initial
+    }
+    Parsed p = Parsed{flags: s.flags, values: values, given: map[string]bool{}, rest: []string{}, help: false}
+    bool flagsDone = false
+    for (int i = 1; i < args.len(); i++) {
+        string a = args[i]
+        if (flagsDone || a == "-" || !a.startsWith("-")) {
+            p.rest.push(a)
+            continue
+        }
+        if (a == "--") {
+            flagsDone = true
+            continue
+        }
+        if (a.startsWith("--")) {
+            string name = a.slice(2, a.len())
+            string? value = null
+            int? eq = name.index("=")
+            if (eq != null) {
+                value = name.slice(eq + 1, name.len())
+                name = name.slice(0, eq)
+            }
+            if (name == "help" && s.helpLong()) {
+                p.help = true
+                continue
+            }
+            Flag? f = s.find(name)
+            if (f == null) {
+                return null, s.unknown(name)
+            }
+            string shown = "--" + name
+            if (value == null) {
+                if (f.kind == Kind.Bool) {
+                    value = "true"
+                } else if (i + 1 < args.len()) {
+                    i++
+                    value = args[i]
+                } else {
+                    return null, shown + ": missing value"
+                }
+            }
+            string reason = p.set(f, shown, value)
+            if (reason != "") {
+                return null, reason
+            }
+            continue
+        }
+        // Short flags, possibly bundled: -v, -vq, -n5, -vn 5, -n=5.
+        for (int k = 1; k < a.len(); k++) {
+            byte c = a[k]
+            string shown = "-" + string([]byte{c})
+            if (c == 'h' && s.helpShort()) {
+                p.help = true
+                continue
+            }
+            Flag? f = s.findShort(c)
+            if (f == null) {
+                return null, shown + ": unknown flag"
+            }
+            string? value = null
+            if (k + 1 < a.len() && a[k + 1] == '=') {
+                value = a.slice(k + 2, a.len())
+            } else if (f.kind == Kind.Bool) {
+                value = "true"
+            } else if (k + 1 < a.len()) {
+                value = a.slice(k + 1, a.len())
+            } else if (i + 1 < args.len()) {
+                i++
+                value = args[i]
+            } else {
+                return null, shown + ": missing value"
+            }
+            string reason = p.set(f, shown, value)
+            if (reason != "") {
+                return null, reason
+            }
+            if (f.kind != Kind.Bool || (k + 1 < a.len() && a[k + 1] == '=')) {
+                break
+            }
+        }
+    }
+    return p, ""
+}
+
+fn (Parsed p) mut set(Flag f, string shown, string text) string {
+    Value? old = p.values[f.name]
+    if (old == null) {
+        old = f.initial
+    }
+    Value? v, string reason = f.convert(shown, text, old)
+    if (v == null) {
+        return reason
+    }
+    p.values[f.name] = v
+    p.given[f.name] = true
+    return ""
+}
+
+// parse, for main: on --help or -h, prints the usage to stdout and exits
+// with 0; on an error, prints `<program>: <reason>` and a hint to use
+// --help to stderr and exits with 2.
+pub fn (Spec s) parseOrExit([]string args) Parsed {
+    Parsed? p, string reason = s.parseArgs(args)
+    if (p == null) {
+        string hint = ""
+        if (s.helpLong()) {
+            hint = "\nrun '" + s.program + " --help' for usage"
+        }
+        fmt.eprintln(s.program + ": " + reason + hint)
+        os.exit(2)
+    }
+    if (p.help) {
+        fmt.print(s.usage())
+        os.exit(0)
+    }
+    return p
+}
+
+fn (Flag f) defaultText() string {
+    switch (f.initial) {
+    case Value.BoolValue(bool _):
+        return ""
+    case Value.IntValue(int n):
+        if (n != 0) {
+            return " (default " + n.string() + ")"
+        }
+    case Value.StrValue(string str):
+        if (str != "") {
+            return " (default \"" + str + "\")"
+        }
+    case Value.DurationValue(int d):
+        if (d != 0) {
+            return " (default " + formatDuration(d) + ")"
+        }
+    case Value.ListValue([]string _):
+        return " (repeatable)"
+    }
+    return ""
+}
+
+// The items of a list value ([] for the others).
+fn (Value v) items() []string {
+    switch (v) {
+    case Value.ListValue([]string xs):
+        return xs
+    case Value.BoolValue(bool _), Value.IntValue(int _), Value.StrValue(string _), Value.DurationValue(int _):
+        return []string{}
+    }
+}
+
+fn padTo(string s, int width) string {
+    string out = s
+    for (; out.chars().len() < width; ) {
+        out = out + " "
+    }
+    return out
+}
+
+// The help text: a usage line, the description, and one line per flag
+// with its short and long names, its type, its help and its default.
+pub fn (Spec s) usage() string {
+    []string lefts = []string{}
+    []string rights = []string{}
+    for (int i = 0; i < s.flags.len(); i++) {
+        Flag f = s.flags[i]
+        string left = "    "
+        byte? sh = f.short
+        if (sh != null) {
+            left = "-" + string([]byte{sh}) + ", "
+        }
+        left = left + "--" + f.name
+        if (f.kind != Kind.Bool) {
+            left = left + " " + kindName(f.kind)
+        }
+        lefts.push(left)
+        rights.push(f.help + f.defaultText())
+    }
+    if (s.helpLong()) {
+        if (s.helpShort()) {
+            lefts.push("-h, --help")
+        } else {
+            lefts.push("    --help")
+        }
+        rights.push("show this help and exit")
+    }
+    int width = 0
+    for (int i = 0; i < lefts.len(); i++) {
+        int w = lefts[i].chars().len()
+        if (w > width) {
+            width = w
+        }
+    }
+    []string out = []string{}
+    string line = "usage: " + s.program
+    if (lefts.len() > 0) {
+        line = line + " [flags]"
+    }
+    if (s.args != "") {
+        line = line + " " + s.args
+    }
+    out.push(line + "\n")
+    if (s.description != "") {
+        out.push("\n" + s.description + "\n")
+    }
+    if (lefts.len() > 0) {
+        out.push("\nflags:\n")
+        for (int i = 0; i < lefts.len(); i++) {
+            out.push("  " + padTo(lefts[i], width) + "   " + rights[i] + "\n")
+        }
+    }
+    return out.join("")
+}
+
+fn (Parsed p) get(string method, string name, Kind kind) Value {
+    for (int i = 0; i < p.flags.len(); i++) {
+        if (p.flags[i].name == name) {
+            if (p.flags[i].kind != kind) {
+                os.crash("flags.Parsed." + method + ": --" + name + " is a " + kindName(p.flags[i].kind) + " flag")
+            }
+            Value? v = p.values[name]
+            if (v != null) {
+                return v
+            }
+            return p.flags[i].initial
+        }
+    }
+    os.crash("flags.Parsed." + method + ": no flag --" + name + " was declared")
+}
+
+// The value of bool flag --name. Crashes if the spec has no such flag, or
+// it is not a bool flag; the same holds for the other getters.
+pub fn (Parsed p) getBool(string name) bool {
+    switch (p.get("getBool", name, Kind.Bool)) {
+    case Value.BoolValue(bool b):
+        return b
+    case Value.IntValue(int _), Value.StrValue(string _), Value.DurationValue(int _), Value.ListValue([]string _):
+        return false
+    }
+}
+
+// The value of int flag --name.
+pub fn (Parsed p) getInt(string name) int {
+    switch (p.get("getInt", name, Kind.Int)) {
+    case Value.IntValue(int n):
+        return n
+    case Value.BoolValue(bool _), Value.StrValue(string _), Value.DurationValue(int _), Value.ListValue([]string _):
+        return 0
+    }
+}
+
+// The value of string flag --name.
+pub fn (Parsed p) getString(string name) string {
+    switch (p.get("getString", name, Kind.Str)) {
+    case Value.StrValue(string s):
+        return s
+    case Value.BoolValue(bool _), Value.IntValue(int _), Value.DurationValue(int _), Value.ListValue([]string _):
+        return ""
+    }
+}
+
+// The value of duration flag --name, in nanoseconds.
+pub fn (Parsed p) getDuration(string name) int {
+    switch (p.get("getDuration", name, Kind.Duration)) {
+    case Value.DurationValue(int d):
+        return d
+    case Value.BoolValue(bool _), Value.IntValue(int _), Value.StrValue(string _), Value.ListValue([]string _):
+        return 0
+    }
+}
+
+// The values of list flag --name, in the order given.
+pub fn (Parsed p) getList(string name) []string {
+    return p.get("getList", name, Kind.List).items()
+}
+
+// Whether --name was given on the command line (rather than left at its
+// default). Crashes if no flag --name was declared.
+pub fn (Parsed p) isSet(string name) bool {
+    for (int i = 0; i < p.flags.len(); i++) {
+        if (p.flags[i].name == name) {
+            return p.given[name] != null
+        }
+    }
+    os.crash("flags.Parsed.isSet: no flag --" + name + " was declared")
+}
+
+// The arguments that are not flags, in order.
+pub fn (Parsed p) args() []string {
+    return p.rest
+}
+
+// Whether --help or -h was given (parseOrExit handles it itself).
+pub fn (Parsed p) helpRequested() bool {
+    return p.help
+}

@@ -1,0 +1,205 @@
+package flags
+
+import "time"
+
+fn flagsTestSpec() Spec {
+    Spec s = spec("todo", "FILE...", "Keeps a list of things to do.")
+    s.addBool("verbose", 'v', "print more")
+    s.addBool("quiet", 'q', "print less")
+    s.addInt("count", 'n', 10, "how many to show")
+    s.addString("output", 'o', "-", "where to write")
+    s.addDuration("timeout", null, 5 * time.second, "give up after this long")
+    s.addList("tag", 't', "only items with this tag")
+    s.addString("name", null, "", "your name")
+    return s
+}
+
+fn flagsTestParse([]string args) Parsed {
+    Parsed? p, error err = flagsTestSpec().parse(args)
+    if (err != null || p == null) {
+        return Parsed{flags: []Flag{}, values: map[string]Value{}, given: map[string]bool{}, rest: []string{}, help: false}
+    }
+    return p
+}
+
+fn flagsTestError([]string args) string {
+    _, error err = flagsTestSpec().parse(args)
+    if (err == null) {
+        return "no error"
+    }
+    return err.message()
+}
+
+test "defaults" {
+    Parsed p = flagsTestParse([]string{"todo"})
+    assert(!p.getBool("verbose"))
+    assert(p.getInt("count") == 10)
+    assert(p.getString("output") == "-")
+    assert(p.getDuration("timeout") == 5 * time.second)
+    assert(p.getList("tag") == []string{})
+    assert(p.args() == []string{})
+    assert(!p.isSet("count"))
+    assert(!p.helpRequested())
+}
+
+test "long flags" {
+    Parsed p = flagsTestParse([]string{"todo", "--verbose", "--count", "3", "--output=out.txt", "--timeout", "1m30s", "--tag", "a", "--tag=b"})
+    assert(p.getBool("verbose"))
+    assert(p.getInt("count") == 3)
+    assert(p.getString("output") == "out.txt")
+    assert(p.getDuration("timeout") == 90 * time.second)
+    assert(p.getList("tag") == []string{"a", "b"})
+    assert(p.isSet("count"))
+    assert(!p.isSet("quiet"))
+    Parsed q = flagsTestParse([]string{"todo", "--verbose=false", "--count=-4", "--output", "-"})
+    assert(!q.getBool("verbose"))
+    assert(q.isSet("verbose"))
+    assert(q.getInt("count") == -4)
+    assert(q.getString("output") == "-")
+}
+
+test "short flags, bundled and attached" {
+    Parsed p = flagsTestParse([]string{"todo", "-vq", "-n5", "-o", "x", "-t", "a", "-vt=b"})
+    assert(p.getBool("verbose"))
+    assert(p.getBool("quiet"))
+    assert(p.getInt("count") == 5)
+    assert(p.getString("output") == "x")
+    assert(p.getList("tag") == []string{"a", "b"})
+    Parsed q = flagsTestParse([]string{"todo", "-vn", "7", "-n=8", "-v=false"})
+    assert(q.getInt("count") == 8)
+    assert(!q.getBool("verbose"))
+}
+
+test "arguments, - and --" {
+    Parsed p = flagsTestParse([]string{"todo", "a.txt", "-v", "-", "b.txt", "--", "-n", "--count"})
+    assert(p.getBool("verbose"))
+    assert(p.args() == []string{"a.txt", "-", "b.txt", "-n", "--count"})
+    assert(p.getInt("count") == 10)
+    // The last of repeated flags wins (lists collect them all).
+    Parsed q = flagsTestParse([]string{"todo", "-n", "1", "--count", "2"})
+    assert(q.getInt("count") == 2)
+    // A string value may start with '-'.
+    Parsed r = flagsTestParse([]string{"todo", "--name", "-x-"})
+    assert(r.getString("name") == "-x-")
+}
+
+test "help" {
+    assert(flagsTestParse([]string{"todo", "--help"}).helpRequested())
+    assert(flagsTestParse([]string{"todo", "-vh"}).helpRequested())
+    Spec s = spec("tool", "", "")
+    s.addString("host", 'h', "localhost", "server")
+    Parsed? p, error err = s.parse([]string{"tool", "-h", "example.com"})
+    assert(err == null)
+    if (p != null) {
+        assert(p.getString("host") == "example.com")
+        assert(!p.helpRequested())
+    }
+}
+
+test "errors" {
+    assert(flagsTestError([]string{"todo", "--colour"}) == "flags.Spec.parse: --colour: unknown flag")
+    assert(flagsTestError([]string{"todo", "--cuont", "3"}) == "flags.Spec.parse: --cuont: unknown flag (did you mean --count?)")
+    assert(flagsTestError([]string{"todo", "-x"}) == "flags.Spec.parse: -x: unknown flag")
+    assert(flagsTestError([]string{"todo", "-vx"}) == "flags.Spec.parse: -x: unknown flag")
+    assert(flagsTestError([]string{"todo", "--count"}) == "flags.Spec.parse: --count: missing value")
+    assert(flagsTestError([]string{"todo", "-n"}) == "flags.Spec.parse: -n: missing value")
+    assert(flagsTestError([]string{"todo", "-n", "x"}) == "flags.Spec.parse: -n: invalid integer \"x\"")
+    assert(flagsTestError([]string{"todo", "--count=1.5"}) == "flags.Spec.parse: --count: invalid integer \"1.5\"")
+    assert(flagsTestError([]string{"todo", "--verbose=yes"}) == "flags.Spec.parse: --verbose: invalid value \"yes\" for a bool flag (use true or false)")
+    assert(flagsTestError([]string{"todo", "--timeout", "5"}) == "flags.Spec.parse: --timeout: invalid duration \"5\" (write it like 1h30m, 5s or 250ms)")
+}
+
+test "durations" {
+    assert(parseDuration("0") == 0)
+    assert(parseDuration("300ms") == 300 * time.millisecond)
+    assert(parseDuration("-1.5h") == -90 * time.minute)
+    assert(parseDuration("2h45m") == 165 * time.minute)
+    assert(parseDuration("1.25s") == 1250 * time.millisecond)
+    assert(parseDuration("10us") == 10 * time.microsecond)
+    assert(parseDuration("10µs") == 10 * time.microsecond)
+    assert(parseDuration("7ns") == 7)
+    assert(parseDuration("") == null)
+    assert(parseDuration("5") == null)
+    assert(parseDuration("5d") == null)
+    assert(parseDuration("h") == null)
+    assert(parseDuration("1.") == null)
+    assert(parseDuration("1.s") == time.second)
+    assert(formatDuration(0) == "0s")
+    assert(formatDuration(5 * time.second) == "5s")
+    assert(formatDuration(90 * time.second) == "1m30s")
+    assert(formatDuration(time.hour) == "1h0m0s")
+    assert(formatDuration(1500 * time.millisecond) == "1.5s")
+    assert(formatDuration(250 * time.millisecond) == "250ms")
+    assert(formatDuration(1500 * time.microsecond) == "1.5ms")
+    assert(formatDuration(42) == "42ns")
+    assert(formatDuration(-2 * time.minute) == "-2m0s")
+}
+
+test "usage" {
+    string want = "usage: todo [flags] FILE...\n\nKeeps a list of things to do.\n\nflags:\n" +
+        "  -v, --verbose            print more\n" +
+        "  -q, --quiet              print less\n" +
+        "  -n, --count int          how many to show (default 10)\n" +
+        "  -o, --output string      where to write (default \"-\")\n" +
+        "      --timeout duration   give up after this long (default 5s)\n" +
+        "  -t, --tag list           only items with this tag (repeatable)\n" +
+        "      --name string        your name\n" +
+        "  -h, --help               show this help and exit\n"
+    assert(flagsTestSpec().usage() == want)
+    assert(spec("x", "", "").usage() == "usage: x [flags]\n\nflags:\n  -h, --help   show this help and exit\n")
+}
+
+fn crashDuplicate() {
+    Spec s = spec("x", "", "")
+    s.addBool("a", null, "")
+    s.addInt("a", null, 0, "")
+}
+
+fn crashDuplicateShort() {
+    Spec s = spec("x", "", "")
+    s.addBool("a", 'a', "")
+    s.addBool("b", 'a', "")
+}
+
+fn crashBadName() {
+    Spec s = spec("x", "", "")
+    s.addBool("Big", null, "")
+}
+
+fn crashWrongType() {
+    Parsed p = flagsTestParse([]string{"todo"})
+    _ = p.getInt("verbose")
+}
+
+fn crashUndeclared() {
+    Parsed p = flagsTestParse([]string{"todo"})
+    _ = p.getString("nope")
+}
+
+test "mistakes in the program crash" {
+    error err = group {
+        spawn crashDuplicate()
+    }
+    assert(err != null)
+    assert(err.message() == "crash: flags.Spec.addInt: flag --a is declared twice")
+    err = group {
+        spawn crashDuplicateShort()
+    }
+    assert(err != null)
+    assert(err.message() == "crash: flags.Spec.addBool: short name -a is declared twice")
+    err = group {
+        spawn crashBadName()
+    }
+    assert(err != null)
+    assert(err.message() == "crash: flags.Spec.addBool: invalid flag name \"Big\" (use lowercase letters, digits and '-')")
+    err = group {
+        spawn crashWrongType()
+    }
+    assert(err != null)
+    assert(err.message() == "crash: flags.Parsed.getInt: --verbose is a bool flag")
+    err = group {
+        spawn crashUndeclared()
+    }
+    assert(err != null)
+    assert(err.message() == "crash: flags.Parsed.getString: no flag --nope was declared")
+}
