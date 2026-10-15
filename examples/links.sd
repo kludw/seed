@@ -1,0 +1,59 @@
+// links: lists the links of HTML files: every href="..." found with a
+// regular expression, resolved against the page's own URL with the url
+// package (RFC 3986), with its query parameters. Shows regex groups and
+// findAll, url.parse, resolve and parseQuery, and flags.
+//
+//   seed run examples/links.sd --base https://example.com/docs/harbour/ examples/testdata/page.html
+package main
+
+import "errors"
+import "flags"
+import "fmt"
+import "fs"
+import "regex"
+import "url"
+
+fn main([]string args) error {
+    flags.Spec spec = flags.spec("links", "FILE...", "Lists the links of HTML files, resolved against the URL the page was read from.")
+    spec.addString("base", 'b', "http://localhost/", "the URL of the page")
+    spec.addBool("external", 'e', "only links to other hosts")
+    flags.Parsed p = spec.parseOrExit(args)
+    if (p.args().len() == 0) {
+        return errors.new("usage: links [flags] FILE... (links --help for more)")
+    }
+    url.Url base = try url.parse(p.getString("base"))
+    // An <a> or <link> tag's href, in single or double quotes, in any case.
+    regex.Regex href = regex.mustCompile("(?i)<(?:a|link)\\s[^>]*?\\bhref\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)')")
+    for (int f = 0; f < p.args().len(); f++) {
+        string page = try fs.read(p.args()[f])
+        []regex.Match ms = href.findAll(page)
+        for (int i = 0; i < ms.len(); i++) {
+            string? raw = ms[i].groupText(1)
+            if (raw == null) {
+                raw = ms[i].groupText(2)
+            }
+            if (raw != null) {
+                try show(base, raw.replace("&amp;", "&"), p.getBool("external"))
+            }
+        }
+    }
+    return null
+}
+
+fn show(url.Url base, string raw, bool externalOnly) error {
+    url.Url ref, error err = url.parse(raw)
+    if (err != null) {
+        fmt.println("! " + err.message())
+        return null
+    }
+    url.Url target = base.resolve(ref)
+    if (externalOnly && target.hostPort() == base.hostPort()) {
+        return null
+    }
+    fmt.println(target.string())
+    url.Query q = try target.params()
+    for (int i = 0; i < q.params.len(); i++) {
+        fmt.println("    " + q.params[i].key + " = " + q.params[i].value)
+    }
+    return null
+}

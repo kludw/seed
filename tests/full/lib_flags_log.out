@@ -1,0 +1,17 @@
+true 3 90 x|y z a.txt,-b.txt
+time=1970-01-02T00:00:00.042Z level=INFO msg=starting app=demo
+time=1970-01-02T00:00:00.042Z level=DEBUG msg=done app=demo worker=1
+time=1970-01-02T00:00:00.042Z level=DEBUG msg=done app=demo worker=1
+time=1970-01-02T00:00:00.042Z level=DEBUG msg=done app=demo worker=1
+time=1970-01-02T00:00:00.042Z level=WARN msg=finished app=demo labels="x y z"
+time=1970-01-02T00:00:00.042Z level=ERROR msg="flags.Spec.parse: --wiat: unknown flag (did you mean --wait?)" app=demo
+usage: demo [flags] FILE...
+
+A demonstration.
+
+flags:
+  -v, --verbose         log more
+  -w, --workers int     how many workers (default 2)
+      --wait duration   how long to wait (default 1s)
+  -l, --label list      a label (repeatable)
+  -h, --help            show this help and exit

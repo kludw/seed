@@ -1,0 +1,4 @@
+--- stderr
+csvgrep: --colum: unknown flag (did you mean --column?)
+run 'csvgrep --help' for usage
+--- exit 2

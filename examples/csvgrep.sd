@@ -1,0 +1,119 @@
+// csvgrep: prints the rows of CSV files in which a field matches a regular
+// expression. Shows the flags package (declaring flags, a generated
+// --help, typed getters), regex, csv for reading and writing, and log for
+// the --verbose trace on stderr.
+//
+//   seed run examples/csvgrep.sd -c city Lisbon examples/testdata/people.csv
+//   seed run examples/csvgrep.sd -i -s name -s email 'EXAMPLE\.COM$' examples/testdata/people.csv
+package main
+
+import "csv"
+import "errors"
+import "flags"
+import "fmt"
+import "fs"
+import "log"
+import "regex"
+
+fn main([]string args) error {
+    flags.Spec spec = flags.spec("csvgrep", "PATTERN FILE...", "Prints the rows of CSV files in which a field matches PATTERN, a regular expression,\nafter the header row.")
+    spec.addString("column", 'c', "", "search only this column")
+    spec.addList("select", 's', "print only this column")
+    spec.addBool("ignore-case", 'i', "match upper and lower case alike")
+    spec.addBool("count", 'n', "print the number of matching rows instead")
+    spec.addString("delimiter", 'd', ",", "the field separator")
+    spec.addBool("verbose", 'v', "trace what is read on stderr")
+    flags.Parsed p = spec.parseOrExit(args)
+    []string rest = p.args()
+    if (rest.len() < 2) {
+        return errors.new("usage: csvgrep [flags] PATTERN FILE... (csvgrep --help for more)")
+    }
+    log.Level level = log.Level.Warn
+    if (p.getBool("verbose")) {
+        level = log.Level.Debug
+    }
+    log.Logger logger = log.new(level, log.Output.Stderr)
+    string delimiter = p.getString("delimiter")
+    if (delimiter.len() != 1 || delimiter == "\"") {
+        return errors.new("csvgrep: --delimiter must be one character other than '\"'")
+    }
+    string pattern = rest[0]
+    if (p.getBool("ignore-case")) {
+        pattern = "(?i)" + pattern
+    }
+    regex.Regex re = try regex.compile(pattern)
+    [][]string out = [][]string{}
+    int count = 0
+    for (int f = 1; f < rest.len(); f++) {
+        string path = rest[f]
+        [][]string rows = try csv.parse(try fs.read(path), delimiter[0])
+        logger.with("file", path).with("rows", rows.len().string()).debug("read")
+        if (rows.len() == 0) {
+            continue
+        }
+        []string header = rows[0]
+        int? only = null
+        if (p.getString("column") != "") {
+            only = header.index(p.getString("column"))
+            if (only == null) {
+                return errors.new(path + ": no column \"" + p.getString("column") + "\"")
+            }
+        }
+        []int picks = try pick(path, header, p.getList("select"))
+        if (out.len() == 0) {
+            out.push(columns(header, picks))
+        }
+        for (int r = 1; r < rows.len(); r++) {
+            if (matches(re, rows[r], only)) {
+                count++
+                out.push(columns(rows[r], picks))
+            }
+        }
+    }
+    if (p.getBool("count")) {
+        fmt.println(count.string())
+    } else {
+        fmt.print(csv.format(out, delimiter[0]))
+    }
+    return null
+}
+
+// Whether re matches the row's field `only`, or any field.
+fn matches(regex.Regex re, []string row, int? only) bool {
+    for (int i = 0; i < row.len(); i++) {
+        if ((only == null || only == i) && re.matches(row[i])) {
+            return true
+        }
+    }
+    return false
+}
+
+// The indexes of the selected columns (all of them when none is).
+fn pick(string path, []string header, []string names) ([]int, error) {
+    []int out = []int{}
+    for (int i = 0; i < names.len(); i++) {
+        int? k = header.index(names[i])
+        if (k == null) {
+            return null, errors.new(path + ": no column \"" + names[i] + "\"")
+        }
+        out.push(k)
+    }
+    if (names.len() == 0) {
+        for (int i = 0; i < header.len(); i++) {
+            out.push(i)
+        }
+    }
+    return out, null
+}
+
+fn columns([]string row, []int picks) []string {
+    []string out = []string{}
+    for (int i = 0; i < picks.len(); i++) {
+        if (picks[i] < row.len()) {
+            out.push(row[picks[i]])
+        } else {
+            out.push("")
+        }
+    }
+    return out
+}

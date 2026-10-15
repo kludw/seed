@@ -1,0 +1,13 @@
+usage: csvgrep [flags] PATTERN FILE...
+
+Prints the rows of CSV files in which a field matches PATTERN, a regular expression,
+after the header row.
+
+flags:
+  -c, --column string      search only this column
+  -s, --select list        print only this column (repeatable)
+  -i, --ignore-case        match upper and lower case alike
+  -n, --count              print the number of matching rows instead
+  -d, --delimiter string   the field separator (default ",")
+  -v, --verbose            trace what is read on stderr
+  -h, --help               show this help and exit

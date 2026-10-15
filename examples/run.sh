@@ -108,6 +108,14 @@ check newcomer-todo-missing newcomer-todo -f "$tmp/todo.json" remove 7
 check newcomer-linkcheck newcomer-linkcheck --demo
 check newcomer-logstat newcomer-logstat newcomer/logstat/access.log
 check newcomer-vending "<newcomer/vending/script.txt" newcomer-vending
+check csvgrep csvgrep -c city Lisbon testdata/people.csv
+check csvgrep-select csvgrep -i -s name -s email 'EXAMPLE\.(COM|ORG)$' testdata/people.csv
+check csvgrep-count csvgrep -n o testdata/people.csv
+check csvgrep-help csvgrep --help
+check csvgrep-bad-flag csvgrep --colum x
+check csvgrep-bad-pattern csvgrep 'a(' testdata/people.csv
+check links links --base https://example.com/docs/harbour/ testdata/page.html
+check links-external links -e -b https://weather.example.org/x testdata/page.html
 
 # --- the tests of every project directory with a tests/ directory in it
 for dir in "$here"/*/; do

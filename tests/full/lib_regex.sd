@@ -1,0 +1,58 @@
+// The regex package end to end, and its per-goroutine caches: goroutines
+// that use a Regex, one of which crashes, must leave nothing behind
+// (make test-leaks).
+package main
+
+import "fmt"
+import "os"
+import "regex"
+
+fn count(regex.Regex r, string text, chan int out) {
+    out.send(r.findAll(text).len())
+}
+
+fn crashAfterUse(regex.Regex r, string text) {
+    if (r.matches(text)) {
+        os.crash("found " + text)
+    }
+}
+
+fn main([]string args) error {
+    regex.Regex date = try regex.compile("(?P<y>\\d{4})-(?P<m>\\d\\d)-(?P<d>\\d\\d)")
+    string text = "from 2026-10-15 to 2027-01-02, not 99-1-1"
+    []regex.Match ms = date.findAll(text)
+    for (int i = 0; i < ms.len(); i++) {
+        string? y = ms[i].named("y")
+        if (y != null) {
+            fmt.println(ms[i].text() + " at " + ms[i].start().string() + ", year " + y)
+        }
+    }
+    fmt.println(date.replace(text, "${d}/${m}/${y}"))
+    fmt.println(regex.mustCompile("\\s*,\\s*").split("a , b,c").join("|"))
+    _, error err = regex.compile("(?<=x)")
+    if (err != null) {
+        fmt.println(err.message())
+    }
+    chan int out = chan int(8)
+    regex.Regex word = regex.mustCompile("(?i)\\b[a-z]+\\b")
+    try group {
+        for (int i = 0; i < 8; i++) {
+            spawn count(word, "one Two three " + i.string(), out)
+        }
+    }
+    int total = 0
+    for (int i = 0; i < 8; i++) {
+        int? n = out.receive()
+        if (n != null) {
+            total = total + n
+        }
+    }
+    fmt.println("words: " + total.string())
+    error crashed = group {
+        spawn crashAfterUse(word, "hello")
+    }
+    if (crashed != null) {
+        fmt.println(crashed.message())
+    }
+    return null
+}

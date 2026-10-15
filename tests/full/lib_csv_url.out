@@ -1,0 +1,7 @@
+seed;https://example.com/a/b?q=x+y&n=1;true
+"multi
+line";https://example.com/c;false
+a,b true
+true
+csv.reader: line 1, column 3: quoted field not closed
+url.parse: http://[::1: missing ']' in host

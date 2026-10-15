@@ -1,0 +1,15 @@
+https://example.com/docs/style.css?v=3
+    v = 3
+https://example.com/docs/harbour/tides.html
+https://weather.example.org/forecast?city=Porto&days=3#today
+    city = Porto
+    days = 3
+https://example.com/search?q=sea+level&lang=en
+    q = sea level
+    lang = en
+https://example.com/docs/harbour/boats/list.html
+https://example.com/docs/crew/
+https://cdn.example.net/img/map.png
+https://example.com/docs/harbour/#top
+mailto:harbour@example.com
+! url.parse: http://bad host/: invalid character (space) at offset 10; percent-encode it
