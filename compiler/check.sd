@@ -228,6 +228,8 @@ type Checker struct {
     int groupDepth
     int groupLoop
     int allowGroup
+    bool inDefault
+    []int defaultState
     bool testMode
     string libDir
     string projectRoot
@@ -281,6 +283,8 @@ fn newChecker(Ast ast, Diags diags, bool testMode) Checker {
         groupDepth: 0,
         groupLoop: -1,
         allowGroup: -1,
+        inDefault: false,
+        defaultState: []int{},
         testMode: testMode,
         libDir: "",
         projectRoot: "",
@@ -378,6 +382,15 @@ fn (Checker c) mut checkProgram() {
     }
     for (int m = 0; m < c.ast.consts.len(); m++) {
         c.checkConst(m)
+    }
+    for (int sd = 0; sd < c.ast.typeDecls.len(); sd++) {
+        c.checkFieldDefaults(sd)
+    }
+    for (int pd = 0; pd < c.ast.params.len(); pd++) {
+        c.defaultState.push(0)
+    }
+    for (int dc = 0; dc < c.ast.typeDecls.len(); dc++) {
+        c.checkDefaultCycles(dc)
     }
     for (int b = 0; b < c.ast.fns.len(); b++) {
         c.checkFnBody(b)
@@ -1073,6 +1086,168 @@ fn (Checker c) nonConstant(int e) int {
         }
     }
     return -1
+}
+
+// ---- default values of struct fields ----
+
+// Checks the default values of the fields of struct d. A default is
+// checked like a constant's value: in the scope of the struct's package,
+// with the field's type, and it must be computable without running code
+// (requireDefault). It is evaluated again at every literal that leaves the
+// field out (gstruct).
+fn (Checker c) mut checkFieldDefaults(int d) {
+    TypeDecl td = c.ast.typeDecls[d]
+    if (td.kind != DeclKind.Struct) {
+        return
+    }
+    for (int i = 0; i < td.fieldCount; i++) {
+        Param f = c.ast.params[c.ast.at(td.fields, i)]
+        if (f.defaultExpr < 0) {
+            continue
+        }
+        int savedFn = c.curFn
+        int savedGroups = c.groupDepth
+        []int savedScope = c.scope
+        []Narrow savedNarrows = c.narrows
+        c.curFn = -1
+        c.groupDepth = 0
+        c.scope = []int{}
+        c.narrows = []Narrow{}
+        c.inDefault = true
+        int before = c.diags.count()
+        c.checkValue(f.defaultExpr, c.fieldType(d, i), "for the default of " + f.name)
+        if (c.diags.count() == before) {
+            c.requireDefault(f.defaultExpr, td.name + "." + f.name)
+        }
+        c.inDefault = false
+        c.curFn = savedFn
+        c.groupDepth = savedGroups
+        c.scope = savedScope
+        c.narrows = savedNarrows
+    }
+}
+
+// A default value follows the rules of a constant's value: literals,
+// constants, enum values, named functions, operators, conversions, list,
+// map and struct literals, and built-in methods that change nothing. So it
+// cannot fail, block, or change anything when a literal uses it.
+fn (Checker c) mut requireDefault(int e, string field) {
+    int bad = c.nonConstant(e)
+    if (bad < 0) {
+        return
+    }
+    Expr x = c.ast.exprs[bad]
+    string what = "this value"
+    if (x.kind == ExprKind.Call) {
+        what = "the call " + c.describe(bad)
+    } else if (x.kind == ExprKind.Try) {
+        what = "try"
+    } else if (x.kind == ExprKind.Group) {
+        what = "a group"
+    } else if (x.kind == ExprKind.ChanMake) {
+        what = "a new channel"
+    }
+    c.errorHint(x.pos, "the default value of " + field + " must be computable without running code, but it uses " + what, "a default may use literals, constants, operators, conversions and list, map and struct literals; set the field in each literal instead")
+}
+
+// Whether field i of struct d has a default value.
+fn (Checker c) hasDefault(int d, int i) bool {
+    return c.ast.params[c.ast.at(c.ast.typeDecls[d].fields, i)].defaultExpr >= 0
+}
+
+// A default that contains a literal of a struct leaving out a field uses
+// that field's default too; a default that uses itself that way would never
+// end (Node? next = Node{} when Node{} leaves next out).
+fn (Checker c) mut checkDefaultCycles(int d) {
+    TypeDecl td = c.ast.typeDecls[d]
+    if (td.kind != DeclKind.Struct) {
+        return
+    }
+    for (int i = 0; i < td.fieldCount; i++) {
+        c.visitDefault(d, i, []string{})
+    }
+}
+
+// Visits the default of field i of struct d (states in defaultState, by
+// Param: 0 not seen, 1 being visited, 2 done). path names the defaults on
+// the way, for the message.
+fn (Checker c) mut visitDefault(int d, int i, []string path) {
+    int pi = c.ast.at(c.ast.typeDecls[d].fields, i)
+    Param f = c.ast.params[pi]
+    if (f.defaultExpr < 0 || c.defaultState[pi] == 2) {
+        return
+    }
+    string name = c.declDisplayName(d) + "." + f.name
+    if (c.defaultState[pi] == 1) {
+        []string loop = path.slice(0, path.len())
+        loop.push(name)
+        Param start = c.ast.params[pi]
+        c.errorHint(c.ast.exprs[start.defaultExpr].pos, "the default value of " + name + " uses itself: " + loop.join(" -> "), "set " + f.name + " in the literal inside the default (null, or a value without the default)")
+        c.defaultState[pi] = 2
+        return
+    }
+    c.defaultState[pi] = 1
+    []string next = path.slice(0, path.len())
+    next.push(name)
+    []int lits = c.structLitsIn(f.defaultExpr, []int{})
+    for (int k = 0; k < lits.len(); k++) {
+        ExprInfo li = c.info[lits[k]]
+        int lt = li.ty
+        if (li.ifaceFrom >= 0) {
+            lt = li.ifaceFrom
+        } else if (li.wrap) {
+            lt = li.inner
+        }
+        if (lt == tyInvalid || c.kindOf(lt) != Kind.Struct) {
+            continue
+        }
+        int ld = c.types.decl(lt)
+        []bool set = c.litFieldsSet(lits[k], ld)
+        for (int j = 0; j < set.len(); j++) {
+            if (!set[j]) {
+                c.visitDefault(ld, j, next)
+            }
+        }
+    }
+    c.defaultState[pi] = 2
+}
+
+// The struct literals in expression e (appended to out).
+fn (Checker c) structLitsIn(int e, []int out) []int {
+    if (e < 0) {
+        return out
+    }
+    Expr x = c.ast.exprs[e]
+    []int found = out
+    if (x.kind == ExprKind.StructLit) {
+        found.push(e)
+    }
+    if (x.kind == ExprKind.Group) {
+        return found
+    }
+    found = c.structLitsIn(x.a, found)
+    found = c.structLitsIn(x.b, found)
+    for (int k = 0; k < x.count; k++) {
+        found = c.structLitsIn(c.ast.at(x.list, k), found)
+    }
+    return found
+}
+
+// For each field of struct d, whether the struct literal e sets it.
+fn (Checker c) litFieldsSet(int e, int d) []bool {
+    Expr x = c.ast.exprs[e]
+    TypeDecl td = c.ast.typeDecls[d]
+    []bool set = []bool{}
+    for (int i = 0; i < td.fieldCount; i++) {
+        set.push(false)
+    }
+    for (int j = 0; j < x.count; j++) {
+        int fi = c.findField(d, c.ast.exprs[c.ast.at(x.list, j)].text)
+        if (fi >= 0) {
+            set[fi] = true
+        }
+    }
+    return set
 }
 
 fn (Checker c) mut checkFnBody(int f) {

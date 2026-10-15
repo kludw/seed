@@ -430,17 +430,17 @@ There is no `day`: a day is not always 24 hours once time zones exist, so the li
 
 ```
 pub type Date struct {
-    pub int year         // e.g. 2026
-    pub int month        // 1–12
-    pub int day          // 1–31
-    pub int hour         // 0–23
-    pub int minute       // 0–59
-    pub int second       // 0–59 (leap seconds are not represented)
-    pub int nanosecond   // 0–999999999
+    pub int year             // e.g. 2026
+    pub int month            // 1–12
+    pub int day              // 1–31
+    pub int hour = 0         // 0–23
+    pub int minute = 0       // 0–59
+    pub int second = 0       // 0–59 (leap seconds are not represented)
+    pub int nanosecond = 0   // 0–999999999
 }
 ```
 
-The fields are `pub`, so that a program can read a `Date` and build one for `time.fromDate`.
+The fields are `pub`, so that a program can read a `Date` and build one for `time.fromDate`. The time of day defaults to midnight: `time.Date{year: 2026, month: 10, day: 15}` is the start of that day.
 
 ### Functions
 
@@ -670,17 +670,18 @@ An HTTP/1.1 server and client, written in Seed on top of `net`. **There is no TL
 
 ```
 pub type Request struct {
-    pub string method               // "GET", "POST", ... (uppercase)
-    pub string url                  // server: the request target, "/todos?done=1"
-                                    // client: the full URL, "http://example.com/todos?done=1"
-    pub map[string]string headers   // names are lowercase
-    pub string body
+    pub string method = "GET"                           // "GET", "POST", ... (uppercase)
+    pub string url                                      // server: the request target, "/todos?done=1"
+                                                        // client: the full URL, "http://example.com/todos?done=1"
+    pub map[string]string headers = map[string]string{} // names are lowercase
+    pub string body = ""
+    pub int timeout = 0                                 // client: a limit on the whole exchange, 0 for none
 }
 
 pub type Response struct {
-    pub int status                  // 200, 404, ...
-    pub map[string]string headers   // names are lowercase
-    pub string body
+    pub int status                                      // 200, 404, ...
+    pub map[string]string headers = map[string]string{} // names are lowercase
+    pub string body = ""
 }
 
 pub type Handler interface {
@@ -690,6 +691,8 @@ pub type Handler interface {
 
 - **Header names are always lowercase** in both directions: the library lowercases names it receives and names a program sets, so `req.headers["content-type"]` always works. A header that appears more than once is joined into one value with `", "`, in the order received. (`set-cookie` cannot be joined correctly this way; that is a known v1 limitation.)
 - Bodies are whole strings. There is no streaming in v1.
+- Every field but `url` and `status` has a default value ([SPEC.md](../SPEC.md#default-values-of-fields)), so `http.Request{url: "http://example.com/"}` is a `GET` without headers, body or time limit, and `http.Response{status: 204}` a response without headers or body.
+- `timeout` only matters to the client (`http.send`); the requests a server receives have `timeout` 0.
 
 ### Request methods
 
@@ -719,7 +722,7 @@ pub type Handler interface {
 | `http.textResponse(int status, string body) Response` | A response with `content-type: text/plain; charset=utf-8`. |
 | `http.jsonResponse(int status, json.Value body) Response` | A response with `content-type: application/json` and `body.string()` as the body. |
 
-Any other response is a struct literal: `http.Response{status: 302, headers: map[string]string{"location": "/"}, body: ""}`.
+Any other response is a struct literal: `http.Response{status: 302, headers: map[string]string{"location": "/"}}`.
 
 ### Server
 
@@ -740,16 +743,16 @@ Any other response is a struct literal: `http.Response{status: 302, headers: map
 
 | Function | Result |
 |---|---|
-| `http.get(string url) (Response, error)` | Sends a `GET` with no extra headers. Exactly `http.send(Request{method: "GET", url: url, headers: map[string]string{}, body: ""})`. |
-| `http.send(Request req) (Response, error)` | Sends any request and returns the response. |
-| `http.getWithin(string url, int timeout) (Response, error)` | `http.get` with a time limit on the whole exchange: `http.sendWithin(Request{method: "GET", url: url, headers: map[string]string{}, body: ""}, timeout)`, with errors that start with `http.getWithin`. |
-| `http.sendWithin(Request req, int timeout) (Response, error)` | `http.send` with a time limit on the whole exchange. |
+| `http.get(string url) (Response, error)` | Sends a `GET` with no extra headers. Exactly `http.send(Request{url: url})`, with errors that start with `http.get`. |
+| `http.send(Request req) (Response, error)` | Sends any request and returns the response, within `req.timeout` when it is not 0. |
+| `http.getWithin(string url, int timeout) (Response, error)` | `http.get` with a time limit on the whole exchange: `http.send(Request{url: url, timeout: timeout})`, with errors that start with `http.getWithin`. |
+| `http.sendWithin(Request req, int timeout) (Response, error)` | `http.send` of `req` with its `timeout` set to `timeout`, with errors that start with `http.sendWithin`. |
 
 - The URL must be `http://host[:port][/path][?query]`. Anything else is an error, including `https://`: `http.get: https://example.com/: https is not supported`.
 - The library adds `host`, `content-length` (when the body is not empty, or the method is `POST`, `PUT` or `PATCH`) and `connection: close`. Each request uses a new connection.
 - **Any response is a success**, including `404` and `500`: check `resp.status`. The error is set only when no response arrived (connection refused, timeout, malformed response).
 - **Redirects are not followed**; a `3xx` response is returned as it is, with its `location` header.
-- `get` and `send` give up with a `timeout` error when connecting, or any single read or write, makes no progress for 30 seconds. `getWithin` and `sendWithin` instead give the whole exchange, from connecting to the last byte of the response, `timeout` nanoseconds (`2 * time.second`), however the time is spent (a server that trickles its answer a byte at a time is cut off too); when it runs out, the error is `http.getWithin: http://example.com/: timeout after 2 s`. A `timeout` that is not positive crashes.
+- **Time limits.** With `timeout` 0 (the default), `send` gives up with a `timeout` error when connecting, or any single read or write, makes no progress for 30 seconds. A positive `req.timeout` instead gives the whole exchange, from connecting to the last byte of the response, that many nanoseconds (`2 * time.second`), however the time is spent (a server that trickles its answer a byte at a time is cut off too); when it runs out, the error is `http.send: http://example.com/: timeout after 2 s`. A negative `req.timeout` crashes. `getWithin` and `sendWithin` are the same with the limit as an argument (for `getWithin`, the one-line form when there is no request to build): their errors start with their own names (`http.getWithin: ...: timeout after 2 s`), and a `timeout` that is not positive crashes.
 - A request waiting in any of the four functions is also stopped when its group is: to give up on something else than time (a user's cancel, the first of several answers), run the request in a goroutine and let another goroutine of the same group fail, as in [the guide's chapter 10](guide/10-concurrency.md).
 - Responses with `transfer-encoding: chunked` are decoded. Bodies larger than 64 MiB are an error. Compressed responses are never requested.
 
@@ -776,6 +779,7 @@ A request with a time limit:
 
 ```
 http.Response resp = try http.getWithin("http://localhost:8080/health", 2 * time.second)
+http.Response same = try http.send(http.Request{url: "http://localhost:8080/health", timeout: 2 * time.second})
 ```
 
 ```

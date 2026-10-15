@@ -13,6 +13,66 @@ Point p = Point{x: 1, y: 2}
 
 A struct literal names every field. There are no zero values, so leaving a field out is an error, and adding a field to a struct makes the compiler point at every literal that needs it. Fields are read and written with `.`: `p.x = p.x + 1`, `hero.pos.x = 0`.
 
+### Default values
+
+A field can declare a default value, written after its name. A literal may then leave that field out, and gets the default:
+
+```seed
+package main
+
+import "fmt"
+import "time"
+
+type Retry struct {
+    int attempts = 3
+    int wait = 500 * time.millisecond
+}
+
+type Fetch struct {
+    string url
+    string method = "GET"
+    map[string]string headers = map[string]string{}
+    Retry retry = Retry{}
+    string? note = null
+}
+
+fn show(Fetch f) string {
+    return f.method + " " + f.url + " headers=" + f.headers.len().string() + " attempts=" + f.retry.attempts.string() + " wait=" + (f.retry.wait / time.millisecond).string() + "ms"
+}
+
+fn main([]string args) error {
+    Fetch a = Fetch{url: "/a"}
+    Fetch b = Fetch{url: "/b", method: "POST", retry: Retry{attempts: 1}}
+    fmt.println(show(a))
+    fmt.println(show(b))
+
+    // Each literal gets its own map: changing a's leaves the next one empty.
+    a.headers["accept"] = "text/plain"
+    Fetch c = Fetch{url: "/c"}
+    fmt.println(a.headers.len().string() + " " + c.headers.len().string())
+    return null
+}
+```
+
+```
+GET /a headers=0 attempts=3 wait=500ms
+POST /b headers=0 attempts=1 wait=500ms
+1 0
+```
+
+This is still "no zero values": every value is written somewhere, in the literal or in the declaration, and a field without a default (`url` here) must be set in every literal. Adding a field with a default to a struct breaks no literal, which is what makes it the way to grow a struct that other code builds, such as `http.Request` and its `timeout`.
+
+The default is evaluated again at every literal that leaves the field out, so each one gets its own list or map. It is computed like a [constant](02-basics.md#constants): literals, constants (of the struct's package too, even private ones), operators, conversions, enum values, and list, map and struct literals, but no calls of functions (built-in methods that only compute a value, such as `len()`, are fine), no other fields and nothing that could fail, so a literal never runs hidden code:
+
+```
+07_default_call.sd:7:19: error: the default value of Event.at must be computable without running code, but it uses the call time.now()
+    7 |     int at = time.now()
+      |                   ^
+    hint: a default may use literals, constants, operators, conversions and list, map and struct literals; set the field in each literal instead
+```
+
+Only struct fields have defaults; function parameters don't. A struct literal of another package's type still needs every field to be `pub`, defaulted ones included.
+
 ## Methods
 
 A method is a function with a receiver in front of its name:

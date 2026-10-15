@@ -1,0 +1,14 @@
+package main
+
+import "time"
+
+type Event struct {
+    string name
+    int at = time.now()
+}
+
+fn main([]string args) error {
+    Event e = Event{name: "start"}
+    _ = e.at
+    return null
+}

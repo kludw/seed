@@ -78,7 +78,7 @@ case Shape.Rect(float w, float h):
 ## Declarations
 
 - `package` comes first, then the imports, one per line, in the order written, as one group with no blank lines between them.
-- `struct` fields, `enum` cases and `interface` methods are one per line. An empty body is written `{}`.
+- `struct` fields, `enum` cases and `interface` methods are one per line. An empty body is written `{}`. A field's default value has one space on each side of its `=` (`int timeout = 0`), like an assignment.
 
 ```
 type Point struct { int x

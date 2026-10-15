@@ -430,7 +430,8 @@ The server and the client (server.sd, client.sd):
   `http.get: http://localhost:1/: connection refused` (the `net.dial:
   <addr>:` part is dropped). A malformed response is
   `http.get: <url>: malformed status line` and so on (wire.sd's reasons).
-- `getWithin`/`sendWithin` (DECISIONS.md, "http client timeout"): the
+- A request's `timeout` (and `getWithin`/`sendWithin`, which set it;
+  DECISIONS.md, "An HTTP request's time limit"): the
   limit runs from before the dial to the end of the response, on
   `time.monotonic`. The dial gets the whole limit (`net.dial`'s own
   timeout), and before every write and read the connection's timeout is set
@@ -438,9 +439,9 @@ The server and the client (server.sd, client.sd):
   outlasts the deadline and a server that trickles bytes is cut off at it.
   Any `timeout` from net on the way becomes `<fn>: <url>: timeout after
   <limit>`. A write that keeps making progress past the deadline is the one
-  thing that can overrun it (by as long as that write takes). `get` and
-  `send` are `httpSend` with no limit: 30 s without progress per step, as
-  before.
+  thing that can overrun it (by as long as that write takes). With
+  `timeout` 0, the default, `httpSend` has no limit: 30 s without progress
+  per step, as before.
 - The client writes the whole request before reading; a server that
   answers early and closes (413) while a large body is still being sent
   can make that a write error instead of the response.

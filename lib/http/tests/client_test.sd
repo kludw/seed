@@ -1,6 +1,7 @@
 package http
 
-// getWithin and sendWithin: a time limit for the whole exchange.
+// Request.timeout, getWithin and sendWithin: a time limit for the whole
+// exchange.
 
 import "errors"
 import "net"
@@ -10,12 +11,16 @@ fn httpWithinBasics(string base, chan string out) error {
     []string lines = []string{}
     Response? ok, error err = getWithin(base + "/", 5 * time.second)
     lines.push(httpTestShow(ok, err))
-    Response? echoed, error err2 = sendWithin(Request{method: "POST", url: base + "/echo", headers: map[string]string{}, body: "data"}, 5 * time.second)
+    Response? echoed, error err2 = sendWithin(Request{method: "POST", url: base + "/echo", body: "data"}, 5 * time.second)
     lines.push(httpTestShow(echoed, err2))
+    Response? timed, error err4 = send(Request{method: "POST", url: base + "/echo", body: "more", timeout: 5 * time.second})
+    lines.push(httpTestShow(timed, err4))
     int start = time.monotonic()
     Response? slow, error err3 = getWithin(base + "/slow", 200 * time.millisecond)
+    Response? slow2, error err5 = send(Request{url: base + "/slow", timeout: 200 * time.millisecond})
     int took = time.monotonic() - start
     lines.push(httpTestShow(slow, err3).replace(base, "BASE"))
+    lines.push(httpTestShow(slow2, err5).replace(base, "BASE"))
     if (took > 5 * time.second) {
         lines.push("took " + (took / time.millisecond).string() + " ms")
     }
@@ -23,9 +28,20 @@ fn httpWithinBasics(string base, chan string out) error {
     return null
 }
 
-test "getWithin and sendWithin answer, or time out against a slow handler" {
+test "getWithin, sendWithin and a request's timeout answer, or time out against a slow handler" {
     string got = try httpTestRun(httpWithinBasics)
-    assert(got == "200 hello\n200 data\nerror: http.getWithin: BASE/slow: timeout after 200 ms")
+    assert(got == "200 hello\n200 data\n200 more\nerror: http.getWithin: BASE/slow: timeout after 200 ms\nerror: http.send: BASE/slow: timeout after 200 ms")
+}
+
+test "a request's defaults: a GET without headers, body or time limit" {
+    Request r = Request{url: "http://example.com/"}
+    assert(r.method == "GET")
+    assert(r.headers.len() == 0)
+    assert(r.body == "")
+    assert(r.timeout == 0)
+    assert(r == Request{method: "GET", url: "http://example.com/", headers: map[string]string{}, body: "", timeout: 0})
+    Response resp = Response{status: statusNoContent}
+    assert(resp.headers.len() == 0 && resp.body == "")
 }
 
 // A server that answers one byte every 50 ms: every read makes progress,
@@ -47,7 +63,7 @@ fn httpWithinTrickle(net.Listener ln) error {
 
 fn httpWithinTrickleClient(string addr, chan string out) error {
     int start = time.monotonic()
-    Response? resp, error err = getWithin("http://" + addr + "/", 300 * time.millisecond)
+    Response? resp, error err = send(Request{url: "http://" + addr + "/", timeout: 300 * time.millisecond})
     int took = time.monotonic() - start
     string shown = httpTestShow(resp, err).replace(addr, "ADDR")
     if (took > 3 * time.second) {
@@ -67,7 +83,7 @@ test "the limit is on the whole exchange, not on each read" {
     }
     assert(err != null && err.message() == "done")
     string? got = out.receive()
-    assert(got != null && got == "error: http.getWithin: http://ADDR/: timeout after 300 ms")
+    assert(got != null && got == "error: http.send: http://ADDR/: timeout after 300 ms")
 }
 
 test "getWithin reports the same errors as get" {
@@ -76,20 +92,29 @@ test "getWithin reports the same errors as get" {
     ln.close()
     Response? resp, error err = getWithin("http://" + addr + "/", time.second)
     assert(httpTestShow(resp, err) == "error: http.getWithin: http://" + addr + "/: connection refused")
-    Response? resp2, error err2 = sendWithin(Request{method: "GET", url: "https://example.com/", headers: map[string]string{}, body: ""}, time.second)
+    Response? resp2, error err2 = sendWithin(Request{url: "https://example.com/"}, time.second)
     assert(httpTestShow(resp2, err2) == "error: http.sendWithin: https://example.com/: https is not supported")
 }
 
 fn httpWithinZero() error {
-    _ = try sendWithin(Request{method: "GET", url: "http://127.0.0.1:1/", headers: map[string]string{}, body: ""}, 0)
+    _ = try sendWithin(Request{url: "http://127.0.0.1:1/"}, 0)
     return null
 }
 
-test "a timeout that is not positive crashes" {
+fn httpNegativeTimeout() error {
+    _ = try send(Request{url: "http://127.0.0.1:1/", timeout: -1})
+    return null
+}
+
+test "a timeout that is not positive crashes, and so does a negative request timeout" {
     error err = group {
         spawn httpWithinZero()
     }
     assert(err != null && err.message() == "crash: http.sendWithin: timeout (0) must be positive")
+    error err2 = group {
+        spawn httpNegativeTimeout()
+    }
+    assert(err2 != null && err2.message() == "crash: http.send: timeout (-1) must not be negative")
 }
 
 test "durations in timeout messages" {

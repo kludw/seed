@@ -1,7 +1,7 @@
 package http
 
-// The client: get and send, getWithin and sendWithin (docs/stdlib.md,
-// "Client"). Each request uses a new connection ("connection: close"); the
+// The client: get and send, and getWithin and sendWithin, which set the
+// request's timeout (docs/stdlib.md, "Client"). Each request uses a new connection ("connection: close"); the
 // response is read with wire.sd.
 
 import "errors"
@@ -13,31 +13,36 @@ import "time"
 // no progress for this long (30 * time.second).
 const int clientTimeout = 30000000000
 
-// Sends a GET with no extra headers. Errors start with "http.get".
+// Sends a GET with no extra headers: send(Request{url: url}), with errors
+// that start with "http.get".
 pub fn get(string url) (Response, error) {
-    return httpSend("http.get", Request{method: "GET", url: url, headers: map[string]string{}, body: ""}, 0)
+    return httpSend("http.get", Request{url: url}, 0)
 }
 
 // Sends any request and returns the response. Any response is a success,
 // including 404 and 500; the error is set only when no response arrived:
 // "http.send: http://localhost:1/: connection refused". Redirects are not
-// followed.
+// followed. A positive req.timeout limits the whole exchange; when it runs
+// out, the error is "http.send: <url>: timeout after <d>" (d in ms or s).
+// Crashes if req.timeout is negative.
 pub fn send(Request req) (Response, error) {
-    return httpSend("http.send", req, 0)
+    if (req.timeout < 0) {
+        os.crash("http.send: timeout (" + req.timeout.string() + ") must not be negative")
+    }
+    return httpSend("http.send", req, req.timeout)
 }
 
-// get with a time limit: like sendWithin for a GET with no extra headers.
-// Errors start with "http.getWithin".
+// get with a time limit: send(Request{url: url, timeout: timeout}), with
+// errors that start with "http.getWithin". Crashes if timeout is not
+// positive.
 pub fn getWithin(string url, int timeout) (Response, error) {
     httpCheckTimeout("http.getWithin", timeout)
-    return httpSend("http.getWithin", Request{method: "GET", url: url, headers: map[string]string{}, body: ""}, timeout)
+    return httpSend("http.getWithin", Request{url: url}, timeout)
 }
 
-// send with a time limit: timeout (nanoseconds) limits the whole exchange,
-// from connecting to the last byte of the response, instead of the 30
-// seconds without progress of send. When it runs out, the error is
-// "http.sendWithin: <url>: timeout after <d>" (d in ms or s). Crashes if
-// timeout is not positive.
+// send with a time limit: send of req with its timeout set to timeout, with
+// errors that start with "http.sendWithin". Crashes if timeout is not
+// positive.
 pub fn sendWithin(Request req, int timeout) (Response, error) {
     httpCheckTimeout("http.sendWithin", timeout)
     return httpSend("http.sendWithin", req, timeout)
@@ -65,9 +70,9 @@ fn httpDuration(int d) string {
     return (tenths / 10).string() + "." + (tenths % 10).string() + " s"
 }
 
-// Sends the request. limit is 0 for get and send (each step may take
-// clientTimeout), or the time the whole exchange may take: then the dial
-// gets what is left of it, and so does each read and write.
+// Sends the request. limit is 0 for no limit on the whole exchange (each
+// step may take clientTimeout), or the time the whole exchange may take:
+// then the dial gets what is left of it, and so does each read and write.
 fn httpSend(string fnName, Request req, int limit) (Response, error) {
     HttpTarget t = try parseUrl(fnName, req.url)
     string data = try requestBytes(fnName, req, t)

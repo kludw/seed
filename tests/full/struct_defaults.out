@@ -1,0 +1,8 @@
+a nobody tags=0 counts=0 inherited=1 note=- retries=1 wait=250000000 level=High
+false 0.25 120 4 42
+b kim tags=2 counts=0 inherited=1 note=urgent retries=6 wait=250000000 level=High
+1 0 1 0 2 1 1
+0 1 2
+true true false
+6 1000000000
+true 1b

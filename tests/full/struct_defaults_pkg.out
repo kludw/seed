@@ -1,0 +1,4 @@
+localhost:8080 Plain /,/admin 1048576 64
+localhost:9090 Tls / 1048576 8
+/ true
+s1,s2,s3 s1,s2 Rgb

@@ -12,19 +12,26 @@ import "json"
 // A request. On the server, `url` is the request target ("/todos?done=1");
 // on the client it is the full URL ("http://example.com/todos?done=1").
 // Header names are lowercase; a header received more than once is joined
-// into one value with ", ".
+// into one value with ", ". Only url has no default:
+// http.Request{url: "http://example.com/"} is a GET without headers or body.
+//
+// timeout (nanoseconds) limits the whole exchange of send, from connecting
+// to the last byte of the response; 0, the default, sets no such limit
+// (each step still gives up after 30 seconds without progress). It must not
+// be negative. Requests that a server receives have timeout 0.
 pub type Request struct {
-    pub string method
+    pub string method = "GET"
     pub string url
-    pub map[string]string headers
-    pub string body
+    pub map[string]string headers = map[string]string{}
+    pub string body = ""
+    pub int timeout = 0
 }
 
-// A response. Header names are lowercase.
+// A response. Header names are lowercase. Only status has no default.
 pub type Response struct {
     pub int status
-    pub map[string]string headers
-    pub string body
+    pub map[string]string headers = map[string]string{}
+    pub string body = ""
 }
 
 // Serves requests. A struct that implements Handler can hold configuration

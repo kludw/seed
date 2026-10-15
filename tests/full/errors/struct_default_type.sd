@@ -1,0 +1,14 @@
+// expect-error: struct_default_type.sd:7:22: error: cannot use 30 (type int) as string for the default of timeout; there are no implicit conversions
+// expect-errors: 1
+// A default value has the type of its field.
+package main
+
+type Request struct {
+    string timeout = 30
+}
+
+fn main([]string args) error {
+    Request r = Request{}
+    _ = r.timeout
+    return null
+}

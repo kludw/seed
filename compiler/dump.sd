@@ -45,7 +45,11 @@ fn (Ast a) dumpParams(int start, int count) string {
         if (p.isPub) {
             mark = "pub "
         }
-        ps.push("(" + mark + a.dumpType(p.typeExpr) + " " + p.name + ")")
+        string def = ""
+        if (p.defaultExpr >= 0) {
+            def = " = " + a.dumpExpr(p.defaultExpr)
+        }
+        ps.push("(" + mark + a.dumpType(p.typeExpr) + " " + p.name + def + ")")
     }
     return "(" + ps.join(" ") + ")"
 }

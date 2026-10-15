@@ -55,7 +55,7 @@ Result      = Type | "(" Type { "," Type } ")" .
 TypeDecl    = "type" Ident ( StructType | EnumType | InterfaceType ) .
 Implements  = "implements" TypeName { "," TypeName } .
 StructType  = "struct" [ Implements ] "{" NL { Field NL } "}" .
-Field       = [ "pub" ] Type Ident .
+Field       = [ "pub" ] Type Ident [ "=" Expr ] .                              // the default value
 EnumType    = "enum" [ Implements ] "{" NL { Ident [ "(" Params ")" ] NL } "}" .   // no () for a case without data
 InterfaceType = "interface" "{" NL { MethodSig NL } "}" .
 MethodSig   = [ "mut" ] Ident "(" [ Params ] ")" [ Result ] .
@@ -68,6 +68,8 @@ Example of a method declaration: `fn (User u) mut tag(string t) { ... }`.
 A function without a block is **native** (`pub fn read(string path) (string, error)`): its body is written in C. Only packages of the standard library may declare native functions; the compiler rejects a missing body anywhere else.
 
 `pub` before a top-level declaration or a struct field makes it usable from other packages. A `TestDecl` is only allowed in a package's `tests/` directory.
+
+A struct field may have a default value after `=` (`int timeout = 30 * time.second`); a struct literal may then leave the field out (SPEC.md, "Default values of fields"). A `Param` (of a function, method or enum case) has no default value.
 
 The imported packages are written `import "path"`, and the code names a package by the last element of its path (`import "shop/money"` gives `money.Amount`). A `TypeName` with a dot (`money.Amount`) names a type of an imported package.
 
@@ -154,6 +156,6 @@ Group       = "group" Block .
 
 - A conversion looks like a call to a type name: `int(x)`, `float(n)`, `byte(i)`, `string(bytes)`.
 - An enum value is `Type.Case(args)`, or `Type.Case` for a case without data. In an `EnumPattern`, a case with data has a `Param` for every field (`_` as the name ignores one), and a case without data has no parentheses.
-- Conditions in `if`, `for` and `switch` are always parenthesised, so `Name{` is always a struct literal.
+- Conditions in `if`, `for` and `switch` are always parenthesised, so `Name{` is always a struct literal. A `StructLit` may leave out the fields that have a default value.
 - Blocks and expressions nest at most 256 levels deep.
 - A `Group` is only used whole: as the value of an assignment (`error err = group {...}`, `err = ...`, `_ = ...`), of `return`, or after `try`.

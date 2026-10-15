@@ -19,15 +19,16 @@ pub const int hour = 3600000000000
 
 const int nsPerDay = 86400000000000
 
-// A UTC calendar date and time.
+// A UTC calendar date and time. The time of day defaults to midnight:
+// time.Date{year: 2026, month: 10, day: 15} is the start of that day.
 pub type Date struct {
     pub int year // e.g. 2026
     pub int month // 1–12
     pub int day // 1–31
-    pub int hour // 0–23
-    pub int minute // 0–59
-    pub int second // 0–59 (leap seconds are not represented)
-    pub int nanosecond // 0–999999999
+    pub int hour = 0 // 0–23
+    pub int minute = 0 // 0–59
+    pub int second = 0 // 0–59 (leap seconds are not represented)
+    pub int nanosecond = 0 // 0–999999999
 }
 
 // A channel that receives the current time (Unix nanoseconds) once, d

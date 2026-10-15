@@ -1,0 +1,6 @@
+package store
+
+pub type Item struct {
+    pub string name
+    int secret = 42
+}

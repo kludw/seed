@@ -1,0 +1,22 @@
+package main
+
+import "time"
+
+// Default values of struct fields.
+type Request struct {
+    pub string method = "GET" // the method
+    string url
+    map[string]string headers = map[string]string{}
+    map[string]int weights = map[string]int{
+        "a": 1,
+        "b": 2,
+    }
+    int timeout = 30 * time.second
+    Options options = Options{verbose: true}
+    int total = 1 +
+        2
+}
+
+type Options struct {
+    bool verbose = false
+}

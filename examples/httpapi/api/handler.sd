@@ -60,7 +60,7 @@ fn respond(Answer answer, int status) http.Response {
     case Answer.NotFound:
         return problem(http.statusNotFound, "no such todo")
     case Answer.Deleted:
-        return http.Response{status: http.statusNoContent, headers: map[string]string{}, body: ""}
+        return http.Response{status: http.statusNoContent}
     }
 }
 

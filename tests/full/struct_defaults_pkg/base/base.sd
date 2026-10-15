@@ -1,0 +1,15 @@
+package base
+
+// Imported by config, but not by main: main's literals of config.Server
+// still evaluate these defaults.
+const []string seeds = []string{"s1", "s2"}
+
+pub type Color enum {
+    Plain
+    Rgb(int r, int g, int b)
+}
+
+pub type Style struct {
+    pub []string seeds = seeds
+    pub Color color = Color.Rgb(1, 2, 3)
+}

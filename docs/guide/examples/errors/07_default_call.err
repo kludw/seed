@@ -1,0 +1,4 @@
+07_default_call.sd:7:19: error: the default value of Event.at must be computable without running code, but it uses the call time.now()
+    7 |     int at = time.now()
+      |                   ^
+    hint: a default may use literals, constants, operators, conversions and list, map and struct literals; set the field in each literal instead

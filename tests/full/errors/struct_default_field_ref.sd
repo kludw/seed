@@ -1,0 +1,15 @@
+// expect-error: struct_default_field_ref.sd:8:18: error: undefined: width
+// expect-errors: 1
+// A default cannot use the struct's other fields.
+package main
+
+type Box struct {
+    int width = 2
+    int height = width
+}
+
+fn main([]string args) error {
+    Box b = Box{}
+    _ = b.height
+    return null
+}

@@ -1,0 +1,18 @@
+// expect-error: struct_default_call.sd:7:17: error: the default value of Counter.start must be computable without running code, but it uses the call first()
+// expect-errors: 1
+// A default value follows the rules of a constant: no calls.
+package main
+
+type Counter struct {
+    int start = first()
+}
+
+fn first() int {
+    return 1
+}
+
+fn main([]string args) error {
+    Counter c = Counter{}
+    _ = c.start
+    return null
+}

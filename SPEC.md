@@ -33,7 +33,7 @@ This document is the reference for the language. The details live in four compan
 | `null`             | any `T?` | Also the "no error" value of `error`.                      |
 | `[]int{1, 2}`      | `[]int`  | The type is always written. `[]int{}` is an empty list.    |
 | `map[string]int{"a": 1}` | `map[string]int` | Keys may be `int`, `byte`, `bool` or `string`. |
-| `Point{x: 1, y: 2}` | `Point` | A struct literal sets every field by name.                 |
+| `Point{x: 1, y: 2}` | `Point` | A struct literal sets fields by name: every field, except those with a [default value](#default-values-of-fields). |
 | `chan int(10)`     | `chan int` | A new channel with a buffer of 10 (`0`: unbuffered).     |
 
 ## Types
@@ -263,14 +263,37 @@ pub type Named interface {
 }
 ```
 
-- A struct literal must set every field: `User{name: "k", email: null, tags: []string{}}`.
+- A struct literal must set every field that has no default value: `User{name: "k", email: null, tags: []string{}}`. Fields are always named; there are no positional literals.
 - Struct fields are private to their package unless marked `pub` (see [Packages](#packages)).
+- A struct field can declare a default value; see [Default values of fields](#default-values-of-fields).
 - An enum case is always written with its type, both when creating a value and in a `switch`: `Shape.Circle(2.0)`, `case Shape.Circle(float r):`. A case without data has no parentheses, in its declaration (`Eof`, not `Eof()`) and as a value: `Token.Eof`.
 - A case pattern matches its enum case exactly: when the case carries data, the pattern binds every field with its type (`case Shape.Rect(float w, float h):`), using `_` as the name of a field it doesn't need (`case Shape.Rect(float w, float _):`); a case without data is written without parentheses (`case Token.Eof:`). A `case` with several labels can't bind names, so all its bindings are `_`: `case Shape.Circle(float _), Shape.Point:`.
 - An enum case can carry data, and a `switch` over an enum must cover every case.
 - A struct or enum satisfies an interface only by declaring it with `implements` (several interfaces are separated by commas). The compiler then checks that every required method exists, with exactly the same signature (including `mut`). Methods cannot be declared on an interface type.
 - A value of such a type converts to the interface (or the nullable interface) automatically wherever the interface is expected. There is no way to get the original type back out of an interface value (no type switches or assertions).
 - An interface method can be `mut`. Like any `mut` method, it can only be called on a variable or a part of one, and it changes only that interface value.
+
+### Default values of fields
+
+```
+type Fetch struct {
+    string url
+    string method = "GET"
+    map[string]string headers = map[string]string{}
+    int timeout = 30 * time.second
+}
+
+Fetch f = Fetch{url: "http://example.com/"}
+Fetch g = Fetch{url: "http://example.com/", method: "POST", timeout: time.second}
+```
+
+- A struct field may declare a default value after its name: `Type name = value`. A struct literal may leave out a field that has one, and gets the default; a field without a default must still be set in every literal. So there are still no zero values: every value is written somewhere, in the literal or in the type.
+- The default is evaluated again at each literal that leaves the field out, after the values written in the literal, so every literal gets its own copy (a default `[]string{}` gives each literal a new empty list). It is evaluated in the scope of the package that declares the struct: it may use that package's constants and types, private ones too, and the packages its file imports.
+- A default follows the rules of a constant's value ([Variables and constants](#variables-and-constants)): literals, constants, enum values, named functions, operators, conversions, built-in methods that compute a value (`"abc".len()`), and list, map and struct literals (which may themselves leave out fields that have defaults). It cannot call a function or method, use a variable or another field of the struct, `try`, a `group` or a new channel. So using a default runs no code of the program: it cannot block or have effects, and it can fail only the way a constant's value can (an index out of range).
+- A default must have the field's type, with the same conversions as an assignment (`string? note = null`, a struct to an interface it implements).
+- A default cannot use itself through struct literals that leave fields out: `Node? next = Node{}`, where `Node{}` leaves `next` out, is an error.
+- Defaults are part of a struct's type: a literal in another package gets them too. Such a literal still needs every field to be `pub` (see [Packages](#packages)), defaulted ones included.
+- Only struct fields have default values. Function parameters and enum case fields don't.
 
 ## Control flow
 
@@ -432,7 +455,7 @@ shop/
 - Imports come after the `package` line, one per line: `import "fmt"`. They are per file: a file imports the packages it uses itself. An unused import is a compile error, and so is an import cycle (the error shows it: `import cycle: a -> b -> a`).
 - `import "path"` looks for the package in the standard library first (`lib/path` next to the `seed` toolchain), then in the directory `path` relative to the **project root**, the directory of the program's `package main` (or the directory given to `seed test`). There is no project file. Import paths are lowercase names separated by `/`. Code calls the package by the last element of the path: after `import "shop/money"`, it writes `money.Amount`. Importing a project package that has the name of a standard library package is an error at the import; rename the project's package.
 - A name from another package is always written with the package name: `cart.newCart()`, `cart.Item`, `cart.maxItems`, `shapes.Shape.Circle(2.0)`, `case shapes.Shape.Circle(float r):`, `cart.Item{name: "pen"}`. A local or package-level name can't be the same as an imported package's name.
-- Everything is private. Mark a top-level name (function, method, type, constant) `pub` to make it usable from other packages. Struct fields are private too, unless marked `pub` (`pub string name`); another package can only read and write `pub` fields, and can only write a struct literal of the type if every field is `pub`. Enum cases and interface methods are as visible as their type.
+- Everything is private. Mark a top-level name (function, method, type, constant) `pub` to make it usable from other packages. Struct fields are private too, unless marked `pub` (`pub string name`); another package can only read and write `pub` fields, and can only write a struct literal of the type if every field is `pub` (fields with default values included). Enum cases and interface methods are as visible as their type.
 - Nothing runs implicitly when a program starts or a package is imported.
 - The core packages `fmt`, `os`, `fs`, `errors` and `time` ([builtins.md](docs/builtins.md#core-packages)) are ordinary standard library packages and must be imported like any other.
 
@@ -491,6 +514,7 @@ The compiler rejects:
 - a `switch` that doesn't cover every case, an enum `switch` with `default`, or a value `switch` whose `default` isn't last
 - an unchecked error, or an unused call result
 - a nullable value (or an error that may be null) used without a null check, or a value read before the error beside it was checked
+- a struct literal that leaves out a field without a default value, or a field's default value that is not computed like a constant or uses itself
 - an unused local variable (including a pattern binding) or import
 - shadowing
 - unreachable code

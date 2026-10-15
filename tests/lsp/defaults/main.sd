@@ -1,0 +1,16 @@
+package main
+
+import "fmt"
+
+// Options for a request.
+type Options struct {
+    string method = "GET"
+    string url
+    int retries = 3 * 2
+}
+
+fn main([]string args) error {
+    Options o = Options{url: "x"}
+    fmt.println(o.method + o.url + o.retries.string())
+    return null
+}

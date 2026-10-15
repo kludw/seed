@@ -1,0 +1,97 @@
+// Default values of struct fields: a literal may leave out a field that has
+// one, gets a fresh copy of it each time, and can still set it.
+package main
+
+import "fmt"
+import "time"
+
+const int baseRetries = 3
+const []string standardTags = []string{"std"}
+
+type Level enum {
+    Low
+    High(int boost)
+}
+
+type Limits struct {
+    int retries = baseRetries * 2
+    int wait = 250 * time.millisecond
+    Level level = Level.High(2)
+}
+
+type Job struct {
+    string name
+    string owner = "nobody"
+    []string tags = []string{}
+    map[string]int counts = map[string]int{}
+    []string inherited = standardTags
+    string? note = null
+    Limits limits = Limits{retries: 1}
+    bool done = !true
+    float share = 1.0 / 4.0
+    byte mark = 'x'
+    int size = "four".len()
+}
+
+type Calc struct {
+    fn(int) int step = double
+}
+
+type Empty struct {}
+
+type OnlyDefaults struct {
+    int a = 1
+    string b = "b"
+}
+
+fn double(int n) int {
+    return n * 2
+}
+
+fn describe(Job j) string {
+    string note = "-"
+    if (j.note != null) {
+        note = j.note
+    }
+    return j.name + " " + j.owner + " tags=" + j.tags.len().string() + " counts=" + j.counts.len().string() + " inherited=" + j.inherited.len().string() + " note=" + note + " retries=" + j.limits.retries.string() + " wait=" + j.limits.wait.string() + " level=" + j.limits.level.name()
+}
+
+fn main([]string args) error {
+    Job a = Job{name: "a"}
+    fmt.println(describe(a))
+    fmt.println(a.done.string() + " " + a.share.string() + " " + a.mark.string() + " " + a.size.string() + " " + Calc{}.step(21).string())
+
+    // Overriding defaults, in any order.
+    Job b = Job{owner: "kim", name: "b", note: "urgent", limits: Limits{}, tags: []string{"x", "y"}}
+    fmt.println(describe(b))
+
+    // Every literal gets its own list and map.
+    Job c = Job{name: "c"}
+    a.tags.push("one")
+    a.counts["k"] = 1
+    a.inherited.push("more")
+    fmt.println(a.tags.len().string() + " " + c.tags.len().string() + " " + a.counts.len().string() + " " + c.counts.len().string() + " " + a.inherited.len().string() + " " + c.inherited.len().string() + " " + standardTags.len().string())
+
+    // In a loop: a fresh default each time around.
+    []Job jobs = []Job{}
+    for (int i = 0; i < 3; i++) {
+        Job j = Job{name: "j" + i.string()}
+        j.tags.push(i.string())
+        jobs.push(j)
+    }
+    fmt.println(jobs[0].tags.join(",") + " " + jobs[1].tags.join(",") + " " + jobs[2].tags.join(","))
+
+    // Equality sees the defaults like any other field.
+    fmt.println((Job{name: "c"} == c).string() + " " + (Job{name: "c", owner: "nobody"} == c).string() + " " + (Job{name: "c", owner: "x"} == c).string())
+
+    // Literals inside lists, maps and other literals.
+    map[string]Limits byName = map[string]Limits{"default": Limits{}, "patient": Limits{wait: time.second}}
+    Limits? p = byName["patient"]
+    if (p != null) {
+        fmt.println(p.retries.string() + " " + p.wait.string())
+    }
+    Empty e = Empty{}
+    OnlyDefaults o = OnlyDefaults{}
+    fmt.println((e == Empty{}).string() + " " + o.a.string() + o.b)
+    return null
+}

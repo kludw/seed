@@ -269,6 +269,9 @@ Some notable shapes:
   (a block), so a formatter can reproduce the source.
 - Map literal entries are `Entry` expressions, struct literal fields are
   `FieldInit` expressions, so every child list is a list of expressions.
+- A struct field is a `Param`; its default value, if any, is the expression
+  `Param.defaultExpr` (-1 otherwise), with the source text on one line in
+  `Param.defaultText` for the language server (`Parser.tokensText`).
 - A case label that looks like `Type.Case` is marked `isPattern` and is *also*
   parsed as an expression, so the same label works in a value switch; one
   with parentheses carries its bindings as `Param`s.
@@ -405,8 +408,15 @@ are shown`. When a file has syntax errors, checking is skipped.
    methods with the same parameter and result types and the same `mut`.
    Each checked pair goes into `impls`.
 5. Check `main`'s signature (not in test mode), then constants (lazily,
-   in dependency order), then every function body (natives have none; test
-   bodies only in test files), then that every import is used.
+   in dependency order), then the default values of struct fields
+   (`checkFieldDefaults`: like a constant's value, with no function and
+   no locals in scope, against the field's type, then `requireDefault`,
+   which is `nonConstant` with its own message), then that no default uses
+   itself through struct literals that leave fields out
+   (`checkDefaultCycles`, a depth-first walk over the fields), then every
+   function body (natives have none; test bodies only in test files),
+   then that every import is used. A struct literal may leave out the
+   fields that have a default (`checkStructLit`, `hasDefault`).
 
 There are no implicit conversions except
 `T → T?` (`coerce` sets `wrap`), `null → T?/error`, reading a narrowed `T?`
@@ -652,7 +662,12 @@ and temporaries own is released through the function's frame instead
   over at once (a struct literal, a map entry, a tuple returned, a defer's
   environment) are evaluated into temporaries first (`ownedOperands`), so
   that they cannot crash after another value was retained in the same
-  statement.
+  statement. A struct literal's operands include the default values of
+  the fields it leaves out (`gstruct`): the default's expression, checked
+  once in its own package, is generated again at every literal, after the
+  fields the literal writes. It needs no locals (it has none) and refers to
+  constants and enum cases by their global C names, so it is valid C in any
+  function and any unit.
 - A return computes its result, leaves the frame (`SD_LF_LEAVE`), and then
   releases without nulling.
 - Only the fields that need it are kept: while the body is generated, frame
@@ -1054,7 +1069,7 @@ under the cursor (or right before it) and look, in order, for:
 
 The result is the declaration's position and a signature rebuilt from the
 tree (`fn (Cart c) mut add(Item item) error`, a type with its fields or
-cases, `const int maxItems = 100`, `shop.Cart cart` for a local), with the
+cases, a field with its default value (`int timeout = 0`), `const int maxItems = 100`, `shop.Cart cart` for a local), with the
 `//` comment lines right above the declaration as its documentation.
 
 Completion after `.` with nothing typed after it inserts a placeholder
@@ -1064,7 +1079,11 @@ imported package, its `pub` functions, types and constants; after a type
 name, the enum's cases; after any other expression, the fields (visible
 from the document's package) and methods of its type, the methods of an
 interface, or the built-in methods of a string, list, map, channel,
-number or error (docs/builtins.md). Elsewhere, the parameters and locals
+number or error (docs/builtins.md). Right after the `{` or a `,` of a
+struct literal (`lspLiteralFields`, from the text: `Name{` or
+`pkg.Name{` before the unmatched `{`, not after `]`, which is a list or
+map), the fields the literal does not set yet, with their types and
+default values. Elsewhere, the parameters and locals
 in scope (`lspLocals`: the blocks that contain the cursor, walked in the
 tree, with the declarations before it), the package's names, the file's
 imports, the keywords and the built-in types.

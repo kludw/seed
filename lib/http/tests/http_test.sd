@@ -245,9 +245,9 @@ test "response bytes" {
     assert(responseBytes("GET", resp, false) == "HTTP/1.1 200 OK\r\ncontent-type: text/plain\r\ncontent-length: 2\r\n\r\nhi")
     assert(responseBytes("HEAD", resp, false) == "HTTP/1.1 200 OK\r\ncontent-type: text/plain\r\ncontent-length: 2\r\n\r\n")
     assert(responseBytes("GET", resp, true) == "HTTP/1.1 200 OK\r\ncontent-type: text/plain\r\ncontent-length: 2\r\nconnection: close\r\n\r\nhi")
-    Response empty = Response{status: 204, headers: map[string]string{}, body: "ignored"}
+    Response empty = Response{status: 204, body: "ignored"}
     assert(responseBytes("DELETE", empty, false) == "HTTP/1.1 204 No Content\r\n\r\n")
-    Response odd = Response{status: 299, headers: map[string]string{"x-evil": "a\r\nset-cookie: b", "bad name": "x"}, body: ""}
+    Response odd = Response{status: 299, headers: map[string]string{"x-evil": "a\r\nset-cookie: b", "bad name": "x"}}
     assert(responseBytes("GET", odd, false) == "HTTP/1.1 299 \r\nx-evil: a  set-cookie: b\r\ncontent-length: 0\r\n\r\n")
     assert(errorResponseBytes(431) == "HTTP/1.1 431 Request Header Fields Too Large\r\ncontent-type: text/plain; charset=utf-8\r\ncontent-length: 32\r\nconnection: close\r\n\r\nRequest Header Fields Too Large\n")
 }
@@ -331,17 +331,17 @@ test "parse url errors" {
 }
 
 test "request bytes" {
-    Request getReq = Request{method: "GET", url: "http://example.com:8080/todos?x=1", headers: map[string]string{}, body: ""}
+    Request getReq = Request{url: "http://example.com:8080/todos?x=1"}
     HttpTarget target, error err = parseUrl("http.send", getReq.url)
     assert(err == null)
     string bytes, error err2 = requestBytes("http.send", getReq, target)
     assert(err2 == null && bytes == "GET /todos?x=1 HTTP/1.1\r\nhost: example.com:8080\r\nconnection: close\r\n\r\n")
-    Request post = Request{method: "POST", url: "http://example.com/todos", headers: map[string]string{"Content-Type": "application/json", "Connection": "keep-alive", "Host": "virtual.example"}, body: ""}
+    Request post = Request{method: "POST", url: "http://example.com/todos", headers: map[string]string{"Content-Type": "application/json", "Connection": "keep-alive", "Host": "virtual.example"}}
     HttpTarget t2, error err3 = parseUrl("http.send", post.url)
     assert(err3 == null)
     string bytes2, error err4 = requestBytes("http.send", post, t2)
     assert(err4 == null && bytes2 == "POST /todos HTTP/1.1\r\ncontent-type: application/json\r\nhost: virtual.example\r\ncontent-length: 0\r\nconnection: close\r\n\r\n")
-    Request bad = Request{method: "GE T", url: "http://a/", headers: map[string]string{}, body: "x"}
+    Request bad = Request{method: "GE T", url: "http://a/", body: "x"}
     _, error err5 = requestBytes("http.send", bad, t2)
     assert(err5 != null)
     assert(err5.message() == "http.send: http://a/: invalid method GE T")
@@ -359,22 +359,22 @@ test "request bytes parse back" {
 }
 
 test "request path" {
-    assert(Request{method: "GET", url: "/todos?done=1", headers: map[string]string{}, body: ""}.path() == "/todos")
-    assert(Request{method: "GET", url: "/a%20b/c%2Fd+e", headers: map[string]string{}, body: ""}.path() == "/a b/c/d+e")
-    assert(Request{method: "GET", url: "/bad%zz?x", headers: map[string]string{}, body: ""}.path() == "/bad%zz")
-    assert(Request{method: "GET", url: "http://example.com/x/y?q#f", headers: map[string]string{}, body: ""}.path() == "/x/y")
-    assert(Request{method: "GET", url: "http://example.com", headers: map[string]string{}, body: ""}.path() == "/")
-    assert(Request{method: "GET", url: "http://example.com?q=1", headers: map[string]string{}, body: ""}.path() == "/")
-    assert(Request{method: "GET", url: "/", headers: map[string]string{}, body: ""}.path() == "/")
-    assert(Request{method: "GET", url: "/redirect?to=http://x/y", headers: map[string]string{}, body: ""}.path() == "/redirect")
+    assert(Request{url: "/todos?done=1"}.path() == "/todos")
+    assert(Request{url: "/a%20b/c%2Fd+e"}.path() == "/a b/c/d+e")
+    assert(Request{url: "/bad%zz?x"}.path() == "/bad%zz")
+    assert(Request{url: "http://example.com/x/y?q#f"}.path() == "/x/y")
+    assert(Request{url: "http://example.com"}.path() == "/")
+    assert(Request{url: "http://example.com?q=1"}.path() == "/")
+    assert(Request{url: "/"}.path() == "/")
+    assert(Request{url: "/redirect?to=http://x/y"}.path() == "/redirect")
 }
 
 test "request query" {
-    Request r = Request{method: "GET", url: "/s?q=a+b%21&lang=en&q=last&flag&&empty=&bad=%zz&%41=x#frag", headers: map[string]string{}, body: ""}
+    Request r = Request{url: "/s?q=a+b%21&lang=en&q=last&flag&&empty=&bad=%zz&%41=x#frag"}
     assert(httpTestHeaders(r.query()) == "{q=last; lang=en; flag=; empty=; A=x}")
-    assert(Request{method: "GET", url: "/s", headers: map[string]string{}, body: ""}.query().len() == 0)
-    assert(Request{method: "GET", url: "/s?", headers: map[string]string{}, body: ""}.query().len() == 0)
-    assert(httpTestHeaders(Request{method: "GET", url: "http://h/p?a=1=2", headers: map[string]string{}, body: ""}.query()) == "{a=1=2}")
+    assert(Request{url: "/s"}.query().len() == 0)
+    assert(Request{url: "/s?"}.query().len() == 0)
+    assert(httpTestHeaders(Request{url: "http://h/p?a=1=2"}.query()) == "{a=1=2}")
 }
 
 test "status text" {

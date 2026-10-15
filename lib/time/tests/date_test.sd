@@ -173,3 +173,10 @@ test "parse errors" {
     assert(timeTestParseError("2026-10-13T08:30:00Z ") == "time.parse: 2026-10-13T08:30:00Z : unexpected text at offset 20")
     assert(timeTestParseError("+2026-10-13T08:30:00Z") == "time.parse: +2026-10-13T08:30:00Z: expected a digit at offset 0")
 }
+
+test "a date without a time of day is midnight" {
+    Date d = Date{year: 2026, month: 10, day: 13}
+    assert(d == timeTestDate(2026, 10, 13, 0, 0, 0, 0))
+    assert(try fromDate(d) == 1791849600 * second)
+    assert(Date{year: 2026, month: 10, day: 13, hour: 8, minute: 30} == date(1791880200 * second))
+}

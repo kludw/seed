@@ -30,7 +30,7 @@ fn client(net.Listener ln, fn(string) ([]string, error) scenario, chan string ou
 
 // Sends a request and shows the response as "STATUS BODY".
 fn call(string method, string url, string body) (string, error) {
-    http.Response resp = try http.send(http.Request{method: method, url: url, headers: map[string]string{}, body: body})
+    http.Response resp = try http.send(http.Request{method: method, url: url, body: body})
     return resp.status.string() + " " + resp.body, null
 }
 

@@ -295,7 +295,8 @@ The compiler rejects:
 | A missing `return` | [4](04-functions-and-errors.md) |
 | A nullable value used without a null check | [5](05-null-safety.md) |
 | A `mut` method called on a parameter | [7](07-structs-and-methods.md) |
-| A struct literal that misses a field | [7](07-structs-and-methods.md) |
+| A struct literal that misses a field without a default value | [7](07-structs-and-methods.md) |
+| A field's default value that calls a function or could fail | [7](07-structs-and-methods.md) |
 | A type whose methods don't match its `implements` | [9](09-interfaces-and-functions.md) |
 | `spawn` outside a group, a spawned `mut` method, `return` or `try` inside a group block | [10](10-concurrency.md) |
 | A name, field or method of another package that isn't `pub` | [11](11-packages.md) |

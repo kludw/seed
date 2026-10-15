@@ -1,0 +1,12 @@
+// expect-error: struct_default_param.sd:5:22: error: a parameter cannot have a default value
+// Only struct fields have default values; parameters do not.
+package main
+
+fn greet(string name = "you") string {
+    return "hi " + name
+}
+
+fn main([]string args) error {
+    _ = greet("x")
+    return null
+}

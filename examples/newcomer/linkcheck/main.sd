@@ -24,7 +24,7 @@ fn (Demo d) handle(http.Request req) (http.Response, error) {
     case "/", "/ok":
         return http.textResponse(http.statusOk, "ok\n"), null
     case "/moved":
-        return http.Response{status: http.statusFound, headers: map[string]string{"location": "/ok"}, body: ""}, null
+        return http.Response{status: http.statusFound, headers: map[string]string{"location": "/ok"}}, null
     case "/slow":
         time.sleep(3 * time.second)
         return http.textResponse(http.statusOk, "finally\n"), null

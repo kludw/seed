@@ -1,0 +1,17 @@
+// expect-error: struct_default_missing_field.sd:14:17: error: missing field url in Request literal
+// expect-errors: 1
+// A field without a default must still be set, even when the others have one.
+package main
+
+type Request struct {
+    string method = "GET"
+    string url
+    int timeout = 0
+}
+
+fn main([]string args) error {
+    Request ok = Request{url: "http://example.com/"}
+    Request r = Request{method: "POST"}
+    _ = ok.method + r.method
+    return null
+}

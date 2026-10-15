@@ -206,11 +206,16 @@ type TypeExpr struct {
 
 // `Type name`: a function parameter, struct field, enum case field or a
 // binding in a case pattern. isPub is set for a struct field marked pub.
+// A struct field may have a default value (`int timeout = 30`): its
+// expression is defaultExpr (-1 when there is none), and defaultText the
+// expression as written, on one line (for the language server).
 type Param struct {
     Pos pos
     int typeExpr
     string name
     bool isPub
+    int defaultExpr
+    string defaultText
 }
 
 // A function or method. body is -1 for a native function (declared

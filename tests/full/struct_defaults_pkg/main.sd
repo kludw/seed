@@ -1,0 +1,21 @@
+// Default values of struct fields across packages: a literal of another
+// package's type may leave out the fields that have defaults, which are
+// evaluated in the scope of that package (its private constants), also
+// for a package (base) that only the other package imports.
+package main
+
+import "config"
+import "fmt"
+
+fn main([]string args) error {
+    config.Server a = config.Server{}
+    config.Server b = config.Server{port: 9090, mode: config.Mode.Tls("cert.pem"), limits: config.Limits{maxHeaders: 8}}
+    a.paths.push("/admin")
+    config.Server c = config.Server{}
+    fmt.println(a.address() + " " + a.mode.name() + " " + a.paths.join(",") + " " + a.limits.maxBody.string() + " " + a.limits.maxHeaders.string())
+    fmt.println(b.address() + " " + b.mode.name() + " " + b.paths.join(",") + " " + b.limits.maxBody.string() + " " + b.limits.maxHeaders.string())
+    fmt.println(c.paths.join(",") + " " + (c == config.Server{host: "localhost"}).string())
+    a.style.seeds.push("s3")
+    fmt.println(a.style.seeds.join(",") + " " + c.style.seeds.join(",") + " " + c.style.color.name())
+    return null
+}

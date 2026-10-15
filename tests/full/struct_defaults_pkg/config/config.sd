@@ -1,0 +1,31 @@
+package config
+
+import "base"
+
+// A default may use the package's private constants and types: it is
+// evaluated in the scope of the package that declares the struct.
+const int defaultPort = 8080
+const string defaultHost = "localhost"
+
+pub type Mode enum {
+    Plain
+    Tls(string cert)
+}
+
+pub type Server struct {
+    pub string host = defaultHost
+    pub int port = defaultPort
+    pub Mode mode = Mode.Plain
+    pub []string paths = []string{"/"}
+    pub Limits limits = Limits{}
+    pub base.Style style = base.Style{}
+}
+
+pub type Limits struct {
+    pub int maxBody = 1024 * 1024
+    pub int maxHeaders = 64
+}
+
+pub fn (Server s) address() string {
+    return s.host + ":" + s.port.string()
+}

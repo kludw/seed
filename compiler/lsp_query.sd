@@ -506,12 +506,7 @@ fn lspTypeSig(Ast ast, int d) string {
     }
     []string members = []string{}
     for (int f = 0; f < td.fieldCount; f++) {
-        Param p = ast.params[ast.at(td.fields, f)]
-        string field = ast.typeExprText(p.typeExpr) + " " + p.name
-        if (p.isPub) {
-            field = "pub " + field
-        }
-        members.push(field)
+        members.push(lspFieldText(ast, ast.params[ast.at(td.fields, f)]))
     }
     for (int k = 0; k < td.caseCount; k++) {
         EnumCase ec = ast.enumCases[ast.at(td.cases, k)]
@@ -545,11 +540,19 @@ fn lspFieldSym(Checker c, int d, int i) LspSym {
         return lspNoSym()
     }
     Param p = c.ast.params[c.ast.at(td.fields, i)]
-    string sig = c.ast.typeExprText(p.typeExpr) + " " + p.name
+    return lspSymOf(p.pos, p.name, lspFieldText(c.ast, p), lspJoinDoc(lspDocComment(c.ast, td.file, p.pos.line), "field of " + c.declDisplayName(d)))
+}
+
+// A struct field as declared: `pub int timeout = 30 * time.second`.
+fn lspFieldText(Ast ast, Param p) string {
+    string s = ast.typeExprText(p.typeExpr) + " " + p.name
     if (p.isPub) {
-        sig = "pub " + sig
+        s = "pub " + s
     }
-    return lspSymOf(p.pos, p.name, sig, lspJoinDoc(lspDocComment(c.ast, td.file, p.pos.line), "field of " + c.declDisplayName(d)))
+    if (p.defaultExpr >= 0) {
+        s = s + " = " + p.defaultText
+    }
+    return s
 }
 
 fn lspCaseSym(Checker c, int d, int ci) LspSym {
@@ -731,8 +734,14 @@ fn lspCompletion(LspJob job) (json.Value, error) {
     int ls = lspLineStart(text, job.line)
     if (a.file >= 0 && ls >= 0) {
         Pos at = Pos{file: a.file, line: job.line + 1, col: start - ls + 1}
+        []json.Value? fields = null
+        if (!member) {
+            fields = lspLiteralFields(a.c, text, start, a.file)
+        }
         if (member) {
             items = lspMemberItems(a.c, at, text, start - 1)
+        } else if (fields != null) {
+            items = fields
         } else {
             items = lspScopeItems(a.c, at)
         }
@@ -741,6 +750,106 @@ fn lspCompletion(LspJob job) (json.Value, error) {
     list["isIncomplete"] = json.Value.Bool(false)
     list["items"] = json.Value.Array(items)
     return json.Value.Object(list), null
+}
+
+// Completion of a field name in a struct literal, where the word at start
+// follows the literal's `{` or a `,` (and spaces or line breaks): the
+// fields the literal does not set yet, with their types and defaults. Null
+// when the word is not there.
+fn lspLiteralFields(Checker c, string text, int start, int file) []json.Value? {
+    int j = start - 1
+    for (; j >= 0 && (text[j] == ' ' || text[j] == '\t' || text[j] == '\n' || text[j] == '\r'); ) {
+        j--
+    }
+    if (j < 0 || (text[j] != '{' && text[j] != ',')) {
+        return null
+    }
+    // The `{` that opens the literal.
+    int open = j
+    int depth = 0
+    for (; open >= 0; open--) {
+        byte b = text[open]
+        if (b == ')' || b == ']' || b == '}') {
+            depth++
+        } else if (b == '(' || b == '[') {
+            depth--
+        } else if (b == '{') {
+            if (depth == 0) {
+                break
+            }
+            depth--
+        }
+        if (depth < 0) {
+            return null
+        }
+    }
+    if (open <= 0 || !lspIdentByte(text[open - 1])) {
+        return null
+    }
+    int ns = open
+    for (; ns > 0 && lspIdentByte(text[ns - 1]); ) {
+        ns--
+    }
+    if (ns > 0 && text[ns - 1] == ']') {
+        // []Item{ or map[string]Item{: a list or a map.
+        return null
+    }
+    string name = text.slice(ns, open)
+    int litStart = ns
+    int pkg = c.ast.files[file].pkgIndex
+    if (ns > 1 && text[ns - 1] == '.') {
+        int ps = ns - 1
+        for (; ps > 0 && lspIdentByte(text[ps - 1]); ) {
+            ps--
+        }
+        pkg = c.importedPkg(file, text.slice(ps, ns - 1))
+        litStart = ps
+        if (pkg < 0 || (ps > 0 && text[ps - 1] == ']')) {
+            return null
+        }
+    }
+    int? g = c.global(pkg, name)
+    if (g == null || c.globalList[g].kind != GlobalKind.Type) {
+        return null
+    }
+    int d = c.globalList[g].index
+    TypeDecl td = c.ast.typeDecls[d]
+    if (td.kind != DeclKind.Struct) {
+        return null
+    }
+    // The fields already set, from the literal in the tree.
+    int line = 1
+    int ls = 0
+    for (int k = 0; k < litStart; k++) {
+        if (text[k] == '\n') {
+            line++
+            ls = k + 1
+        }
+    }
+    Pos lp = Pos{file: file, line: line, col: litStart - ls + 1}
+    []string set = []string{}
+    for (int e = 0; e < c.ast.exprs.len(); e++) {
+        Expr x = c.ast.exprs[e]
+        if (x.kind == ExprKind.StructLit && x.pos == lp) {
+            for (int f = 0; f < x.count; f++) {
+                set.push(c.ast.exprs[c.ast.at(x.list, f)].text)
+            }
+        }
+    }
+    []json.Value items = []json.Value{}
+    Pos at = Pos{file: file, line: line, col: 1}
+    for (int i = 0; i < td.fieldCount; i++) {
+        Param p = c.ast.params[c.ast.at(td.fields, i)]
+        if (set.contains(p.name) || !c.fieldVisible(d, i, at)) {
+            continue
+        }
+        string doc = "field of " + c.declDisplayName(d)
+        if (p.defaultExpr >= 0) {
+            doc = doc + " (has a default value: may be left out)"
+        }
+        items.push(lspItem(p.name, 5, lspFieldText(c.ast, p), lspJoinDoc(lspDocComment(c.ast, td.file, p.pos.line), doc)))
+    }
+    return items
 }
 
 fn lspItem(string label, int kind, string detail, string doc) json.Value {

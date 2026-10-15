@@ -339,6 +339,9 @@ fn (Checker c) mut undefinedName(int e) {
     if (hint == "") {
         hint = s.hint()
     }
+    if (hint == "" && c.inDefault) {
+        hint = "a default value can use constants, but not the struct's other fields"
+    }
     c.errorHint(x.pos, "undefined: " + x.text, hint)
     c.setType(e, tyInvalid)
 }
@@ -741,7 +744,11 @@ fn (Checker c) mut checkTry(int e) {
         return
     }
     if (c.curFn < 0) {
-        c.error(x.pos, "try cannot be used in a constant")
+        if (c.inDefault) {
+            c.errorHint(x.pos, "try cannot be used in a default value", "a default cannot fail; set the field in each literal instead")
+        } else {
+            c.error(x.pos, "try cannot be used in a constant")
+        }
         return
     }
     int ret = c.fnRet[c.curFn]
@@ -880,8 +887,8 @@ fn (Checker c) mut checkStructLit(int e) {
                 found = true
             }
         }
-        if (!found) {
-            c.errorHint(x.pos, "missing field " + name + " in " + tname + " literal", "a struct literal must set every field")
+        if (!found && !c.hasDefault(d, m)) {
+            c.errorHint(x.pos, "missing field " + name + " in " + tname + " literal", "a struct literal must set every field that has no default value")
             ok = false
         }
     }

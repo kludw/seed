@@ -1,0 +1,18 @@
+// expect-error: struct_default_try.sd:7:16: error: try cannot be used in a default value
+// expect-errors: 1
+// A default cannot fail.
+package main
+
+type Config struct {
+    int port = try parsePort()
+}
+
+fn parsePort() (int, error) {
+    return 80, null
+}
+
+fn main([]string args) error {
+    Config c = Config{}
+    _ = c.port
+    return null
+}

@@ -1,0 +1,12 @@
+// expect-error: cannot write the literal store.Item{...} outside package store: the field secret is not pub
+// A literal of another package's type still needs every field to be pub,
+// even a private field that has a default.
+package main
+
+import "store"
+
+fn main([]string args) error {
+    store.Item it = store.Item{name: "pen"}
+    _ = it.name
+    return null
+}

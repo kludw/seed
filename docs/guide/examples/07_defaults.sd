@@ -1,0 +1,34 @@
+package main
+
+import "fmt"
+import "time"
+
+type Retry struct {
+    int attempts = 3
+    int wait = 500 * time.millisecond
+}
+
+type Fetch struct {
+    string url
+    string method = "GET"
+    map[string]string headers = map[string]string{}
+    Retry retry = Retry{}
+    string? note = null
+}
+
+fn show(Fetch f) string {
+    return f.method + " " + f.url + " headers=" + f.headers.len().string() + " attempts=" + f.retry.attempts.string() + " wait=" + (f.retry.wait / time.millisecond).string() + "ms"
+}
+
+fn main([]string args) error {
+    Fetch a = Fetch{url: "/a"}
+    Fetch b = Fetch{url: "/b", method: "POST", retry: Retry{attempts: 1}}
+    fmt.println(show(a))
+    fmt.println(show(b))
+
+    // Each literal gets its own map: changing a's leaves the next one empty.
+    a.headers["accept"] = "text/plain"
+    Fetch c = Fetch{url: "/c"}
+    fmt.println(a.headers.len().string() + " " + c.headers.len().string())
+    return null
+}

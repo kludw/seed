@@ -12,7 +12,7 @@ Seed started from Go and kept most of its spirit: a small language, fast to lear
 | Go | Seed | Why |
 |---|---|---|
 | `var n int`, `n := 0`, `var n = 0` | `int n = 0` | One form. The type is always visible, and every variable starts with a value. |
-| Zero values | No zero values: every declaration and struct literal is complete | A forgotten field is a compile error, not a silent `0` or `""`. |
+| Zero values | No zero values: every declaration and struct literal is complete, and a field that may be left out declares its default (`int timeout = 0`) | A forgotten field is a compile error, not a silent `0` or `""`; a default is written once, where the field is declared. |
 | `nil` for pointers, maps, slices, interfaces, channels, funcs | `T?` and `null`, only where the type says so (and `error`, which the compiler checks like a `T?`) | "Might be missing" is part of the type, and the compiler makes you check it. |
 | `*T`, `&x`, pointer and value receivers | No pointers. Values only; `mut` methods change the caller's variable | No aliasing, no nil dereference, no data races, no `*T` versus `T` decision. |
 | Slices share their backing array; `append` may or may not copy | `[]T` is a value; copy-on-write makes copies cheap | A list you passed somewhere never changes under you. |

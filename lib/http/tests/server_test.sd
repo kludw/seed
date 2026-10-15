@@ -101,7 +101,7 @@ fn httpTestBasics(string base, chan string out) error {
     lines.push(echoed.status.string() + " " + echoed.body + " " + method + " " + echoedType)
     Response q = try get(base + "/query?a=1&b=x+y&c=%41")
     lines.push(q.status.string() + " " + q.body)
-    Response head = try send(Request{method: "HEAD", url: base + "/", headers: map[string]string{}, body: ""})
+    Response head = try send(Request{method: "HEAD", url: base + "/"})
     string? headLength = head.headers["content-length"]
     if (headLength == null) {
         return errors.new("HEAD without content-length")
@@ -218,7 +218,7 @@ test "keep-alive, pipelining, chunked bodies and 100-continue" {
 
 fn httpTestParallelClient(string base, int n, chan int done) error {
     for (int i = 0; i < 10; i++) {
-        Response resp = try send(Request{method: "POST", url: base + "/echo", headers: map[string]string{}, body: "client " + n.string() + " request " + i.string()})
+        Response resp = try send(Request{method: "POST", url: base + "/echo", body: "client " + n.string() + " request " + i.string()})
         if (resp.body != "client " + n.string() + " request " + i.string()) {
             return errors.new("wrong body " + resp.body)
         }
@@ -291,7 +291,7 @@ test "client errors" {
     assert(httpTestShow(resp, err) == "error: http.get: http://" + addr + "/: connection refused")
     Response? resp2, error err2 = get("https://example.com/")
     assert(httpTestShow(resp2, err2) == "error: http.get: https://example.com/: https is not supported")
-    Response? resp3, error err3 = send(Request{method: "GET", url: "ftp://x/", headers: map[string]string{}, body: ""})
+    Response? resp3, error err3 = send(Request{url: "ftp://x/"})
     assert(httpTestShow(resp3, err3) == "error: http.send: ftp://x/: unsupported scheme ftp")
 }
 

@@ -1,0 +1,16 @@
+// expect-error: struct_default_cycle.sd:9:18: error: the default value of Node.next uses itself: Node.next -> Node.next
+// expect-errors: 1
+// A default that builds a literal of its own struct without setting the
+// field would never end.
+package main
+
+type Node struct {
+    int value = 0
+    Node? next = Node{}
+}
+
+fn main([]string args) error {
+    Node n = Node{next: null}
+    _ = n.value
+    return null
+}

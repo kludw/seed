@@ -13,15 +13,16 @@
 #   equal NAME.out (--update rewrites it), the server must exit with 0
 #   after shutdown and exit, and its stderr must be empty, or contain the
 #   text of NAME.err when there is one.
-# - Fuzz sessions: each file of the fixture project is typed in, three
-#   bytes at a time, with hover, definition, completion, symbols and
+# - Fuzz sessions: each file of the fixture project, and the program of
+#   tests/lsp/defaults (struct fields with default values), is typed in,
+#   three bytes at a time, with hover, definition, completion, symbols and
 #   formatting asked at every step. Every request must be answered, and
 #   nothing may crash (a crash would be contained, but is logged to
 #   stderr, which must stay empty).
 #
 # The documents are in tests/lsp/proj (a program and its package shop of
-# two files, with tests) and tests/lsp/edits (versions of them for
-# didChange).
+# two files, with tests), tests/lsp/edits (versions of them for
+# didChange), tests/lsp/programs and tests/lsp/defaults.
 set -u
 seed=$1
 update=${2:-}
@@ -77,7 +78,7 @@ for script in "$dir"/*.lsp; do
   pass=$((pass+1))
 done
 
-for f in proj/main.sd proj/shop/cart.sd proj/shop/item.sd proj/shop/tests/cart_test.sd; do
+for f in proj/main.sd proj/shop/cart.sd proj/shop/item.sd proj/shop/tests/cart_test.sd defaults/main.sd; do
   run "fuzz $f" fuzz "$dir/$f" "$dir" 3 || continue
   if [ -s "$tmp/err" ]; then
     failed "fuzz $f" "stderr: $(head -c 500 "$tmp/err")"; continue

@@ -709,22 +709,38 @@ fn (Gen g) mut gmap(int e) string {
     return m
 }
 
+// A struct literal. A field that the literal leaves out gets its default
+// value, evaluated here, after the fields written in the literal (a default
+// has no effects, see requireDefault, so only a crash could tell).
 fn (Gen g) mut gstruct(int e) string {
     int st = g.coreType(e)
     string sct = g.ctype(st)
     Expr x = g.c.ast.exprs[e]
-    if (x.count == 0) {
+    int d = g.c.types.decl(st)
+    TypeDecl td = g.c.ast.typeDecls[d]
+    if (td.fieldCount == 0) {
         return "((" + sct + "){0})"
     }
     []int es = []int{}
+    []string names = []string{}
     for (int i = 0; i < x.count; i++) {
-        es.push(g.c.ast.exprs[g.arg(e, i)].a)
+        Expr fi = g.c.ast.exprs[g.arg(e, i)]
+        es.push(fi.a)
+        names.push(fi.text)
+    }
+    if (x.count < td.fieldCount) {
+        for (int k = 0; k < td.fieldCount; k++) {
+            Param f = g.c.ast.params[g.c.ast.at(td.fields, k)]
+            if (f.defaultExpr >= 0 && !names.contains(f.name)) {
+                es.push(f.defaultExpr)
+                names.push(f.name)
+            }
+        }
     }
     []string vals = g.ownedOperands(es)
     []string fields = []string{}
-    for (int j = 0; j < x.count; j++) {
-        Expr fi = g.c.ast.exprs[g.arg(e, j)]
-        fields.push(".f_" + fi.text + " = " + g.ownVal(vals[j], g.typeOf(fi.a)))
+    for (int j = 0; j < es.len(); j++) {
+        fields.push(".f_" + names[j] + " = " + g.ownVal(vals[j], g.typeOf(es[j])))
     }
     return g.temp(st, "(" + sct + "){" + fields.join(", ") + "}")
 }

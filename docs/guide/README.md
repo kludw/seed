@@ -12,7 +12,7 @@ This guide is for programmers who already know Go or another C-like language. It
 4. [Functions and errors](04-functions-and-errors.md): multiple results, errors as values, `try`, `_`, `defer`, crashes and exit codes.
 5. [Null safety](05-null-safety.md): `T?` and how the compiler narrows it.
 6. [Lists and maps](06-lists-and-maps.md): every method, value semantics and copy-on-write.
-7. [Structs, methods and `mut`](07-structs-and-methods.md): why there are no pointers, and how to model shared state.
+7. [Structs, methods and `mut`](07-structs-and-methods.md): default values of fields, why there are no pointers, and how to model shared state.
 8. [Enums](08-enums.md): enums with data, exhaustive `switch`, trees without pointers.
 9. [Interfaces and function values](09-interfaces-and-functions.md): `implements`, `error` as an interface, `sortBy`.
 10. [Concurrency](10-concurrency.md): goroutines that share nothing, channels, `select`, groups and Erlang-style failure.

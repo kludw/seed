@@ -469,7 +469,7 @@ $ echo $?
 
 `main` returns the group's error, so the program exits with code 1 and prints the message.
 
-The `select` with the timer has to run in a spawned goroutine, as `collect` does. A `select` written in the group block itself does see the timeout, but the block can't stop the group's goroutines (only a failing goroutine stops them) and can't leave early, so the group still waits for the slow goroutine before it returns. For one HTTP request there is a shortcut: `http.getWithin(url, timeout)` and `http.sendWithin(req, timeout)` take the limit themselves ([stdlib.md](../stdlib.md#client)).
+The `select` with the timer has to run in a spawned goroutine, as `collect` does. A `select` written in the group block itself does see the timeout, but the block can't stop the group's goroutines (only a failing goroutine stops them) and can't leave early, so the group still waits for the slow goroutine before it returns. For one HTTP request there is a shortcut: a request's `timeout` field (`http.Request{url: url, timeout: 2 * time.second}`), or `http.getWithin(url, timeout)`, limits the whole exchange ([stdlib.md](../stdlib.md#client)).
 
 ## Compared with Go
 
