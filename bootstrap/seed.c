@@ -3388,6 +3388,7 @@ sd_map *sd_map_clone_deep(const sd_map *m) {
 #include <limits.h>
 #include <poll.h>
 #include <pthread.h>
+#include <sched.h>
 #include <setjmp.h>
 #include <signal.h>
 #include <stdatomic.h>
@@ -3428,6 +3429,7 @@ sd_map *sd_map_clone_deep(const sd_map *m) {
 #define SD_RUNQ 256                        /* a P's run queue (a power of two) */
 #define SD_GFREE_LOCAL 64                  /* finished goroutines kept per P ... */
 #define SD_GFREE_GLOBAL 4096               /* ... and shared */
+#define SD_SFREE_LOCAL 32                  /* free stacks kept per P (the rest shared, as many) */
 
 #if defined(__has_feature)
 #if __has_feature(address_sanitizer) || __has_feature(thread_sanitizer) || __has_feature(memory_sanitizer)
@@ -3523,74 +3525,99 @@ enum { SD_PS_RUNNING = 0, SD_PS_NOTIFIED, SD_PS_PARKED, SD_PS_PARKED_COUNTED };
 enum { SD_WM_NONE = 0, SD_WM_PARK, SD_WM_PIPE };
 enum { SD_WR_PENDING = 0, SD_WR_READY, SD_WR_TIMEOUT, SD_WR_STOP, SD_WR_WOKEN };
 
+/* A goroutine. Its fields are grouped by cache line, by who uses them: a
+ * goroutine is spawned on one CPU, often runs on another and its structure
+ * is reused by a third, so each line it uses is pulled from cache to cache.
+ * sd_spawn writes the first line (and the arguments' line), and nothing
+ * else; the goroutine itself uses the next two lines while it runs and
+ * ends; the rest is for waits and other rarer uses, and is not written at
+ * all by a goroutine that does not use it, so that it stays shared in every
+ * cache. task_reset keeps to the same lines. */
 struct sd_task {
-  sd_frame *frame;   /* innermost protected frame */
-  int raise;         /* pending raise kind */
-  char *msg;         /* crash message (malloc'ed unless msg_static) */
-  bool msg_static;
+  /* Written by sd_spawn (and schedlink by the free lists). */
+  _Alignas(64) sd_task *schedlink; /* in a run queue or a free list */
+  sd_task_fn body;
+  void *args;
+  const sd_type *args_type;
+  sd_group *group;           /* the group this goroutine belongs to (NULL for main) */
+  _Atomic(sd_task *) *gslot; /* its slot in the group's members */
+  uint64_t rng;
+  /* For the deadlock report: the goroutine's name (the spawn expression,
+   * a test's description, or NULL). */
+  const char *name;
+  _Alignas(64) char argbuf[64]; /* the arguments, when they fit */
 
-  sd_cleanup *cl;
-  size_t ncl, capcl;
-  char *arena;
-  size_t arena_len, arena_cap;
-  sd_lframe *lf_top; /* the generated code's cleanup frames (seed.h) */
-
-  pthread_mutex_t mu; /* protects sel, waiting_group, wait_mode, wake_r/wake_w */
-  _Atomic int ps;     /* SD_PS_* */
-  sd_sel *sel;
-  sd_group *waiting_group;
+  /* Used by every goroutine as it starts, runs and ends. */
+  _Alignas(64) void *sp; /* saved stack pointer (or ucontext) while switched out */
+  sd_stack stk;
+  sd_frame *frame;       /* innermost protected frame */
+  sd_lframe *lf_top;     /* the generated code's cleanup frames (seed.h) */
+  _Atomic int ps;        /* SD_PS_* */
   atomic_int cancelled;
-  /* Blocking waits: the result, claimed by the first waker; how wakers reach
-   * the wait; the wake-up pipe of a wait that polls in the OS (created on
-   * first use, -1 before); the wait's deadline. */
+  int raise;             /* pending raise kind */
+  int blockdepth;        /* nesting of sd_block_begin */
+  /* Blocking waits: the result, claimed by the first waker; how wakers
+   * reach the wait. */
   _Atomic int wait_res;
   int wait_mode;
+  int blocked_kind;      /* for the deadlock report: what it is parked on (SD_BLOCK_*) */
+  int blocked_n;         /* number of cases of a select */
+  size_t ncl, arena_len; /* the cleanup stack's depth and its arena's use */
+  size_t natexit, ngls;
+  sd_err result;         /* what the body returned, handed to the group on g0 */
+  char *msg;             /* crash message (malloc'ed unless msg_static) */
+  sd_sel *sel;
+  sd_group *waiting_group;
+  /* the wake-up pipe of a wait that polls in the OS (created on first use,
+   * -1 before) */
   int wake_r, wake_w;
-  sd_timer wtimer;
-  sd_task *hnext;      /* in a handle's queue of goroutines waiting for its operation lock */
-  int blockdepth;      /* nesting of sd_block_begin */
+  bool msg_static;
 
+  /* Rarer: buffers (kept with the goroutine for the next), locks, waits. */
+  _Alignas(64) sd_cleanup *cl;
+  size_t capcl;
+  char *arena;
+  size_t arena_cap;
+  void (**atexit_fns)(void); /* sd_goroutine_atexit, run when the goroutine ends */
+  size_t capatexit;
+  void **gls;                /* goroutine-local storage (sd_goroutine_local) */
+  pthread_mutex_t mu;        /* protects sel, waiting_group, wait_mode, wake_r/wake_w */
+  sd_timer wtimer;           /* the wait's deadline */
+  sd_task *hnext;            /* in a handle's queue of goroutines waiting for its operation lock */
   /* A thread the scheduler does not run (a unit test's main thread, say)
    * that uses the runtime: it parks on pmu/cv. */
   bool foreign;
   pthread_mutex_t pmu;
   pthread_cond_t cv;
-
-  sd_group *group;          /* the group this goroutine belongs to (NULL for main) */
-  sd_task *next, *prev;     /* the other running members of that group */
-  sd_task_fn body;
-  void *args;
-  const sd_type *args_type;
-  sd_err result;            /* what the body returned, handed to the group on g0 */
-  _Alignas(16) char argbuf[64]; /* the arguments, when they fit */
-  uint64_t rng;
-  void (**atexit_fns)(void); /* sd_goroutine_atexit, run when the goroutine ends */
-  size_t natexit, capatexit;
-  void **gls;                /* goroutine-local storage (sd_goroutine_local) */
-  size_t ngls;
-  /* For the deadlock report: the goroutine's name (the spawn expression,
-   * a test's description, or NULL) and what it is parked on. */
-  const char *name;
-  int blocked_kind; /* SD_BLOCK_* */
-  int blocked_n;    /* number of cases of a select */
-
-  /* Scheduling. */
-  void *sp;           /* saved stack pointer (or ucontext) while switched out */
-  sd_stack stk;
-  sd_task *schedlink; /* in a run queue or a free list */
   void *tsan_fiber;
 };
 
 enum { SD_BLOCK_NONE = 0, SD_BLOCK_RECV, SD_BLOCK_SEND, SD_BLOCK_SELECT, SD_BLOCK_GROUP };
 
+/* A group's running goroutines are in slots, in chunks that never move
+ * while the group lives. Only the goroutine that runs the group block
+ * spawns (the compiler allows spawn nowhere else), so it alone fills slots,
+ * scanning from a cursor for an empty one (or adding a chunk when a whole
+ * chunk's worth is full); a goroutine that ends empties its own. Neither
+ * takes a lock: spawning and ending touch the group's count and one slot,
+ * never another goroutine's memory. A cancellation (under the group's lock)
+ * pins each slot it visits (the low bit) while it cancels that goroutine;
+ * one that ends meanwhile waits for the pin to go. */
+#define SD_GSLOTS 63
+typedef struct sd_gchunk {
+  _Atomic(struct sd_gchunk *) next;
+  _Atomic(sd_task *) slot[SD_GSLOTS];
+} sd_gchunk;
+
 struct sd_group {
-  pthread_mutex_t mu;
-  sd_task *members; /* running goroutines */
-  sd_task *dead;    /* finished goroutines not freed yet (linked by next) */
-  int64_t running;
-  bool failed;
+  pthread_mutex_t mu;      /* serialises cancellations; protects err */
+  _Atomic int64_t state;   /* running goroutines * 2, + 1 once the owner waits */
+  atomic_int failed;
   sd_err err;
   sd_task *waiter;
+  sd_gchunk *cur, *tail;   /* the spawner's: where to look for a slot, the last chunk */
+  int curi;
+  sd_gchunk first;
 };
 
 #define SEL_CANCELLED (-1)
@@ -3614,7 +3641,11 @@ typedef struct {
 } sd_waitq;
 
 struct sd_chan {
+  /* The reference count is changed by every goroutine that is handed the
+   * channel (a spawn's arguments) and by the end of each: away from the
+   * lock and the fields it protects, which senders and receivers use. */
   _Atomic int64_t rc;
+  char rc_pad_[64 - sizeof(int64_t)];
   pthread_mutex_t mu;
   const sd_type *et;
   int64_t cap, count, head;
@@ -3644,8 +3675,11 @@ struct sd_p {
   int64_t sm_swhen;
   _Atomic int preempt;           /* 1: the running goroutine is asked to yield (counted in sd_preempt_req_) */
   sd_p *link;                    /* in the idle list */
-  sd_task *gfree;                /* finished goroutines kept for reuse */
+  long ndec;                     /* goroutines parked or ended here, not yet off sd_running */
+  sd_task *gfree;                /* finished goroutines kept for reuse (no stacks) */
   int ngfree;
+  int nsfree;                    /* free stacks, the newest last */
+  sd_stack sfree[SD_SFREE_LOCAL];
   uint32_t ntrim;
 };
 
@@ -3671,6 +3705,11 @@ struct sd_m {
   size_t g0_size;
 };
 
+typedef struct {
+  sd_task *head;
+  int n;
+} sd_gbatch;
+
 static struct {
   pthread_mutex_t mu;     /* the global run queue, the idle Ps and Ms */
   sd_task *runq_head, *runq_tail;
@@ -3688,9 +3727,13 @@ static struct {
   _Atomic int nmspinning;
   int nprocs;
   sd_p *allp;
-  pthread_mutex_t gmu;    /* finished goroutines shared by the Ps */
-  sd_task *gfree;
-  _Atomic int ngfree;
+  pthread_mutex_t gmu;    /* finished goroutines and free stacks shared by the Ps */
+  sd_gbatch *gfree;       /* batches of goroutines (each linked by schedlink) */
+  size_t ngbatch, capgbatch;
+  _Atomic int ngfree;     /* goroutines in them (written under gmu) */
+  sd_stack *sfree;
+  _Atomic size_t nsfree;  /* written under gmu */
+  size_t capsfree;
 } sched = {.mu = PTHREAD_MUTEX_INITIALIZER, .gmu = PTHREAD_MUTEX_INITIALIZER};
 
 static pthread_once_t sched_once = PTHREAD_ONCE_INIT;
@@ -4030,8 +4073,9 @@ static uint64_t seed_new(const void *salt) {
 }
 
 static sd_task *task_alloc(void) {
-  sd_task *t = calloc(1, sizeof *t);
-  if (!t) sd_fatal("out of memory");
+  void *mem = NULL;
+  if (posix_memalign(&mem, 64, sizeof(sd_task)) != 0) sd_fatal("out of memory");
+  sd_task *t = memset(mem, 0, sizeof(sd_task));
   pthread_mutex_init(&t->mu, NULL);
   pthread_mutex_init(&t->pmu, NULL);
   pthread_cond_init(&t->cv, NULL);
@@ -4065,15 +4109,19 @@ static void task_destroy(sd_task *t) {
 }
 
 /* Readies a goroutine that finished for reuse: its state is reset, its
- * stack and buffers kept. */
+ * buffers kept. The fields sd_spawn sets are left as they are, and the
+ * rarely used ones are only read (see sd_task): a wait's timer is off and
+ * its handle queue link NULL after every wait. */
 static void task_reset(sd_task *t) {
-  if (t->wake_r >= 0) { /* descriptors are scarcer than memory */
+  if (SD_UNLIKELY(t->wake_r >= 0)) { /* descriptors are scarcer than memory */
     close(t->wake_r);
     close(t->wake_w);
     t->wake_r = t->wake_w = -1;
   }
-  free(t->msg_static ? NULL : t->msg);
-  t->msg = NULL;
+  if (SD_UNLIKELY(t->msg != NULL)) {
+    free(t->msg_static ? NULL : t->msg);
+    t->msg = NULL;
+  }
   t->msg_static = false;
   t->frame = NULL;
   t->raise = SD_RAISE_NONE;
@@ -4086,19 +4134,13 @@ static void task_reset(sd_task *t) {
   atomic_store_explicit(&t->ps, SD_PS_RUNNING, memory_order_relaxed);
   atomic_store_explicit(&t->wait_res, 0, memory_order_relaxed);
   t->wait_mode = SD_WM_NONE;
-  t->wtimer.idx = SD_TIMER_OFF;
-  t->hnext = NULL;
+  if (SD_UNLIKELY(t->wtimer.idx != SD_TIMER_OFF)) t->wtimer.idx = SD_TIMER_OFF;
+  if (SD_UNLIKELY(t->hnext != NULL)) t->hnext = NULL;
   t->blockdepth = 0;
-  t->group = NULL;
-  t->next = t->prev = NULL;
-  t->body = NULL;
-  t->args = NULL;
-  t->args_type = NULL;
   t->natexit = 0;
-  t->name = NULL;
   t->blocked_kind = SD_BLOCK_NONE;
   t->blocked_n = 0;
-  t->schedlink = NULL;
+  t->sp = NULL; /* its context is made when it first runs (switch_to_g) */
 }
 
 static void sched_init(void);
@@ -4109,37 +4151,57 @@ static sd_p *cur_p(void) {
   return m && m->curg ? m->p : NULL;
 }
 
-/* A goroutine with a stack, from the current P's free list, the shared
- * one, or new. */
+/* Goroutines and stacks are pooled apart, as in Go: a goroutine's structure
+ * (sd_task) is reused by whoever spawns next, but its stack is taken when it
+ * first runs, from the free stacks of the P that runs it, and given back to
+ * that P's when it ends. A P that runs goroutines one after another so
+ * reuses the same few stacks, whose top pages are in its cache and TLB (each
+ * stack is a mapping of its own, so a cold one costs a page walk as well as
+ * cache misses). Each pool is a per-P cache in front of a shared one; the
+ * shared pool of goroutines holds batches, so that moving SD_GFREE_LOCAL / 2
+ * of them between a P and it takes O(1) under the lock and touches none. */
+
+/* A goroutine without a stack (stack == SD_GOROUTINE_STACK: it gets one when
+ * it first runs) or with one of the given size (the main goroutine's), from
+ * the current P's free list, the shared one, or new. */
 static sd_task *g_get(size_t stack) {
   pthread_once(&sched_once, sched_init);
+  if (stack != SD_GOROUTINE_STACK) {
+    sd_task *t = task_alloc();
+    if (!stack_alloc(&t->stk, stack)) sd_fatal("cannot start a goroutine (out of memory for its stack)");
+#if defined(SD_TSAN)
+    t->tsan_fiber = __tsan_create_fiber(0);
+#endif
+    return t;
+  }
   sd_task *t = NULL;
-  sd_p *p = stack == SD_GOROUTINE_STACK ? cur_p() : NULL;
-  if (p) {
-    if (!p->gfree && atomic_load_explicit(&sched.ngfree, memory_order_relaxed) > 0) {
-      /* refill half of the local list from the shared one */
-      pthread_mutex_lock(&sched.gmu);
-      while (sched.gfree && p->ngfree < SD_GFREE_LOCAL / 2) {
-        sd_task *g = sched.gfree;
-        sched.gfree = g->schedlink;
-        sched.ngfree--;
-        g->schedlink = p->gfree;
-        p->gfree = g;
-        p->ngfree++;
-      }
-      pthread_mutex_unlock(&sched.gmu);
+  sd_p *p = cur_p();
+  if (p && !p->gfree && atomic_load_explicit(&sched.ngfree, memory_order_relaxed) > 0) {
+    /* take a batch from the shared list */
+    pthread_mutex_lock(&sched.gmu);
+    if (sched.ngbatch > 0) {
+      sd_gbatch b = sched.gfree[--sched.ngbatch];
+      atomic_store_explicit(&sched.ngfree, sched.ngfree - b.n, memory_order_relaxed);
+      p->gfree = b.head;
+      p->ngfree = b.n;
     }
+    pthread_mutex_unlock(&sched.gmu);
+  }
+  if (p) {
     t = p->gfree;
     if (t) {
       p->gfree = t->schedlink;
       p->ngfree--;
     }
-  } else if (stack == SD_GOROUTINE_STACK && atomic_load_explicit(&sched.ngfree, memory_order_relaxed) > 0) {
+  } else if (atomic_load_explicit(&sched.ngfree, memory_order_relaxed) > 0) {
+    /* a thread without a P: one goroutine off the last batch */
     pthread_mutex_lock(&sched.gmu);
-    t = sched.gfree;
-    if (t) {
-      sched.gfree = t->schedlink;
-      sched.ngfree--;
+    if (sched.ngbatch > 0) {
+      sd_gbatch *b = &sched.gfree[sched.ngbatch - 1];
+      t = b->head;
+      b->head = t->schedlink;
+      if (--b->n == 0) sched.ngbatch--;
+      atomic_store_explicit(&sched.ngfree, sched.ngfree - 1, memory_order_relaxed);
     }
     pthread_mutex_unlock(&sched.gmu);
   }
@@ -4148,83 +4210,138 @@ static sd_task *g_get(size_t stack) {
     return t;
   }
   t = task_alloc();
-  if (!stack_alloc(&t->stk, stack)) sd_fatal("cannot start a goroutine (out of memory for its stack)");
 #if defined(SD_TSAN)
   t->tsan_fiber = __tsan_create_fiber(0);
 #endif
   return t;
 }
 
-/* A finished goroutine goes back to a free list (or is freed). */
-static void g_put(sd_task *t) {
+/* Pushes a list of n goroutines (linked by schedlink) as one batch on the
+ * shared list, or frees them if it is full. */
+static void gfree_push_batch(sd_task *head, int n) {
+  pthread_mutex_lock(&sched.gmu);
+  bool keep = sched.ngfree + n <= SD_GFREE_GLOBAL;
+  if (keep) {
+    if (sched.ngbatch == sched.capgbatch) {
+      sched.capgbatch = sched.capgbatch ? sched.capgbatch * 2 : 64;
+      sched.gfree = sd_realloc(sched.gfree, sched.capgbatch * sizeof *sched.gfree);
+    }
+    sched.gfree[sched.ngbatch++] = (sd_gbatch){head, n};
+    atomic_store_explicit(&sched.ngfree, sched.ngfree + n, memory_order_relaxed);
+  }
+  pthread_mutex_unlock(&sched.gmu);
+  if (!keep) {
+    while (head) {
+      sd_task *g = head;
+      head = g->schedlink;
+      task_destroy(g);
+    }
+  }
+}
+
+/* A finished goroutine (its stack given back already, unless it is not of
+ * the pooled size) goes back to p's free list (the shared one without p),
+ * or is freed. Called by the P where it ran (on g0, as it ends), so the
+ * reset writes memory that is in this CPU's cache. */
+static void g_put(sd_p *p, sd_task *t) {
   task_reset(t);
-  if ((size_t)(t->stk.hi - t->stk.lo) != page_round(SD_GOROUTINE_STACK)) {
+  if (t->stk.kind != SD_STACK_NONE) {
     task_destroy(t);
     return;
   }
+  if (!p) {
+    t->schedlink = NULL;
+    gfree_push_batch(t, 1);
+    return;
+  }
+  t->schedlink = p->gfree;
+  p->gfree = t;
+  if (++p->ngfree <= SD_GFREE_LOCAL) return;
+  /* move half to the shared list */
+  sd_task *head = p->gfree, *tail = head;
+  int n = SD_GFREE_LOCAL / 2;
+  for (int i = 1; i < n; i++) tail = tail->schedlink;
+  p->gfree = tail->schedlink;
+  p->ngfree -= n;
+  tail->schedlink = NULL;
+  gfree_push_batch(head, n);
+}
+
+/* A stack for a goroutine about to run on p (NULL: a thread without one). */
+static void stack_get(sd_p *p, sd_stack *s) {
+  if (p && p->nsfree == 0 && atomic_load_explicit(&sched.nsfree, memory_order_relaxed) > 0) {
+    pthread_mutex_lock(&sched.gmu);
+    size_t n = atomic_load_explicit(&sched.nsfree, memory_order_relaxed);
+    while (n > 0 && p->nsfree < SD_SFREE_LOCAL / 2) p->sfree[p->nsfree++] = sched.sfree[--n];
+    atomic_store_explicit(&sched.nsfree, n, memory_order_relaxed);
+    pthread_mutex_unlock(&sched.gmu);
+  }
+  if (p && p->nsfree > 0) {
+    *s = p->sfree[--p->nsfree];
+    return;
+  }
+  if (!p && atomic_load_explicit(&sched.nsfree, memory_order_relaxed) > 0) {
+    pthread_mutex_lock(&sched.gmu);
+    size_t n = atomic_load_explicit(&sched.nsfree, memory_order_relaxed);
+    if (n > 0) {
+      *s = sched.sfree[--n];
+      atomic_store_explicit(&sched.nsfree, n, memory_order_relaxed);
+    }
+    pthread_mutex_unlock(&sched.gmu);
+    if (s->kind != SD_STACK_NONE) return;
+  }
+  if (!stack_alloc(s, SD_GOROUTINE_STACK)) sd_fatal("cannot start a goroutine (out of memory for its stack)");
+}
+
+/* Stacks into the shared pool (trimmed: stack_trim), or unmapped if it is
+ * full. */
+static void stack_put_shared(sd_stack *ss, int n) {
+  for (int i = 0; i < n; i++) stack_trim(&ss[i]);
+  pthread_mutex_lock(&sched.gmu);
+  size_t k = atomic_load_explicit(&sched.nsfree, memory_order_relaxed);
+  int i = 0;
+  for (; i < n && k < SD_GFREE_GLOBAL; i++) {
+    if (k == sched.capsfree) {
+      sched.capsfree = sched.capsfree ? sched.capsfree * 2 : 64;
+      sched.sfree = sd_realloc(sched.sfree, sched.capsfree * sizeof *sched.sfree);
+    }
+    sched.sfree[k++] = ss[i];
+  }
+  atomic_store_explicit(&sched.nsfree, k, memory_order_relaxed);
+  pthread_mutex_unlock(&sched.gmu);
+  for (; i < n; i++) stack_free(&ss[i]);
+}
+
+/* A finished goroutine's stack goes back to the free stacks of p, the P it
+ * ended on (the shared ones without p). */
+static void stack_put(sd_p *p, sd_stack *s) {
 #if defined(SD_ASAN)
   /* Frames of the goroutine that never returned leave their redzones
    * poisoned; the stack's top part is what the next one uses. */
   {
-    size_t n = (size_t)(t->stk.hi - t->stk.lo);
+    size_t n = (size_t)(s->hi - s->lo);
     if (n > ((size_t)256 << 10)) n = (size_t)256 << 10;
-    __asan_unpoison_memory_region(t->stk.hi - n, n);
+    __asan_unpoison_memory_region(s->hi - n, n);
   }
 #endif
-  sd_p *p = cur_p();
-  if (p) {
-    /* A stack that went deep gives its memory back (stack_trim). Looking
-     * costs a page of the stack the goroutine did not use, so a P checks
-     * every fourth one it keeps, and every one it passes on. */
-    if ((++p->ntrim & 3) == 0) stack_trim(&t->stk);
-    t->schedlink = p->gfree;
-    p->gfree = t;
-    if (++p->ngfree <= SD_GFREE_LOCAL) return;
-    /* move half to the shared list */
-    sd_task *batch = NULL;
-    int n = 0;
-    while (p->ngfree > SD_GFREE_LOCAL / 2) {
-      sd_task *g = p->gfree;
-      p->gfree = g->schedlink;
-      p->ngfree--;
-      g->schedlink = batch;
-      batch = g;
-      stack_trim(&g->stk);
-      n++;
-    }
-    pthread_mutex_lock(&sched.gmu);
-    sd_task *extra = NULL;
-    while (batch) {
-      sd_task *g = batch;
-      batch = g->schedlink;
-      if (sched.ngfree < SD_GFREE_GLOBAL) {
-        g->schedlink = sched.gfree;
-        sched.gfree = g;
-        sched.ngfree++;
-      } else {
-        g->schedlink = extra;
-        extra = g;
-      }
-    }
-    pthread_mutex_unlock(&sched.gmu);
-    while (extra) {
-      sd_task *g = extra;
-      extra = g->schedlink;
-      task_destroy(g);
-    }
-    (void)n;
+  sd_stack st = *s;
+  memset(s, 0, sizeof *s); /* kind SD_STACK_NONE */
+  if (!p) {
+    stack_put_shared(&st, 1);
     return;
   }
-  stack_trim(&t->stk);
-  pthread_mutex_lock(&sched.gmu);
-  bool keep = sched.ngfree < SD_GFREE_GLOBAL;
-  if (keep) {
-    t->schedlink = sched.gfree;
-    sched.gfree = t;
-    sched.ngfree++;
+  /* A stack that went deep gives its memory back (stack_trim). Looking
+   * costs a page of the stack the goroutine did not use, so a P checks
+   * every fourth one it keeps, and every one it passes on. */
+  if ((++p->ntrim & 3) == 0) stack_trim(&st);
+  if (p->nsfree == SD_SFREE_LOCAL) {
+    /* move the older half to the shared pool */
+    enum { H = SD_SFREE_LOCAL / 2 };
+    stack_put_shared(p->sfree, H);
+    memmove(p->sfree, p->sfree + H, (size_t)(SD_SFREE_LOCAL - H) * sizeof *p->sfree);
+    p->nsfree -= H;
   }
-  pthread_mutex_unlock(&sched.gmu);
-  if (!keep) task_destroy(t);
+  p->sfree[p->nsfree++] = st;
 }
 
 /* The current goroutine. A thread that did not start through sd_main or
@@ -4280,7 +4397,11 @@ static void report_put(deadlock_report *r, const char *fmt, ...) {
 static void report_task(deadlock_report *r, sd_task *t, int depth);
 
 static void report_group(deadlock_report *r, sd_group *g, int depth) {
-  for (sd_task *m = g->members; m; m = m->next) report_task(r, m, depth);
+  for (sd_gchunk *k = &g->first; k; k = atomic_load_explicit(&k->next, memory_order_acquire))
+    for (int i = 0; i < SD_GSLOTS; i++) {
+      sd_task *m = (sd_task *)((uintptr_t)atomic_load(&k->slot[i]) & ~(uintptr_t)1);
+      if (m) report_task(r, m, depth);
+    }
 }
 
 static void report_task(deadlock_report *r, sd_task *t, int depth) {
@@ -4331,6 +4452,26 @@ static SD_NORETURN void sd_deadlock(void) {
 
 static void running_dec(void) {
   if (atomic_fetch_sub(&sd_running, 1) == 1) sd_deadlock();
+}
+
+/* The goroutines that end or park on a P are taken off sd_running when the
+ * P goes idle (pidle_put_locked), not one at a time: the count is written
+ * by every CPU, and a spawn's increment on one CPU and the end on another
+ * made its cache line travel twice per goroutine. Increments are not
+ * deferred, so the count is never below the truth, and reaches zero only
+ * when every goroutine is blocked: then every P goes idle, and the last to
+ * flush finds the deadlock. */
+static void running_dec_p(sd_p *p) {
+  if (p) p->ndec++;
+  else running_dec();
+}
+
+static void running_flush(sd_p *p) {
+  long n = p->ndec;
+  if (n) {
+    p->ndec = 0;
+    if (atomic_fetch_sub(&sd_running, n) == n) sd_deadlock();
+  }
 }
 
 static int ncpu(void) {
@@ -4598,6 +4739,7 @@ static void sysmon_wake(void);
 /* ------------------------------------------------------- idle Ps and Ms */
 
 static void pidle_put_locked(sd_p *p) {
+  running_flush(p);
   preempt_clear(p);
   atomic_store_explicit(&p->status, SD_P_IDLE, memory_order_release);
   p->link = sched.pidle;
@@ -4793,6 +4935,13 @@ static void ctx_prepare(sd_task *t) { t->sp = ctx_make(t->stk.hi, g_entry); }
 
 /* g0 -> g: runs g until it switches back. */
 static void switch_to_g(sd_m *m, sd_task *g) {
+  /* A goroutine's first run: its context is made here rather than by
+   * sd_spawn, so that the top of its stack is written by the CPU that runs
+   * it (which often is not the spawner's). */
+  if (!g->sp) {
+    if (g->stk.kind == SD_STACK_NONE) stack_get(m->p, &g->stk);
+    ctx_prepare(g);
+  }
 #if defined(SD_TSAN)
   __tsan_switch_to_fiber(g->tsan_fiber, 0);
 #endif
@@ -4920,7 +5069,7 @@ top:;
   goto top;
 }
 
-static void goroutine_exit_g0(sd_task *t);
+static void goroutine_exit_g0(sd_m *m, sd_task *t);
 
 /* What a goroutine that switched to g0 asked for. Returns the goroutine to
  * run next (the same one, readied meanwhile), or NULL. */
@@ -4934,14 +5083,14 @@ static sd_task *handle_act(sd_m *m, sd_task *g) {
     bool counted = act == SD_ACT_PARK_COUNTED;
     int exp = SD_PS_RUNNING;
     if (atomic_compare_exchange_strong(&g->ps, &exp, counted ? SD_PS_PARKED_COUNTED : SD_PS_PARKED)) {
-      if (counted) running_dec();
+      if (counted) running_dec_p(m->p);
       return NULL;
     }
     atomic_store_explicit(&g->ps, SD_PS_RUNNING, memory_order_relaxed); /* woken meanwhile */
     return g;
   }
   case SD_ACT_EXIT:
-    goroutine_exit_g0(g);
+    goroutine_exit_g0(m, g);
     return NULL;
   case SD_ACT_YIELD:
     /* g was preempted: to the global queue's tail, behind what waits. */
@@ -5438,9 +5587,55 @@ static void task_cancel(sd_task *m) {
 }
 
 static void group_cancel_locked(sd_group *g) {
-  if (g->failed) return;
-  g->failed = true;
-  for (sd_task *m = g->members; m; m = m->next) task_cancel(m);
+  if (atomic_load(&g->failed)) return;
+  /* Sequentially consistent, against sd_spawn: either it sees failed after
+   * filling its slot, or this sees the slot filled. */
+  atomic_store(&g->failed, 1);
+  for (sd_gchunk *k = &g->first; k; k = atomic_load_explicit(&k->next, memory_order_acquire))
+    for (int i = 0; i < SD_GSLOTS; i++) {
+      sd_task *m = atomic_load(&k->slot[i]);
+      if (!m) continue;
+      /* pin it: the goroutine cannot end (and be reused) while it is cancelled */
+      if (!atomic_compare_exchange_strong(&k->slot[i], &m, (sd_task *)((uintptr_t)m | 1))) continue;
+      task_cancel(m);
+      atomic_store(&k->slot[i], m);
+    }
+}
+
+/* Empties t's slot (waiting while a cancellation has it pinned). */
+static void group_slot_clear(_Atomic(sd_task *) *slot, sd_task *t) {
+  for (int spins = 0;; spins++) {
+    sd_task *e = t;
+    if (atomic_compare_exchange_weak(slot, &e, NULL)) return;
+    if (spins < 100) cpu_relax();
+    else sched_yield();
+  }
+}
+
+/* The spawner's: an empty slot, after the last one it filled. */
+static _Atomic(sd_task *) *group_slot_take(sd_group *g) {
+  sd_gchunk *k = g->cur;
+  int i = g->curi;
+  for (int n = 0; n < SD_GSLOTS; n++, i++) {
+    if (i == SD_GSLOTS) {
+      k = atomic_load_explicit(&k->next, memory_order_relaxed);
+      if (!k) k = &g->first;
+      i = 0;
+    }
+    if (!atomic_load_explicit(&k->slot[i], memory_order_relaxed)) {
+      g->cur = k;
+      g->curi = i + 1;
+      return &k->slot[i];
+    }
+  }
+  /* SD_GSLOTS full slots in a row: a new chunk */
+  sd_gchunk *nk = calloc(1, sizeof *nk);
+  if (!nk) sd_fatal("out of memory");
+  atomic_store_explicit(&g->tail->next, nk, memory_order_release);
+  g->tail = nk;
+  g->cur = nk;
+  g->curi = 1;
+  return &nk->slot[0];
 }
 
 static void group_cancel(sd_group *g) {
@@ -5454,6 +5649,7 @@ sd_group *sd_group_begin(void) {
   sd_group *g = calloc(1, sizeof *g);
   if (!g) sd_fatal("out of memory");
   spin_mutex_init(&g->mu);
+  g->cur = g->tail = &g->first;
   cl_push(t, (sd_cleanup){NULL, g, t->arena_len, 0});
   return g;
 }
@@ -5508,46 +5704,35 @@ static SD_NORETURN void goroutine_main(sd_task *t) {
   __builtin_unreachable();
 }
 
-/* On g0, after goroutine t returned (its result in t->result): moves it to
- * its group's dead list (its last use: the group may free it from then on). */
-static void goroutine_exit_g0(sd_task *t) {
+/* On g0, after goroutine t returned (its result in t->result): takes it out
+ * of its group (the group may be freed once the count is down) and puts it
+ * on this P's free list, as Go's goexit0 does: the reset writes lines that
+ * are in this CPU's cache, where the spawner would have pulled each one
+ * over. */
+static void goroutine_exit_g0(sd_m *m, sd_task *t) {
   sd_err result = t->result;
   t->result = SD_ERR_NULL;
   sd_group *g = t->group;
-  lock_briefly(&g->mu);
+  group_slot_clear(t->gslot, t);
   if (!sd_err_is_null(result)) {
+    pthread_mutex_lock(&g->mu);
     if (sd_err_is_null(g->err)) {
       g->err = result;
       result = SD_ERR_NULL;
     }
     group_cancel_locked(g);
+    pthread_mutex_unlock(&g->mu);
+    sd_err_release(result);
   }
-  if (t->prev) t->prev->next = t->next;
-  else g->members = t->next;
-  if (t->next) t->next->prev = t->prev;
-  t->prev = NULL;
-  t->next = g->dead;
-  g->dead = t;
-  sd_task *w = NULL;
-  if (--g->running == 0) {
-    w = g->waiter;
-    g->waiter = NULL;
-  }
-  pthread_mutex_unlock(&g->mu);
-  sd_err_release(result);
-  if (w) unpark(w);
-  running_dec();
+  /* The last one wakes the owner if it waits (the group is not freed before
+   * that); otherwise g may be gone after this. */
+  if (atomic_fetch_sub_explicit(&g->state, 2, memory_order_acq_rel) == 3) unpark(g->waiter);
+  if ((size_t)(t->stk.hi - t->stk.lo) == page_round(SD_GOROUTINE_STACK)) stack_put(m->p, &t->stk);
+  g_put(m->p, t);
+  running_dec_p(m->p);
 }
 
-/* Frees a list of finished goroutines (linked by next): they no longer run
- * (goroutine_exit_g0's last use is under the group's lock). */
-static void reap(sd_task *m) {
-  for (sd_task *next; m; m = next) {
-    next = m->next;
-    g_put(m);
-  }
-}
-
+/* Called only by the goroutine that runs g's block (see sd_group). */
 void sd_spawn(sd_group *g, sd_task_fn body, const sd_type *args_type, const void *args) {
   sd_task *parent = task_current();
   sd_task *c = g_get(SD_GOROUTINE_STACK);
@@ -5559,26 +5744,26 @@ void sd_spawn(sd_group *g, sd_task_fn body, const sd_type *args_type, const void
   c->body = body;
   c->group = g;
   c->args_type = args_type;
+  c->args = NULL;
   /* Generated code names the descriptor of a spawn's arguments after the
    * spawn ("spawn worker(i, jobs)"): the goroutine's name in reports. */
-  if (args_type && args_type->name && strncmp(args_type->name, "spawn ", 6) == 0) c->name = args_type->name + 6;
+  c->name = args_type && args_type->name && strncmp(args_type->name, "spawn ", 6) == 0 ? args_type->name + 6 : NULL;
   if (args_type) {
     c->args = args_type->size <= sizeof c->argbuf ? (void *)c->argbuf : sd_alloc(args_type->size);
     sd_clone_deep(args_type, c->args, args);
   }
-  lock_briefly(&g->mu);
-  /* Finished goroutines of the group are freed here (outside the lock). */
-  sd_task *dead = g->dead;
-  g->dead = NULL;
-  bool start = !g->failed && !atomic_load(&parent->cancelled);
+  bool start = !atomic_load_explicit(&g->failed, memory_order_relaxed) && !atomic_load(&parent->cancelled);
   if (start) {
-    c->next = g->members;
-    if (c->next) c->next->prev = c;
-    g->members = c;
-    g->running++;
+    c->gslot = group_slot_take(g);
+    atomic_fetch_add_explicit(&g->state, 2, memory_order_relaxed);
+    atomic_store(c->gslot, c);
+    if (atomic_load(&g->failed)) {
+      /* failed meanwhile (a cancellation may have seen c: it only marked it) */
+      group_slot_clear(c->gslot, c);
+      atomic_fetch_sub_explicit(&g->state, 2, memory_order_relaxed);
+      start = false;
+    }
   }
-  pthread_mutex_unlock(&g->mu);
-  reap(dead);
   if (!start) {
     /* The group is already failing: the goroutine is not started. */
     if (args_type) {
@@ -5586,12 +5771,10 @@ void sd_spawn(sd_group *g, sd_task_fn body, const sd_type *args_type, const void
       if (c->args != (void *)c->argbuf) free(c->args);
       c->args = NULL;
     }
-    c->next = NULL;
-    g_put(c);
+    g_put(cur_p(), c);
     return;
   }
   atomic_fetch_add(&sd_running, 1);
-  ctx_prepare(c);
   pthread_once(&sysmon_once, sysmon_start); /* preemption needs it from now on */
   ready(c);
 }
@@ -5604,25 +5787,22 @@ static void group_join(sd_task *t, sd_group *g) {
   t->blocked_kind = SD_BLOCK_GROUP;
   pthread_mutex_unlock(&t->mu);
   if (atomic_load(&t->cancelled)) group_cancel(g);
-  pthread_mutex_lock(&g->mu);
-  bool wait = g->running > 0;
-  if (wait) g->waiter = t;
-  pthread_mutex_unlock(&g->mu);
-  if (wait) park(t, true);
+  g->waiter = t;
+  /* published by the release; the last goroutine to end sees the bit */
+  if (atomic_fetch_or_explicit(&g->state, 1, memory_order_acq_rel) >= 2) park(t, true);
+  atomic_store_explicit(&g->state, 0, memory_order_relaxed);
   pthread_mutex_lock(&t->mu);
   t->waiting_group = NULL;
   t->blocked_kind = SD_BLOCK_NONE;
   pthread_mutex_unlock(&t->mu);
-  /* Every member has finished, so all are on the dead list now. */
-  pthread_mutex_lock(&g->mu);
-  sd_task *dead = g->dead;
-  g->dead = NULL;
-  pthread_mutex_unlock(&g->mu);
-  reap(dead);
 }
 
 static void group_destroy(sd_group *g) {
   pthread_mutex_destroy(&g->mu);
+  for (sd_gchunk *k = atomic_load(&g->first.next), *n; k; k = n) {
+    n = atomic_load(&k->next);
+    free(k);
+  }
   free(g);
 }
 
@@ -7069,7 +7249,6 @@ int sd_main(int argc, char **argv, sd_err (*main_fn)(sd_list *args)) {
   sd_task *t = g_get(main_stack_size());
   sd_main_task = t;
   atomic_fetch_add(&sd_running, 1);
-  ctx_prepare(t);
   pthread_mutex_lock(&sched.mu);
   sd_p *p = pidle_get_locked();
   pthread_mutex_unlock(&sched.mu);
@@ -7552,6 +7731,7 @@ typedef struct sd_S_Label sd_S_Label;
 typedef struct sd_S_Lexer sd_S_Lexer;
 typedef struct sd_S_Loader sd_S_Loader;
 typedef struct sd_S_LoopCtx sd_S_LoopCtx;
+typedef struct sd_S_MagicDiv sd_S_MagicDiv;
 typedef struct sd_S_MethodSig sd_S_MethodSig;
 typedef struct sd_S_MutEvent sd_S_MutEvent;
 typedef struct sd_S_Narrow sd_S_Narrow;
@@ -7606,7 +7786,8 @@ struct sd_S_Impl { sd_int f_decl; sd_int f_iface; };
 struct sd_S_IntEvent { sd_int f_var; sd_int f_expr; bool f_top; sd_int f_bound; bool f_inc; bool f_incl; };
 struct sd_S_IntRange { sd_int f_state; sd_int f_lo; sd_int f_hi; };
 struct sd_S_Lexer { sd_int f_file; sd_str f_src; sd_int f_i; sd_int f_line; sd_int f_col; sd_box * f_last; bool f_lineHasToken; sd_list * f_tokens; sd_list * f_comments; sd_list * f_errors; };
-struct sd_S_LoopCtx { sd_int f_mark; sd_int f_label; sd_list * f_acc; sd_int f_accTo; };
+struct sd_S_LoopCtx { sd_int f_mark; sd_int f_label; sd_list * f_acc; sd_list * f_bounded; sd_int f_accTo; };
+struct sd_S_MagicDiv { sd_int f_m; sd_int f_s; };
 struct sd_S_MutEvent { sd_int f_root; sd_str f_path; sd_int f_method; };
 struct sd_S_Narrow { sd_str f_key; bool f_dead; };
 struct sd_S_Package { sd_str f_path; sd_str f_name; sd_str f_dir; sd_str f_cprefix; bool f_isLib; };
@@ -7716,6 +7897,7 @@ static const sd_type sd_D_Label;
 static const sd_type sd_D_Lexer;
 static const sd_type sd_D_Loader;
 static const sd_type sd_D_LoopCtx;
+static const sd_type sd_D_MagicDiv;
 static const sd_type sd_D_MethodSig;
 static const sd_type sd_D_MutEvent;
 static const sd_type sd_D_Narrow;
@@ -7827,8 +8009,10 @@ static const sd_field sd_F_Lexer[] = {SD_FIELD(sd_S_Lexer, f_file, &sd_type_int)
 static const sd_type sd_D_Lexer = SD_STRUCT_TYPE("Lexer", sd_S_Lexer, sd_F_Lexer);
 static const sd_field sd_F_Loader[] = {SD_FIELD(sd_S_Loader, f_p, &sd_D_Parser), SD_FIELD(sd_S_Loader, f_seedRoot, &sd_type_str), SD_FIELD(sd_S_Loader, f_projectRoot, &sd_type_str), SD_FIELD(sd_S_Loader, f_libDir, &sd_type_str), SD_FIELD(sd_S_Loader, f_byDir, &sd_type_map), SD_FIELD(sd_S_Loader, f_unformatted, &sd_type_list)};
 static const sd_type sd_D_Loader = SD_STRUCT_TYPE("Loader", sd_S_Loader, sd_F_Loader);
-static const sd_field sd_F_LoopCtx[] = {SD_FIELD(sd_S_LoopCtx, f_mark, &sd_type_int), SD_FIELD(sd_S_LoopCtx, f_label, &sd_type_int), SD_FIELD(sd_S_LoopCtx, f_acc, &sd_type_list), SD_FIELD(sd_S_LoopCtx, f_accTo, &sd_type_int)};
+static const sd_field sd_F_LoopCtx[] = {SD_FIELD(sd_S_LoopCtx, f_mark, &sd_type_int), SD_FIELD(sd_S_LoopCtx, f_label, &sd_type_int), SD_FIELD(sd_S_LoopCtx, f_acc, &sd_type_list), SD_FIELD(sd_S_LoopCtx, f_bounded, &sd_type_list), SD_FIELD(sd_S_LoopCtx, f_accTo, &sd_type_int)};
 static const sd_type sd_D_LoopCtx = SD_STRUCT_TYPE("LoopCtx", sd_S_LoopCtx, sd_F_LoopCtx);
+static const sd_field sd_F_MagicDiv[] = {SD_FIELD(sd_S_MagicDiv, f_m, &sd_type_int), SD_FIELD(sd_S_MagicDiv, f_s, &sd_type_int)};
+static const sd_type sd_D_MagicDiv = SD_STRUCT_TYPE("MagicDiv", sd_S_MagicDiv, sd_F_MagicDiv);
 static const sd_field sd_F_MethodSig[] = {SD_FIELD(sd_S_MethodSig, f_pos, &sd_D_Pos), SD_FIELD(sd_S_MethodSig, f_isMut, &sd_type_bool), SD_FIELD(sd_S_MethodSig, f_name, &sd_type_str), SD_FIELD(sd_S_MethodSig, f_params, &sd_type_int), SD_FIELD(sd_S_MethodSig, f_paramCount, &sd_type_int), SD_FIELD(sd_S_MethodSig, f_results, &sd_type_int), SD_FIELD(sd_S_MethodSig, f_resultCount, &sd_type_int)};
 static const sd_type sd_D_MethodSig = SD_STRUCT_TYPE("MethodSig", sd_S_MethodSig, sd_F_MethodSig);
 static const sd_field sd_F_MutEvent[] = {SD_FIELD(sd_S_MutEvent, f_root, &sd_type_int), SD_FIELD(sd_S_MutEvent, f_path, &sd_type_str), SD_FIELD(sd_S_MutEvent, f_method, &sd_type_int)};
@@ -8114,6 +8298,7 @@ static sd_str sd_c_buildOpt(void);
 static sd_str sd_c_cCompiler(void);
 static sd_list * sd_c_cFlags(void);
 static sd_list * sd_c_cLibs(void);
+static sd_str sd_c_divcHelpers(void);
 static sd_str sd_c_encoding_base64Std(void);
 static sd_str sd_c_encoding_base64Url(void);
 static sd_str sd_c_encoding_hexDigits(void);
@@ -8245,8 +8430,10 @@ static sd_str sd_f_labelText(sd_S_Label l_l);
 static sd_str sd_f_lastElement(sd_str l_path);
 static sd_S_Lexer sd_f_lex(sd_int l_file, sd_str l_src);
 static sd_str sd_f_literalKey(sd_S_Expr l_x);
+static sd_int sd_f_log2Exact(sd_int l_c);
 static uint8_t sd_f_lowerByte(uint8_t l_c);
 static sd_str sd_f_macroArg(sd_str l_v, sd_str l_name);
+static sd_S_MagicDiv sd_f_magicDiv(sd_int l_c, sd_int l_max);
 static sd_err sd_f_main(sd_list * l_args);
 static sd_int sd_f_matchingOpener(sd_list * l_open, sd_box * l_k);
 static sd_int sd_f_maxOf(sd_int l_a, sd_int l_b);
@@ -8317,10 +8504,12 @@ static bool sd_f_verifyFormat(sd_str l_path, sd_str l_src);
 static sd_str sd_f_withArticle(sd_str l_word);
 static sd_int sd_fg_absOf(sd_int l_a);
 static bool sd_fg_isIntOrBool(sd_int l_t);
+static sd_int sd_fg_log2Exact(sd_int l_c);
 static sd_int sd_fg_maxOf(sd_int l_a, sd_int l_b);
 static sd_int sd_fg_minOf(sd_int l_a, sd_int l_b);
 static int64_t sd_fs_absOf(int64_t l_a);
 static int64_t sd_fs_isIntOrBool(int64_t l_t);
+static int64_t sd_fs_log2Exact(int64_t l_c);
 static int64_t sd_fs_maxOf(int64_t l_a, int64_t l_b);
 static int64_t sd_fs_minOf(int64_t l_a, int64_t l_b);
 static sd_int sd_m_Ast__addExpr(sd_S_Ast * l_a, sd_S_Expr l_e);
@@ -8544,9 +8733,11 @@ static bool sd_m_Formatter__statementFrame(sd_S_Formatter l_f, sd_int l_s);
 static bool sd_m_Formatter__structural(sd_S_Formatter l_f, sd_int l_s);
 static bool sd_m_Formatter__topBlank(sd_S_Formatter l_f, sd_int l_i, sd_int l_line);
 static bool sd_m_Gen__accBodyOk(sd_S_Gen l_g, sd_int l_b);
+static sd_list * sd_m_Gen__accBounded(sd_S_Gen l_g, sd_S_Stmt l_st, sd_list * l_acc);
 static sd_int sd_m_Gen__accLocal(sd_S_Gen l_g, sd_int l_e);
 static sd_int sd_m_Gen__accSize(sd_S_Gen l_g, sd_int l_b);
 static sd_int sd_m_Gen__accSizeStmt(sd_S_Gen l_g, sd_int l_s);
+static sd_int sd_m_Gen__accStep(sd_S_Gen l_g, sd_S_AccUpdate l_u);
 static bool sd_m_Gen__accStmtOk(sd_S_Gen l_g, sd_int l_s);
 static sd_list * sd_m_Gen__accTail(sd_S_Gen l_g, sd_int l_b, sd_list * l_acc);
 static sd_list * sd_m_Gen__accTailStmt(sd_S_Gen l_g, sd_int l_s, sd_list * l_acc);
@@ -8594,6 +8785,7 @@ static void sd_m_Gen__declareLocal(sd_S_Gen * l_g, sd_int l_v, sd_int l_t, sd_st
 static bool sd_m_Gen__declaredIn(sd_S_Gen l_g, sd_int l_v, sd_S_Stmt l_st);
 static sd_str sd_m_Gen__desc(sd_S_Gen l_g, sd_int l_t);
 static sd_str sd_m_Gen__descriptorText(sd_S_Gen * l_g, sd_int l_d);
+static sd_str sd_m_Gen__divNonNeg(sd_S_Gen * l_g, sd_int l_e, sd_str l_a, sd_str l_b);
 static sd_int sd_m_Gen__elemOf(sd_S_Gen l_g, sd_int l_t);
 static void sd_m_Gen__emit(sd_S_Gen * l_g, sd_str l_line);
 static void sd_m_Gen__emitMaterialise(sd_S_Gen * l_g, sd_list * l_acc, sd_int l_skip);
@@ -8651,7 +8843,7 @@ static void sd_m_Gen__genHelper(sd_S_Gen * l_g, sd_int l_t, sd_int l_kind);
 static void sd_m_Gen__genIf(sd_S_Gen * l_g, sd_S_Stmt l_st);
 static void sd_m_Gen__genIncDec(sd_S_Gen * l_g, sd_int l_s);
 static bool sd_m_Gen__genIntUpdate(sd_S_Gen * l_g, sd_S_Stmt l_st, sd_S_Target l_tg);
-static void sd_m_Gen__genLoopCopy(sd_S_Gen * l_g, sd_S_Stmt l_st, sd_int l_label, sd_list * l_acc, sd_int l_accTo, bool l_spills);
+static void sd_m_Gen__genLoopCopy(sd_S_Gen * l_g, sd_S_Stmt l_st, sd_int l_label, sd_list * l_acc, sd_list * l_bounded, sd_int l_accTo, bool l_spills);
 static void sd_m_Gen__genMultiAssign(sd_S_Gen * l_g, sd_int l_s);
 static void sd_m_Gen__genNative(sd_S_Gen * l_g, sd_int l_f);
 static sd_str sd_m_Gen__genProgram(sd_S_Gen * l_g, sd_str l_natives);
@@ -8775,7 +8967,7 @@ static sd_str sd_m_Gen__retainExpr(sd_S_Gen * l_g, sd_int l_t, sd_str l_v);
 static sd_int sd_m_Gen__rootVar(sd_S_Gen l_g, sd_int l_e);
 static sd_str sd_m_Gen__showVal(sd_S_Gen l_g, sd_int l_t, sd_str l_v);
 static void sd_m_Gen__slotEnd(sd_S_Gen * l_g, sd_S_Slot l_s);
-static sd_str sd_m_Gen__smallBinary(sd_S_Gen l_g, sd_int l_e, sd_list * l_vals);
+static sd_str sd_m_Gen__smallBinary(sd_S_Gen * l_g, sd_int l_e, sd_list * l_vals);
 static sd_S_IntRange sd_m_Gen__smallRange(sd_S_Gen l_g, sd_int l_e);
 static sd_str sd_m_Gen__spillBarrier(sd_S_Gen l_g, sd_S_Stmt l_st);
 static bool sd_m_Gen__stmtAssigns(sd_S_Gen l_g, sd_int l_s, sd_int l_v);
@@ -8983,15 +9175,16 @@ static inline __attribute__((unused)) void sd_rl_S5Block(sd_S_Block v);
 static inline __attribute__((unused)) void sd_rl_S6FnDecl(sd_S_FnDecl v);
 static inline __attribute__((unused)) void sd_rl_T2Lse(sd_T_T2Lse v);
 static inline __attribute__((unused)) void sd_rl_S9AccUpdate(sd_S_AccUpdate v);
+static inline __attribute__((unused)) sd_S_IntRange sd_rt_S8IntRange(sd_S_IntRange v);
+static inline __attribute__((unused)) void sd_rl_S8IntRange(sd_S_IntRange v);
 static inline __attribute__((unused)) sd_S_LoopCtx sd_rt_S7LoopCtx(sd_S_LoopCtx v);
 static inline __attribute__((unused)) void sd_rl_S7LoopCtx(sd_S_LoopCtx v);
-static inline __attribute__((unused)) void sd_rl_S8IntRange(sd_S_IntRange v);
 static inline __attribute__((unused)) sd_S_ExprInfo sd_rt_S8ExprInfo(sd_S_ExprInfo v);
 static inline __attribute__((unused)) void sd_rl_S8ExprInfo(sd_S_ExprInfo v);
 static inline __attribute__((unused)) void sd_rl_S4Expr(sd_S_Expr v);
 static inline __attribute__((unused)) sd_S_Gen sd_rt_S3Gen(sd_S_Gen v);
 static inline __attribute__((unused)) void sd_rl_S3Gen(sd_S_Gen v);
-static inline __attribute__((unused)) sd_S_IntRange sd_rt_S8IntRange(sd_S_IntRange v);
+static inline __attribute__((unused)) void sd_rl_S8MagicDiv(sd_S_MagicDiv v);
 static inline __attribute__((unused)) void sd_rl_S4Stmt(sd_S_Stmt v);
 static inline __attribute__((unused)) sd_S_Target sd_rt_S6Target(sd_S_Target v);
 static inline __attribute__((unused)) void sd_rl_S6Target(sd_S_Target v);
@@ -9829,6 +10022,22 @@ bool sd_lib_crypto_equal(sd_str a, sd_str b) {
   for (int64_t i = 0; i < a->len; i++) diff |= x[i] ^ y[i];
   return diff == 0;
 }
+#ifndef SD_DIVC_
+#define SD_DIVC_
+/* x / c for 0 <= x < 2^62 and a constant c > 0, as (x * m) >> (64 + s) (gen_int.sd). */
+static inline __attribute__((unused)) int64_t sd_divc_(int64_t x, uint64_t m, int s, int64_t c) {
+#ifdef __SIZEOF_INT128__
+  (void)c;
+  return (int64_t)((uint64_t)(((unsigned __int128)(uint64_t)x * m) >> 64) >> s);
+#else
+  (void)m; (void)s;
+  return (int64_t)((uint64_t)x / (uint64_t)c);
+#endif
+}
+static inline __attribute__((unused)) int64_t sd_modc_(int64_t x, uint64_t m, int s, int64_t c) {
+  return x - sd_divc_(x, m, s, c) * c;
+}
+#endif
 static inline __attribute__((unused)) sd_S_Pos sd_rt_S3Pos(sd_S_Pos v) {
   v.f_file = sd_int_retain(v.f_file);
   v.f_line = sd_int_retain(v.f_line);
@@ -10261,10 +10470,22 @@ static inline __attribute__((unused)) void sd_rl_S9AccUpdate(sd_S_AccUpdate v) {
   sd_int_release(v.f_var);
   sd_list_release(v.f_rest);
 }
+static inline __attribute__((unused)) sd_S_IntRange sd_rt_S8IntRange(sd_S_IntRange v) {
+  v.f_state = sd_int_retain(v.f_state);
+  v.f_lo = sd_int_retain(v.f_lo);
+  v.f_hi = sd_int_retain(v.f_hi);
+  return v;
+}
+static inline __attribute__((unused)) void sd_rl_S8IntRange(sd_S_IntRange v) {
+  sd_int_release(v.f_state);
+  sd_int_release(v.f_lo);
+  sd_int_release(v.f_hi);
+}
 static inline __attribute__((unused)) sd_S_LoopCtx sd_rt_S7LoopCtx(sd_S_LoopCtx v) {
   v.f_mark = sd_int_retain(v.f_mark);
   v.f_label = sd_int_retain(v.f_label);
   v.f_acc = sd_list_retain(v.f_acc);
+  v.f_bounded = sd_list_retain(v.f_bounded);
   v.f_accTo = sd_int_retain(v.f_accTo);
   return v;
 }
@@ -10272,12 +10493,8 @@ static inline __attribute__((unused)) void sd_rl_S7LoopCtx(sd_S_LoopCtx v) {
   sd_int_release(v.f_mark);
   sd_int_release(v.f_label);
   sd_list_release(v.f_acc);
+  sd_list_release(v.f_bounded);
   sd_int_release(v.f_accTo);
-}
-static inline __attribute__((unused)) void sd_rl_S8IntRange(sd_S_IntRange v) {
-  sd_int_release(v.f_state);
-  sd_int_release(v.f_lo);
-  sd_int_release(v.f_hi);
 }
 static inline __attribute__((unused)) sd_S_ExprInfo sd_rt_S8ExprInfo(sd_S_ExprInfo v) {
   v.f_ty = sd_int_retain(v.f_ty);
@@ -10433,11 +10650,9 @@ static inline __attribute__((unused)) void sd_rl_S3Gen(sd_S_Gen v) {
   sd_int_release(v.f_pcCond);
   sd_map_release(v.f_refs);
 }
-static inline __attribute__((unused)) sd_S_IntRange sd_rt_S8IntRange(sd_S_IntRange v) {
-  v.f_state = sd_int_retain(v.f_state);
-  v.f_lo = sd_int_retain(v.f_lo);
-  v.f_hi = sd_int_retain(v.f_hi);
-  return v;
+static inline __attribute__((unused)) void sd_rl_S8MagicDiv(sd_S_MagicDiv v) {
+  sd_int_release(v.f_m);
+  sd_int_release(v.f_s);
 }
 static inline __attribute__((unused)) void sd_rl_S4Stmt(sd_S_Stmt v) {
   sd_box_release(v.f_kind);
@@ -10757,6 +10972,7 @@ static sd_list * sd_c_runtimeFiles(void) {
 }
 static sd_int sd_c_smallIntMin(void) { return SD_INT(-4611686018427387904); }
 static sd_int sd_c_smallIntMax(void) { return SD_INT(4611686018427387903); }
+static sd_str sd_c_divcHelpers(void) { return SD_STR_LIT("#ifndef SD_DIVC_\012#define SD_DIVC_\012/* x / c for 0 <= x < 2^62 and a constant c > 0, as (x * m) >> (64 + s) (gen_int.sd). */\012static inline __attribute__((unused)) int64_t sd_divc_(int64_t x, uint64_t m, int s, int64_t c) {\012#ifdef __SIZEOF_INT128__\012  (void)c;\012  return (int64_t)((uint64_t)(((unsigned __int128)(uint64_t)x * m) >> 64) >> s);\012#else\012  (void)m; (void)s;\012  return (int64_t)((uint64_t)x / (uint64_t)c);\012#endif\012}\012static inline __attribute__((unused)) int64_t sd_modc_(int64_t x, uint64_t m, int s, int64_t c) {\012  return x - sd_divc_(x, m, s, c) * c;\012}\012#endif\012"); }
 typedef struct { sd_map * v; int s; } sd_ct_keywords;
 static int sd_ck_keywords;
 static void sd_cf_keywords(void) { sd_ct_keywords *sd_cc_ = sd_goroutine_local(&sd_ck_keywords, sizeof(sd_ct_keywords)); sd_map_release(sd_cc_->v); sd_cc_->s = 0; }
@@ -25048,7 +25264,7 @@ static void sd_m_Suggest__consider(sd_S_Suggest * l_s, sd_str l_cand) {
   }
   sd_int _t1 = sd_f_editDistance(((*l_s)).f_name, l_cand);
   sd_int l_d = _t1;
-  sd_int _t2 = sd_int_add(SD_INT_S((SD_SMALL(sd_str_len(((*l_s)).f_name)) / ((int64_t)3))), SD_INT(1));
+  sd_int _t2 = sd_int_add(SD_INT_S(sd_divc_(SD_SMALL(sd_str_len(((*l_s)).f_name)), 6148914691236517206ull, 0, 3)), SD_INT(1));
   sd_int l_limit = _t2;
   if (sd_int_gt(l_limit, SD_INT(3))) {
     sd_int _t3 = SD_INT(3);
@@ -29179,11 +29395,11 @@ static sd_str sd_f_cString(sd_str l_s) {
               int64_t l_v = SD_SMALL(sd_int_retain(sd_byte_to_int(l_c)));
               uint8_t _t8 = ((uint8_t)92);
               SD_LIST_PUSH((&L.l_b), uint8_t, _t8);
-              uint8_t _t9 = sd_str_at(sd_c_octalDigits(), SD_INT_S((l_v / ((int64_t)64))));
+              uint8_t _t9 = sd_str_at(sd_c_octalDigits(), SD_INT_S(((l_v) >> 6)));
               SD_LIST_PUSH((&L.l_b), uint8_t, _t9);
-              uint8_t _t10 = sd_str_at(sd_c_octalDigits(), SD_INT_S(((l_v / ((int64_t)8)) % ((int64_t)8))));
+              uint8_t _t10 = sd_str_at(sd_c_octalDigits(), SD_INT_S(((((l_v) >> 3)) & 7)));
               SD_LIST_PUSH((&L.l_b), uint8_t, _t10);
-              uint8_t _t11 = sd_str_at(sd_c_octalDigits(), SD_INT_S((l_v % ((int64_t)8))));
+              uint8_t _t11 = sd_str_at(sd_c_octalDigits(), SD_INT_S(((l_v) & 7)));
               SD_LIST_PUSH((&L.l_b), uint8_t, _t11);
             }
           }
@@ -31696,7 +31912,7 @@ static sd_str sd_m_Gen__expandFrame(sd_S_Gen l_g, sd_str l_line) {
       if (!((l_i < SD_SMALL(sd_list_len(L.l_segs))))) break;
       {
         sd_str l_seg = SD_LIST_GET(L.l_segs, sd_str, SD_INT_S(l_i));
-        if (((l_i % ((int64_t)2)) == ((int64_t)0))) {
+        if ((((l_i) & 1) == ((int64_t)0))) {
           sd_str _t4 = sd_str_retain(l_seg);
           SD_LIST_PUSH((&L.l_out), sd_str, _t4);
           goto _c3;
@@ -33124,7 +33340,7 @@ static sd_str sd_m_Gen__rawName(sd_S_Gen l_g, sd_int l_v) {
   return _t2;
 }
 
-typedef struct { sd_lframe h; sd_list * l_words; sd_str _t5; sd_str _t7; sd_str _t10; sd_str _t11; sd_str _t13; sd_str _t19; } sd_L_sd_m_Gen__genAccLoop;
+typedef struct { sd_lframe h; sd_list * l_words; sd_str _t5; sd_str _t7; sd_str _t10; sd_str _t11; sd_str _t13; sd_list * _t16; sd_str _t20; } sd_L_sd_m_Gen__genAccLoop;
 static void sd_lr_sd_m_Gen__genAccLoop(sd_lframe *p) {
   sd_L_sd_m_Gen__genAccLoop *L = (sd_L_sd_m_Gen__genAccLoop *)p;
   sd_list_release(L->l_words);
@@ -33133,7 +33349,8 @@ static void sd_lr_sd_m_Gen__genAccLoop(sd_lframe *p) {
   sd_str_release(L->_t10);
   sd_str_release(L->_t11);
   sd_str_release(L->_t13);
-  sd_str_release(L->_t19);
+  sd_list_release(L->_t16);
+  sd_str_release(L->_t20);
 }
 static void sd_m_Gen__genAccLoop(sd_S_Gen * l_g, sd_S_Stmt l_st, sd_list * l_acc, sd_int l_general, sd_int l_done) {
   sd_L_sd_m_Gen__genAccLoop L = {{0}};
@@ -33185,22 +33402,164 @@ static void sd_m_Gen__genAccLoop(sd_S_Gen * l_g, sd_S_Stmt l_st, sd_list * l_acc
   sd_int *_t14 = (&(l_g)->f_ntmp);
   { int64_t r_; if (SD_LIKELY((((*_t14).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((*_t14).w, SD_INT(1).w, &r_))) (*_t14).w = r_; else { sd_int s_ = sd_int_add_slow((*_t14), SD_INT(1)); sd_int_release((*_t14)); (*_t14) = s_; } }
   sd_int _t15 = sd_int_retain(((*l_g)).f_ntmp);
-  bool _t16 = false;
+  L._t16 = sd_m_Gen__accBounded((*l_g), l_st, l_acc);
+  bool _t17 = false;
   SD_PREEMPT();
-  sd_m_Gen__genLoopCopy(l_g, l_st, _t15, l_acc, l_general, _t16);
+  sd_m_Gen__genLoopCopy(l_g, l_st, _t15, l_acc, L._t16, l_general, _t17);
+  sd_list_release(L._t16); L._t16 = NULL;
   sd_int_release(_t15);
-  sd_int _t17 = SD_INT(-1);
-  sd_m_Gen__emitMaterialise(l_g, l_acc, _t17);
-  sd_str_part _t18[] = {{SD_STR_LIT("goto _d")}, {NULL, l_done}, {SD_STR_LIT(";")}};
-  L._t19 = sd_str_concat_parts(_t18, 3);
-  sd_m_Gen__emit(l_g, L._t19);
-  sd_str_release(L._t19); L._t19 = NULL;
-  sd_int *_t20 = (&(l_g)->f_indent);
-  { int64_t r_; if (SD_LIKELY((((*_t20).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_sub_overflow((*_t20).w, SD_INT(1).w, &r_))) (*_t20).w = r_; else { sd_int s_ = sd_int_sub_slow((*_t20), SD_INT(1)); sd_int_release((*_t20)); (*_t20) = s_; } }
-  sd_str _t21 = SD_STR_LIT("}");
-  sd_m_Gen__emit(l_g, _t21);
+  sd_int _t18 = SD_INT(-1);
+  sd_m_Gen__emitMaterialise(l_g, l_acc, _t18);
+  sd_str_part _t19[] = {{SD_STR_LIT("goto _d")}, {NULL, l_done}, {SD_STR_LIT(";")}};
+  L._t20 = sd_str_concat_parts(_t19, 3);
+  sd_m_Gen__emit(l_g, L._t20);
+  sd_str_release(L._t20); L._t20 = NULL;
+  sd_int *_t21 = (&(l_g)->f_indent);
+  { int64_t r_; if (SD_LIKELY((((*_t21).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_sub_overflow((*_t21).w, SD_INT(1).w, &r_))) (*_t21).w = r_; else { sd_int s_ = sd_int_sub_slow((*_t21), SD_INT(1)); sd_int_release((*_t21)); (*_t21) = s_; } }
+  sd_str _t22 = SD_STR_LIT("}");
+  sd_m_Gen__emit(l_g, _t22);
   sd_list_release(L.l_words); L.l_words = NULL;
   SD_LF_LEAVE(L);
+}
+
+typedef struct { sd_lframe h; sd_box * l_ir; sd_list * _t8; sd_list * l_sites; sd_list * l_out; sd_S_AccUpdate l_u; } sd_L_sd_m_Gen__accBounded;
+static void sd_lr_sd_m_Gen__accBounded(sd_lframe *p) {
+  sd_L_sd_m_Gen__accBounded *L = (sd_L_sd_m_Gen__accBounded *)p;
+  sd_box_release(L->l_ir);
+  sd_list_release(L->_t8);
+  sd_list_release(L->l_sites);
+  sd_list_release(L->l_out);
+  sd_rl_S9AccUpdate(L->l_u);
+}
+static sd_list * sd_m_Gen__accBounded(sd_S_Gen l_g, sd_S_Stmt l_st, sd_list * l_acc) {
+  sd_L_sd_m_Gen__accBounded L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_m_Gen__accBounded);
+  sd_int _t1 = sd_m_Gen__countedVar(l_g, l_st);
+  sd_int l_i = _t1;
+  sd_S_IntRange *_t2 = sd_map_get((l_g).f_varRange, &l_i);
+  sd_box * _t3 = _t2 ? ({ sd_S_IntRange c_ = sd_rt_S8IntRange(*_t2); sd_box_new(&sd_D_IntRange, &c_); }) : NULL;
+  L.l_ir = _t3;
+  if (((sd_int_lt(l_i, SD_INT(0)) || ((L.l_ir) == NULL)) || (!sd_int_eq((SD_BOX_GET(L.l_ir, sd_S_IntRange)).f_state, SD_INT(1))))) {
+    sd_list * _t4 = sd_list_new(&sd_type_int, 0);
+    sd_list * _t5 = _t4;
+    SD_LF_LEAVE(L);
+    sd_box_release(L.l_ir);
+    sd_int_release(l_i);
+    return _t5;
+  }
+  sd_int _t6 = sd_int_sub((SD_BOX_GET(L.l_ir, sd_S_IntRange)).f_hi, (SD_BOX_GET(L.l_ir, sd_S_IntRange)).f_lo);
+  sd_int _t7 = sd_int_add(_t6, SD_INT(1));
+  sd_int l_trips = _t7;
+  sd_int_release(_t6);
+  L._t8 = sd_list_new(&sd_type_int, 0);
+  sd_list * _t9 = sd_m_Gen__accTail(l_g, (l_st).f_body, L._t8);
+  L.l_sites = _t9;
+  sd_list_release(L._t8); L._t8 = NULL;
+  sd_list * _t10 = sd_list_new(&sd_type_int, 0);
+  L.l_out = _t10;
+  {
+    int64_t l_k = ((int64_t)0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!((l_k < SD_SMALL(sd_list_len(l_acc))))) break;
+      {
+        sd_int l_most = SD_INT(0);
+        bool l_ok = true;
+        {
+          int64_t l_j = ((int64_t)0);
+          for (;;) {
+            SD_PREEMPT();
+            if (!((l_j < SD_SMALL(sd_list_len(L.l_sites))))) break;
+            {
+              sd_S_AccUpdate _t13 = sd_m_Gen__accUpdate(l_g, SD_LIST_GET(L.l_sites, sd_int, SD_INT_S(l_j)));
+              L.l_u = _t13;
+              if (sd_int_eq((L.l_u).f_var, SD_LIST_GET(l_acc, sd_int, SD_INT_S(l_k)))) {
+                sd_int _t14 = sd_m_Gen__accStep(l_g, L.l_u);
+                sd_int l_d = _t14;
+                if (sd_int_lt(l_d, SD_INT(0))) {
+                  bool _t15 = false;
+                  l_ok = _t15;
+                }
+                sd_int _t16 = sd_f_maxOf(l_most, l_d);
+                sd_int_release(l_most);
+                l_most = _t16;
+                sd_int_release(l_d);
+              }
+              sd_rl_S9AccUpdate(L.l_u); L.l_u = ((sd_S_AccUpdate){0});
+            }
+            _c12:;
+            l_j++;
+          }
+        }
+        bool _t19 = l_ok;
+        if (_t19) {
+          sd_int _t17 = sd_int_mul(l_trips, l_most);
+          sd_int _t18 = sd_int_add(sd_c_smallIntMax(), SD_INT(1));
+          _t19 = sd_int_le(_t17, _t18);
+          sd_int_release(_t18);
+          sd_int_release(_t17);
+        }
+        if (_t19) {
+          sd_int _t20 = sd_int_retain(SD_LIST_GET(l_acc, sd_int, SD_INT_S(l_k)));
+          SD_LIST_PUSH((&L.l_out), sd_int, _t20);
+        }
+        sd_int_release(l_most);
+      }
+      _c11:;
+      l_k++;
+    }
+  }
+  sd_list * _t21 = L.l_out;
+  SD_LF_LEAVE(L);
+  sd_list_release(L.l_sites);
+  sd_int_release(l_trips);
+  sd_box_release(L.l_ir);
+  sd_int_release(l_i);
+  return _t21;
+}
+
+static sd_int sd_m_Gen__accStep(sd_S_Gen l_g, sd_S_AccUpdate l_u) {
+  if ((SD_SMALL(sd_list_len((l_u).f_rest)) == ((int64_t)0))) {
+    return SD_INT(1);
+  }
+  sd_S_IntRange _t1 = sd_f_knownRange(SD_INT(0), SD_INT(0));
+  sd_S_IntRange l_total = _t1;
+  {
+    int64_t l_i = ((int64_t)0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!((l_i < SD_SMALL(sd_list_len((l_u).f_rest))))) break;
+      {
+        bool _t3 = sd_m_Gen__isSimpleSmall(l_g, SD_LIST_GET((l_u).f_rest, sd_int, SD_INT_S(l_i)));
+        if ((!_t3)) {
+          sd_int _t4 = SD_INT(-1);
+          sd_rl_S8IntRange(l_total);
+          return _t4;
+        }
+        sd_S_IntRange _t5 = sd_m_Gen__smallRange(l_g, SD_LIST_GET((l_u).f_rest, sd_int, SD_INT_S(l_i)));
+        sd_S_IntRange _t6 = sd_f_binRange(SD_BOX_REF(sd_k_Tok__Plus), l_total, _t5);
+        sd_rl_S8IntRange(l_total);
+        l_total = _t6;
+        sd_rl_S8IntRange(_t5);
+      }
+      _c2:;
+      l_i++;
+    }
+  }
+  bool _t7 = sd_f_isSmallRange(l_total);
+  if ((!_t7)) {
+    sd_int _t8 = SD_INT(-1);
+    sd_rl_S8IntRange(l_total);
+    return _t8;
+  }
+  sd_int _t9 = sd_f_absOf((l_total).f_lo);
+  sd_int _t10 = sd_f_absOf((l_total).f_hi);
+  sd_int _t11 = sd_f_maxOf(_t9, _t10);
+  sd_int _t12 = _t11;
+  sd_int_release(_t10);
+  sd_int_release(_t9);
+  sd_rl_S8IntRange(l_total);
+  return _t12;
 }
 
 typedef struct { sd_lframe h; sd_str _t2; sd_str _t3; sd_str _t5; } sd_L_sd_m_Gen__emitMaterialise;
@@ -33237,7 +33596,7 @@ static void sd_m_Gen__emitMaterialise(sd_S_Gen * l_g, sd_list * l_acc, sd_int l_
   SD_LF_LEAVE(L);
 }
 
-typedef struct { sd_lframe h; sd_S_LoopCtx l_lc; sd_S_AccUpdate l_u; sd_str l_op; sd_str l_r; sd_str l_raw; sd_str l_b; sd_list * l_terms; sd_str _t20; sd_str _t23; sd_str _t25; sd_str l_old; sd_str l_t; sd_str _t31; sd_str l_undo; sd_str _t39; sd_str l_a; sd_str _t43; sd_str _t44; sd_str _t46; sd_str _t48; sd_list * _t49; sd_str _t51; sd_str _t55; } sd_L_sd_m_Gen__genAccUpdate;
+typedef struct { sd_lframe h; sd_S_LoopCtx l_lc; sd_S_AccUpdate l_u; sd_str l_op; sd_str l_r; sd_str l_raw; sd_str l_b; sd_list * l_terms; sd_str _t20; sd_str _t23; sd_str _t25; sd_str l_cop; sd_str _t34; sd_str l_old; sd_str l_t; sd_str _t37; sd_str l_undo; sd_str _t45; sd_str l_a; sd_str _t49; sd_str _t50; sd_str _t52; sd_str _t54; sd_list * _t55; sd_str _t57; sd_str _t61; } sd_L_sd_m_Gen__genAccUpdate;
 static void sd_lr_sd_m_Gen__genAccUpdate(sd_lframe *p) {
   sd_L_sd_m_Gen__genAccUpdate *L = (sd_L_sd_m_Gen__genAccUpdate *)p;
   sd_rl_S7LoopCtx(L->l_lc);
@@ -33250,19 +33609,21 @@ static void sd_lr_sd_m_Gen__genAccUpdate(sd_lframe *p) {
   sd_str_release(L->_t20);
   sd_str_release(L->_t23);
   sd_str_release(L->_t25);
+  sd_str_release(L->l_cop);
+  sd_str_release(L->_t34);
   sd_str_release(L->l_old);
   sd_str_release(L->l_t);
-  sd_str_release(L->_t31);
+  sd_str_release(L->_t37);
   sd_str_release(L->l_undo);
-  sd_str_release(L->_t39);
+  sd_str_release(L->_t45);
   sd_str_release(L->l_a);
-  sd_str_release(L->_t43);
-  sd_str_release(L->_t44);
-  sd_str_release(L->_t46);
-  sd_str_release(L->_t48);
-  sd_list_release(L->_t49);
-  sd_str_release(L->_t51);
-  sd_str_release(L->_t55);
+  sd_str_release(L->_t49);
+  sd_str_release(L->_t50);
+  sd_str_release(L->_t52);
+  sd_str_release(L->_t54);
+  sd_list_release(L->_t55);
+  sd_str_release(L->_t57);
+  sd_str_release(L->_t61);
 }
 static bool sd_m_Gen__genAccUpdate(sd_S_Gen * l_g, sd_int l_s) {
   sd_L_sd_m_Gen__genAccUpdate L = {{0}};
@@ -33384,74 +33745,101 @@ static bool sd_m_Gen__genAccUpdate(sd_S_Gen * l_g, sd_int l_s) {
     }
     sd_rl_S8IntRange(l_total);
   }
+  bool _t31 = (!sd_str_eq(L.l_raw, SD_STR_LIT("")));
+  if (_t31) {
+    sd_int _t30 = (L.l_u).f_var;
+    _t31 = sd_list_contains((L.l_lc).f_bounded, &_t30);
+  }
+  if (_t31) {
+    L.l_cop = SD_STR_LIT(" += ");
+    if ((L.l_u).f_sub) {
+      sd_str _t32 = SD_STR_LIT(" -= ");
+      sd_str_release(L.l_cop);
+      L.l_cop = _t32;
+    }
+    sd_str _t33[] = {L.l_r, L.l_cop, L.l_raw, SD_STR_LIT(";")};
+    L._t34 = sd_str_concat_n(_t33, 4);
+    sd_m_Gen__emit(l_g, L._t34);
+    sd_str_release(L._t34); L._t34 = NULL;
+    bool _t35 = true;
+    SD_LF_LEAVE(L);
+    sd_str_release(L.l_cop);
+    sd_str_release(L.l_b);
+    sd_str_release(L.l_raw);
+    sd_str_release(L.l_r);
+    sd_str_release(L.l_op);
+    sd_rl_S9AccUpdate(L.l_u);
+    sd_rl_S7LoopCtx(L.l_lc);
+    return _t35;
+  }
   L.l_old = sd_str_retain(L.l_r);
   L.l_t = SD_STR_LIT("");
   if ((!sd_str_eq(L.l_raw, SD_STR_LIT("")))) {
-    sd_str _t30[] = {SD_STR_LIT("if (SD_UNLIKELY(__builtin_"), L.l_op, SD_STR_LIT("_overflow("), L.l_r, SD_STR_LIT(", "), L.l_raw, SD_STR_LIT(", &"), L.l_r, SD_STR_LIT("))) {")};
-    L._t31 = sd_str_concat_n(_t30, 9);
-    sd_m_Gen__emit(l_g, L._t31);
-    sd_str_release(L._t31); L._t31 = NULL;
+    sd_str _t36[] = {SD_STR_LIT("if (SD_UNLIKELY(__builtin_"), L.l_op, SD_STR_LIT("_overflow("), L.l_r, SD_STR_LIT(", "), L.l_raw, SD_STR_LIT(", &"), L.l_r, SD_STR_LIT("))) {")};
+    L._t37 = sd_str_concat_n(_t36, 9);
+    sd_m_Gen__emit(l_g, L._t37);
+    sd_str_release(L._t37); L._t37 = NULL;
     L.l_undo = SD_STR_LIT(" - ");
     if ((L.l_u).f_sub) {
-      sd_str _t32 = SD_STR_LIT(" + ");
+      sd_str _t38 = SD_STR_LIT(" + ");
       sd_str_release(L.l_undo);
-      L.l_undo = _t32;
+      L.l_undo = _t38;
     }
-    sd_str _t33[] = {SD_STR_LIT("(int64_t)((uint64_t)"), L.l_r, L.l_undo, SD_STR_LIT("(uint64_t)"), L.l_raw, SD_STR_LIT(")")};
-    sd_str _t34 = sd_str_concat_n(_t33, 6);
+    sd_str _t39[] = {SD_STR_LIT("(int64_t)((uint64_t)"), L.l_r, L.l_undo, SD_STR_LIT("(uint64_t)"), L.l_raw, SD_STR_LIT(")")};
+    sd_str _t40 = sd_str_concat_n(_t39, 6);
     sd_str_release(L.l_old);
-    L.l_old = _t34;
-    sd_str _t35[] = {SD_STR_LIT("SD_INT_S("), L.l_raw, SD_STR_LIT(")")};
-    sd_str _t36 = sd_str_concat_n(_t35, 3);
+    L.l_old = _t40;
+    sd_str _t41[] = {SD_STR_LIT("SD_INT_S("), L.l_raw, SD_STR_LIT(")")};
+    sd_str _t42 = sd_str_concat_n(_t41, 3);
     sd_str_release(L.l_b);
-    L.l_b = _t36;
+    L.l_b = _t42;
     sd_str_release(L.l_undo); L.l_undo = NULL;
   } else {
-    sd_str _t37 = sd_m_Gen__newTmp(l_g);
+    sd_str _t43 = sd_m_Gen__newTmp(l_g);
     sd_str_release(L.l_t);
-    L.l_t = _t37;
-    sd_str _t38[] = {SD_STR_LIT("int64_t "), L.l_t, SD_STR_LIT("; if (SD_UNLIKELY(("), L.l_b, SD_STR_LIT(".w & 1) != 0 || __builtin_"), L.l_op, SD_STR_LIT("_overflow("), L.l_r, SD_STR_LIT(", "), L.l_b, SD_STR_LIT(".w >> 1, &"), L.l_t, SD_STR_LIT("))) {")};
-    L._t39 = sd_str_concat_n(_t38, 13);
-    sd_m_Gen__emit(l_g, L._t39);
-    sd_str_release(L._t39); L._t39 = NULL;
+    L.l_t = _t43;
+    sd_str _t44[] = {SD_STR_LIT("int64_t "), L.l_t, SD_STR_LIT("; if (SD_UNLIKELY(("), L.l_b, SD_STR_LIT(".w & 1) != 0 || __builtin_"), L.l_op, SD_STR_LIT("_overflow("), L.l_r, SD_STR_LIT(", "), L.l_b, SD_STR_LIT(".w >> 1, &"), L.l_t, SD_STR_LIT("))) {")};
+    L._t45 = sd_str_concat_n(_t44, 13);
+    sd_m_Gen__emit(l_g, L._t45);
+    sd_str_release(L._t45); L._t45 = NULL;
   }
-  sd_int *_t40 = (&(l_g)->f_indent);
-  { int64_t r_; if (SD_LIKELY((((*_t40).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((*_t40).w, SD_INT(1).w, &r_))) (*_t40).w = r_; else { sd_int s_ = sd_int_add_slow((*_t40), SD_INT(1)); sd_int_release((*_t40)); (*_t40) = s_; } }
-  sd_str _t41 = sd_m_Gen__newTmp(l_g);
-  L.l_a = _t41;
-  sd_str _t42[] = {SD_STR_LIT("sd_int "), L.l_a, SD_STR_LIT(" = sd_int_from_i64("), L.l_old, SD_STR_LIT(");")};
-  L._t43 = sd_str_concat_n(_t42, 5);
-  sd_m_Gen__emit(l_g, L._t43);
-  sd_str_release(L._t43); L._t43 = NULL;
+  sd_int *_t46 = (&(l_g)->f_indent);
+  { int64_t r_; if (SD_LIKELY((((*_t46).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((*_t46).w, SD_INT(1).w, &r_))) (*_t46).w = r_; else { sd_int s_ = sd_int_add_slow((*_t46), SD_INT(1)); sd_int_release((*_t46)); (*_t46) = s_; } }
+  sd_str _t47 = sd_m_Gen__newTmp(l_g);
+  L.l_a = _t47;
+  sd_str _t48[] = {SD_STR_LIT("sd_int "), L.l_a, SD_STR_LIT(" = sd_int_from_i64("), L.l_old, SD_STR_LIT(");")};
+  L._t49 = sd_str_concat_n(_t48, 5);
+  sd_m_Gen__emit(l_g, L._t49);
+  sd_str_release(L._t49); L._t49 = NULL;
   sd_m_Gen__emitMaterialise(l_g, (L.l_lc).f_acc, (L.l_u).f_var);
-  L._t44 = sd_m_Gen__lname((*l_g), (L.l_u).f_var);
-  sd_str _t45[] = {L._t44, SD_STR_LIT(" = sd_int_"), L.l_op, SD_STR_LIT("("), L.l_a, SD_STR_LIT(", "), L.l_b, SD_STR_LIT(");")};
-  L._t46 = sd_str_concat_n(_t45, 8);
-  sd_m_Gen__emit(l_g, L._t46);
-  sd_str_release(L._t46); L._t46 = NULL;
-  sd_str_release(L._t44); L._t44 = NULL;
-  sd_str _t47[] = {SD_STR_LIT("sd_int_release("), L.l_a, SD_STR_LIT(");")};
-  L._t48 = sd_str_concat_n(_t47, 3);
-  sd_m_Gen__emit(l_g, L._t48);
-  sd_str_release(L._t48); L._t48 = NULL;
-  L._t49 = sd_list_new(&sd_type_str, 0);
-  sd_m_Gen__releaseAbove(l_g, (L.l_lc).f_mark, L._t49);
-  sd_list_release(L._t49); L._t49 = NULL;
-  sd_str_part _t50[] = {{SD_STR_LIT("goto _c")}, {NULL, (L.l_lc).f_accTo}, {SD_STR_LIT(";")}};
-  L._t51 = sd_str_concat_parts(_t50, 3);
-  sd_m_Gen__emit(l_g, L._t51);
-  sd_str_release(L._t51); L._t51 = NULL;
-  sd_int *_t52 = (&(l_g)->f_indent);
-  { int64_t r_; if (SD_LIKELY((((*_t52).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_sub_overflow((*_t52).w, SD_INT(1).w, &r_))) (*_t52).w = r_; else { sd_int s_ = sd_int_sub_slow((*_t52), SD_INT(1)); sd_int_release((*_t52)); (*_t52) = s_; } }
-  sd_str _t53 = SD_STR_LIT("}");
-  sd_m_Gen__emit(l_g, _t53);
+  L._t50 = sd_m_Gen__lname((*l_g), (L.l_u).f_var);
+  sd_str _t51[] = {L._t50, SD_STR_LIT(" = sd_int_"), L.l_op, SD_STR_LIT("("), L.l_a, SD_STR_LIT(", "), L.l_b, SD_STR_LIT(");")};
+  L._t52 = sd_str_concat_n(_t51, 8);
+  sd_m_Gen__emit(l_g, L._t52);
+  sd_str_release(L._t52); L._t52 = NULL;
+  sd_str_release(L._t50); L._t50 = NULL;
+  sd_str _t53[] = {SD_STR_LIT("sd_int_release("), L.l_a, SD_STR_LIT(");")};
+  L._t54 = sd_str_concat_n(_t53, 3);
+  sd_m_Gen__emit(l_g, L._t54);
+  sd_str_release(L._t54); L._t54 = NULL;
+  L._t55 = sd_list_new(&sd_type_str, 0);
+  sd_m_Gen__releaseAbove(l_g, (L.l_lc).f_mark, L._t55);
+  sd_list_release(L._t55); L._t55 = NULL;
+  sd_str_part _t56[] = {{SD_STR_LIT("goto _c")}, {NULL, (L.l_lc).f_accTo}, {SD_STR_LIT(";")}};
+  L._t57 = sd_str_concat_parts(_t56, 3);
+  sd_m_Gen__emit(l_g, L._t57);
+  sd_str_release(L._t57); L._t57 = NULL;
+  sd_int *_t58 = (&(l_g)->f_indent);
+  { int64_t r_; if (SD_LIKELY((((*_t58).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_sub_overflow((*_t58).w, SD_INT(1).w, &r_))) (*_t58).w = r_; else { sd_int s_ = sd_int_sub_slow((*_t58), SD_INT(1)); sd_int_release((*_t58)); (*_t58) = s_; } }
+  sd_str _t59 = SD_STR_LIT("}");
+  sd_m_Gen__emit(l_g, _t59);
   if ((!sd_str_eq(L.l_t, SD_STR_LIT("")))) {
-    sd_str _t54[] = {L.l_r, SD_STR_LIT(" = "), L.l_t, SD_STR_LIT(";")};
-    L._t55 = sd_str_concat_n(_t54, 4);
-    sd_m_Gen__emit(l_g, L._t55);
-    sd_str_release(L._t55); L._t55 = NULL;
+    sd_str _t60[] = {L.l_r, SD_STR_LIT(" = "), L.l_t, SD_STR_LIT(";")};
+    L._t61 = sd_str_concat_n(_t60, 4);
+    sd_m_Gen__emit(l_g, L._t61);
+    sd_str_release(L._t61); L._t61 = NULL;
   }
-  bool _t56 = true;
+  bool _t62 = true;
   SD_LF_LEAVE(L);
   sd_str_release(L.l_a);
   sd_str_release(L.l_t);
@@ -33462,7 +33850,7 @@ static bool sd_m_Gen__genAccUpdate(sd_S_Gen * l_g, sd_int l_s) {
   sd_str_release(L.l_op);
   sd_rl_S9AccUpdate(L.l_u);
   sd_rl_S7LoopCtx(L.l_lc);
-  return _t56;
+  return _t62;
 }
 
 static sd_str sd_m_Gen__spillBarrier(sd_S_Gen l_g, sd_S_Stmt l_st) {
@@ -37543,7 +37931,7 @@ static sd_str sd_m_Gen__gbinary(sd_S_Gen * l_g, sd_int l_e) {
   L.l_vals = _t20;
   sd_list_release(L._t19); L._t19 = NULL;
   if (sd_int_eq(l_t, sd_c_tyInt())) {
-    sd_str _t21 = sd_m_Gen__smallBinary((*l_g), l_e, L.l_vals);
+    sd_str _t21 = sd_m_Gen__smallBinary(l_g, l_e, L.l_vals);
     L.l_small = _t21;
     if ((!sd_str_eq(L.l_small, SD_STR_LIT("")))) {
       sd_str _t22 = L.l_small;
@@ -40958,27 +41346,28 @@ static sd_str sd_f_macroArg(sd_str l_v, sd_str l_name) {
   return _t4;
 }
 
-typedef struct { sd_lframe h; sd_str l_a; sd_str l_b; sd_str _t9; sd_str _t14; } sd_L_sd_m_Gen__smallBinary;
+typedef struct { sd_lframe h; sd_str l_a; sd_str l_b; sd_str _t9; sd_str l_d; sd_str _t18; } sd_L_sd_m_Gen__smallBinary;
 static void sd_lr_sd_m_Gen__smallBinary(sd_lframe *p) {
   sd_L_sd_m_Gen__smallBinary *L = (sd_L_sd_m_Gen__smallBinary *)p;
   sd_str_release(L->l_a);
   sd_str_release(L->l_b);
   sd_str_release(L->_t9);
-  sd_str_release(L->_t14);
+  sd_str_release(L->l_d);
+  sd_str_release(L->_t18);
 }
-static sd_str sd_m_Gen__smallBinary(sd_S_Gen l_g, sd_int l_e, sd_list * l_vals) {
+static sd_str sd_m_Gen__smallBinary(sd_S_Gen * l_g, sd_int l_e, sd_list * l_vals) {
   sd_L_sd_m_Gen__smallBinary L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__smallBinary);
-  sd_S_Expr l_x = SD_LIST_GET((((l_g).f_c).f_ast).f_exprs, sd_S_Expr, l_e);
-  sd_int _t1 = sd_m_Gen__typeOf(l_g, (l_x).f_a);
+  sd_S_Expr l_x = SD_LIST_GET(((((*l_g)).f_c).f_ast).f_exprs, sd_S_Expr, l_e);
+  sd_int _t1 = sd_m_Gen__typeOf((*l_g), (l_x).f_a);
   bool _t3 = (!sd_int_eq(_t1, sd_c_tyInt()));
   if (!_t3) {
-    bool _t2 = sd_m_Gen__isSmallInt(l_g, (l_x).f_a);
+    bool _t2 = sd_m_Gen__isSmallInt((*l_g), (l_x).f_a);
     _t3 = (!_t2);
   }
   bool _t5 = _t3;
   if (!_t5) {
-    bool _t4 = sd_m_Gen__isSmallInt(l_g, (l_x).f_b);
+    bool _t4 = sd_m_Gen__isSmallInt((*l_g), (l_x).f_b);
     _t5 = (!_t4);
   }
   bool _t6 = _t5;
@@ -41004,24 +41393,251 @@ static sd_str sd_m_Gen__smallBinary(sd_S_Gen l_g, sd_int l_e, sd_list * l_vals) 
     return _t12;
   }
   if (((((((SD_BOX_GET(l_op, sd_E_Tok).tag == 39) || (SD_BOX_GET(l_op, sd_E_Tok).tag == 40)) || (SD_BOX_GET(l_op, sd_E_Tok).tag == 41)) || (SD_BOX_GET(l_op, sd_E_Tok).tag == 42)) || (SD_BOX_GET(l_op, sd_E_Tok).tag == 43)) || (SD_BOX_GET(l_op, sd_E_Tok).tag == 44))) {
-    bool _t13 = sd_m_Gen__isSmallInt(l_g, l_e);
+    bool _t13 = sd_m_Gen__isSmallInt((*l_g), l_e);
     if (_t13) {
-      L._t14 = sd_m_Tok__text(l_op);
-      sd_str _t15[] = {SD_STR_LIT("SD_INT_S(("), L.l_a, SD_STR_LIT(" "), L._t14, SD_STR_LIT(" "), L.l_b, SD_STR_LIT("))")};
-      sd_str _t16 = sd_str_concat_n(_t15, 7);
-      sd_str _t17 = _t16;
+      if (((SD_BOX_GET(l_op, sd_E_Tok).tag == 42) || (SD_BOX_GET(l_op, sd_E_Tok).tag == 43))) {
+        sd_str _t14 = sd_m_Gen__divNonNeg(l_g, l_e, L.l_a, L.l_b);
+        L.l_d = _t14;
+        if ((!sd_str_eq(L.l_d, SD_STR_LIT("")))) {
+          sd_str _t15[] = {SD_STR_LIT("SD_INT_S("), L.l_d, SD_STR_LIT(")")};
+          sd_str _t16 = sd_str_concat_n(_t15, 3);
+          sd_str _t17 = _t16;
+          SD_LF_LEAVE(L);
+          sd_str_release(L.l_d);
+          sd_str_release(L.l_b);
+          sd_str_release(L.l_a);
+          return _t17;
+        }
+        sd_str_release(L.l_d); L.l_d = NULL;
+      }
+      L._t18 = sd_m_Tok__text(l_op);
+      sd_str _t19[] = {SD_STR_LIT("SD_INT_S(("), L.l_a, SD_STR_LIT(" "), L._t18, SD_STR_LIT(" "), L.l_b, SD_STR_LIT("))")};
+      sd_str _t20 = sd_str_concat_n(_t19, 7);
+      sd_str _t21 = _t20;
       SD_LF_LEAVE(L);
-      sd_str_release(L._t14);
+      sd_str_release(L._t18);
       sd_str_release(L.l_b);
       sd_str_release(L.l_a);
-      return _t17;
+      return _t21;
     }
   }
-  sd_str _t18 = SD_STR_LIT("");
+  sd_str _t22 = SD_STR_LIT("");
   SD_LF_LEAVE(L);
   sd_str_release(L.l_b);
   sd_str_release(L.l_a);
-  return _t18;
+  return _t22;
+}
+
+typedef struct { sd_lframe h; sd_str l_uop; sd_str l_f; } sd_L_sd_m_Gen__divNonNeg;
+static void sd_lr_sd_m_Gen__divNonNeg(sd_lframe *p) {
+  sd_L_sd_m_Gen__divNonNeg *L = (sd_L_sd_m_Gen__divNonNeg *)p;
+  sd_str_release(L->l_uop);
+  sd_str_release(L->l_f);
+}
+static sd_str sd_m_Gen__divNonNeg(sd_S_Gen * l_g, sd_int l_e, sd_str l_a, sd_str l_b) {
+  sd_L_sd_m_Gen__divNonNeg L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_m_Gen__divNonNeg);
+  sd_S_Expr l_x = SD_LIST_GET(((((*l_g)).f_c).f_ast).f_exprs, sd_S_Expr, l_e);
+  sd_S_IntRange _t1 = sd_m_Gen__smallRange((*l_g), (l_x).f_a);
+  sd_S_IntRange l_ra = _t1;
+  sd_S_IntRange _t2 = sd_m_Gen__smallRange((*l_g), (l_x).f_b);
+  sd_S_IntRange l_rb = _t2;
+  bool _t3 = sd_f_isSmallRange(l_ra);
+  bool _t5 = (!_t3);
+  if (!_t5) {
+    bool _t4 = sd_f_isSmallRange(l_rb);
+    _t5 = (!_t4);
+  }
+  if (((_t5 || sd_int_lt((l_ra).f_lo, SD_INT(0))) || sd_int_le((l_rb).f_lo, SD_INT(0)))) {
+    sd_str _t6 = SD_STR_LIT("");
+    SD_LF_LEAVE(L);
+    sd_rl_S8IntRange(l_rb);
+    sd_rl_S8IntRange(l_ra);
+    return _t6;
+  }
+  bool l_div = (SD_BOX_GET((l_x).f_op, sd_E_Tok).tag == 42);
+  bool _t8 = (!sd_int_eq((l_rb).f_lo, (l_rb).f_hi));
+  if (!_t8) {
+    bool _t7 = sd_m_Gen__isSimpleSmall((*l_g), (l_x).f_b);
+    _t8 = (!_t7);
+  }
+  if (_t8) {
+    L.l_uop = SD_STR_LIT(" % ");
+    if (l_div) {
+      sd_str _t9 = SD_STR_LIT(" / ");
+      sd_str_release(L.l_uop);
+      L.l_uop = _t9;
+    }
+    sd_str _t10[] = {SD_STR_LIT("((int64_t)((uint64_t)("), l_a, SD_STR_LIT(")"), L.l_uop, SD_STR_LIT("(uint64_t)("), l_b, SD_STR_LIT(")))")};
+    sd_str _t11 = sd_str_concat_n(_t10, 7);
+    sd_str _t12 = _t11;
+    SD_LF_LEAVE(L);
+    sd_str_release(L.l_uop);
+    sd_rl_S8IntRange(l_rb);
+    sd_rl_S8IntRange(l_ra);
+    return _t12;
+  }
+  sd_int l_c = (l_rb).f_lo;
+  sd_int _t13 = sd_f_log2Exact(l_c);
+  sd_int l_k = _t13;
+  if (sd_int_ge(l_k, SD_INT(0))) {
+    if (l_div) {
+      sd_str_part _t14[] = {{SD_STR_LIT("((")}, {l_a}, {SD_STR_LIT(") >> ")}, {NULL, l_k}, {SD_STR_LIT(")")}};
+      sd_str _t15 = sd_str_concat_parts(_t14, 5);
+      sd_str _t16 = _t15;
+      SD_LF_LEAVE(L);
+      sd_int_release(l_k);
+      sd_rl_S8IntRange(l_rb);
+      sd_rl_S8IntRange(l_ra);
+      return _t16;
+    }
+    sd_int _t17 = sd_int_sub(l_c, SD_INT(1));
+    sd_str_part _t18[] = {{SD_STR_LIT("((")}, {l_a}, {SD_STR_LIT(") & ")}, {NULL, _t17}, {SD_STR_LIT(")")}};
+    sd_str _t19 = sd_str_concat_parts(_t18, 5);
+    sd_str _t20 = _t19;
+    SD_LF_LEAVE(L);
+    sd_int_release(_t17);
+    sd_int_release(l_k);
+    sd_rl_S8IntRange(l_rb);
+    sd_rl_S8IntRange(l_ra);
+    return _t20;
+  }
+  sd_S_MagicDiv _t21 = sd_f_magicDiv(l_c, (l_ra).f_hi);
+  sd_S_MagicDiv l_md = _t21;
+  sd_str _t22 = sd_c_divcHelpers();
+  if ((!sd_list_contains(((*l_g)).f_helpers, &_t22))) {
+    sd_str _t23 = sd_str_retain(sd_c_divcHelpers());
+    sd_list ** _t24 = (&(l_g)->f_helpers);
+    SD_LIST_PUSH(_t24, sd_str, _t23);
+  }
+  L.l_f = SD_STR_LIT("sd_modc_(");
+  if (l_div) {
+    sd_str _t25 = SD_STR_LIT("sd_divc_(");
+    sd_str_release(L.l_f);
+    L.l_f = _t25;
+  }
+  sd_str_part _t26[] = {{L.l_f}, {l_a}, {SD_STR_LIT(", ")}, {NULL, (l_md).f_m}, {SD_STR_LIT("ull, ")}, {NULL, (l_md).f_s}, {SD_STR_LIT(", ")}, {NULL, l_c}, {SD_STR_LIT(")")}};
+  sd_str _t27 = sd_str_concat_parts(_t26, 9);
+  sd_str _t28 = _t27;
+  SD_LF_LEAVE(L);
+  sd_str_release(L.l_f);
+  sd_rl_S8MagicDiv(l_md);
+  sd_int_release(l_k);
+  sd_rl_S8IntRange(l_rb);
+  sd_rl_S8IntRange(l_ra);
+  return _t28;
+}
+
+static sd_int sd_fg_log2Exact(sd_int l_c) {
+  sd_int l_k = SD_INT(0);
+  {
+    sd_int l_p = SD_INT(1);
+    for (;;) {
+      SD_PREEMPT();
+      if (!(sd_int_le(l_p, l_c))) break;
+      {
+        if (sd_int_eq(l_p, l_c)) {
+          sd_int _t2 = l_k;
+          sd_int_release(l_p);
+          return _t2;
+        }
+        { int64_t r_; if (SD_LIKELY((((l_k).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_k).w, SD_INT(1).w, &r_))) (l_k).w = r_; else { sd_int s_ = sd_int_add_slow((l_k), SD_INT(1)); sd_int_release((l_k)); (l_k) = s_; } }
+      }
+      _c1:;
+      sd_int _t3 = sd_int_mul(l_p, SD_INT(2));
+      sd_int_release(l_p);
+      l_p = _t3;
+    }
+    sd_int_release(l_p);
+  }
+  sd_int _t4 = SD_INT(-1);
+  sd_int_release(l_k);
+  return _t4;
+}
+
+static int64_t sd_fs_log2Exact(int64_t l_c) {
+  int64_t l_k = SD_INT(0).w;
+  {
+    int64_t l_p = SD_INT(1).w;
+    for (;;) {
+      SD_PREEMPT();
+      if (!(((l_p) <= (l_c)))) break;
+      {
+        if (((l_p) == (l_c))) {
+          return l_k;
+        }
+        if (__builtin_add_overflow(l_k, (int64_t)2, &l_k)) return 1;
+      }
+      _c1:;
+      int64_t _t2; if (__builtin_mul_overflow(l_p, (SD_INT(2).w) >> 1, &_t2)) return 1;
+      l_p = _t2;
+    }
+  }
+  return SD_INT(-1).w;
+  return 1;
+}
+
+static sd_int sd_f_log2Exact(sd_int l_c) {
+  if (SD_LIKELY(((l_c.w) & 1) == 0)) { int64_t r_ = sd_fs_log2Exact(l_c.w); if (SD_LIKELY((r_ & 1) == 0)) return (sd_int){r_}; }
+  return sd_fg_log2Exact(l_c);
+}
+
+static sd_S_MagicDiv sd_f_magicDiv(sd_int l_c, sd_int l_max) {
+  sd_int l_two64 = SD_INT(1);
+  {
+    int64_t l_i = ((int64_t)0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!((l_i < ((int64_t)64)))) break;
+      {
+        sd_int _t2 = sd_int_mul(l_two64, SD_INT(2));
+        sd_int_release(l_two64);
+        l_two64 = _t2;
+      }
+      _c1:;
+      l_i++;
+    }
+  }
+  sd_int l_p = sd_int_retain(l_two64);
+  sd_int l_s = SD_INT(0);
+  {
+    for (;;) {
+      SD_PREEMPT();
+      {
+        sd_int _t3 = sd_int_add(l_p, l_c);
+        sd_int _t4 = sd_int_sub(_t3, SD_INT(1));
+        sd_int _t5 = sd_int_div(_t4, l_c);
+        sd_int l_m = _t5;
+        sd_int_release(_t4);
+        sd_int_release(_t3);
+        bool _t9 = sd_int_lt(l_m, l_two64);
+        if (_t9) {
+          sd_int _t6 = sd_int_mul(l_m, l_c);
+          sd_int _t7 = sd_int_sub(_t6, l_p);
+          sd_int _t8 = sd_int_mul(_t7, l_max);
+          _t9 = sd_int_lt(_t8, l_p);
+          sd_int_release(_t8);
+          sd_int_release(_t7);
+          sd_int_release(_t6);
+        }
+        if (_t9) {
+          sd_S_MagicDiv _t10 = (sd_S_MagicDiv){.f_m = sd_int_retain(l_m), .f_s = sd_int_retain(l_s)};
+          sd_S_MagicDiv _t11 = _t10;
+          sd_int_release(l_m);
+          sd_int_release(l_s);
+          sd_int_release(l_p);
+          sd_int_release(l_two64);
+          return _t11;
+        }
+        sd_int _t12 = sd_int_mul(l_p, SD_INT(2));
+        sd_int_release(l_p);
+        l_p = _t12;
+        { int64_t r_; if (SD_LIKELY((((l_s).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_s).w, SD_INT(1).w, &r_))) (l_s).w = r_; else { sd_int s_ = sd_int_add_slow((l_s), SD_INT(1)); sd_int_release((l_s)); (l_s) = s_; } }
+        sd_int_release(l_m);
+      }
+    }
+  }
+  sd_crash("internal error: magicDiv reached its end without returning");
 }
 
 static bool sd_m_Gen__isSimpleSmall(sd_S_Gen l_g, sd_int l_e) {
@@ -44934,12 +45550,13 @@ static void sd_m_Gen__genIf(sd_S_Gen * l_g, sd_S_Stmt l_st) {
   SD_LF_LEAVE(L);
 }
 
-typedef struct { sd_lframe h; sd_list * l_acc; sd_list * _t10; sd_str _t14; } sd_L_sd_m_Gen__genFor;
+typedef struct { sd_lframe h; sd_list * l_acc; sd_list * _t10; sd_list * _t11; sd_str _t15; } sd_L_sd_m_Gen__genFor;
 static void sd_lr_sd_m_Gen__genFor(sd_lframe *p) {
   sd_L_sd_m_Gen__genFor *L = (sd_L_sd_m_Gen__genFor *)p;
   sd_list_release(L->l_acc);
   sd_list_release(L->_t10);
-  sd_str_release(L->_t14);
+  sd_list_release(L->_t11);
+  sd_str_release(L->_t15);
 }
 static void sd_m_Gen__genFor(sd_S_Gen * l_g, sd_S_Stmt l_st) {
   sd_L_sd_m_Gen__genFor L = {{0}};
@@ -44980,23 +45597,25 @@ static void sd_m_Gen__genFor(sd_S_Gen * l_g, sd_S_Stmt l_st) {
     }
   }
   L._t10 = sd_list_new(&sd_type_int, 0);
-  sd_int _t11 = SD_INT(-1);
-  bool _t12 = sd_int_ge(l_done, SD_INT(0));
+  L._t11 = sd_list_new(&sd_type_int, 0);
+  sd_int _t12 = SD_INT(-1);
+  bool _t13 = sd_int_ge(l_done, SD_INT(0));
   SD_PREEMPT();
-  sd_m_Gen__genLoopCopy(l_g, l_st, l_label, L._t10, _t11, _t12);
+  sd_m_Gen__genLoopCopy(l_g, l_st, l_label, L._t10, L._t11, _t12, _t13);
+  sd_list_release(L._t11); L._t11 = NULL;
   sd_list_release(L._t10); L._t10 = NULL;
   if (sd_int_ge(l_done, SD_INT(0))) {
-    sd_str_part _t13[] = {{SD_STR_LIT("_d")}, {NULL, l_done}, {SD_STR_LIT(":;")}};
-    L._t14 = sd_str_concat_parts(_t13, 3);
-    sd_m_Gen__emit(l_g, L._t14);
-    sd_str_release(L._t14); L._t14 = NULL;
+    sd_str_part _t14[] = {{SD_STR_LIT("_d")}, {NULL, l_done}, {SD_STR_LIT(":;")}};
+    L._t15 = sd_str_concat_parts(_t14, 3);
+    sd_m_Gen__emit(l_g, L._t15);
+    sd_str_release(L._t15); L._t15 = NULL;
   }
-  bool _t15 = true;
-  sd_m_Gen__popScope(l_g, _t15);
-  sd_int *_t16 = (&(l_g)->f_indent);
-  { int64_t r_; if (SD_LIKELY((((*_t16).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_sub_overflow((*_t16).w, SD_INT(1).w, &r_))) (*_t16).w = r_; else { sd_int s_ = sd_int_sub_slow((*_t16), SD_INT(1)); sd_int_release((*_t16)); (*_t16) = s_; } }
-  sd_str _t17 = SD_STR_LIT("}");
-  sd_m_Gen__emit(l_g, _t17);
+  bool _t16 = true;
+  sd_m_Gen__popScope(l_g, _t16);
+  sd_int *_t17 = (&(l_g)->f_indent);
+  { int64_t r_; if (SD_LIKELY((((*_t17).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_sub_overflow((*_t17).w, SD_INT(1).w, &r_))) (*_t17).w = r_; else { sd_int s_ = sd_int_sub_slow((*_t17), SD_INT(1)); sd_int_release((*_t17)); (*_t17) = s_; } }
+  sd_str _t18 = SD_STR_LIT("}");
+  sd_m_Gen__emit(l_g, _t18);
   sd_int_release(l_label);
   sd_int_release(l_done);
   sd_list_release(L.l_acc); L.l_acc = NULL;
@@ -45013,7 +45632,7 @@ static void sd_lr_sd_m_Gen__genLoopCopy(sd_lframe *p) {
   sd_str_release(L->_t17);
   sd_str_release(L->_t20);
 }
-static void sd_m_Gen__genLoopCopy(sd_S_Gen * l_g, sd_S_Stmt l_st, sd_int l_label, sd_list * l_acc, sd_int l_accTo, bool l_spills) {
+static void sd_m_Gen__genLoopCopy(sd_S_Gen * l_g, sd_S_Stmt l_st, sd_int l_label, sd_list * l_acc, sd_list * l_bounded, sd_int l_accTo, bool l_spills) {
   sd_L_sd_m_Gen__genLoopCopy L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__genLoopCopy);
   sd_str _t1 = SD_STR_LIT("for (;;) {");
@@ -45036,7 +45655,7 @@ static void sd_m_Gen__genLoopCopy(sd_S_Gen * l_g, sd_S_Stmt l_st, sd_int l_label
     sd_str_release(L._t7); L._t7 = NULL;
     sd_str_release(L.l_c); L.l_c = NULL;
   }
-  sd_S_LoopCtx _t8 = (sd_S_LoopCtx){.f_mark = sd_list_len(((*l_g)).f_slots), .f_label = sd_int_retain(l_label), .f_acc = sd_list_retain(l_acc), .f_accTo = sd_int_retain(l_accTo)};
+  sd_S_LoopCtx _t8 = (sd_S_LoopCtx){.f_mark = sd_list_len(((*l_g)).f_slots), .f_label = sd_int_retain(l_label), .f_acc = sd_list_retain(l_acc), .f_bounded = sd_list_retain(l_bounded), .f_accTo = sd_int_retain(l_accTo)};
   sd_list ** _t9 = (&(l_g)->f_loops);
   SD_LIST_PUSH(_t9, sd_S_LoopCtx, _t8);
   sd_str _t10 = SD_STR_LIT("{");
@@ -47471,7 +48090,7 @@ static void sd_m_Lexer__lexNumber(sd_S_Lexer * l_lx) {
     sd_int l_digits = SD_INT(0);
     {
       if (SD_LIKELY(((l_digits.w) & 1) == 0)) {
-        int64_t r_digits_3357 = SD_SMALL(l_digits);
+        int64_t r_digits_3401 = SD_SMALL(l_digits);
         for (;;) {
           SD_PREEMPT();
           bool _t12 = sd_int_lt(((*l_lx)).f_i, SD_INT_S(l_n));
@@ -47484,8 +48103,8 @@ static void sd_m_Lexer__lexNumber(sd_S_Lexer * l_lx) {
           {
             sd_int *_t13 = (&(l_lx)->f_i);
             { int64_t r_; if (SD_LIKELY((((*_t13).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((*_t13).w, SD_INT(1).w, &r_))) (*_t13).w = r_; else { sd_int s_ = sd_int_add_slow((*_t13), SD_INT(1)); sd_int_release((*_t13)); (*_t13) = s_; } }
-            if (SD_UNLIKELY(__builtin_add_overflow(r_digits_3357, ((int64_t)1), &r_digits_3357))) {
-              sd_int _t14 = sd_int_from_i64((int64_t)((uint64_t)r_digits_3357 - (uint64_t)((int64_t)1)));
+            if (SD_UNLIKELY(__builtin_add_overflow(r_digits_3401, ((int64_t)1), &r_digits_3401))) {
+              sd_int _t14 = sd_int_from_i64((int64_t)((uint64_t)r_digits_3401 - (uint64_t)((int64_t)1)));
               l_digits = sd_int_add(_t14, SD_INT_S(((int64_t)1)));
               sd_int_release(_t14);
               goto _c9;
@@ -47493,7 +48112,7 @@ static void sd_m_Lexer__lexNumber(sd_S_Lexer * l_lx) {
           }
           _c10:;
         }
-        l_digits = sd_int_from_i64(r_digits_3357);
+        l_digits = sd_int_from_i64(r_digits_3401);
         goto _d8;
       }
       for (;;) {
@@ -48081,8 +48700,8 @@ static sd_str sd_f_byteHex(uint8_t l_c) {
   SD_LF_ENTER(L, sd_lr_sd_f_byteHex);
   L.l_digits = SD_STR_LIT("0123456789abcdef");
   int64_t l_v = SD_SMALL(sd_int_retain(sd_byte_to_int(l_c)));
-  L._t1 = sd_str_slice(L.l_digits, SD_INT_S((l_v / ((int64_t)16))), SD_INT_S(((l_v / ((int64_t)16)) + ((int64_t)1))));
-  L._t2 = sd_str_slice(L.l_digits, SD_INT_S((l_v % ((int64_t)16))), SD_INT_S(((l_v % ((int64_t)16)) + ((int64_t)1))));
+  L._t1 = sd_str_slice(L.l_digits, SD_INT_S(((l_v) >> 4)), SD_INT_S((((l_v) >> 4) + ((int64_t)1))));
+  L._t2 = sd_str_slice(L.l_digits, SD_INT_S(((l_v) & 15)), SD_INT_S((((l_v) & 15) + ((int64_t)1))));
   sd_str _t3[] = {SD_STR_LIT("0x"), L._t1, L._t2};
   sd_str _t4 = sd_str_concat_n(_t3, 3);
   sd_str _t5 = _t4;
@@ -50925,7 +51544,7 @@ static sd_T_T2ie sd_f_testCommand(sd_str l_root, sd_list * l_args) {
         {
           int64_t l_j = ((int64_t)0);
           if (SD_LIKELY(((l_failed.w) & 1) == 0)) {
-            int64_t r_failed_3623 = SD_SMALL(l_failed);
+            int64_t r_failed_3667 = SD_SMALL(l_failed);
             for (;;) {
               SD_PREEMPT();
               if (!((l_j < SD_SMALL(sd_list_len(L.l_pkgs))))) break;
@@ -50981,22 +51600,22 @@ static sd_T_T2ie sd_f_testCommand(sd_str l_root, sd_list * l_args) {
                 sd_int _t52 = SD_LIST_GET(L.l_counts, sd_int, SD_INT(0));
                 { int64_t r_; if (SD_LIKELY((((l_passed).w | _t52.w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_passed).w, _t52.w, &r_))) (l_passed).w = r_; else { sd_int s_ = sd_int_add_slow((l_passed), _t52); sd_int_release((l_passed)); (l_passed) = s_; } }
                 sd_int _t53 = SD_LIST_GET(L.l_counts, sd_int, SD_INT(1));
-                int64_t _t54; if (SD_UNLIKELY((_t53.w & 1) != 0 || __builtin_add_overflow(r_failed_3623, _t53.w >> 1, &_t54))) {
-                  sd_int _t55 = sd_int_from_i64(r_failed_3623);
+                int64_t _t54; if (SD_UNLIKELY((_t53.w & 1) != 0 || __builtin_add_overflow(r_failed_3667, _t53.w >> 1, &_t54))) {
+                  sd_int _t55 = sd_int_from_i64(r_failed_3667);
                   l_failed = sd_int_add(_t55, _t53);
                   sd_int_release(_t55);
                   sd_list_release(L.l_counts); L.l_counts = NULL;
                   sd_str_release(L.l_work); L.l_work = NULL;
                   goto _c42;
                 }
-                r_failed_3623 = _t54;
+                r_failed_3667 = _t54;
                 sd_list_release(L.l_counts); L.l_counts = NULL;
                 sd_str_release(L.l_work); L.l_work = NULL;
               }
               _c43:;
               l_j++;
             }
-            l_failed = sd_int_from_i64(r_failed_3623);
+            l_failed = sd_int_from_i64(r_failed_3667);
             goto _d41;
           }
           for (;;) {
@@ -56599,7 +57218,7 @@ static sd_T_T2se sd_f_encoding_hexDecode(sd_str l_text) {
       l_i++;
     }
   }
-  if (((SD_SMALL(sd_str_len(l_text)) % ((int64_t)2)) != ((int64_t)0))) {
+  if ((((SD_SMALL(sd_str_len(l_text))) & 1) != ((int64_t)0))) {
     L._t8 = sd_f_encoding_encodingError(SD_STR_LIT("hexDecode"), SD_INT_S((SD_SMALL(sd_str_len(l_text)) - ((int64_t)1))), SD_STR_LIT("odd number of hex digits"));
     if (sd_err_is_null(L._t8)) sd_crash("%s", "hexDecode returned null as result 1 without an error");
     SD_LF_LEAVE(L);
@@ -57020,7 +57639,7 @@ static sd_T_T2se sd_f_encoding_unbase64(sd_str l_text, bool l_url, sd_str l_fnNa
     sd_int_release(l_i);
   }
   if (sd_int_gt(l_padding, SD_INT(0))) {
-    bool _t13 = (((l_n % ((int64_t)4)) != ((int64_t)0)) || sd_int_gt(l_padding, SD_INT(2)));
+    bool _t13 = ((((l_n) & 3) != ((int64_t)0)) || sd_int_gt(l_padding, SD_INT(2)));
     if (!_t13) {
       sd_int _t11 = sd_int_mod(l_end, SD_INT(4));
       sd_int _t12 = sd_int_add(_t11, l_padding);

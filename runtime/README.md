@@ -571,15 +571,33 @@ sd_err l_err;
   goroutine. `sd_group_wait` returns the first error (`crash: <message>` for a
   crash), or null.
 - **Finished goroutines are freed while the group runs.** A goroutine that
-  ends moves itself to its group's dead list (its last use of its task);
-  the next `sd_spawn` in the group (or `sd_group_wait`) frees those tasks.
-  A server's group, which spawns a goroutine per connection for as long as
-  it runs, so holds only the connections that are open.
-- **Starting a goroutine** takes a finished goroutine's structure and
-  stack from the current processor's free list (or makes new ones), copies
-  the arguments into it (inline when they take 64 bytes or less), and puts
-  it in the processor's `runnext` slot (below): about 1 us, with no system
-  call. State that belongs to a goroutine lives in its task or in
+  ends leaves its group and goes back to the free list of the processor
+  it ended on (on that worker's scheduler stack, as Go's `goexit0`), its
+  stack to that processor's free stacks. A server's group, which spawns a
+  goroutine per connection for as long as it runs, so holds only the
+  connections that are open.
+- **Group membership takes no lock.** Only the goroutine running the group
+  block spawns into it (the compiler allows `spawn` nowhere else; C callers
+  of `sd_spawn` must keep to it). The group's running goroutines sit in
+  slots, in chunks of 63 that never move while the group lives: the
+  spawner fills an empty slot (scanning from where it last filled one, or
+  adding a chunk when 63 in a row are full), a goroutine that ends empties
+  its own, and the count of running goroutines, with a bit for the owner
+  waiting in `sd_group_wait`, is one atomic word. Neither touches another
+  goroutine's memory. The group's lock serialises cancellations and guards
+  the first error: a cancellation sets `failed`, then pins each filled
+  slot (its low bit) while it cancels that goroutine, so that it cannot
+  end and be reused meanwhile (one that ends waits for the pin to go). A
+  spawn fills its slot and then reads `failed` (both sequentially
+  consistent): either the cancellation sees the slot, or the spawn sees
+  `failed` and takes the slot back without starting the goroutine.
+- **Starting a goroutine** takes a finished goroutine's structure from the
+  current processor's free list (or makes one), copies the arguments into
+  it (inline when they take 64 bytes or less), and puts it in the
+  processor's `runnext` slot (below), with no lock and no system call. The
+  goroutine gets a stack, and its first context, when it first runs, from
+  the free stacks of the processor that runs it (Stacks, below). State
+  that belongs to a goroutine lives in its task or in
   goroutine-local storage (`sd_goroutine_local`), which is freed when it
   ends, after its `sd_goroutine_atexit` functions (the generated constant
   caches release their values with one). Nothing of a goroutine stays on a
@@ -614,6 +632,16 @@ sd_err l_err;
   runner names itself and each test's goroutine (`test "<description>"`).
   Every goroutine is parked when this runs, so the tasks are read without
   locks.
+
+  The check is a count, `sd_running`: goroutines not parked on a channel
+  or a group (waits in the OS count), plus pending timers. Increments are
+  immediate; a goroutine that ends or parks on a processor is counted off
+  when that processor goes idle (`p->ndec`, flushed in
+  `pidle_put_locked`), not one at a time, so that a spawn on one CPU and
+  the end on another do not each move the count's cache line. The count
+  is so never below the truth, and reaches zero only when every goroutine
+  is blocked; then every processor goes idle, and the last to flush
+  reports the deadlock.
 - Crashes in the main goroutine (including in a group block) end the program
   as in section 9, after stopping and waiting for its groups.
 
@@ -630,8 +658,14 @@ most that many run at once.
   used only as deep as it grows, with 64 KB of inaccessible memory below it
   (a guard: a stack overflow faults, and the fault handler crashes the
   goroutine, section 9). The main goroutine's stack is the stack limit
-  (`ulimit -s`, 8 MB by default), as a main thread's would be. A finished
-  goroutine keeps its stack for the next one; a stack found to have been
+  (`ulimit -s`, 8 MB by default), as a main thread's would be. Stacks are
+  pooled apart from goroutines, as in Go: each processor keeps up to 32
+  free stacks (newest last; half of them move to a shared pool when it
+  has more), a goroutine takes one from the processor that first runs it
+  and gives it back to the one it ends on. A processor that runs
+  goroutines one after another so reuses the same stack, whose top is in
+  its cache and TLB; a stack per goroutine meant a cold 8 MB mapping at
+  each start (a page walk and cache misses). A stack found to have been
   used deeper than 64 KB gives the memory below that back (`madvise`) when
   it is pooled. Each guarded stack costs two kernel memory maps, and Linux
   allows 65,530 by default (`vm.max_map_count`): beyond a budget derived
@@ -646,6 +680,17 @@ most that many run at once.
   stack (the scheduler context, "g0"), which decides what runs next. The
   sanitizers are told about every switch (`__sanitizer_start_switch_fiber`
   and `__tsan_switch_to_fiber`).
+- **Cache lines.** A goroutine is often spawned on one CPU, run on another
+  and its structure reused by a third, so every cache line of it that is
+  written travels. `sd_task` is laid out by line: `sd_spawn` writes one
+  (and the arguments' line), the running goroutine two more, and the
+  fields of waits, buffers and locks are only read by `task_reset` when
+  unused, so they stay shared in every cache. The shared pools of
+  goroutines and stacks are arrays (of batches, for goroutines), so moving
+  goroutines between a processor and them touches none. A channel's
+  reference count, changed by every spawn that passes the channel and the
+  end of each such goroutine, has a cache line of its own, away from the
+  lock.
 - **Run queues.** Each P has a queue of 256 runnable goroutines that only
   its owner adds to, plus a `runnext` slot; there is also a global queue
   (under a lock). A goroutine readied by another (a channel hand-off, a
@@ -1326,6 +1371,15 @@ passed 3 times each with everything (the runtime included) built under
 reports, and the runtime's tests passed on aarch64 under qemu (plain
 build, both context-switch implementations: the assembly and
 `SD_CTX_UCONTEXT`).
+
+Soak of the spawn changes (groups without a lock, stacks per processor,
+the deferred running count; same machine): the 38 programs 30 times each
+per setting (`SEED_PROCS=1`, 2 and 4: 3,420 runs, twice), `test_conc` and
+`test_block` 30 times each per setting (180 runs), and `seed test lib/net
+lib/http lib/time` (58 tests) 30 times per setting (90 runs). No failure.
+`test_conc`, `test_block`, `test_pkg`, `test_str`, the example and the
+`spawn` benchmark also passed on aarch64 under qemu, with both context
+switches.
 
 Performance on an Apple M-series laptop (`-O2`, `run.sh bench`), with
 goroutines as threads (before the M:N scheduler; its numbers on Linux are
