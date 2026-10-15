@@ -742,12 +742,15 @@ Any other response is a struct literal: `http.Response{status: 302, headers: map
 |---|---|
 | `http.get(string url) (Response, error)` | Sends a `GET` with no extra headers. Exactly `http.send(Request{method: "GET", url: url, headers: map[string]string{}, body: ""})`. |
 | `http.send(Request req) (Response, error)` | Sends any request and returns the response. |
+| `http.getWithin(string url, int timeout) (Response, error)` | `http.get` with a time limit on the whole exchange: `http.sendWithin(Request{method: "GET", url: url, headers: map[string]string{}, body: ""}, timeout)`, with errors that start with `http.getWithin`. |
+| `http.sendWithin(Request req, int timeout) (Response, error)` | `http.send` with a time limit on the whole exchange. |
 
 - The URL must be `http://host[:port][/path][?query]`. Anything else is an error, including `https://`: `http.get: https://example.com/: https is not supported`.
 - The library adds `host`, `content-length` (when the body is not empty, or the method is `POST`, `PUT` or `PATCH`) and `connection: close`. Each request uses a new connection.
 - **Any response is a success**, including `404` and `500`: check `resp.status`. The error is set only when no response arrived (connection refused, timeout, malformed response).
 - **Redirects are not followed**; a `3xx` response is returned as it is, with its `location` header.
-- The client gives up with a `timeout` error when connecting, or any single read or write, makes no progress for 30 seconds. To wait less, run the request in a goroutine and `select` on its result channel and `time.after`, in a second goroutine of the same group that fails when the time is up, so that the group stops the request (a `select` in the group block itself would see the timeout, but the group would still wait for the request; see the example below).
+- `get` and `send` give up with a `timeout` error when connecting, or any single read or write, makes no progress for 30 seconds. `getWithin` and `sendWithin` instead give the whole exchange, from connecting to the last byte of the response, `timeout` nanoseconds (`2 * time.second`), however the time is spent (a server that trickles its answer a byte at a time is cut off too); when it runs out, the error is `http.getWithin: http://example.com/: timeout after 2 s`. A `timeout` that is not positive crashes.
+- A request waiting in any of the four functions is also stopped when its group is: to give up on something else than time (a user's cancel, the first of several answers), run the request in a goroutine and let another goroutine of the same group fail, as in [the guide's chapter 10](guide/10-concurrency.md).
 - Responses with `transfer-encoding: chunked` are decoded. Bodies larger than 64 MiB are an error. Compressed responses are never requested.
 
 ```
@@ -769,39 +772,10 @@ fn main([]string args) error {
 }
 ```
 
-A request with a shorter time limit. `deadline` fails when the time is up, which stops the group and so the `http.get` waiting in `fetch`; when `fetch` fails first, its error is the group's:
+A request with a time limit:
 
 ```
-fn fetch(string url, chan http.Response out) error {
-    out.send(try http.get(url))
-    return null
-}
-
-fn deadline(chan http.Response answer, chan http.Response result, int d) error {
-    select {
-    case http.Response? resp = answer.receive():
-        if (resp != null) {
-            result.send(resp)
-        }
-        return null
-    case time.after(d).receive():
-        return errors.new("no response within " + (d / time.millisecond).string() + " ms")
-    }
-}
-
-fn getWithin(string url, int d) (http.Response, error) {
-    chan http.Response answer = chan http.Response(1)
-    chan http.Response result = chan http.Response(1)
-    try group {
-        spawn fetch(url, answer)
-        spawn deadline(answer, result, d)
-    }
-    http.Response? resp = result.receive()
-    if (resp == null) {
-        return null, errors.new("no response")
-    }
-    return resp, null
-}
+http.Response resp = try http.getWithin("http://localhost:8080/health", 2 * time.second)
 ```
 
 ```
@@ -842,7 +816,7 @@ fmt, io, os, fs, net, crypto, path      (no imports)
 errors, strings, math, rand             → os (for os.crash)
 encoding                                → errors
 time, json                              → errors, os
-http                                    → net, json, encoding, time, fmt, errors
+http                                    → net, json, encoding, time, fmt, errors, os
 ```
 
 ### Native functions

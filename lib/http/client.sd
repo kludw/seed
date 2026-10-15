@@ -1,18 +1,21 @@
 package http
 
-// The client: get and send (docs/stdlib.md, "Client"). Each request uses a
-// new connection ("connection: close"); the response is read with wire.sd.
+// The client: get and send, getWithin and sendWithin (docs/stdlib.md,
+// "Client"). Each request uses a new connection ("connection: close"); the
+// response is read with wire.sd.
 
 import "errors"
 import "net"
+import "os"
+import "time"
 
-// The client gives up when connecting, or a single read or write, makes no
-// progress for this long (30 * time.second).
+// get and send give up when connecting, or a single read or write, makes
+// no progress for this long (30 * time.second).
 const int clientTimeout = 30000000000
 
 // Sends a GET with no extra headers. Errors start with "http.get".
 pub fn get(string url) (Response, error) {
-    return httpSend("http.get", Request{method: "GET", url: url, headers: map[string]string{}, body: ""})
+    return httpSend("http.get", Request{method: "GET", url: url, headers: map[string]string{}, body: ""}, 0)
 }
 
 // Sends any request and returns the response. Any response is a success,
@@ -20,36 +23,103 @@ pub fn get(string url) (Response, error) {
 // "http.send: http://localhost:1/: connection refused". Redirects are not
 // followed.
 pub fn send(Request req) (Response, error) {
-    return httpSend("http.send", req)
+    return httpSend("http.send", req, 0)
 }
 
-fn httpSend(string fnName, Request req) (Response, error) {
+// get with a time limit: like sendWithin for a GET with no extra headers.
+// Errors start with "http.getWithin".
+pub fn getWithin(string url, int timeout) (Response, error) {
+    httpCheckTimeout("http.getWithin", timeout)
+    return httpSend("http.getWithin", Request{method: "GET", url: url, headers: map[string]string{}, body: ""}, timeout)
+}
+
+// send with a time limit: timeout (nanoseconds) limits the whole exchange,
+// from connecting to the last byte of the response, instead of the 30
+// seconds without progress of send. When it runs out, the error is
+// "http.sendWithin: <url>: timeout after <d>" (d in ms or s). Crashes if
+// timeout is not positive.
+pub fn sendWithin(Request req, int timeout) (Response, error) {
+    httpCheckTimeout("http.sendWithin", timeout)
+    return httpSend("http.sendWithin", req, timeout)
+}
+
+fn httpCheckTimeout(string fnName, int timeout) {
+    if (timeout <= 0) {
+        os.crash(fnName + ": timeout (" + timeout.string() + ") must be positive")
+    }
+}
+
+// "250 ms", "2 s", "1.5 s": a timeout for messages.
+fn httpDuration(int d) string {
+    if (d < time.second) {
+        int ms = d / time.millisecond
+        if (ms == 0) {
+            return d.string() + " ns"
+        }
+        return ms.string() + " ms"
+    }
+    int tenths = d / (time.second / 10)
+    if (tenths % 10 == 0) {
+        return (tenths / 10).string() + " s"
+    }
+    return (tenths / 10).string() + "." + (tenths % 10).string() + " s"
+}
+
+// Sends the request. limit is 0 for get and send (each step may take
+// clientTimeout), or the time the whole exchange may take: then the dial
+// gets what is left of it, and so does each read and write.
+fn httpSend(string fnName, Request req, int limit) (Response, error) {
     HttpTarget t = try parseUrl(fnName, req.url)
     string data = try requestBytes(fnName, req, t)
     string prefix = fnName + ": " + req.url + ": "
-    net.Conn c, error err = net.dial(t.address, clientTimeout)
+    string late = prefix + "timeout after " + httpDuration(limit)
+    int deadline = 0
+    int step = clientTimeout
+    if (limit > 0) {
+        deadline = time.monotonic() + limit
+        step = limit
+    }
+    net.Conn c, error err = net.dial(t.address, step)
     if (err != null) {
+        if (limit > 0 && err.message().endsWith(": timeout")) {
+            return null, errors.new(late)
+        }
         return null, errors.new(prefix + httpReason(err.message(), t.address))
     }
     defer c.close()
-    c.setTimeout(clientTimeout)
     string peer = c.remoteAddr()
+    int left = httpLeft(deadline, step)
+    if (left <= 0) {
+        return null, errors.new(late)
+    }
+    c.setTimeout(left)
     error werr = c.write(data)
     if (werr != null) {
+        if (limit > 0 && werr.message().endsWith(": timeout")) {
+            return null, errors.new(late)
+        }
         return null, errors.new(prefix + httpReason(werr.message(), peer))
     }
     MessageReader r = newMessageReader(maxHeadBytes, maxResponseBody)
     bool eof = false
     for (;;) {
-        ResponseParse step = r.nextResponse(req.method, eof)
-        switch (step) {
+        ResponseParse parsed = r.nextResponse(req.method, eof)
+        switch (parsed) {
         case ResponseParse.Done(Response resp):
             return resp, null
         case ResponseParse.Fail(string reason):
             return null, errors.new(prefix + reason)
         case ResponseParse.NeedMore:
+            int wait = httpLeft(deadline, step)
+            if (wait <= 0) {
+                return null, errors.new(late)
+            }
+            c.setTimeout(wait)
             string? more, error rerr = c.read(65536)
             if (rerr != null) {
+                if (limit > 0 && rerr.message().endsWith(": timeout")) {
+                    return null, errors.new(late)
+                }
                 return null, errors.new(prefix + httpReason(rerr.message(), peer))
             }
             if (more == null) {
@@ -59,4 +129,13 @@ fn httpSend(string fnName, Request req) (Response, error) {
             }
         }
     }
+}
+
+// The time a step may take: step without a deadline, otherwise what is
+// left until the deadline (0 or less once it has passed).
+fn httpLeft(int deadline, int step) int {
+    if (deadline == 0) {
+        return step
+    }
+    return deadline - time.monotonic()
 }

@@ -49,7 +49,7 @@ test "checkAll reports status, timeout and sorts by url" {
 test "a refused connection is a failure, not an error" {
     Outcome o = checkOne("http://127.0.0.1:1/", time.second)
     assert(!o.ok())
-    assert(o.string() == "error: http.get: http://127.0.0.1:1/: connection refused")
+    assert(o.string() == "error: http.getWithin: http://127.0.0.1:1/: connection refused")
 }
 
 test "outcome text" {
