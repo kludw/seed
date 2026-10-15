@@ -1,0 +1,14 @@
+// A negative shift count reports the shift's position.
+package main
+
+import "fmt"
+
+fn shift(int a, int n) int {
+    return a << n
+}
+
+fn main([]string args) error {
+    fmt.println(shift(1, 3).string())
+    fmt.println(shift(1, -args.len()).string())
+    return null
+}

@@ -144,7 +144,7 @@ A goroutine fails when it returns an error or crashes. Then:
 
 - the other goroutines in its group are **stopped**;
 - each stopped goroutine's deferred calls still run;
-- the group returns the **first** error. A crash becomes an error too, so a bug in one goroutine doesn't take down the program; the group reports it.
+- the group returns the **first** error. A crash becomes an error too, so a bug in one goroutine doesn't take down the program; the group reports it. Its message is `crash: <message>`, and it carries the crash's trace: when `main` returns it, the program prints the trace below the error, ending with where the goroutine was spawned ([chapter 14](14-crashes-and-debugging.md)).
 
 ```seed
 // When one goroutine fails, the group stops the others and returns the error.

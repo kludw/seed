@@ -1,0 +1,2 @@
+crash: index out of range: 5 with length 2
+    at letter (tests/full/trace_string_index.sd:7:12)

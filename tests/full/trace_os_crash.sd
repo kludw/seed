@@ -1,0 +1,18 @@
+// os.crash reports the position of its call, and the callers.
+package main
+
+import "fmt"
+import "os"
+
+fn check(int n) int {
+    if (n < 0) {
+        os.crash("check: n (" + n.string() + ") must not be negative")
+    }
+    return n
+}
+
+fn main([]string args) error {
+    fmt.println(check(1).string())
+    fmt.println(check(-args.len()).string())
+    return null
+}

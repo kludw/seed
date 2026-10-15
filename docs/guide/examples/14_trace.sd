@@ -1,0 +1,24 @@
+package main
+
+import "fmt"
+
+fn average([]int xs) int {
+    int sum = 0
+    for (int i = 0; i < xs.len(); i++) {
+        sum = sum + xs[i]
+    }
+    return sum / xs.len()
+}
+
+fn report(string name, []int scores) error {
+    fmt.println(name + ": " + average(scores).string())
+    return null
+}
+
+fn main([]string args) error {
+    try group {
+        spawn report("ada", []int{90, 85})
+        spawn report("bob", []int{})
+    }
+    return null
+}

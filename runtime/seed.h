@@ -69,6 +69,11 @@ SD_NOINLINE __attribute__((unused)) static int *sd_errno_loc_(void) {
 #else
 #define SD_NO_TCE
 #endif
+/* On the runtime functions that generated code calls and that may crash:
+ * never inlined into a Seed function (when the runtime is in the same C
+ * file, as with seed c), so that a crash in them has the return address of
+ * a call on a marked line (crash traces, below). */
+#define SD_CRASHES __attribute__((noinline))
 #define SD_LIKELY(x) __builtin_expect(!!(x), 1)
 #define SD_UNLIKELY(x) __builtin_expect(!!(x), 0)
 #define SD_PRINTF(a, b) __attribute__((format(printf, a, b)))
@@ -203,6 +208,59 @@ SD_NORETURN void sd_crash_null(void); /* a T? that the compiler proved non-null 
 /* Crashes with fmt, whose one %s is the decimal text of v (for natives:
  * nothing is leaked by the crash). */
 SD_NORETURN void sd_crash_int(const char *fmt, sd_int v);
+
+/* ---- where a crash happened (runtime/README.md, "Crash traces") ----
+ * A crash prints where it happened in the Seed source and the Seed call
+ * stack. Nothing is recorded while the program runs: the trace is rebuilt
+ * from the return addresses on the stack when it crashes. Every C unit the
+ * compiler generates has a table of its *sites* (a function and a position
+ * in the source), and puts SD_SA(table, index) after each C line that calls
+ * something that may crash: an assembler label, which emits no
+ * instruction, and a record {address, site} in the section sd_sites
+ * (__DATA,__sd_sites on macOS). The first record after a return address,
+ * in the same function, is the site of that call. SD_SAV(v, table, index)
+ * is the same mark after a call whose result is v, as an asm that is not
+ * volatile (it passes v through), so that a function stays pure for the C
+ * compiler (the call of the fast version of a pure int function). The checks the C compiler inlines
+ * and moves out of line (an index, a division) pass their site to the crash
+ * itself instead (the *_at functions), which costs nothing until they
+ * fail. */
+typedef struct sd_site {
+  const char *fn;    /* the Seed function: get, Cart.add, cart.newCart, test "name" */
+  const char *file;  /* the source file, as given to the compiler */
+  int32_t line, col;
+} sd_site;
+#if (defined(__x86_64__) || defined(__aarch64__)) && (defined(__ELF__) || defined(__APPLE__)) && \
+    !defined(SD_NO_SITES)
+#define SD_SITES 1
+#if defined(__APPLE__)
+#define SD_SITES_SECTION "__DATA,__sd_sites"
+#else
+#define SD_SITES_SECTION "sd_sites,\"aw\""
+#endif
+/* An asm statement counts as one instruction in the inliner's estimates
+ * with `asm inline` (GCC 9, clang 13 and later). */
+#if (defined(__clang__) && __clang_major__ >= 13) || (!defined(__clang__) && defined(__GNUC__) && __GNUC__ >= 9)
+#define SD_ASM_INLINE_ __inline__
+#else
+#define SD_ASM_INLINE_
+#endif
+#define SD_STR_(x) #x
+#define SD_XSTR_(x) SD_STR_(x)
+#define SD_SITE_ASM_(TAB, K) \
+  "772:\n\t.pushsection " SD_SITES_SECTION "\n\t.p2align 3\n\t.quad 772b, " SD_XSTR_(__USER_LABEL_PREFIX__) #TAB \
+  "+" #K "*24\n\t.popsection"
+#define SD_SA(TAB, K) __asm__ __volatile__ SD_ASM_INLINE_(SD_SITE_ASM_(TAB, K))
+#define SD_SAV(V, TAB, K) __asm__ SD_ASM_INLINE_(SD_SITE_ASM_(TAB, K) : "+r"(V))
+#else
+#define SD_SA(TAB, K) ((void)0)
+#define SD_SAV(V, TAB, K) ((void)0)
+#endif
+/* The crashes of the out-of-line paths, with their site. */
+SD_NORETURN void sd_crash_at(const sd_site *s, const char *fmt, ...) SD_PRINTF(2, 3);
+SD_NORETURN void sd_crash_index_at(sd_int i, int64_t len, const sd_site *s);
+/* Before a call of os.crash: the site of the crash that follows. */
+void sd_crash_site_(const sd_site *s);
 
 void *sd_alloc(size_t n);             /* malloc; out of memory ends the program */
 void *sd_realloc(void *p, size_t n);
@@ -373,10 +431,47 @@ SD_INLINE int64_t sd_int_index(sd_int i, int64_t len) {
   if (SD_LIKELY((i.w & 1) == 0) && (uint64_t)(i.w >> 1) < (uint64_t)len) return i.w >> 1;
   sd_crash_index(i, len);
 }
+/* The same, for generated code: a crash reports the site s. */
+SD_INLINE int64_t sd_int_index_at(sd_int i, int64_t len, const sd_site *s) {
+  if (SD_LIKELY((i.w & 1) == 0) && (uint64_t)(i.w >> 1) < (uint64_t)len) return i.w >> 1;
+  sd_crash_index_at(i, len, s);
+}
+/* The slow paths of the operations that may crash, for generated code: a
+ * crash in them reports the site s (sd_int_div_at, ...). */
+sd_int sd_int_div_slow_at(sd_int a, sd_int b, const sd_site *s);
+sd_int sd_int_mod_slow_at(sd_int a, sd_int b, const sd_site *s);
+sd_int sd_int_shl_slow_at(sd_int a, sd_int b, const sd_site *s);
+sd_int sd_int_shr_slow_at(sd_int a, sd_int b, const sd_site *s);
+SD_INLINE sd_int sd_int_div_at(sd_int a, sd_int b, const sd_site *s) {
+  if (SD_LIKELY(((a.w | b.w) & 1) == 0) && b.w != 0) {
+    int64_t q = (a.w >> 1) / (b.w >> 1);
+    if (SD_LIKELY(q <= SD_INT_SMALL_MAX)) return (sd_int){(int64_t)((uint64_t)q << 1)};
+  }
+  return sd_int_div_slow_at(a, b, s);
+}
+SD_INLINE sd_int sd_int_mod_at(sd_int a, sd_int b, const sd_site *s) {
+  if (SD_LIKELY(((a.w | b.w) & 1) == 0) && b.w != 0) return (sd_int){a.w % b.w};
+  return sd_int_mod_slow_at(a, b, s);
+}
+SD_INLINE sd_int sd_int_shl_at(sd_int a, sd_int b, const sd_site *s) {
+  if (SD_LIKELY(((a.w | b.w) & 1) == 0) && b.w >= 0 && b.w < 2 * 62) {
+    int64_t n = b.w >> 1;
+    int64_t r = (int64_t)((uint64_t)a.w << n);
+    if (SD_LIKELY((r >> n) == a.w)) return (sd_int){r};
+  }
+  return sd_int_shl_slow_at(a, b, s);
+}
+SD_INLINE sd_int sd_int_shr_at(sd_int a, sd_int b, const sd_site *s) {
+  if (SD_LIKELY(((a.w | b.w) & 1) == 0) && b.w >= 0) {
+    int64_t n = b.w >> 1;
+    return (sd_int){n >= 63 ? (a.w < 0 ? -2 : 0) : ((a.w >> n) & ~(int64_t)1)};
+  }
+  return sd_int_shr_slow_at(a, b, s);
+}
 
 double sd_int_to_float(sd_int a);            /* float(i): nearest double */
-sd_int sd_float_to_int(double f);            /* int(f): truncates; crashes on nan/inf */
-uint8_t sd_int_to_byte(sd_int a);            /* byte(i): crashes unless 0..255 */
+SD_CRASHES sd_int sd_float_to_int(double f);            /* int(f): truncates; crashes on nan/inf */
+SD_CRASHES uint8_t sd_int_to_byte(sd_int a);            /* byte(i): crashes unless 0..255 */
 SD_INLINE sd_int sd_byte_to_int(uint8_t b) { return SD_INT(b); }
 uint64_t sd_int_hash(sd_int a);
 
@@ -423,6 +518,9 @@ SD_INLINE const char *sd_str_cstr(sd_str s) { return s->data; } /* borrowed */
 SD_INLINE int64_t sd_str_len_raw(sd_str s) { return s->len; }
 SD_INLINE sd_int sd_str_len(sd_str s) { return SD_INT(s->len); }
 SD_INLINE uint8_t sd_str_at(sd_str s, sd_int i) { return (uint8_t)s->data[sd_int_index(i, s->len)]; }
+SD_INLINE uint8_t sd_str_at_s(sd_str s, sd_int i, const sd_site *site) {
+  return (uint8_t)s->data[sd_int_index_at(i, s->len, site)];
+}
 sd_str sd_str_concat(sd_str a, sd_str b);
 sd_str sd_str_concat_n(const sd_str *parts, int n); /* a + b + c + ... in one allocation */
 /* A part of a concatenation: the string s, or (s == NULL) the decimal text
@@ -467,14 +565,14 @@ bool sd_str_eq(sd_str a, sd_str b);               /* null-safe */
 int sd_str_cmp(sd_str a, sd_str b);               /* bytewise, -1/0/1 */
 SD_INLINE bool sd_str_lt(sd_str a, sd_str b) { return sd_str_cmp(a, b) < 0; }
 uint64_t sd_str_hash(sd_str s);
-sd_str sd_str_slice(sd_str s, sd_int a, sd_int b);
+SD_CRASHES sd_str sd_str_slice(sd_str s, sd_int a, sd_int b);
 bool sd_str_contains(sd_str s, sd_str sub);
 sd_int sd_str_index(sd_str s, sd_str sub);        /* int?: SD_INT_NULL when absent */
 bool sd_str_starts_with(sd_str s, sd_str p);
 bool sd_str_ends_with(sd_str s, sd_str p);
-sd_list *sd_str_split(sd_str s, sd_str sep);      /* []string */
+SD_CRASHES sd_list *sd_str_split(sd_str s, sd_str sep);      /* []string */
 sd_str sd_str_trim(sd_str s);
-sd_str sd_str_replace(sd_str s, sd_str old, sd_str new_);
+SD_CRASHES sd_str sd_str_replace(sd_str s, sd_str old, sd_str new_);
 sd_str sd_str_to_upper(sd_str s);
 sd_str sd_str_to_lower(sd_str s);
 sd_err sd_str_to_int(sd_str s, sd_int *out);      /* on error *out = SD_INT_NULL */
@@ -503,6 +601,8 @@ struct sd_list {
  * sd_list_at_mut to write). Crashes when out of range. l is evaluated
  * twice: pass a variable or a side-effect-free expression. */
 #define SD_LIST_GET(l, T, i) (((T *)sd_list_data(l))[sd_int_index((i), (l)->len)])
+/* The same, for generated code: a crash reports the site s. */
+#define SD_LIST_GET_AT(l, T, i, s) (((T *)sd_list_data(l))[sd_int_index_at((i), (l)->len, (s))])
 
 void sd_list_free_(sd_list *l);
 SD_INLINE sd_list *sd_list_retain(sd_list *l) {
@@ -516,15 +616,15 @@ SD_INLINE void sd_list_release(sd_list *l) {
 sd_list *sd_list_new(const sd_type *et, int64_t cap);      /* owned, empty */
 SD_INLINE sd_int sd_list_len(const sd_list *l) { return SD_INT(l->len); }
 void *sd_list_mut(sd_list **pl);                            /* make unique; returns data */
-void *sd_list_at_mut(sd_list **pl, sd_int i);               /* unique; borrowed element pointer */
-void sd_list_set(sd_list **pl, sd_int i, const void *val);  /* xs[i] = v: CONSUMES val */
+SD_CRASHES void *sd_list_at_mut(sd_list **pl, sd_int i);               /* unique; borrowed element pointer */
+SD_CRASHES void sd_list_set(sd_list **pl, sd_int i, const void *val);  /* xs[i] = v: CONSUMES val */
 void sd_list_push(sd_list **pl, const void *val);           /* CONSUMES val */
 bool sd_list_pop(sd_list **pl, void *out);                  /* moves last into *out; false if empty */
-void sd_list_insert(sd_list **pl, sd_int i, const void *val); /* CONSUMES val; 0 <= i <= len */
-void sd_list_remove(sd_list **pl, sd_int i);
+SD_CRASHES void sd_list_insert(sd_list **pl, sd_int i, const void *val); /* CONSUMES val; 0 <= i <= len */
+SD_CRASHES void sd_list_remove(sd_list **pl, sd_int i);
 bool sd_list_contains(const sd_list *l, const void *x);
 sd_int sd_list_index(const sd_list *l, const void *x);      /* int?: SD_INT_NULL when absent */
-sd_list *sd_list_slice(const sd_list *l, sd_int a, sd_int b);
+SD_CRASHES sd_list *sd_list_slice(const sd_list *l, sd_int a, sd_int b);
 void sd_list_reverse(sd_list **pl);
 void sd_list_sort(sd_list **pl);                            /* []int, []float, []string, []byte */
 /* sortBy: stable. less(ctx, a, b) gets borrowed pointers to two elements. */
@@ -623,7 +723,7 @@ sd_err sd_errorf(const char *fmt, ...) SD_PRINTF(1, 2);
 /* strerror(e) with a lowercase first letter, for the <reason> part of
  * docs/stdlib.md's error messages (borrowed, per thread). */
 const char *sd_strerror(int e);
-sd_str sd_err_message(sd_err e);                  /* e.message(); crashes on null */
+SD_CRASHES sd_str sd_err_message(sd_err e);                  /* e.message(); crashes on null */
 bool sd_err_equal(sd_err a, sd_err b);            /* both null, or same message */
 extern const sd_error_vtable sd_errors_vtable;   /* the vtable of errors.new values */
 
@@ -727,12 +827,12 @@ __attribute__((cold)) void sd_preempt_(void);
 
 /* ---- channels ---- (channel handles are shared between goroutines; their
  * count is atomic) */
-sd_chan *sd_chan_new(const sd_type *et, sd_int cap); /* chan T(n); crashes if n < 0 */
+SD_CRASHES sd_chan *sd_chan_new(const sd_type *et, sd_int cap); /* chan T(n); crashes if n < 0 */
 sd_chan *sd_chan_retain(sd_chan *c);
 void sd_chan_release(sd_chan *c);
-void sd_chan_send(sd_chan *c, const void *val);       /* val borrowed; the receiver gets a deep copy */
+SD_CRASHES void sd_chan_send(sd_chan *c, const void *val);       /* val borrowed; the receiver gets a deep copy */
 bool sd_chan_receive(sd_chan *c, void *out);          /* false: closed and empty (out untouched) */
-void sd_chan_close(sd_chan *c);                       /* crashes if already closed */
+SD_CRASHES void sd_chan_close(sd_chan *c);                       /* crashes if already closed */
 
 enum { SD_SEND = 1, SD_RECV = 2 };
 typedef struct sd_select_case {
@@ -743,7 +843,7 @@ typedef struct sd_select_case {
 } sd_select_case;
 /* Waits until one case can proceed, performs it and returns its index. When
  * several are ready, one is chosen uniformly at random. */
-int sd_select(sd_select_case *cases, int n);
+SD_CRASHES int sd_select(sd_select_case *cases, int n);
 
 /* ---- time ---- */
 sd_chan *sd_time_after(sd_int ns);  /* chan int receiving the wall-clock time once, after ns, then closed */
@@ -834,6 +934,13 @@ int sd_main(int argc, char **argv, sd_err (*main_fn)(sd_list *args));
 /* Run fn(arg) in a protected frame: a crash inside it runs the defers it
  * pushed and comes back as an owned error "crash: <message>" (for tests). */
 sd_err sd_catch(sd_err (*fn)(void *arg), void *arg);
+/* The error of a crashed goroutine (and of sd_catch): its message is
+ * "crash: <message>", and it carries the crash's trace, the lines "    at
+ * f (file:line:col)" ... that sd_main and the test runner print after the
+ * message. sd_err_trace returns the trace (borrowed), or NULL for any other
+ * error. */
+sd_err sd_crash_error(const char *msg, const char *trace);
+const char *sd_err_trace(sd_err e);
 SD_NORETURN void sd_exit_process(int code); /* flush stdout/stderr and _exit */
 
 /* ---- seed test (seed_test.c) ----
@@ -869,7 +976,7 @@ SD_NORETURN void sd_os_crash(sd_str message);       /* os.crash: like a runtime 
 sd_str sd_os_executable(void);                      /* the program's real path ("" if unknown) */
 sd_err sd_os_cwd(sd_str *out);                      /* os.cwd */
 sd_str sd_os_env(sd_str name);                      /* string?: NULL when unset */
-sd_err sd_os_run(const sd_list *argv, sd_int *code); /* on error *code = SD_INT_NULL; a stop point */
+SD_CRASHES sd_err sd_os_run(const sd_list *argv, sd_int *code); /* on error *code = SD_INT_NULL; a stop point */
 /* fs (on error the out value is NULL) */
 sd_err sd_fs_read(sd_str path, sd_str *out);
 sd_err sd_fs_write(sd_str path, sd_str data);

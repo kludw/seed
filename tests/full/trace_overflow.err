@@ -1,0 +1,6 @@
+crash: stack overflow or invalid memory access
+    at down (tests/full/trace_overflow.sd:11:12)
+    called from down (tests/full/trace_overflow.sd:11:12)
+ more calls ...
+    called from down (tests/full/trace_overflow.sd:11:12)
+    called from main (tests/full/trace_overflow.sd:17:17)

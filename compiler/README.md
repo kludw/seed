@@ -41,11 +41,11 @@ will do (see "Adding a language feature").
 ## Command line
 
 ```
-seed build [-o out] <dir | file.sd>   compile a program (default output: the directory's or file's name)
-seed run <dir | file.sd> [args...]    compile into $TMPDIR and run; passes the exit code
+seed build [-g] [-o out] <dir | file.sd>  compile a program (default output: the directory's or file's name)
+seed run [-g] <dir | file.sd> [args...]   compile into $TMPDIR and run; passes the exit code
 seed test [-v] [--run text] [dir...]  run the tests of every package under the dirs (default .)
 seed fmt [--check] <file.sd | dir>... format in place, or report unformatted files
-seed c <dir | file.sd...>             C program on stdout (what tests/run.sh uses)
+seed c [-g] <dir | file.sd...>        C program on stdout (what tests/run.sh uses)
 seed ast <file.sd>...                 print the syntax tree (debugging aid)
 seed lsp                              language server on stdin/stdout (see "The language server")
 ```
@@ -76,7 +76,12 @@ the binary is `<root>/build/seedN`. The C compiler and its flags for
 `-O2` (`buildOpt`), `seed run` and `seed test` with `-O1` (`quickOpt`,
 about half the C compiler's time), and the runtime's cached object is
 always `-O2`. The Makefile has the `-O2` flags in `SEED_CFLAGS` and
-`SEED_LIBS`.
+`SEED_LIBS`. With `-g` (`build`, `run` and `c`), the generated C has
+`#line` directives that point at the Seed source (`gen_site.sd`), and
+`build` and `run` compile it with `-g` and `-O0` (`debugOpt`) instead, for
+gdb and lldb (docs/guide, chapter 14); the cache keeps those objects apart
+(their text and flags differ). The runtime's object stays the cached `-O2`
+one.
 
 ### seed test
 
@@ -199,6 +204,7 @@ never return (`isNoReturn`).
 | `gen_int.sd` | gen | ints known to be small: the interval analysis of int locals, unboxed locals, plain C arithmetic |
 | `gen_move.sd` | gen | moving a local's value on its last use; borrowed locals and the mod sets of mut methods |
 | `gen_unit.sd` | gen | the program as one C unit per package (for the object cache of build, run and test) |
+| `gen_site.sd` | gen | crash traces: the table of sites of a unit, the marks after the lines that may crash; `#line` directives for `-g` |
 | `gen_fast.sd` | gen | small-int versions of pure int functions, and the functions that choose between them and the general ones |
 | `gen_preempt.sd` | gen | where the generated code checks for preemption: the direct call graph's strongly connected components |
 | `gen_acc.sd` | gen | loop accumulators: a fast copy of a loop with raw `int64_t` accumulators that spills into the general copy; each loop iteration's preemption check |
@@ -640,6 +646,36 @@ and temporaries own is released through the function's frame instead
   line was emitted. The other placeholders become plain C locals
   (`expandFrame`), and a function without needed fields has no frame (most
   temporaries live from one call to the next statement).
+
+*Crash sites* (gen_site.sd; runtime/README.md, "Crash traces"): every
+unit has a table of sites (`sd_sites_root`, `sd_sites_<cprefix>`, or
+`sd_sites_prog` for `seed c`), `{function, file, line, col}`, declared at
+its top and defined at its end (`siteDecl`, `siteTable`). While a Seed
+function is generated (`siteStart`/`siteEnd`, in `genFn` and `genFast`),
+`Gen.pos` is the position of the code being generated: the statement
+(`genStmt`, `fastBlock`), or the call inside it (`gexpr`, `fastExpr`), and
+`emit` puts `SD_SA(table, k)` after each line that calls something that
+may crash (`markable`: like `lineMayCrash`, without C's keywords and the
+checks below; a `return` with a call keeps its value in a variable
+first). The fast versions (gen_fast.sd) have no marks (`noMarks`): even
+one `asm` statement changes how GCC lays out a small recursion like fib's,
+which cost fib 10 to 20 %; the chooser's call of the fast version is
+marked with `SD_SAV`, a non-volatile mark that keeps the function pure,
+at the function's own position, so that a trace through a fast version
+names the function (and counts its calls). The checks whose failure path the C
+compiler moves out of line take the address of their site instead
+(`siteAddr`): `SD_LIST_GET_AT` and `sd_str_at_s` in `gindex` (the
+position of the indexed value), `sd_int_div_at` and `mod`, `shl`, `shr`
+in `binaryOp` (the operator's), `sd_crash_at` for `return null, err`; a
+call of `os.crash` is preceded by `sd_crash_site_` (`plainCall`). A spawn
+trampoline has no marks (the trace ends with the spawn's own site). The
+function names of the table are `fnSiteLabel`'s (`Cart.add`,
+`cart.newCart`, `test "name"`), and the files `sitePath`'s (as given, the
+standard library's from `lib/` on). With `-g`, `lineMark` puts a `#line`
+before every line of a Seed function (a directive numbers the lines after
+it), with the file's absolute path, and `lineReset` a placeholder after
+it that `finishLines` (main.sd) turns into a `#line` back to the C file;
+the cleanup frame's setup goes on the line of the function's declaration.
 
 *Small ints* (gen_int.sd): `analyzeInts` computes, before a function is
 generated, an interval for every `int` local declared in it (by a
@@ -1296,5 +1332,11 @@ forward one release at a time.
   reached through two different spellings would be loaded twice (cannot
   happen with the resolution rules unless the project root is itself
   inside `lib/`).
+- A crash's trace has no frame for a Seed function that the C compiler
+  inlined into its caller: the crash's own site is shown, the line in the
+  caller where the inlined call was is not (`seed run -g` compiles without
+  inlining). The column of a line that crashes in a conversion or another
+  runtime call whose value is used later in the line is the statement's,
+  not the call's.
 - The parser reports at most one syntax error per statement; an error in an
   expression that spans lines may hide a second error on the next line.

@@ -112,6 +112,8 @@ static sd_err test_run_all(sd_list *args) {
       printf("FAIL \"%s\": %s\n", t->name, m->data);
     } else if (m->len >= 7 && memcmp(m->data, "crash: ", 7) == 0) {
       printf("FAIL \"%s\": %s:%d: %s\n", t->name, t->file, t->line, m->data);
+      const char *trace = sd_err_trace(e);
+      if (trace) fputs(trace, stdout);
     } else {
       printf("FAIL \"%s\": %s:%d: error: %s\n", t->name, t->file, t->line, m->data);
     }

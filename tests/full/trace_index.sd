@@ -1,0 +1,31 @@
+// A crash prints where it happened and the calls that led there: an index
+// out of range in a method, called from a recursive function, called from
+// main. (A function that the C compiler inlines has no frame of its own:
+// the trace then goes on with its caller. The recursion keeps them here.)
+package main
+
+import "fmt"
+
+type Shelf struct {
+    []string books
+}
+
+fn (Shelf s) book(int i) string {
+    return s.books[i]
+}
+
+fn pick(Shelf s, int i, int depth) string {
+    if (depth > 0) {
+        return pick(s, i, depth - 1)
+    }
+    string b = s.book(i)
+    return "picked " + b
+}
+
+fn main([]string args) error {
+    Shelf s = Shelf{books: []string{"a", "b"}}
+    fmt.println(pick(s, 1, 2))
+    fmt.println(s.book(0))
+    fmt.println(pick(s, args.len() + 6, 2))
+    return null
+}

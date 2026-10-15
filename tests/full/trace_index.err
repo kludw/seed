@@ -1,0 +1,5 @@
+crash: index out of range: 7 with length 2
+    at Shelf.book (tests/full/trace_index.sd:14:14)
+    called from pick (tests/full/trace_index.sd:19:16)
+    called from pick (tests/full/trace_index.sd:19:16)
+    called from main (tests/full/trace_index.sd:29:17)

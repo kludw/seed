@@ -1,0 +1,2 @@
+crash: cannot convert 300 to byte
+    at small (tests/full/trace_byte.sd:7:5)

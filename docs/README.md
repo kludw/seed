@@ -4,7 +4,7 @@ Start with the guide if you want to learn Seed; use the reference when you need 
 
 ## Learning
 
-- [guide/](guide/README.md): the Seed guide, teaching the whole language by example in 13 chapters, with every example checked by [guide/check.sh](guide/check.sh).
+- [guide/](guide/README.md): the Seed guide, teaching the whole language by example in 14 chapters, with every example checked by [guide/check.sh](guide/check.sh).
   1. [Getting started](guide/01-getting-started.md): building the toolchain, hello world, `seed run`, `seed build`, `seed fmt`.
   2. [Basics](guide/02-basics.md): types, literals, declarations, constants, operators, strings and printing.
   3. [Control flow](guide/03-control-flow.md): `if`, the one `for`, `switch`, `break` and `continue`.

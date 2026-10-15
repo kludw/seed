@@ -98,11 +98,11 @@ There is one binary, `seed`:
 
 | Command | What it does |
 |---|---|
-| `seed run <dir \| file.sd> [args...]` | Compiles a program and runs it with the arguments. |
-| `seed build [-o out] <dir \| file.sd>` | Compiles a program into one executable. |
+| `seed run [-g] <dir \| file.sd> [args...]` | Compiles a program and runs it with the arguments. |
+| `seed build [-g] [-o out] <dir \| file.sd>` | Compiles a program into one executable; with `-g`, for gdb or lldb, which then show the Seed source ([the guide, chapter 14](docs/guide/14-crashes-and-debugging.md)). |
 | `seed test [-v] [--run text] [dir...]` | Runs the `test` blocks of every package under the directories (`--run`: only the tests whose description contains the text; `-v`: list each test). |
 | `seed fmt [--check] <file.sd \| dir>...` | Formats files (or every `.sd` file under a directory) in place, or reports the ones that aren't formatted. |
-| `seed c <dir \| file.sd...>` | Prints the generated C (for testing the compiler). |
+| `seed c [-g] <dir \| file.sd...>` | Prints the generated C (for testing the compiler). |
 | `seed ast <file.sd>...` | Prints the syntax tree (for debugging the parser). |
 | `seed lsp` | A language server on stdin and stdout, for editors: the compiler's errors as you type, formatting, go to definition, hover, completion and the outline ([the guide, chapter 1](docs/guide/01-getting-started.md#editors)). |
 
@@ -117,7 +117,7 @@ The Makefile has the development targets:
 | `make release` | Verifies, then refreshes the snapshot `bootstrap/seed.c` from the current compiler. |
 | `make install` | Links `$PREFIX/bin/seed` to `build/seed2` (`make uninstall` removes it). |
 | `make test` | The language tests in `tests/lang` and `tests/core`. |
-| `make test-full` | The features outside the bootstrap subset, packages and `seed test`. |
+| `make test-full` | The features outside the bootstrap subset, packages, `seed test`, crash traces, and a gdb session (when gdb is installed). |
 | `make test-lib` | The standard library's tests. |
 | `make test-fmt` | The formatter's self-checks and golden tests. |
 | `make test-examples` | Builds every example and checks its output, its tests and its formatting. |
@@ -143,7 +143,7 @@ The Makefile has the development targets:
 
 The documentation:
 
-- [The guide](docs/guide/README.md) teaches the language by example, in 13 chapters, for programmers who know Go or another C-like language.
+- [The guide](docs/guide/README.md) teaches the language by example, in 14 chapters, for programmers who know Go or another C-like language.
 - [SPEC.md](SPEC.md), [docs/grammar.md](docs/grammar.md), [docs/builtins.md](docs/builtins.md), [docs/stdlib.md](docs/stdlib.md) and [docs/formatting.md](docs/formatting.md) are the reference.
 - [compiler/README.md](compiler/README.md), [runtime/README.md](runtime/README.md) and [lib/README.md](lib/README.md) describe the implementation.
 - [docs/first-impressions.md](docs/first-impressions.md) is the friction log of a Go programmer learning Seed from these documents, with what was fixed and what remains.
@@ -162,7 +162,7 @@ The documentation:
 - Big integers use quadratic algorithms, so converting a number with millions of digits to text is slow.
 - Tested on macOS (arm64) and Linux (x86_64, glibc). Other POSIX systems are untested.
 - The parser reports at most one syntax error per statement.
-- There is no debugger; generated programs are C, so `lldb` works on them. The language server (`seed lsp`) has no rename, references or signature help.
+- A crash shows where it happened and the calls that led there, but not the calls of functions that the C compiler inlined (`seed run -g` shows them). There is no debugger of Seed's own: `seed build -g` makes gdb and lldb follow the Seed source, with Seed's variables under their C names (`l_x`). The language server (`seed lsp`) has no rename, references or signature help.
 
 Bugs found in passing are recorded in [compiler/BUGS_FIXED.md](compiler/BUGS_FIXED.md) and [lib/COMPILER_BUGS.md](lib/COMPILER_BUGS.md).
 

@@ -11,11 +11,12 @@ exact stdout (and exit code, where it isn't 0) is checked.
 |---|---|---|
 | `lang/` | Programs that stay inside the subset of the retired bootstrap compiler seed0 (no interfaces, function values, channels, `select`, `group`/`spawn`, `defer`, `test`/`assert`, user packages or `s.chars()`). | `make test` |
 | `lang/errors/` | Programs that must be rejected: an ignored error, `_` with a plain `T`, a `mut` method on a parameter, a `T?` used as `T`, syntax errors, unknown names and type mismatches. | `make test` |
-| `full/` | Programs for the rest of the language: interfaces, function values and `sortBy`, `defer`, channels, `select`, `group`/`spawn` with Erlang-style failure, integers wider than 64 bits, `s.chars()`, `os.crash`, the core packages' error messages, enum patterns. `full/NAME/` directories are programs made of packages (`pkg_basic`). | `make test-full` |
+| `full/` | Programs for the rest of the language: interfaces, function values and `sortBy`, `defer`, channels, `select`, `group`/`spawn` with Erlang-style failure, integers wider than 64 bits, `s.chars()`, `os.crash`, the core packages' error messages, enum patterns, crash traces (`trace_*`: where every kind of crash happened, and the calls that led there). `full/NAME/` directories are programs made of packages (`pkg_basic`, `trace_pkg`). | `make test-full` |
 | `full/errors/` | The pedantic checks: unused names and imports, shadowing, switch coverage, missing returns, unreachable code, naming rules, `implements`, unhandled errors, formatting, enum patterns and so on. `full/errors/NAME/` directories are package errors: cycles, visibility (`pub` names, fields, methods, struct literals), unknown and wrongly named packages, natives outside the standard library, tests outside `tests/`. | `make test-full` |
 | `testcmd/` | Projects for `seed test` (`test_cmd.sh`): `NAME.out` is the exact stdout of `seed test testcmd/NAME` (run in `tests/`), `NAME.exit` its exit code. | `make test-full` |
 | `core/` | More programs in the same subset as `lang/` (written for the retired bootstrap compiler seed0): crashes, exit codes, equality, narrowing, value copies, an interpreter; `core/errors/` has more programs that must be rejected. | `make test` |
 | `lsp/` | The language server (`seed lsp`): session scripts `NAME.lsp` with their transcripts `NAME.out`, the documents they work on (`proj/`, `programs/`, `edits/`) and `driver/`, which frames the messages and checks the answers (`test_lsp.sh` has the details). | `make test-lsp` |
+| `gdb/` | The program that `test_gdb.sh` debugs: `seed build -g`, then a scripted gdb session (a breakpoint at a Seed line, the locals through `runtime/seed-gdb.py`, `step`, `bt`, `next`, `finish`); skipped without gdb. | `make test-full` |
 | `fmt/` | Golden tests for `seed fmt`: `NAME.sd` must format to `NAME.expected` (`tests/fmt/run.sh <seed>`, or `make test-fmt`). | `make test-fmt` |
 | `spec/` | Spec conformance tests, one or a few rules each, named after the section of `SPEC.md`, `docs/grammar.md`, `docs/builtins.md` or `docs/formatting.md` they pin (`null_narrowing_not`, `select_evaluation_order`, ...); `spec/errors/` has the programs that must be rejected (`fmt_*` are unformatted programs that must fail at the first line that differs), and `spec/NAME/` directories are programs made of packages. `spec/AUDIT.md` maps every spec section to the tests that cover it. | `make test-full` |
 | `spec/testcmd/` | `seed test` projects for the rules about tests (run by `test_cmd.sh` in `spec/`, like `testcmd/`); `NAME.err`, if present, is text that must appear in stderr. | `make test-full` |
@@ -32,8 +33,11 @@ The format is defined in the header of `run.sh`. For every `NAME.sd`:
 - `NAME.out` is the exact expected stdout, including the final newline.
 - `NAME.exit` is the expected exit code (default 0). Errors returned from
   `main` exit with 1 and crashes exit with 2.
-- `NAME.err` is text that must appear somewhere in stderr, such as
-  `error: disk full` or `crash:`.
+- `NAME.err` holds lines that must appear in stderr, in that order, each
+  within a line of it: `error: disk full`, or a crash's message and the
+  lines of its trace (`    at get (tests/full/trace_index.sd:14:14)`). The
+  `trace_*` tests list the lines that both gcc and clang builds print: a
+  function that the C compiler inlined has no line of its own.
 - `NAME.leaks` (only for `tests/leaks.sh`) says why the program is expected
   to leak. There are none: programs that crash, and those whose goroutines
   crash or are stopped, must not leak either (the cleanup frames release
@@ -99,7 +103,8 @@ goroutines at many kinds of points for this check.
   check (always on), so every test program, apart from `errors/`, is
   formatted and passes them.
 - `make test-full` also runs `tests/test_cmd.sh`: the `seed test` projects
-  in `testcmd/`, `seed run` with arguments, `seed build` without `-o`, the
+  in `testcmd/`, crash traces through `seed run` and `seed run -g` (every
+  frame) and `seed build -g`, `seed run` with arguments, `seed build` without `-o`, the
   formatting error, `seed` found through `$PATH` as a symbolic link
   without `$SEED_ROOT`, concurrent runs of programs with the same name,
   that no temporary directory is left behind, the runtime cache (and its

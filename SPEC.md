@@ -451,7 +451,7 @@ fn main([]string args) error {
 
 - A program is the `package main` of a directory (all its files) or a single `.sd` file. `main` always has exactly this signature.
 - `args[0]` is the program itself; the arguments follow it.
-- Returning `null` exits with code 0. Returning an error prints `error: <message>` to stderr and exits with code 1. A crash prints `crash: <message>` and exits with code 2.
+- Returning `null` exits with code 0. Returning an error prints `error: <message>` to stderr and exits with code 1. A crash prints `crash: <message>`, then where it happened and the calls that led there (one line each, `    at f (file:line:col)`, `    called from g (file:line:col)`, ...), and exits with code 2. An error that is a goroutine's crash (`crash: <message>`, from a group) is printed with that crash's trace below it, ending with `    spawned from h (file:line:col)`; the trace is not part of the error's message.
 - `os.exit(int)` exits immediately with a specific code, without running defers.
 
 ## Tests

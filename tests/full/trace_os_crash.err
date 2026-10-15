@@ -1,0 +1,2 @@
+crash: check: n (-1) must not be negative
+    at check (tests/full/trace_os_crash.sd:9:12)

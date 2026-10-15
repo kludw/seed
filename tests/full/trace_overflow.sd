@@ -1,0 +1,19 @@
+// A stack overflow shows the first ten calls and the last five, with
+// the number left out between them.
+package main
+
+import "fmt"
+
+fn down(int n, []int xs) int {
+    if (n == 0) {
+        return xs.len()
+    }
+    return down(n - 1, xs) + 1
+}
+
+fn main([]string args) error {
+    []int xs = []int{1}
+    fmt.println(down(3, xs).string())
+    fmt.println(down(100000000 + args.len(), xs).string())
+    return null
+}

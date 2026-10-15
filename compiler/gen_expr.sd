@@ -500,7 +500,13 @@ fn (Gen g) mut ownedOperands([]int es) []string {
 // T? when the checker asked for them.
 fn (Gen g) mut gexpr(int e) string {
     ExprInfo i = g.c.info[e]
+    // The lines of a call are at the call's position (gen_site.sd).
+    Pos saved = g.pos
+    if (g.c.ast.exprs[e].kind == ExprKind.Call) {
+        g.pos = g.c.ast.exprs[e].pos
+    }
     string v = g.gcore(e)
+    g.pos = saved
     if (i.ifaceFrom >= 0) {
         int it = i.ty
         if (i.wrap) {
@@ -728,14 +734,14 @@ fn (Gen g) mut gindex(int e) string {
     ExprInfo i = g.c.info[e]
     []string vals = g.operands([]int{x.a, x.b})
     if (i.res == Res.StringIndex) {
-        return "sd_str_at(" + vals[0] + ", " + vals[1] + ")"
+        return "sd_str_at_s(" + vals[0] + ", " + vals[1] + ", " + g.siteAddr(g.c.ast.exprs[x.a].pos) + ")"
     }
     if (i.res == Res.ListIndex) {
         int el = i.ty
         if (i.narrowed) {
             el = i.orig
         }
-        string v = "SD_LIST_GET(" + vals[0] + ", " + g.ctype(el) + ", " + vals[1] + ")"
+        string v = "SD_LIST_GET_AT(" + vals[0] + ", " + g.ctype(el) + ", " + vals[1] + ", " + g.siteAddr(g.c.ast.exprs[x.a].pos) + ")"
         if (i.narrowed) {
             return g.unwrapVal(i.orig, v)
         }
@@ -807,7 +813,11 @@ fn (Gen g) mut gbinary(int e) string {
             return small
         }
     }
-    return g.binaryOp(op, t, vals[0], vals[1])
+    Pos saved = g.pos
+    g.pos = x.pos
+    string r = g.binaryOp(op, t, vals[0], vals[1])
+    g.pos = saved
+    return r
 }
 
 // v == E.Case (or !=, either way round) where E.Case has no data and v is
@@ -852,6 +862,11 @@ fn (Gen g) mut binaryOp(Tok op, int t, string a, string b) string {
         string f = intOpName(op)
         if (op == Tok.Lt || op == Tok.Le || op == Tok.Gt || op == Tok.Ge) {
             return "sd_int_" + f + "(" + a + ", " + b + ")"
+        }
+        if (op == Tok.Slash || op == Tok.Percent || op == Tok.Shl || op == Tok.Shr) {
+            // These may crash in their out-of-line slow path: the site goes
+            // with it (gen_site.sd).
+            return g.temp(tyInt, "sd_int_" + f + "_at(" + a + ", " + b + ", " + g.siteAddr(g.pos) + ")")
         }
         return g.temp(tyInt, "sd_int_" + f + "(" + a + ", " + b + ")")
     }

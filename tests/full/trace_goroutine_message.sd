@@ -1,0 +1,25 @@
+// The error of a crashed goroutine is still crash: <message>: its
+// message does not change, and the trace only goes with the error.
+package main
+
+import "fmt"
+
+fn item([]int xs, int i) int {
+    return xs[i]
+}
+
+fn worker(int i) error {
+    []int xs = []int{1}
+    fmt.println(item(xs, i).string())
+    return null
+}
+
+fn main([]string args) error {
+    error err = group {
+        spawn worker(args.len() + 1)
+    }
+    if (err != null) {
+        fmt.println("group failed: " + err.message())
+    }
+    return null
+}

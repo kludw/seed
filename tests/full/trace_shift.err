@@ -1,0 +1,2 @@
+crash: negative shift count
+    at shift (tests/full/trace_shift.sd:7:14)

@@ -1,7 +1,8 @@
 // The `seed` command line.
 //
-//   seed build [-o out] <dir | file.sd>   compile a program to an executable
-//   seed run <dir | file.sd> [args...]    compile and run, passing the exit code
+//   seed build [-g] [-o out] <dir | file.sd>  compile a program to an executable
+//   seed run [-g] <dir | file.sd> [args...]   compile and run, passing the exit code
+//                                             (-g: for a debugger: #line, -g -O0)
 //   seed test [-v] [--run text] [dir...]  run the tests of the packages under the dirs
 //   seed fmt [--check] <file.sd | dir>... format the files in place (see fmt.sd)
 //   seed c <dir | file.sd...>             write the C program to stdout (for tests)
@@ -27,9 +28,10 @@ const string cCompiler = "cc"
 const []string cFlags = []string{"-std=c11", "-w"}
 const string buildOpt = "-O2"
 const string quickOpt = "-O1"
+const string debugOpt = "-O0"
 const []string cLibs = []string{"-lm", "-lpthread"}
 
-const string usage = "usage:\n  seed build [-o out] <dir | file.sd>\n  seed run <dir | file.sd> [args...]\n  seed test [-v] [--run text] [dir...]\n  seed fmt [--check] <file.sd | dir>...\n  seed c <dir | file.sd...>\n  seed ast <file.sd>...\n  seed lsp\n"
+const string usage = "usage:\n  seed build [-g] [-o out] <dir | file.sd>\n  seed run [-g] <dir | file.sd> [args...]\n  seed test [-v] [--run text] [dir...]\n  seed fmt [--check] <file.sd | dir>...\n  seed c [-g] <dir | file.sd...>\n  seed ast <file.sd>...\n  seed lsp\n"
 
 fn main([]string args) error {
     if (args.len() < 2) {
@@ -40,17 +42,21 @@ fn main([]string args) error {
     []string rest = args.slice(2, args.len())
     string root = rootDir(args[0])
     if (cmd == "c") {
+        bool debugC = rest.len() > 0 && rest[0] == "-g"
+        if (debugC) {
+            rest.remove(0)
+        }
         if (rest.len() == 0) {
             fmt.eprint(usage)
             os.exit(2)
         }
         Build t = try targetOf(rest)
-        string? program = try compileProgram(root, t, false)
+        string? program = try compileProgram(root, t, debugC)
         if (program == null) {
             os.exit(1)
         }
         string runtime = try readRuntime(root)
-        fmt.print(runtime + program)
+        fmt.print(finishLines(runtime + program, t.name + ".c"))
         return null
     }
     if (cmd == "ast") {
@@ -64,6 +70,12 @@ fn main([]string args) error {
     }
     if (cmd == "build") {
         string out = ""
+        bool debug = false
+        int? gflag = rest.index("-g")
+        if (gflag != null) {
+            debug = true
+            rest.remove(gflag)
+        }
         int o = -1
         int? found = rest.index("-o")
         if (found != null) {
@@ -82,13 +94,17 @@ fn main([]string args) error {
         if (out == "") {
             out = bt.name
         }
-        bool ok = try build(root, bt, out)
+        bool ok = try build(root, bt, out, debug)
         if (!ok) {
             os.exit(1)
         }
         return null
     }
     if (cmd == "run") {
+        bool debugRun = rest.len() > 0 && rest[0] == "-g"
+        if (debugRun) {
+            rest.remove(0)
+        }
         if (rest.len() == 0) {
             fmt.eprint(usage)
             os.exit(2)
@@ -98,7 +114,7 @@ fn main([]string args) error {
             progArgs.remove(0)
         }
         Build rt = try targetOf(rest.slice(0, 1))
-        int code = try run(root, rt, progArgs)
+        int code = try run(root, rt, progArgs, debugRun)
         os.exit(code)
     }
     if (cmd == "test") {
@@ -207,18 +223,18 @@ fn targetOf([]string args) (Build, error) {
     return Build{files: args, dir: fdir, projectRoot: fdir, name: baseName(args[0])}, null
 }
 
-// Loads, checks and translates a program to C, without the runtime (seed c
-// pastes the whole runtime above it; build, run and test only seed.h, see
-// writeC). Compile errors are printed to stderr, and the result is then
-// null. In test mode, the root package's tests/ files are compiled too, and
-// the program runs the tests instead of main.
-fn compileProgram(string root, Build t, bool testMode) (string?, error) {
-    Checker? c = try checkedProgram(root, t, testMode)
+// Loads, checks and translates a program to C for seed c, without the
+// runtime (seed c pastes the whole runtime above it). Compile errors are
+// printed to stderr, and the result is then null. With debug (seed c -g),
+// the C has #line directives (gen_site.sd).
+fn compileProgram(string root, Build t, bool debug) (string?, error) {
+    Checker? c = try checkedProgram(root, t, false)
     if (c == null) {
         return null, null
     }
     string natives = try readNatives(c.ast)
     Gen g = newGen(c)
+    g.debug = debug
     return g.genProgram(natives), null
 }
 
@@ -329,25 +345,36 @@ fn runCC(string opt, []string args, []string inputs, string out, bool link) erro
 // and the root package's are compiled in parallel, then linked with the
 // runtime. Without a cache the program is one self-contained C file, as
 // for seed c. Returns false when there were compile errors.
-fn buildProgram(string root, Build t, bool testMode, string dir, string name, string out, string opt) (bool, error) {
+//
+// With debug (seed build -g, seed run -g), the C has #line directives that
+// point at the Seed source, and is compiled with -g -O0 (debugOpt), so that
+// a debugger shows Seed lines (gen_site.sd).
+fn buildProgram(string root, Build t, bool testMode, string dir, string name, string out, string opt, bool debug) (bool, error) {
     Checker? c = try checkedProgram(root, t, testMode)
     if (c == null) {
         return false, null
+    }
+    []string dbg = []string{}
+    if (debug) {
+        opt = debugOpt
+        dbg = []string{"-g"}
     }
     string cfile = dir + "/" + name + ".c"
     string? rt = try runtimeObject(root)
     if (rt == null) {
         string natives = try readNatives(c.ast)
         Gen whole = newGen(c)
+        whole.debug = debug
         string program = whole.genProgram(natives)
         string runtime = try readRuntime(root)
-        try fs.write(cfile, runtime + program)
-        try runCC(opt, []string{}, []string{cfile}, out, true)
+        try fs.write(cfile, finishLines(runtime + program, cfile))
+        try runCC(opt, dbg, []string{cfile}, out, true)
         return true, null
     }
     string cache = dirName(rt)
     []string natives2 = try readPackageNatives(c.ast)
     Gen g = newGen(c)
+    g.debug = debug
     []Unit units = g.genUnits(natives2)
     string header = try readRuntimeHeader(root)
     []string objs = []string{}
@@ -355,10 +382,11 @@ fn buildProgram(string root, Build t, bool testMode, string dir, string name, st
     for (int i = 0; i < units.len(); i++) {
         string text = header + units[i].text
         if (units[i].root) {
-            try fs.write(cfile, text)
+            try fs.write(cfile, finishLines(text, cfile))
             continue
         }
-        string key = encoding.hexEncode(crypto.sha256(cCompiler + "\n" + cFlags.join(" ") + " " + opt + "\n" + text)).slice(0, 20)
+        text = finishLines(text, "package-" + units[i].path.replace("/", "_") + ".c")
+        string key = encoding.hexEncode(crypto.sha256(cCompiler + "\n" + cFlags.join(" ") + " " + opt + " " + dbg.join(" ") + "\n" + text)).slice(0, 20)
         string obj = cache + "/pkg-" + units[i].path.replace("/", "_") + "-" + key + ".o"
         objs.push(obj)
         if (!fs.exists(obj)) {
@@ -371,15 +399,19 @@ fn buildProgram(string root, Build t, bool testMode, string dir, string name, st
         for (int j = 0; j < objs.len(); j++) {
             inputs.push(objs[j])
         }
-        try runCC(opt, []string{}, inputs, out, true)
+        try runCC(opt, dbg, inputs, out, true)
         return true, null
     }
     string rootObj = dir + "/" + name + ".o"
+    []string cdbg = []string{"-c"}
+    if (debug) {
+        cdbg.push("-g")
+    }
     error err = group {
         for (int k = 0; k < missing.len(); k++) {
-            spawn compileObject(cache, missing[k].text, missing[k].path, opt)
+            spawn compileObject(cache, missing[k].text, missing[k].path, opt, debug)
         }
-        spawn runCC(opt, []string{"-c"}, []string{cfile}, rootObj, false)
+        spawn runCC(opt, cdbg, []string{cfile}, rootObj, false)
     }
     if (err != null) {
         return false, err
@@ -388,7 +420,7 @@ fn buildProgram(string root, Build t, bool testMode, string dir, string name, st
     for (int m = 0; m < objs.len(); m++) {
         linked.push(objs[m])
     }
-    try runCC(opt, []string{}, linked, out, true)
+    try runCC(opt, dbg, linked, out, true)
     return true, null
 }
 
@@ -411,7 +443,7 @@ fn runtimeObject(string root) (string?, error) {
         if (fs.exists(obj)) {
             return obj, null
         }
-        error err = compileObject(dirs[i], text, obj, buildOpt)
+        error err = compileObject(dirs[i], text, obj, buildOpt, false)
         if (err == null) {
             return obj, null
         }
@@ -422,12 +454,16 @@ fn runtimeObject(string root) (string?, error) {
 // Compiles the C text into the object obj in the cache directory dir,
 // through files with a random name and a rename, so that concurrent
 // compilers never see a half-written object.
-fn compileObject(string dir, string text, string obj, string opt) error {
+fn compileObject(string dir, string text, string obj, string opt, bool debug) error {
     try fs.mkdir(dir)
     string tmp = dir + "/tmp-" + encoding.hexEncode(crypto.randomBytes(8))
     defer _ = fs.remove(tmp + ".c")
     try fs.write(tmp + ".c", text)
-    error err = runCC(opt, []string{"-c"}, []string{tmp + ".c"}, tmp + ".o", false)
+    []string args = []string{"-c"}
+    if (debug) {
+        args.push("-g")
+    }
+    error err = runCC(opt, args, []string{tmp + ".c"}, tmp + ".o", false)
     if (err != null) {
         _ = fs.remove(tmp + ".o")
         return err
@@ -438,19 +474,19 @@ fn compileObject(string dir, string text, string obj, string opt) error {
 // Compiles a program into the executable out, through C files in a new
 // temporary directory (removed afterwards). Returns false when there were
 // compile errors.
-fn build(string root, Build t, string out) (bool, error) {
+fn build(string root, Build t, string out, bool debug) (bool, error) {
     string dir = try fs.makeTemp("seed-build-")
     defer _ = fs.removeAll(dir)
-    return buildProgram(root, t, false, dir, baseName(out), out, buildOpt)
+    return buildProgram(root, t, false, dir, baseName(out), out, buildOpt, debug)
 }
 
 // Builds a program into a new temporary directory, runs it with args,
 // removes the directory and returns the program's exit code.
-fn run(string root, Build t, []string args) (int, error) {
+fn run(string root, Build t, []string args, bool debug) (int, error) {
     string dir = try fs.makeTemp("seed-run-")
     defer _ = fs.removeAll(dir)
     string exe = dir + "/" + t.name
-    bool ok = try buildProgram(root, t, false, dir, t.name, exe, quickOpt)
+    bool ok = try buildProgram(root, t, false, dir, t.name, exe, quickOpt, debug)
     if (!ok) {
         return 1, null
     }
@@ -591,7 +627,7 @@ fn testPackage(string root, string base, string dir, string work, []string opts)
     Build t = Build{files: files, dir: dir, projectRoot: base, name: name}
     string exe = work + "/test"
     string results = work + "/results"
-    bool ok = try buildProgram(root, t, true, work, "test", exe, quickOpt)
+    bool ok = try buildProgram(root, t, true, work, "test", exe, quickOpt, false)
     if (!ok) {
         fmt.println("FAIL " + dir + ": the package or its tests do not compile")
         return []int{0, 1}, null

@@ -1,0 +1,13 @@
+// Closing a channel twice reports the second close.
+package main
+
+fn shut(chan int ch) {
+    ch.close()
+}
+
+fn main([]string args) error {
+    chan int ch = chan int(1)
+    shut(ch)
+    shut(ch)
+    return null
+}

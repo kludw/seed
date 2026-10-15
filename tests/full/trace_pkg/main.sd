@@ -1,0 +1,13 @@
+// A crash in a method of another package shows the package's functions
+// with their package's name, and their files.
+package main
+
+import "fmt"
+import "shapes"
+
+fn main([]string args) error {
+    shapes.Polygon p = shapes.Polygon{xs: []int{0, 4, 9}}
+    fmt.println(shapes.width(p, 0, -1).string())
+    fmt.println(shapes.width(p, 0, args.len() + 4).string())
+    return null
+}

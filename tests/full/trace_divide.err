@@ -1,0 +1,2 @@
+crash: division by zero
+    at divide (tests/full/trace_divide.sd:7:14)

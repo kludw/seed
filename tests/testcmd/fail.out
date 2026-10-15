@@ -3,6 +3,7 @@ FAIL "string comparison": testcmd/fail/checks/tests/checks_test.sd:18: assert fa
 FAIL "nullable": testcmd/fail/checks/tests/checks_test.sd:23: assert failed: n != null (null != null)
 FAIL "error from try": testcmd/fail/checks/tests/checks_test.sd:26: error: checks.parse: empty input
 FAIL "crash": testcmd/fail/checks/tests/checks_test.sd:31: crash: index out of range: 5 with length 2
+    at test "crash" (testcmd/fail/checks/tests/checks_test.sd:33:12)
 deferred
 FAIL "defer runs when an assert fails": testcmd/fail/checks/tests/checks_test.sd:38: assert failed: false
 FAIL "error compared with null": testcmd/fail/checks/tests/checks_test.sd:43: assert failed: err == null ("string.toInt: \"x\": invalid integer" == null)

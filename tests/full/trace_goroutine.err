@@ -1,0 +1,3 @@
+error: crash: index out of range: 5 with length 2
+    at item (tests/full/trace_goroutine.sd:7:12)
+    spawned from main (tests/full/trace_goroutine.sd:20:9)

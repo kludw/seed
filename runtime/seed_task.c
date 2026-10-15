@@ -189,9 +189,9 @@ struct sd_task {
   sd_group *group;           /* the group this goroutine belongs to (NULL for main) */
   _Atomic(sd_task *) *gslot; /* its slot in the group's members */
   uint64_t rng;
-  /* For the deadlock report: the goroutine's name (the spawn expression,
-   * a test's description, or NULL). */
-  const char *name;
+  /* Where it was spawned: sd_spawn's return address, in the spawning
+   * function (for the trace of a crash, which shows it). */
+  void *spawn_ret;
   _Alignas(64) char argbuf[64]; /* the arguments, when they fit */
 
   /* Used by every goroutine as it starts, runs and ends. */
@@ -237,6 +237,17 @@ struct sd_task {
   pthread_mutex_t pmu;
   pthread_cond_t cv;
   void *tsan_fiber;
+  /* For the deadlock report: a name given by sd_task_set_name_ (the test
+   * runner's); otherwise the goroutine's name is its spawn (task_name). */
+  const char *name;
+  /* Crash traces: the trace of a crash, made when it is raised (malloc'ed,
+   * taken with the message); the site of a slow path that may crash
+   * (sd_int_div_slow_at, ...) and the return address of its call, while it
+   * runs. */
+  char *trace;
+  const sd_site *site;
+  void *site_ret;
+  bool site_note;
 };
 
 enum { SD_BLOCK_NONE = 0, SD_BLOCK_RECV, SD_BLOCK_SEND, SD_BLOCK_SELECT, SD_BLOCK_GROUP };
@@ -748,6 +759,7 @@ static void task_destroy(sd_task *t) {
   free(t->atexit_fns);
   free(t->gls);
   free(t->msg_static ? NULL : t->msg);
+  free(t->trace);
   stack_free(&t->stk);
 #if defined(SD_TSAN)
   if (t->tsan_fiber) __tsan_destroy_fiber(t->tsan_fiber);
@@ -770,6 +782,11 @@ static void task_reset(sd_task *t) {
     t->msg = NULL;
   }
   t->msg_static = false;
+  if (SD_UNLIKELY(t->trace != NULL)) {
+    free(t->trace);
+    t->trace = NULL;
+  }
+  if (SD_UNLIKELY(t->name != NULL)) t->name = NULL;
   t->frame = NULL;
   t->raise = SD_RAISE_NONE;
   t->ncl = 0;
@@ -1007,6 +1024,16 @@ static sd_task *task_current(void) {
 
 void sd_task_set_name_(const char *name) { task_current()->name = name; }
 
+/* A goroutine's name for reports: the one it was given, or its spawn, from
+ * the descriptor of its arguments, which the generator names after the
+ * spawn ("spawn worker(i, jobs)"), or NULL. */
+static const char *task_name(const sd_task *t) {
+  if (t->name) return t->name;
+  const sd_type *at = t->group ? t->args_type : NULL;
+  if (at && at->name && strncmp(at->name, "spawn ", 6) == 0) return at->name + 6;
+  return NULL;
+}
+
 /* Called by every generated function with a cleanup frame: reads the TLS
  * itself (noinline, never parks) rather than through tls_task. */
 SD_NOINLINE sd_lframe **sd_lf_top_(void) {
@@ -1064,7 +1091,8 @@ static void report_task(deadlock_report *r, sd_task *t, int depth) {
     default: break;
     }
     report_put(r, "%*s", 2 + 2 * (depth < 10 ? depth : 10), "");
-    if (t->name) report_put(r, "%.80s", t->name);
+    const char *name = task_name(t);
+    if (name) report_put(r, "%.80s", name);
     else if (t == sd_main_task) report_put(r, "main()");
     else report_put(r, "a goroutine");
     if (t->blocked_kind == SD_BLOCK_SELECT) report_put(r, ": %s (%d cases)\n", what, t->blocked_n);
@@ -2017,17 +2045,286 @@ static void lframes_release(sd_task *t, sd_lframe *mark) {
   }
 }
 
+/* ---------------------------------------------------------- crash traces
+ *
+ * When a goroutine crashes, the runtime walks its stack (_Unwind_Backtrace,
+ * from libgcc or the system's libunwind) and maps each return address to a
+ * site of the Seed source through the records that the generated code's
+ * marks put in the section sd_sites (seed.h, SD_SA): the first mark after
+ * a return address, in the same function, is the site of that call. Frames without a record (the runtime, natives, thunks,
+ * functions the C compiler inlined) are left out. A crash in an inlined
+ * check passes its site (sd_crash_index_at, ...) and the return address of
+ * that call, which is where its frame is. Nothing of this runs before a
+ * crash. */
+
+static int protect(sd_task *t, void (*fn)(void *), void *arg);
+
+#define SD_TRACE_HEAD 10      /* frames shown from the crash on ... */
+#define SD_TRACE_TAIL 5       /* ... and from the goroutine's start */
+#define SD_TRACE_MAX 4000000  /* stack frames walked at most */
+
+#if defined(SD_SITES)
+#include <unwind.h>
+
+typedef struct sd_site_rec {
+  uintptr_t a;
+  const sd_site *site;
+} sd_site_rec;
+
+#if defined(__APPLE__)
+#define SD_SITES_CSECTION "__DATA,__sd_sites"
+extern const sd_site_rec sd_sites_begin_ __asm("section$start$__DATA$__sd_sites");
+extern const sd_site_rec sd_sites_end_ __asm("section$end$__DATA$__sd_sites");
+#define SD_SITES_BEGIN (&sd_sites_begin_)
+#define SD_SITES_END (&sd_sites_end_)
+#else
+#define SD_SITES_CSECTION "sd_sites"
+extern const sd_site_rec __start_sd_sites[], __stop_sd_sites[];
+#define SD_SITES_BEGIN (__start_sd_sites)
+#define SD_SITES_END (__stop_sd_sites)
+#endif
+_Static_assert(sizeof(sd_site) == 24, "SD_SA assumes 24-byte sites");
+
+/* An empty record of the runtime's own, so that the section exists in
+ * every program. */
+__attribute__((used, section(SD_SITES_CSECTION))) static sd_site_rec sd_site_none_ = {0, NULL};
+
+/* The records sorted by A, made at the first crash. */
+static sd_site_rec *site_tab;
+static size_t site_n;
+static pthread_once_t site_once = PTHREAD_ONCE_INIT;
+
+static int site_rec_cmp(const void *x, const void *y) {
+  const sd_site_rec *p = x, *q = y;
+  if (p->a != q->a) return p->a < q->a ? -1 : 1;
+  return 0;
+}
+
+static void site_init(void) {
+  size_t n = (size_t)(SD_SITES_END - SD_SITES_BEGIN);
+  site_tab = malloc((n ? n : 1) * sizeof *site_tab);
+  if (!site_tab) return;
+  for (const sd_site_rec *r = SD_SITES_BEGIN; r < SD_SITES_END; r++)
+    if (r->site) site_tab[site_n++] = *r;
+  qsort(site_tab, site_n, sizeof *site_tab, site_rec_cmp);
+}
+
+/* The site of the call at ip (inside the call instruction) in the function
+ * that starts at fn: the first mark after ip, when it is in that function
+ * too (a mark in another function means that the call had none: the
+ * runtime, a native, a thunk). */
+static const sd_site *site_find(uintptr_t ip, uintptr_t fn) {
+  size_t lo = 0, hi = site_n;
+  while (lo < hi) {
+    size_t mid = lo + (hi - lo) / 2;
+    if (site_tab[mid].a < ip) lo = mid + 1;
+    else hi = mid;
+  }
+  if (lo == site_n || !fn) return NULL;
+  uintptr_t a = site_tab[lo].a;
+  if (a < fn || (uintptr_t)_Unwind_FindEnclosingFunction((void *)a) != fn) return NULL;
+  return site_tab[lo].site;
+}
+
+/* A line of a trace: a frame with a site, or (site NULL) a run of n
+ * frames without one, such as a deep recursion of the fast version of a
+ * pure int function. */
+typedef struct {
+  const sd_site *site;
+  long n;
+} trace_entry;
+
+typedef struct {
+  trace_entry head[SD_TRACE_HEAD];
+  trace_entry tail[SD_TRACE_TAIL];
+  long n;              /* entries */
+  long unsited;        /* frames without a site since the last entry */
+  long raw;            /* stack frames walked */
+  uintptr_t stop;      /* protect: the walk ends at its frame */
+  uintptr_t skip_to;   /* the frame of the crash's own site: frames up to it are left out */
+  uintptr_t skip_fn;   /* or the function of that frame: its first frame is left out */
+  const sd_site *site; /* the crash's site, when it passed one */
+  bool found;          /* skip_to was found (first walk) */
+} trace_walk;
+
+static void trace_entry_add(trace_walk *w, const sd_site *s, long n) {
+  trace_entry e = {s, n};
+  if (w->n < SD_TRACE_HEAD) w->head[w->n] = e;
+  else w->tail[(w->n - SD_TRACE_HEAD) % SD_TRACE_TAIL] = e;
+  w->n++;
+}
+
+/* Frames without a site are left out, but many of them in a row (a
+ * recursion that the trace cannot name, at least SD_TRACE_RUN) become an
+ * entry of their own. */
+#define SD_TRACE_RUN 64
+static void trace_flush_unsited(trace_walk *w) {
+  if (w->unsited >= SD_TRACE_RUN) trace_entry_add(w, NULL, w->unsited);
+  w->unsited = 0;
+}
+
+static void trace_add(trace_walk *w, const sd_site *s) {
+  trace_flush_unsited(w);
+  trace_entry_add(w, s, 1);
+}
+
+/* The first walk: whether the frame at skip_to is on the stack. */
+static _Unwind_Reason_Code trace_find_cb(struct _Unwind_Context *ctx, void *arg) {
+  trace_walk *w = arg;
+  uintptr_t ip = _Unwind_GetIP(ctx);
+  if (ip == 0 || ++w->raw > 64 || _Unwind_GetRegionStart(ctx) == w->stop) return _URC_END_OF_STACK;
+  if (ip == w->skip_to) {
+    w->found = true;
+    return _URC_END_OF_STACK;
+  }
+  return _URC_NO_REASON;
+}
+
+static _Unwind_Reason_Code trace_cb(struct _Unwind_Context *ctx, void *arg) {
+  trace_walk *w = arg;
+  int before = 0;
+  uintptr_t ip = _Unwind_GetIPInfo(ctx, &before);
+  uintptr_t fn = _Unwind_GetRegionStart(ctx);
+  if (ip == 0 || ++w->raw > SD_TRACE_MAX || fn == w->stop) return _URC_END_OF_STACK;
+  if (w->skip_to) {
+    if (ip == w->skip_to) w->skip_to = 0;
+    return _URC_NO_REASON;
+  }
+  if (w->skip_fn && fn == w->skip_fn) {
+    w->skip_fn = 0;
+    return _URC_NO_REASON;
+  }
+  /* A return address is just after its call. A signal frame's address is
+   * the faulting instruction itself (a stack overflow's is in a function's
+   * entry, before its marks): it has no site. */
+  if (before) return _URC_NO_REASON;
+  const sd_site *s = site_find(ip - 1, fn);
+  if (!s) {
+    w->unsited++;
+    return _URC_NO_REASON;
+  }
+  if (w->n == 0 && w->site && s == w->site) return _URC_NO_REASON; /* the crash's own frame */
+  trace_add(w, s);
+  return _URC_NO_REASON;
+}
+
+static const sd_site *site_of_return(uintptr_t ret) {
+  if (!ret || !site_tab) return NULL;
+  return site_find(ret - 1, (uintptr_t)_Unwind_FindEnclosingFunction((void *)(ret - 1)));
+}
+#endif
+
+typedef struct {
+  char *p;
+  size_t len, cap;
+} trace_buf;
+
+static void trace_put(trace_buf *b, const char *fmt, ...) SD_PRINTF(2, 3);
+static void trace_put(trace_buf *b, const char *fmt, ...) {
+  va_list ap;
+  va_start(ap, fmt);
+  int n = vsnprintf(NULL, 0, fmt, ap);
+  va_end(ap);
+  if (n <= 0) return;
+  if (b->len + (size_t)n + 1 > b->cap) {
+    size_t cap = b->cap ? b->cap * 2 : 256;
+    while (cap < b->len + (size_t)n + 1) cap *= 2;
+    char *p = realloc(b->p, cap);
+    if (!p) return;
+    b->p = p;
+    b->cap = cap;
+  }
+  va_start(ap, fmt);
+  vsnprintf(b->p + b->len, b->cap - b->len, fmt, ap);
+  va_end(ap);
+  b->len += (size_t)n;
+}
+
+static void trace_line(trace_buf *b, const char *how, const sd_site *s) {
+  trace_put(b, "    %s %s (%s:%d:%d)\n", how, s->fn, s->file, (int)s->line, (int)s->col);
+}
+
+#if defined(SD_SITES)
+/* An entry of a trace; returns whether it was a frame with a site. */
+static bool trace_entry_line(trace_buf *b, const trace_entry *e, bool first) {
+  if (!e->site) {
+    trace_put(b, "    ... %ld calls without a position (optimised code) ...\n", e->n);
+    return false;
+  }
+  trace_line(b, first ? "at" : "called from", e->site);
+  return true;
+}
+#endif
+
+/* The trace of a crash of t (malloc'ed; NULL when nothing is known): the
+ * lines "    at f (file:line:col)" for where it crashed, "    called from
+ * g (...)" for each caller, the first and last frames only of a deep stack,
+ * and "    spawned from h (...)" for a goroutine. site is the crash's own
+ * site (or NULL) and site_ret the return address of the call that passed
+ * it, which is in the frame of that site; with note, the call was made in
+ * that frame's function before the crash (sd_crash_site_). Runs on the
+ * crashing goroutine's stack, or in the fault handler. */
+static char *trace_make(sd_task *t, const sd_site *site, void *site_ret, bool note) {
+  trace_buf b = {NULL, 0, 0};
+#if defined(SD_SITES)
+  pthread_once(&site_once, site_init);
+  if (!site_tab) return NULL;
+  trace_walk w;
+  memset(&w, 0, sizeof w);
+  w.stop = (uintptr_t)(void *)protect;
+  w.site = site;
+  if (site && site_ret && note) {
+    w.skip_fn = (uintptr_t)_Unwind_FindEnclosingFunction((void *)((uintptr_t)site_ret - 1));
+  } else if (site && site_ret) {
+    w.skip_to = (uintptr_t)site_ret;
+    _Unwind_Backtrace(trace_find_cb, &w);
+    w.skip_to = w.found ? (uintptr_t)site_ret : 0;
+    w.raw = 0;
+  }
+  _Unwind_Backtrace(trace_cb, &w);
+  trace_flush_unsited(&w);
+  bool first = true;
+  if (site) {
+    trace_line(&b, "at", site);
+    first = false;
+  }
+  for (long i = 0; i < w.n && i < SD_TRACE_HEAD; i++)
+    if (trace_entry_line(&b, &w.head[i], first)) first = false;
+  if (w.n > SD_TRACE_HEAD) {
+    long rest = w.n - SD_TRACE_HEAD, from = 0;
+    if (rest > SD_TRACE_TAIL) {
+      trace_put(&b, "    ... %ld more calls ...\n", rest - SD_TRACE_TAIL);
+      from = rest - SD_TRACE_TAIL;
+    }
+    for (long i = from; i < rest; i++) trace_entry_line(&b, &w.tail[i % SD_TRACE_TAIL], false);
+  }
+  const sd_site *sp = t->group ? site_of_return((uintptr_t)t->spawn_ret) : NULL;
+  if (sp) trace_line(&b, "spawned from", sp);
+#else
+  (void)t;
+  (void)site_ret;
+  (void)note;
+  if (site) trace_line(&b, "at", site);
+#endif
+  return b.p;
+}
+
 static SD_NORETURN void raise_in(sd_task *t, int kind, char *msg) {
   if (t->raise == SD_RAISE_NONE) {
     t->raise = kind;
     t->msg = msg;
     t->msg_static = false;
+    if (kind == SD_RAISE_CRASH) t->trace = trace_make(t, t->site, t->site_ret, t->site_note);
   } else {
     free(msg); /* the first crash (or stop) wins */
   }
+  t->site = NULL;
+  t->site_ret = NULL;
+  t->site_note = false;
   if (!t->frame) {
     fflush(stdout);
     fprintf(stderr, "crash: %s\n", t->msg ? t->msg : "goroutine stopped");
+    if (t->trace) fputs(t->trace, stderr);
     sd_exit_process(2);
   }
   lframes_release(t, t->frame->lmark);
@@ -2053,6 +2350,57 @@ void sd_crash_index(sd_int i, int64_t len) {
 
 void sd_crash_null(void) { sd_crash("null value used"); }
 
+/* A crash at the site s; ret is the return address of the call that passed
+ * it (in the frame of s). */
+static SD_NORETURN void crash_at(const sd_site *s, void *ret, char *msg) {
+  sd_task *t = task_current();
+  t->site = s;
+  t->site_ret = ret;
+  raise_in(t, SD_RAISE_CRASH, msg);
+}
+
+SD_NOINLINE void sd_crash_at(const sd_site *s, const char *fmt, ...) {
+  va_list ap;
+  va_start(ap, fmt);
+  char *m = sd_vfmt(fmt, ap);
+  va_end(ap);
+  crash_at(s, __builtin_return_address(0), m);
+}
+
+SD_NOINLINE void sd_crash_site_(const sd_site *s) {
+  sd_task *t = task_current();
+  t->site = s;
+  t->site_ret = __builtin_return_address(0);
+  t->site_note = true;
+}
+
+SD_NOINLINE void sd_crash_index_at(sd_int i, int64_t len, const sd_site *s) {
+  char *v = sd_int_to_cstr(i);
+  char *m = sd_fmt("index out of range: %s with length %lld", v, (long long)len);
+  free(v);
+  crash_at(s, __builtin_return_address(0), m);
+}
+
+SD_NOINLINE sd_int sd_int_div_slow_at(sd_int a, sd_int b, const sd_site *s) {
+  if (b.w == SD_INT(0).w) crash_at(s, __builtin_return_address(0), sd_fmt("division by zero"));
+  return sd_int_div_slow(a, b);
+}
+
+SD_NOINLINE sd_int sd_int_mod_slow_at(sd_int a, sd_int b, const sd_site *s) {
+  if (b.w == SD_INT(0).w) crash_at(s, __builtin_return_address(0), sd_fmt("division by zero"));
+  return sd_int_mod_slow(a, b);
+}
+
+SD_NOINLINE sd_int sd_int_shl_slow_at(sd_int a, sd_int b, const sd_site *s) {
+  if (sd_int_cmp(b, SD_INT(0)) < 0) crash_at(s, __builtin_return_address(0), sd_fmt("negative shift count"));
+  return sd_int_shl_slow(a, b);
+}
+
+SD_NOINLINE sd_int sd_int_shr_slow_at(sd_int a, sd_int b, const sd_site *s) {
+  if (sd_int_cmp(b, SD_INT(0)) < 0) crash_at(s, __builtin_return_address(0), sd_fmt("negative shift count"));
+  return sd_int_shr_slow(a, b);
+}
+
 void sd_crash_int(const char *fmt, sd_int v) {
   char *s = sd_int_to_cstr(v);
   char *m = sd_fmt(fmt, s);
@@ -2073,7 +2421,7 @@ static void unwind_to(sd_task *t, size_t mark);
  * kind is returned (it stays pending in t->raise for the caller). The
  * signal mask is not saved: the fault handler runs with SA_NODEFER and an
  * empty mask, so a jump out of it leaves the mask as it was. */
-static int protect(sd_task *t, void (*fn)(void *), void *arg) {
+SD_NOINLINE static int protect(sd_task *t, void (*fn)(void *), void *arg) {
   sd_frame f;
   f.prev = t->frame;
   f.mark = t->ncl;
@@ -2095,6 +2443,13 @@ static int protect(sd_task *t, void (*fn)(void *), void *arg) {
   unwind_to(t, f.mark);
   t->frame = f.prev;
   return t->raise;
+}
+
+/* Takes the pending crash's trace (malloc'ed, or NULL). */
+static char *take_trace(sd_task *t) {
+  char *tr = t->trace;
+  t->trace = NULL;
+  return tr;
 }
 
 /* Takes the pending raise: returns its kind and (malloc'ed) message. */
@@ -2336,8 +2691,10 @@ static SD_NORETURN void goroutine_main(sd_task *t) {
   if (r != SD_RAISE_NONE) {
     char *msg;
     take_raise(t, &msg);
-    result = r == SD_RAISE_CRASH ? sd_errorf("crash: %s", msg) : SD_ERR_NULL;
+    char *trace = take_trace(t);
+    result = r == SD_RAISE_CRASH ? sd_crash_error(msg, trace) : SD_ERR_NULL;
     free(msg);
+    free(trace);
   }
   if (t->args_type) {
     sd_release(t->args_type, t->args);
@@ -2379,8 +2736,9 @@ static void goroutine_exit_g0(sd_m *m, sd_task *t) {
   running_dec_p(m->p);
 }
 
-/* Called only by the goroutine that runs g's block (see sd_group). */
-void sd_spawn(sd_group *g, sd_task_fn body, const sd_type *args_type, const void *args) {
+/* Called only by the goroutine that runs g's block (see sd_group). Not
+ * inlined: its return address is the spawn's (spawn_ret). */
+__attribute__((noinline)) void sd_spawn(sd_group *g, sd_task_fn body, const sd_type *args_type, const void *args) {
   sd_task *parent = task_current();
   sd_task *c = g_get(SD_GOROUTINE_STACK);
   /* The select generator's seed, from the parent's (no shared counter). */
@@ -2394,7 +2752,7 @@ void sd_spawn(sd_group *g, sd_task_fn body, const sd_type *args_type, const void
   c->args = NULL;
   /* Generated code names the descriptor of a spawn's arguments after the
    * spawn ("spawn worker(i, jobs)"): the goroutine's name in reports. */
-  c->name = args_type && args_type->name && strncmp(args_type->name, "spawn ", 6) == 0 ? args_type->name + 6 : NULL;
+  c->spawn_ret = __builtin_return_address(0);
   if (args_type) {
     c->args = args_type->size <= sizeof c->argbuf ? (void *)c->argbuf : sd_alloc(args_type->size);
     sd_clone_deep(args_type, c->args, args);
@@ -3759,6 +4117,9 @@ static void fault_handler(int sig) {
       t->raise = SD_RAISE_CRASH;
       t->msg = (char *)"stack overflow or invalid memory access";
       t->msg_static = true;
+      /* The walk crosses the signal frame into the goroutine's stack. A
+       * fault in it comes back here with the raise set: no trace then. */
+      t->trace = trace_make(t, NULL, NULL, false);
     }
     lframes_release(t, t->frame->lmark);
     siglongjmp(t->frame->jb, 1);
@@ -3804,9 +4165,35 @@ sd_err sd_catch(sd_err (*fn)(void *arg), void *arg) {
   }
   char *msg;
   take_raise(t, &msg);
-  sd_err e = sd_errorf("crash: %s", msg);
+  char *trace = take_trace(t);
+  sd_err e = sd_crash_error(msg, trace);
   free(msg);
+  free(trace);
   return e;
+}
+
+/* The error of a crash: its message, and its trace for whoever prints it. */
+typedef struct {
+  sd_str msg;
+  sd_str trace;
+} crash_payload;
+static const sd_field crash_payload_fields[] = {SD_FIELD(crash_payload, msg, &sd_type_str),
+                                                SD_FIELD(crash_payload, trace, &sd_type_str)};
+static const sd_type crash_payload_type = SD_STRUCT_TYPE("crash", crash_payload, crash_payload_fields);
+static sd_str crash_error_message(const void *self) { return sd_str_retain(((const crash_payload *)self)->msg); }
+static const sd_error_vtable crash_error_vtable = {{"crash"}, crash_error_message};
+
+sd_err sd_crash_error(const char *msg, const char *trace) {
+  char *m = sd_fmt("crash: %s", msg);
+  crash_payload p = {sd_str_from_cstr(m), sd_str_from_cstr(trace ? trace : "")};
+  free(m);
+  return sd_iface_new(&crash_error_vtable.hdr, &crash_payload_type, &p);
+}
+
+const char *sd_err_trace(sd_err e) {
+  if (e.vt != &crash_error_vtable.hdr) return NULL;
+  const crash_payload *p = sd_iface_self(e);
+  return p->trace->len > 0 ? p->trace->data : NULL;
 }
 
 static struct {
@@ -3835,8 +4222,10 @@ static SD_NORETURN void main_goroutine(sd_task *t) {
   if (r != SD_RAISE_NONE) {
     char *msg;
     take_raise(t, &msg);
+    char *trace = take_trace(t);
     fflush(stdout);
     fprintf(stderr, "crash: %s\n", msg);
+    if (trace) fputs(trace, stderr);
     sd_exit_process(2);
   }
   sd_list_release(args);
@@ -3846,6 +4235,9 @@ static SD_NORETURN void main_goroutine(sd_task *t) {
     fputs("error: ", stderr);
     fwrite(m->data, 1, (size_t)m->len, stderr);
     fputc('\n', stderr);
+    /* A goroutine's crash that main returned: where it happened. */
+    const char *trace = sd_err_trace(mc.result);
+    if (trace) fputs(trace, stderr);
     sd_exit_process(1);
   }
   sd_exit_process(0);

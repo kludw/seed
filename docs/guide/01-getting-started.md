@@ -84,12 +84,12 @@ Hello, world!
 
 | Command | What it does |
 |---|---|
-| `seed run <file.sd or dir> [args...]` | Compiles the program into a temporary executable and runs it. The exit code is the program's. |
-| `seed build [-o out] <file.sd or dir>` | Compiles the program into an executable (named after the file or directory unless `-o` names it): a single binary with no dependencies. |
+| `seed run [-g] <file.sd or dir> [args...]` | Compiles the program into a temporary executable and runs it. The exit code is the program's. |
+| `seed build [-g] [-o out] <file.sd or dir>` | Compiles the program into an executable (named after the file or directory unless `-o` names it): a single binary with no dependencies. With `-g`, for a debugger: gdb and lldb then show the Seed source ([chapter 14](14-crashes-and-debugging.md)). |
 | `seed test [-v] [--run text] [dir...]` | Runs the tests of the packages under the directories; `-v` lists each test as it runs, `--run` runs only the tests whose description contains the text (see [chapter 11](11-packages.md)). |
 | `seed fmt <file.sd or dir>...` | Rewrites the files in the one canonical layout; a directory means every `.sd` file under it. |
 | `seed fmt --check <file.sd or dir>...` | Changes nothing, and reports the files that are not formatted (exit code 1). |
-| `seed c <file.sd or dir>` | Writes the generated C program to stdout. |
+| `seed c [-g] <file.sd or dir>` | Writes the generated C program to stdout. |
 | `seed lsp` | The language server, for editors (see [Editors](#editors)). |
 
 A program is a single `.sd` file, or a directory: the `package main` in it and the packages it imports ([chapter 11](11-packages.md)). Compile errors are printed to stderr, and the command exits with code 1.

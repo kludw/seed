@@ -292,12 +292,19 @@ fn (Gen g) mut genFast(int f) {
     g.fastLoops = []int{}
     g.pcStart(fd.body)
     g.emit(head + " {")
+    // The fast version has no marks (gen_site.sd): even one asm statement
+    // changes how the C compiler lays out a small recursion like fib's.
+    g.siteStart(f)
+    g.noMarks = true
     g.indent++
     g.fastBlock(fd.body)
+    g.noMarks = false
+    g.siteEnd()
     g.emit("return 1;")
     g.indent--
     g.emit("}")
     g.emit("")
+    g.out.push(g.lineReset())
     // The chooser.
     string value = "(sd_int){r_}"
     if (g.c.fnRet[f] == tyBool) {
@@ -305,7 +312,9 @@ fn (Gen g) mut genFast(int f) {
     }
     g.emit(sig + " {")
     g.indent++
-    string call = "int64_t r_ = " + g.fastName(f) + "(" + fastArgs.join(", ") + ");"
+    // The chooser's call of the fast version is marked with the function's
+    // own position, so that a trace through the fast version names it.
+    string call = "int64_t r_ = " + g.fastName(f) + "(" + fastArgs.join(", ") + "); SD_SAV(r_, " + g.siteTab + ", " + g.siteRef(fd.pos).string() + ");"
     string take = "if (SD_LIKELY((r_ & 1) == 0)) return " + value + ";"
     if (ints.len() == 0) {
         g.emit("{ " + call + " " + take + " }")
@@ -320,6 +329,7 @@ fn (Gen g) mut genFast(int f) {
     g.indent--
     g.emit("}")
     g.emit("")
+    g.out.push(g.lineReset())
     g.fnText.push(g.out.join(""))
 }
 
@@ -331,6 +341,7 @@ fn (Gen g) mut fastBlock(int b) {
     for (int i = 0; i < bl.count; i++) {
         int s = g.c.ast.at(bl.list, i)
         bool top = g.pcEnter(b, s)
+        g.pos = g.c.ast.stmts[s].pos
         g.fastStmt(s)
         g.pcTop = top
     }
@@ -488,7 +499,10 @@ fn (Gen g) mut fastExpr(int e) string {
         if (g.callMayRecurse(i.ref)) {
             g.preemptLine()
         }
+        Pos saved = g.pos
+        g.pos = x.pos
         g.emit("int64_t " + r + " = " + g.fastName(i.ref) + "(" + args.join(", ") + "); if (" + r + " & 1) return 1;")
+        g.pos = saved
         if (g.c.fnRet[i.ref] == tyBool) {
             return "(" + r + " != 0)"
         }

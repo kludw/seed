@@ -1,0 +1,19 @@
+// Polygons whose corners are looked up by index.
+package shapes
+
+pub type Polygon struct {
+    pub []int xs
+}
+
+// The x coordinate of corner i, counted around the polygon; a negative i
+// counts back from the last corner.
+pub fn (Polygon p) corner(int i) int {
+    if (i < 0) {
+        return p.corner(p.xs.len() + i)
+    }
+    return p.xs[i]
+}
+
+pub fn width(Polygon p, int a, int b) int {
+    return p.corner(b) - p.corner(a)
+}

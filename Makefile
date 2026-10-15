@@ -72,11 +72,13 @@ release: verify
 test: build/seed2
 	tests/run.sh "build/seed2 c" tests/lang tests/core
 
-# The rest of the language, packages (tests/full/NAME/ directories) and the
-# seed command (tests/test_cmd.sh).
+# The rest of the language, packages (tests/full/NAME/ directories), the
+# seed command (tests/test_cmd.sh) and debugging with gdb (tests/test_gdb.sh,
+# skipped without gdb).
 test-full: build/seed2
 	tests/run.sh "build/seed2 c" tests/full tests/spec
 	tests/test_cmd.sh build/seed2
+	tests/test_gdb.sh build/seed2
 
 # The language server (seed lsp): scripted JSON-RPC sessions over stdin
 # and stdout, and sessions that type the test documents in a few bytes at

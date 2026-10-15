@@ -7,7 +7,8 @@
 # For every examples/NAME.sd (compiled with `seed c`):
 #   NAME.out   expected stdout (required, may be empty)
 #   NAME.exit  expected exit code (optional, default 0)
-#   NAME.err   text that must appear in stderr (optional)
+#   NAME.err   lines that must appear in stderr, each within a line, in
+#              this order (optional)
 # For every examples/NAME/ directory (a project: package main and the
 # packages it imports): `seed run NAME` must print NAME/main.out, and
 # `seed test NAME` must print NAME/test.out (both run in examples/).
@@ -32,6 +33,13 @@ tmp=$(mktemp -d "${TMPDIR:-/tmp}/seedguide.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 pass=0; fail=0
 failed() { fail=$((fail+1)); echo "FAIL $1: $2"; }
+# has_lines WANT GOT: every non-empty line of WANT is part of a line of GOT,
+# in order (as in tests/run.sh).
+has_lines() {
+  awk 'NR == FNR { if ($0 != "") want[++n] = $0; next }
+       j <= n && index($0, want[j]) { j++ }
+       END { exit !(j > n) }' j=1 "$1" "$2"
+}
 
 for src in "$dir"/*.sd; do
   [ -e "$src" ] || continue
@@ -51,7 +59,7 @@ for src in "$dir"/*.sd; do
   if ! cmp -s "$tmp/out" "$name.out"; then
     failed "$short" "stdout differs:"; diff "$name.out" "$tmp/out" | head -20; continue
   fi
-  if [ -f "$name.err" ] && ! grep -qF "$(cat "$name.err")" "$tmp/err"; then
+  if [ -f "$name.err" ] && ! has_lines "$name.err" "$tmp/err"; then
     failed "$short" "stderr missing '$(cat "$name.err")', got: $(head -c 300 "$tmp/err")"; continue
   fi
   pass=$((pass+1))

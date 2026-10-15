@@ -1,0 +1,14 @@
+// An index out of range of a string.
+package main
+
+import "fmt"
+
+fn letter(string s, int i) byte {
+    return s[i]
+}
+
+fn main([]string args) error {
+    fmt.println(letter("ab", 0).string())
+    fmt.println(letter("ab", args.len() + 4).string())
+    return null
+}

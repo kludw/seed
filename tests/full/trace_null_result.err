@@ -1,0 +1,2 @@
+crash: find returned null as result 1 without an error
+    at find (tests/full/trace_null_result.sd:10:5)

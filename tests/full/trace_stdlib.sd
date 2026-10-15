@@ -1,0 +1,16 @@
+// A crash inside the standard library (rand.range's check of its
+// arguments) shows the library's file from lib/ on, then the caller.
+package main
+
+import "fmt"
+import "rand"
+
+fn roll(int lo, int hi) int {
+    return rand.range(lo, hi)
+}
+
+fn main([]string args) error {
+    fmt.println((roll(1, 2) - 1).string())
+    fmt.println(roll(5, args.len()).string())
+    return null
+}

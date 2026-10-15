@@ -1,0 +1,4 @@
+crash: index out of range: 5 with length 3
+    at shapes.Polygon.corner (tests/full/trace_pkg/shapes/shapes.sd:14:14)
+    called from shapes.width (tests/full/trace_pkg/shapes/shapes.sd:18:14)
+    called from main (tests/full/trace_pkg/main.sd:11:24)

@@ -1,0 +1,21 @@
+package main
+
+import "fmt"
+
+fn total([]int xs, string label) int {
+    int sum = 0
+    for (int i = 0; i < xs.len(); i++) {
+        sum = sum + xs[i]
+    }
+    fmt.println(label + ": " + sum.string())
+    return sum
+}
+
+fn main([]string args) error {
+    []int xs = []int{3, 4, 5}
+    string name = "numbers"
+    map[string]int seen = map[string]int{"a": 1}
+    int t = total(xs, name)
+    fmt.println(t.string() + " " + seen.len().string())
+    return null
+}

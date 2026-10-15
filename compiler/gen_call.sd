@@ -34,6 +34,12 @@ fn (Gen g) mut gcall(int e) string {
 fn (Gen g) mut plainCall(int e) string {
     string call = g.callFrom(e, g.operands(g.callOperands(e)))
     g.preemptCall(e)
+    ExprInfo i = g.c.info[e]
+    if (i.res == Res.Func && g.siteOn && g.c.isNoReturn(i.ref) && g.c.ast.fns[i.ref].name == "crash") {
+        // os.crash: the C compiler makes a call that never returns a cold
+        // path, where no mark reaches, so the site goes first (gen_site.sd).
+        g.emit("sd_crash_site_(" + g.siteAddr(g.pos) + ");")
+    }
     return g.finishCall(e, call)
 }
 

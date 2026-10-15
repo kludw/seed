@@ -1,0 +1,2 @@
+crash: index out of range: 7 with length 3
+    at drop (tests/full/trace_list_remove.sd:8:8)

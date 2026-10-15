@@ -309,9 +309,12 @@ $ seed run 04_crash.sd
 third: 70
 deferred calls still run
 crash: index out of range: 3 with length 3
+    at main (04_crash.sd:9:30)
 $ echo $?
 2
 ```
+
+Below the message, a crash shows where it happened: the function, the file, the line and the column, then each call that led there (`called from ...`), as Go's panics do. [Chapter 14](14-crashes-and-debugging.md) explains these traces and how to run a program in a debugger.
 
 There is no `panic` and no `recover`. To stop a program on purpose, return an error from `main`, or call `os.exit`.
 
@@ -321,7 +324,7 @@ There is no `panic` and no `recover`. To stop a program on purpose, return an er
 |---|---|---|
 | `main` returns `null` | nothing | 0 |
 | `main` returns an error | `error: <message>` on stderr | 1 |
-| A crash | `crash: <message>` on stderr | 2 |
+| A crash | `crash: <message>` and where it happened on stderr | 2 |
 | `os.exit(n)` | nothing (stdout is flushed) | `n` (its low 8 bits, so use 0–255) |
 
 Returning an error from `main` is the normal way to fail, and `try` makes it easy:

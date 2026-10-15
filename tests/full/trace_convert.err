@@ -1,0 +1,2 @@
+crash: cannot convert float inf to int
+    at whole (tests/full/trace_convert.sd:8:12)

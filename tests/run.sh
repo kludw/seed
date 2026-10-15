@@ -9,7 +9,8 @@
 # For every <dir>/NAME.sd:
 #   NAME.out   expected stdout (required, may be empty)
 #   NAME.exit  expected exit code (optional, default 0)
-#   NAME.err   text that must appear in stderr (optional)
+#   NAME.err   lines that must appear in stderr, each within a line, in
+#              this order (optional): a crash's message and its trace
 #   NAME.in    stdin for the program (optional)
 # For every <dir>/errors/NAME.sd: compiling must fail, and stderr must contain
 # the text after "// expect-error: " on the file's first line. When the second
@@ -41,6 +42,13 @@ run_limited() {
   return $rc
 }
 limit=${SEED_TEST_TIMEOUT:-120}
+# has_lines WANT GOT: every non-empty line of WANT is part of a line of GOT,
+# in order.
+has_lines() {
+  awk 'NR == FNR { if ($0 != "") want[++n] = $0; next }
+       j <= n && index($0, want[j]) { j++ }
+       END { exit !(j > n) }' j=1 "$1" "$2"
+}
 for dir in "$@"; do
   for src in "$dir"/*.sd "$dir"/*/; do
     [ -e "$src" ] || continue
@@ -66,8 +74,8 @@ for dir in "$@"; do
     if ! cmp -s "$tmp/out" "$name.out"; then
       failed "$src" "stdout differs:"; diff "$name.out" "$tmp/out" | head -20; continue
     fi
-    if [ -f "$name.err" ] && ! grep -qF "$(cat "$name.err")" "$tmp/err"; then
-      failed "$src" "stderr missing '$(cat "$name.err")', got: $(head -c 300 "$tmp/err")"; continue
+    if [ -f "$name.err" ] && ! has_lines "$name.err" "$tmp/err"; then
+      failed "$src" "stderr missing '$(cat "$name.err")', got: $(head -c 600 "$tmp/err")"; continue
     fi
     pass=$((pass+1))
   done

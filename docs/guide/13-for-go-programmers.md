@@ -62,4 +62,4 @@ Seed started from Go and kept most of its spirit: a small language, fast to lear
 
 You give up some convenience: a few more characters for declarations, no closures for quick callbacks, no type switches, and a little more ceremony around maps and nullable values. In return, a Seed program reads the same no matter who wrote it, a function call can't change your variables behind your back, nothing is `nil` unless its type says so, no error is silently dropped, goroutines can't race or leak, and the compiler tells you about most mistakes before you run anything.
 
-Back to the [table of contents](README.md).
+Next: [Crashes and debugging](14-crashes-and-debugging.md).

@@ -1,0 +1,14 @@
+// byte(n) out of range reports the conversion's position.
+package main
+
+import "fmt"
+
+fn small(int n) byte {
+    return byte(n)
+}
+
+fn main([]string args) error {
+    fmt.println(small(7).string())
+    fmt.println(small(args.len() + 299).string())
+    return null
+}

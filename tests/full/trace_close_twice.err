@@ -1,0 +1,2 @@
+crash: close of closed channel
+    at shut (tests/full/trace_close_twice.sd:5:8)

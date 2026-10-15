@@ -1,0 +1,3 @@
+crash: index out of range: 5 with length 3
+    at change (tests/full/trace_list_ops.sd:14:9)
+    called from main (tests/full/trace_list_ops.sd:22:17)

@@ -1,0 +1,21 @@
+// A crash in a deferred call during a normal return shows the deferred
+// function, then the function that deferred it.
+package main
+
+import "fmt"
+
+fn last([]int xs) {
+    fmt.println(xs[xs.len()].string())
+}
+
+fn work([]int xs) {
+    defer last(xs)
+    fmt.println("working")
+}
+
+fn main([]string args) error {
+    []int xs = []int{1, 2}
+    last([]int{3})
+    work(xs)
+    return null
+}

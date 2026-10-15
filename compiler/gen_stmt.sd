@@ -74,6 +74,13 @@ fn (Gen g) mut condVal(string c, int mark) string {
 
 fn (Gen g) mut genStmt(int s) {
     Stmt st = g.c.ast.stmts[s]
+    Pos saved = g.pos
+    g.pos = st.pos
+    g.genStmtAt(s, st)
+    g.pos = saved
+}
+
+fn (Gen g) mut genStmtAt(int s, Stmt st) {
     int mark = g.slots.len()
     switch (st.kind) {
     case StmtKind.ExprStmt:
@@ -982,7 +989,7 @@ fn (Gen g) mut genReturn(Stmt st) {
         int pt = g.c.types.part(rtype, r)
         if (g.c.ast.exprs[es[r]].kind == ExprKind.NullLit && !g.c.types.isOpt(pt) && pt != tyError && g.c.types.part(rtype, es.len() - 1) == tyError) {
             string msg = g.c.ast.fns[g.curFn].name + " returned null as result " + (r + 1).string() + " without an error"
-            g.emit("if (sd_err_is_null(" + vals[es.len() - 1] + ")) sd_crash(\"%s\", " + cString(msg) + ");")
+            g.emit("if (sd_err_is_null(" + vals[es.len() - 1] + ")) sd_crash_at(" + g.siteAddr(g.pos) + ", \"%s\", " + cString(msg) + ");")
             break
         }
     }
@@ -1161,6 +1168,10 @@ fn (Gen g) mut genSpawn(Stmt st) {
     int savedIndent = g.indent
     g.out = []string{}
     g.indent = 1
+    // The trampoline is not marked: the goroutine's trace ends with where
+    // it was spawned (sd_spawn's own site) instead.
+    bool marks = g.siteOn
+    g.siteOn = false
     string call = g.callFrom(e, evals)
     if (g.coreType(e) == tyVoid) {
         g.emit(call + ";")
@@ -1168,6 +1179,7 @@ fn (Gen g) mut genSpawn(Stmt st) {
     } else {
         g.emit("return " + call + ";")
     }
+    g.siteOn = marks
     string body = g.out.join("")
     g.out = saved
     g.indent = savedIndent

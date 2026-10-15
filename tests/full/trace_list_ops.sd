@@ -1,0 +1,24 @@
+// The crashes of list operations in the runtime (remove, insert, slice,
+// an assignment out of range) report the call's position.
+package main
+
+import "fmt"
+
+fn change([]int xs, int which) []int {
+    []int ys = xs
+    if (which == 0) {
+        ys.remove(7)
+    } else if (which == 1) {
+        ys.insert(9, 0)
+    } else if (which == 2) {
+        ys[5] = 1
+    }
+    return ys.slice(2, which)
+}
+
+fn main([]string args) error {
+    []int xs = []int{1, 2, 3}
+    fmt.println(change(xs, 3).len().string())
+    fmt.println(change(xs, args.len() + 1).len().string())
+    return null
+}

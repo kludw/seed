@@ -55,6 +55,7 @@ runtime/seed_task.c      goroutines, crashes, defer, groups, channels, select, t
 runtime/seed_pkg.c       the OS side of fmt, os, fs (called by the natives in lib/)
 runtime/seed_test.c      the runner of seed test programs, assert errors
 runtime/seed_all.c       all of the above as one translation unit
+runtime/seed-gdb.py      gdb pretty printers and seed-locals, for programs built with seed build -g
 ```
 
 ```
@@ -77,6 +78,7 @@ the `SD_STR_LIT` and `SD_INT_BIGLIT` macros. It builds warning-free with
 | `SD_LEAK_CHECK` | Run LeakSanitizer's check in `sd_exit_process` (programs end with `_exit`, which skips its own); for `-fsanitize=leak` builds (`tests/leaks.sh` on Linux). Implies `SD_PLAIN_MALLOC`. |
 | `SD_PLAIN_MALLOC` | Allocate counted objects with `malloc`/`free` instead of the runtime's small-object allocator (section 15), so that leak checkers and sanitizers see each object. Automatic under ASan and TSan. |
 | `SD_GOROUTINE_STACK` | Stack size of goroutines in bytes (default 8 MB, reserved and committed as used; section 10). |
+| `SD_NO_SITES` | No crash-trace records (`SD_SA` expands to nothing): a trace shows only the sites passed to a crash. Automatic on architectures other than x86_64 and aarch64. |
 | `SD_CTX_UCONTEXT` | Switch goroutines with `swapcontext` instead of the runtime's own assembly (automatic on architectures other than x86_64 and aarch64; slower). |
 
 At run time, `SEED_PROCS=n` sets the number of processors (worker threads
@@ -463,8 +465,9 @@ happens next:
 1. The goroutine's pending defers run, newest first (and any groups it
    started are stopped and waited for, in stack order).
 2. In a goroutine inside a group, the crash becomes the group's error,
-   `crash: <message>`. In the main goroutine, the program prints
-   `crash: <message>` to stderr after flushing stdout and exits with code 2.
+   `crash: <message>`, which carries the crash's trace (below). In the main
+   goroutine, the program prints `crash: <message>` and the trace to stderr
+   after flushing stdout and exits with code 2.
 
 Crash unwinding is a `siglongjmp` to the goroutine's top frame, so generated
 code needs no checks after calls. What the unwound C frames' locals hold is
@@ -515,6 +518,73 @@ held by `int` locals (the compiler leaves ints out; small ints own nothing)
 and the C locals of native functions (which release what they hold before
 `sd_stop`, see section 13). The compiler's side is in compiler/README.md
 ("Memory management").
+
+**Crash traces.** A crash also shows where it happened in the Seed source
+and the calls that led there (the format is in DECISIONS.md):
+
+```
+crash: index out of range: 7 with length 3
+    at get (main.sd:6:12)
+    called from main (main.sd:11:17)
+```
+
+Nothing is recorded while the program runs; the trace is rebuilt from the
+return addresses on the stack when the goroutine crashes:
+
+- **Sites.** Every C unit the compiler generates has a table of *sites*,
+  `const sd_site sd_sites_<unit>[]` (`{fn, file, line, col}`: the Seed
+  function and a position), and puts `SD_SA(table, k)` after each C line
+  of a Seed function that calls something that may crash (a Seed
+  function, a native, a runtime function). `SD_SA` is an `asm` statement
+  that emits no instruction: a label, and a record `{label's address, &site
+  k}` in the section `sd_sites` (`__DATA,__sd_sites` on macOS), whose
+  bounds the linker gives (`__start_sd_sites`/`__stop_sd_sites`,
+  `section$start$__DATA$__sd_sites`). The first record after a return
+  address, in the same function (`_Unwind_FindEnclosingFunction`), is the
+  site of the call. `SD_SAV(v, table, k)` is the same mark as a
+  non-volatile `asm` that passes the call's result `v` through, so that
+  the C compiler still sees the function as pure; it marks the call of
+  the fast version of a pure int function, with that function's position.
+  The fast versions themselves have no marks: even one `asm` changes how
+  GCC lays out a small recursion such as fib's.
+- **Checks moved out of line.** An inlined check whose failure path the C
+  compiler moves out of line (an index, a division, a shift) has no record
+  after its call into the runtime, so the generated code passes the site
+  to the crash itself: `SD_LIST_GET_AT(l, T, i, site)`, `sd_str_at_s`,
+  `sd_int_div_at` (and `mod`, `shl`, `shr`), `sd_crash_at(site, fmt, ...)`.
+  The site's address is loaded only when the check fails. The crash
+  records it with its own return address (`crash_at`), which is in the
+  frame of that site: the walk leaves out the frames up to that one.
+  Before a call of `os.crash` (which never returns, so its call is out of
+  line too), the generated code calls `sd_crash_site_(site)`.
+- **The walk.** `raise_in` (and the fault handler, from the alternate
+  signal stack, through the signal frame) builds the trace with
+  `_Unwind_Backtrace` (libgcc on Linux, the system's libunwind on macOS)
+  down to the goroutine's `protect` frame, and keeps the first 10 frames
+  that have a site and a ring of the last 5, with the count between them
+  (`trace_make`). Frames without a site are left out, but 64 or more in a
+  row become a line of their own, `... N calls without a position
+  (optimised code) ...` (a deep recursion of a fast version). The sorted
+  table of records is made at the first crash.
+  A goroutine started by `sd_spawn` keeps its spawn's return address
+  (`spawn_ret`, in the cache line `sd_spawn` writes anyway), shown as
+  `spawned from`.
+- **Where the trace goes.** `t->trace`, taken with the message. A crashed
+  goroutine's error is `sd_crash_error(msg, trace)`: its message is
+  `crash: <msg>` as before, and `sd_err_trace(e)` gives the trace, which
+  `sd_main` prints below `error: ...` when main returns that error, and
+  the test runner below the `FAIL` line of a test that crashed.
+- **What degrades.** Frames without a record are left out: the runtime,
+  natives, thunks and trampolines, the fast versions of pure int
+  functions (counted when they are many, then named by their entry), and
+  the frames of Seed functions that the C compiler inlined into their
+  callers (the crash's own site is
+  still shown, from the record or the site passed). The runtime functions
+  that generated code calls and that may crash are `SD_CRASHES`
+  (`noinline`), so that, when the runtime is in the same C file as the
+  program (`seed c`), their calls keep a return address on a marked line.
+  On other architectures than x86_64 and aarch64 (or with `-DSD_NO_SITES`)
+  there are no records, and a trace shows only the sites passed to a crash.
 
 **Defer API.** A function containing `defer` records the stack depth on entry
 and unwinds to it before every return:
@@ -1183,6 +1253,10 @@ Arguments are borrowed and results owned unless marked **consumes** or
 | `void sd_crash_null(void)` | noreturn; for a null that the compiler believed impossible |
 | `void sd_crash_int(const char *fmt, sd_int v)` | noreturn; `fmt` has one `%s`, the text of `v` (for natives: the crash frees it) |
 | `sd_lframe`, `sd_lf_top`, `SD_LF_ENTER(L, release)`, `SD_LF_LEAVE(L)` | cleanup frames (section 9) |
+| `sd_site`, `SD_SA(table, k)`, `SD_SAV(v, table, k)` | crash traces: a site of the Seed source, the mark after a call (section 9) |
+| `sd_crash_at(site, fmt, ...)`, `sd_crash_index_at(i, len, site)`, `sd_crash_site_(site)` | crashes that report their site |
+| `SD_LIST_GET_AT(l, T, i, site)`, `sd_str_at_s(s, i, site)`, `sd_int_div_at mod_at shl_at shr_at(a, b, site)` | the inline checks, with the site of their failure |
+| `sd_err sd_crash_error(msg, trace)`, `const char *sd_err_trace(sd_err)` | a crashed goroutine's error and its trace (NULL for other errors) |
 | `void *sd_alloc(size_t)`, `sd_realloc`, `sd_free` | out of memory ends the program |
 | `int64_t sd_live_objects(void)` | with `-DSD_COUNT_OBJECTS`, else -1 |
 

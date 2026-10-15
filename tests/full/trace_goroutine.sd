@@ -1,0 +1,23 @@
+// A goroutine's crash becomes its group's error; when main returns that
+// error, the program prints it with the trace of the crash and where the
+// goroutine was spawned.
+package main
+
+fn item([]int xs, int i) int {
+    return xs[i]
+}
+
+fn worker(int id, chan int out) error {
+    []int xs = []int{10, 20}
+    out.send(item(xs, id))
+    return null
+}
+
+fn main([]string args) error {
+    chan int out = chan int(4)
+    try group {
+        spawn worker(1, out)
+        spawn worker(args.len() + 4, out)
+    }
+    return null
+}

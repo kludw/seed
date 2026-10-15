@@ -19,6 +19,7 @@ This guide is for programmers who already know Go or another C-like language. It
 11. [Packages and visibility](11-packages.md): `pub`, imports, package layout, tests.
 12. [The compiler is your friend](12-the-compiler.md): the pedantic checks, reading error messages, formatting.
 13. [Seed for Go programmers](13-for-go-programmers.md): the differences side by side, and why.
+14. [Crashes and debugging](14-crashes-and-debugging.md): reading a crash's trace, and `seed build -g` with gdb or lldb.
 
 ## The examples
 

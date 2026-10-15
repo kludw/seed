@@ -1,0 +1,23 @@
+// return null, err with a null err crashes at the return.
+package main
+
+import "fmt"
+
+fn find(string key, error err) (string, error) {
+    if (key == "a") {
+        return "found", null
+    }
+    return null, err
+}
+
+fn main([]string args) error {
+    string v, error e = find("a", null)
+    if (e == null) {
+        fmt.println(v)
+    }
+    string w, error e2 = find("b", null)
+    if (e2 == null) {
+        fmt.println(w)
+    }
+    return null
+}

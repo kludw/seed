@@ -1,0 +1,16 @@
+// A failed conversion (a float that is not finite to int) reports the
+// conversion's position.
+package main
+
+import "fmt"
+
+fn whole(float f) int {
+    return int(f)
+}
+
+fn main([]string args) error {
+    fmt.println(whole(2.5).string())
+    float zero = float(args.len() - 1)
+    fmt.println(whole(1.0 / zero).string())
+    return null
+}

@@ -1,0 +1,213 @@
+// The C generator, continued: where crashes happen, and #line directives.
+//
+// A crash prints where it happened in the Seed source and the Seed call
+// stack (runtime/README.md, "Crash traces"). Nothing is recorded while the
+// program runs: the runtime rebuilds the stack from the return addresses
+// when it crashes, through a table of *sites* (a function and a position in
+// the source) that every C unit has (siteTab) and two kinds of marks:
+//
+//   - Each C line of a Seed function that calls something that may crash
+//     (a Seed function, a native, a runtime function other than the safe
+//     ones of safeCallSet) is followed by SD_SA(table, k) (emit, markable,
+//     marked): an assembler label, which emits no instruction, and a
+//     record {address, site k} in the section sd_sites. The first record
+//     after a return address, in the same function, is the site of that
+//     call. The position of a line is the innermost call being generated,
+//     or else the statement (Gen.pos, set by genStmt, fastBlock, gexpr and
+//     fastExpr). The fast versions of pure int functions have no marks
+//     (noMarks; the cost was measurable in fib); the chooser's call of one
+//     has SD_SAV, a mark that passes the result through, so that the
+//     function stays pure, at the function's position.
+//   - The checks that the C compiler inlines and moves out of line, where
+//     no return address leads back (an index, a division, a shift), and the
+//     crashes the generator writes, pass the address of their site to the
+//     crash itself (SD_LIST_GET_AT, sd_int_div_at, sd_crash_at, ...): a
+//     constant that is loaded only when the check fails.
+//
+// With -g (seed build -g, seed run -g), the lines of Seed functions are
+// also preceded by #line directives for their position (lineMark), so that
+// a debugger shows the Seed source.
+package main
+
+// The index of the site of the current function at pos in the unit's table
+// (added when new).
+fn (Gen g) mut siteRef(Pos pos) int {
+    string path = g.sitePath(pos.file)
+    string key = g.fnLabel + "\x00" + path + "\x00" + pos.line.string() + ":" + pos.col.string()
+    int? known = g.siteIdx[key]
+    if (known != null) {
+        return known
+    }
+    int k = g.sites.len()
+    g.sites.push("{" + cString(g.fnLabel) + ", " + cString(path) + ", " + pos.line.string() + ", " + pos.col.string() + "}")
+    g.siteIdx[key] = k
+    return k
+}
+
+// The C address of the site of the current function at pos.
+fn (Gen g) mut siteAddr(Pos pos) string {
+    if (!g.siteOn || pos.line <= 0) {
+        return "NULL"
+    }
+    return "&" + g.siteTab + "[" + g.siteRef(pos).string() + "]"
+}
+
+// A source file as a crash shows it: as given to the compiler, or, for the
+// standard library, from lib/ on.
+fn (Gen g) sitePath(int file) string {
+    if (file < 0 || file >= g.c.diags.paths.len()) {
+        return "?"
+    }
+    string path = g.c.diags.paths[file]
+    string lib = g.c.libDir + "/"
+    if (g.c.libDir != "" && path.startsWith(lib)) {
+        return "lib/" + path.slice(lib.len(), path.len())
+    }
+    return path
+}
+
+// The name of function f in a crash's trace: get, Cart.add, cart.newCart,
+// cart.Cart.add (the package's name outside package main), test "name".
+fn (Gen g) fnSiteLabel(int f) string {
+    FnDecl fd = g.c.ast.fns[f]
+    if (fd.isTest) {
+        return "test " + cString(fd.name)
+    }
+    string name = fd.name
+    int recv = g.c.fnRecv[f]
+    if (fd.isMethod && recv >= 0) {
+        name = g.c.ast.typeDecls[recv].name + "." + fd.name
+    }
+    Package pk = g.c.ast.pkgs[g.c.fnPkg(f)]
+    if (pk.name != "main" && pk.name != "") {
+        return pk.name + "." + name
+    }
+    return name
+}
+
+// Starts the code of function f: its lines are marked, at its position.
+fn (Gen g) mut siteStart(int f) {
+    g.fnLabel = g.fnSiteLabel(f)
+    g.siteOn = true
+    g.pos = g.c.ast.fns[f].pos
+}
+
+fn (Gen g) mut siteEnd() {
+    g.siteOn = false
+    g.pos = Pos{file: -1, line: 0, col: 0}
+}
+
+// The C functions and macros that the marks leave alone besides the safe
+// calls: C's keywords, the frame macros, and the checks that pass their
+// site themselves (their slow paths are out of line, where a mark cannot
+// reach).
+fn siteSafeSet() map[string]bool {
+    map[string]bool m = map[string]bool{}
+    []string names = []string{"if", "for", "while", "switch", "return", "sizeof", "__typeof__", "SD_LF_LEAVE", "SD_LF_ENTER", "SD_UNLIKELY", "SD_SA", "SD_SAV", "SD_LIST_GET", "SD_LIST_GET_AT", "sd_str_at_s", "sd_int_div_at", "sd_int_mod_at", "sd_int_shl_at", "sd_int_shr_at", "sd_crash_at", "sd_int_index_at", "sd_crash_site_"}
+    for (int i = 0; i < names.len(); i++) {
+        m[names[i]] = true
+    }
+    return m
+}
+
+// Whether a C line gets the mark of a site: a whole statement (ending with
+// `;`, or a block `{ ... }` on one line) that calls something that may
+// crash.
+fn (Gen g) markable(string line) bool {
+    string t = line.trim()
+    if (!t.endsWith(";") && !(t.startsWith("{") && t.endsWith("}"))) {
+        return false
+    }
+    if (t.startsWith("break") || t.startsWith("continue") || t.startsWith("goto") || t.startsWith("#") || t.contains("SD_SAV(")) {
+        return false
+    }
+    for (int i = 0; i < t.len(); i++) {
+        if (t[i] != '(') {
+            continue
+        }
+        int j = i
+        for (; j > 0 && isIdentByte(t[j - 1]); ) {
+            j--
+        }
+        if (j == i) {
+            if (i > 0 && t[i - 1] == ')') {
+                return true
+            }
+            continue
+        }
+        string id = t.slice(j, i)
+        if (id.startsWith("sd_rt_") || id.startsWith("sd_rl_")) {
+            continue
+        }
+        if (g.safeCalls[id] == null && g.siteSafe[id] == null) {
+            return true
+        }
+    }
+    return false
+}
+
+// A line followed by the mark of the site at the current position. A
+// return keeps its value in a variable first, so that the mark comes
+// between the call and the return.
+fn (Gen g) mut marked(string line) string {
+    string mark = "SD_SA(" + g.siteTab + ", " + g.siteRef(g.pos).string() + ");"
+    string t = line.trim()
+    if (t.startsWith("return ")) {
+        string e = t.slice(7, t.len() - 1)
+        return "{ __typeof__(" + e + ") sd_r_ = " + e + "; " + mark + " return sd_r_; }"
+    }
+    return line + " " + mark
+}
+
+// With -g: the #line directive for the current position, to be put before
+// the next line (every line has one: a directive numbers the lines after
+// it, and a statement takes several C lines).
+fn (Gen g) mut lineMark() string {
+    if (!g.debug || !g.siteOn || g.pos.line <= 0 || g.pos.file < 0) {
+        return ""
+    }
+    string key = g.pos.file.string() + ":" + g.pos.line.string()
+    if (!g.lastLine.startsWith(key + " ")) {
+        g.lastLine = key + " #line " + g.pos.line.string() + " " + cString(absPath(g.c.diags.paths[g.pos.file])) + "\n"
+    }
+    return g.lastLine.slice(key.len() + 1, g.lastLine.len())
+}
+
+// With -g: after a Seed function, the C lines go back to the C file (a
+// placeholder that finishLines replaces, since the line number is known only
+// in the whole file).
+fn (Gen g) mut lineReset() string {
+    if (!g.debug) {
+        return ""
+    }
+    g.lastLine = ""
+    return "#line \x02\n"
+}
+
+// The unit's table of sites, under the name the marks use (defined last in
+// the unit; declared first by siteDecl).
+fn (Gen g) siteTable() string {
+    if (g.sites.len() == 0) {
+        return "const sd_site " + g.siteTab + "[] = {{0, 0, 0, 0}};\n"
+    }
+    return "const sd_site " + g.siteTab + "[] = {\n  " + g.sites.join(",\n  ") + "\n};\n"
+}
+
+fn (Gen g) siteDecl() string {
+    return "extern const sd_site " + g.siteTab + "[];\n"
+}
+
+// Replaces the placeholders of lineReset in the C text of the file named
+// cname with #line directives for the lines that follow (seed build -g).
+fn finishLines(string text, string cname) string {
+    if (!text.contains("#line \x02")) {
+        return text
+    }
+    []string lines = text.split("\n")
+    for (int i = 0; i < lines.len(); i++) {
+        if (lines[i].trim() == "#line \x02") {
+            lines[i] = "#line " + (i + 2).string() + " " + cString(cname)
+        }
+    }
+    return lines.join("\n")
+}

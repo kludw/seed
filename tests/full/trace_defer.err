@@ -1,0 +1,3 @@
+crash: index out of range: 1 with length 1
+    at last (tests/full/trace_defer.sd:8:17)
+    called from main (tests/full/trace_defer.sd:18:5)

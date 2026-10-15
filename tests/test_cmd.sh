@@ -57,6 +57,39 @@ case $out in
   *) failed "seed test in spec/testcmd/rules" "$out" ;;
 esac
 
+# Crash traces with seed run, which compiles a C file per package (the
+# tests in full/trace_*.sd use seed c). With -g (-O0, no inlining) every
+# frame is shown; without, the crash site and what the C compiler did not
+# inline.
+want=$(printf '%s\n' "crash: index out of range: 7 with length 2" \
+  "    at Shelf.book (full/trace_index.sd:14:14)" \
+  "    called from pick (full/trace_index.sd:21:18)" \
+  "    called from pick (full/trace_index.sd:19:16)" \
+  "    called from pick (full/trace_index.sd:19:16)" \
+  "    called from main (full/trace_index.sd:29:17)")
+out=$(cd "$here" && "$seed" run -g full/trace_index.sd 2>&1 > /dev/null); code=$?
+if [ "$code" = 2 ] && [ "$out" = "$want" ]; then pass=$((pass+1)); else failed "seed run -g full/trace_index.sd" "exit $code: $out"; fi
+want=$(printf '%s\n' "error: crash: index out of range: 5 with length 2" \
+  "    at item (full/trace_goroutine.sd:7:12)" \
+  "    called from worker (full/trace_goroutine.sd:12:14)" \
+  "    spawned from main (full/trace_goroutine.sd:20:9)")
+out=$(cd "$here" && "$seed" run -g full/trace_goroutine.sd 2>&1); code=$?
+if [ "$code" = 1 ] && [ "$out" = "$want" ]; then pass=$((pass+1)); else failed "seed run -g full/trace_goroutine.sd" "exit $code: $out"; fi
+out=$(cd "$here" && "$seed" run full/trace_pkg 2>&1 > /dev/null); code=$?
+case $code:$out in
+  "2:crash: index out of range: 5 with length 3
+    at shapes.Polygon.corner (full/trace_pkg/shapes/shapes.sd:14:14)"*"called from main (full/trace_pkg/main.sd:11:24)") pass=$((pass+1)) ;;
+  *) failed "seed run full/trace_pkg" "exit $code: $out" ;;
+esac
+# seed build -g: the same trace from a program built for a debugger.
+if (cd "$here" && "$seed" build -g -o "$tmp/trace_divide" full/trace_divide.sd); then
+  out=$("$tmp/trace_divide" 2>&1 > /dev/null); code=$?
+  want=$(printf '%s\n' "crash: division by zero" "    at divide (full/trace_divide.sd:7:14)" "    called from main (full/trace_divide.sd:12:17)")
+  if [ "$code" = 2 ] && [ "$out" = "$want" ]; then pass=$((pass+1)); else failed "seed build -g full/trace_divide.sd" "exit $code: $out"; fi
+else
+  failed "seed build -g full/trace_divide.sd" "did not build"
+fi
+
 # SPEC "Toolchain": seed run skips a -- before the program's arguments (only
 # the first one).
 out=$("$seed" run "$here/spec/program_args.sd" -- -x -- two 2>&1)

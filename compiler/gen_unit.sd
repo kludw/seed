@@ -55,6 +55,12 @@ fn (Gen g) mut genUnit(int p, string natives) string {
     g.queue = []HelperReq{}
     g.ndefer = 0
     g.nspawn = 0
+    g.sites = []string{}
+    g.siteIdx = map[string]int{}
+    g.siteTab = "sd_sites_root"
+    if (p > 0) {
+        g.siteTab = "sd_sites_" + g.c.ast.pkgs[p].cprefix
+    }
     // Helpers are requested once per type; every unit has its own.
     for (int t = 0; t < g.c.types.list.len(); t++) {
         g.c.types.list[t].helpers = 0
@@ -66,10 +72,11 @@ fn (Gen g) mut genUnit(int p, string natives) string {
     for (int i = 0; i < g.queue.len(); i++) {
         g.genHelper(g.queue[i].ty, g.queue[i].kind)
     }
-    []string body = []string{g.protos.join(""), natives, g.helpers.join(""), g.thunks.join(""), g.consts.join(""), g.fnText.join("")}
+    []string body = []string{g.protos.join(""), g.siteDecl(), natives, g.helpers.join(""), g.thunks.join(""), g.consts.join(""), g.fnText.join("")}
     if (p == 0) {
         body.push(g.mainText())
     }
+    body.push(g.siteTable())
     string text = body.join("")
     // The prototypes and type definitions the unit refers to, directly or
     // through another one it includes.

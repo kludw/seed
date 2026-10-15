@@ -150,6 +150,22 @@ type Gen struct {
     // per package, and the identifiers the unit being assembled refers to.
     bool split
     map[string]bool refs
+    // Crash traces (see emit and siteRef): the position in the source of
+    // the code being generated, the Seed name of the current function,
+    // whether its lines are marked, the C name of the unit's table of
+    // sites, the table's entries and their indexes by text. With debug
+    // (seed build -g), the lines of Seed functions carry #line directives;
+    // lastLine is the last one emitted.
+    Pos pos
+    string fnLabel
+    bool siteOn
+    string siteTab
+    []string sites
+    map[string]int siteIdx
+    bool debug
+    string lastLine
+    map[string]bool siteSafe
+    bool noMarks
 }
 
 fn newGen(Checker c) Gen {
@@ -218,6 +234,16 @@ fn newGen(Checker c) Gen {
         pcCond: 0,
         split: false,
         refs: map[string]bool{},
+        pos: Pos{file: -1, line: 0, col: 0},
+        fnLabel: "",
+        siteOn: false,
+        siteTab: "sd_sites_prog",
+        sites: []string{},
+        siteIdx: map[string]int{},
+        debug: false,
+        lastLine: "",
+        siteSafe: siteSafeSet(),
+        noMarks: false,
     }
 }
 
@@ -246,12 +272,14 @@ fn (Gen g) mut genProgram(string natives) string {
         parts.push(g.gprotos[p].text)
     }
     parts.push(g.protos.join(""))
+    parts.push(g.siteDecl())
     parts.push(natives)
     parts.push(g.helpers.join(""))
     parts.push(g.thunks.join(""))
     parts.push(g.consts.join(""))
     parts.push(g.fnText.join(""))
     parts.push(g.mainText())
+    parts.push(g.siteTable())
     return parts.join("")
 }
 
@@ -313,12 +341,28 @@ fn (Gen g) mut emit(string line) {
     if (g.indent > 0) {
         pad = spaces(g.indent * 2)
     }
-    g.out.push(pad + line + "\n")
+    string text = line
+    if (g.siteOn) {
+        string lm = g.lineMark()
+        if (lm != "") {
+            g.out.push(lm)
+        }
+        if (g.pos.line > 0 && !g.noMarks && g.markable(line)) {
+            text = g.marked(line)
+        }
+    }
+    g.out.push(pad + text + "\n")
     if (g.frameOn && g.lineMayCrash(line)) {
         g.crashSeq++
     }
     if (g.moved.len() > 0) {
         for (int i = 0; i < g.moved.len(); i++) {
+            if (g.siteOn) {
+                string nm = g.lineMark()
+                if (nm != "") {
+                    g.out.push(nm)
+                }
+            }
             g.out.push(pad + nullMark(g.moved[i].name) + "\n")
             g.slotEnd(g.moved[i])
         }
@@ -1541,7 +1585,7 @@ fn (Gen g) mut genNative(int f) {
         if (ps.len() == 0) {
             ps.push("void")
         }
-        g.protos.push(g.ctype(r) + " " + native + "(" + ps.join(", ") + ");\n")
+        g.protos.push("SD_CRASHES " + g.ctype(r) + " " + native + "(" + ps.join(", ") + ");\n")
         string call = native + "(" + args.join(", ") + ")"
         if (r != tyVoid) {
             call = "return " + call
@@ -1557,7 +1601,7 @@ fn (Gen g) mut genNative(int f) {
         args.push("&r_.r" + k.string())
         body.push("  r_.r" + k.string() + " = " + g.zeroOf(pt) + ";\n")
     }
-    g.protos.push(g.ctype(g.c.types.part(r, n - 1)) + " " + native + "(" + ps.join(", ") + ");\n")
+    g.protos.push("SD_CRASHES " + g.ctype(g.c.types.part(r, n - 1)) + " " + native + "(" + ps.join(", ") + ");\n")
     body.push("  r_.r" + (n - 1).string() + " = " + native + "(" + args.join(", ") + ");\n  return r_;\n}\n\n")
     g.fnText.push(body.join(""))
 }
@@ -1615,6 +1659,7 @@ fn (Gen g) mut genFn(int f) {
         sig = sig.replace(" " + g.c.fnCName[f] + "(", " " + g.generalName(f) + "(")
     }
     g.emit(sig + " {")
+    g.siteStart(f)
     g.indent++
     if (g.preemptsOnEntry(f)) {
         g.emit("SD_PREEMPT();")
@@ -1644,6 +1689,7 @@ fn (Gen g) mut genFn(int f) {
     } else if (fd.resultCount > 0 && !endsInReturn) {
         g.emit("sd_crash(\"internal error: " + fd.name + " reached its end without returning\");")
     }
+    g.siteEnd()
     g.indent--
     g.emit("}")
     g.emit("")
@@ -1665,16 +1711,26 @@ fn (Gen g) mut genFn(int f) {
         }
     }
     []string text = []string{}
+    string dl = ""
+    if (g.debug) {
+        g.lastLine = ""
+        dl = "#line " + fd.pos.line.string() + " " + cString(absPath(g.c.diags.paths[fd.pos.file])) + "\n"
+    }
     bool hasFrame = fields.len() > 0
     if (hasFrame) {
         string cn = g.c.fnCName[f]
         text.push("typedef struct { sd_lframe h;" + fields.join("") + " } sd_L_" + cn + ";\n")
         text.push("static void sd_lr_" + cn + "(sd_lframe *p) {\n  sd_L_" + cn + " *L = (sd_L_" + cn + " *)p;\n" + rels.join("") + "}\n")
-        text.push(g.out[0])
-        text.push("  sd_L_" + cn + " L = {{0}};\n")
-        text.push("  SD_LF_ENTER(L, sd_lr_" + cn + ");\n")
+        string enter = "  sd_L_" + cn + " L = {{0}};\n  SD_LF_ENTER(L, sd_lr_" + cn + ");\n"
+        if (g.debug) {
+            // On the line of the declaration, as the debugger sees it.
+            enter = " sd_L_" + cn + " L = {{0}}; SD_LF_ENTER(L, sd_lr_" + cn + ");\n"
+            text.push(dl + g.out[0].slice(0, g.out[0].len() - 1) + enter)
+        } else {
+            text.push(g.out[0] + enter)
+        }
     } else {
-        text.push(g.out[0])
+        text.push(dl + g.out[0])
     }
     for (int k = 1; k < g.out.len(); k++) {
         string line = g.out[k]
@@ -1689,6 +1745,7 @@ fn (Gen g) mut genFn(int f) {
         }
         text.push(line)
     }
+    text.push(g.lineReset())
     g.fnText.push(text.join(""))
 }
 
