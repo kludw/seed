@@ -1,0 +1,66 @@
+name: ci
+
+on:
+  push:
+    branches: [main, "seed-v2*"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-14]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build (bootstrap, three stages)
+        run: make
+
+      - name: Fixed point and snapshot
+        run: make verify
+
+      - name: Core language
+        run: make test
+
+      - name: Full language and seed command
+        run: make test-full
+
+      - name: Standard library
+        run: make test-lib
+
+      - name: Formatter
+        run: make test-fmt
+
+      - name: Examples
+        run: make test-examples
+
+      - name: Guide
+        run: docs/guide/check.sh
+
+      - name: Runtime (asan, tsan, plain)
+        run: runtime/tests/run.sh
+
+      - name: Leaks
+        run: make test-leaks
+
+      - name: Concurrency soak
+        shell: bash
+        run: |
+          fails=0
+          for f in tests/full/*group*.sd tests/full/*chan*.sd tests/full/*select*.sd tests/full/*spawn*.sd tests/full/preempt*.sd; do
+            n=${f%.sd}; [ -f "$n.out" ] || continue
+            b=build/soak-$(basename "$n"); build/seed2 build -o "$b" "$f" > /dev/null
+            want=0; [ -f "$n.exit" ] && want=$(cat "$n.exit")
+            for p in 1 2 4; do for k in 1 2 3 4 5; do
+              in=/dev/null; [ -f "$n.in" ] && in="$n.in"
+              SEED_PROCS=$p "$b" < "$in" > build/soak.out 2> build/soak.err; c=$?
+              if [ "$c" != "$want" ] || ! cmp -s build/soak.out "$n.out"; then
+                fails=$((fails+1)); echo "FAIL SEED_PROCS=$p $f (exit $c)"
+              fi
+            done; done
+          done
+          echo "soak failures: $fails"; [ "$fails" = 0 ]
