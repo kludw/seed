@@ -341,6 +341,9 @@ tty_feeder() { # TYPESCRIPT RESULT
     done
   done
   echo Ada
+  # Stay open a little: when the pipe closes at once, macOS's script can
+  # pass the end of input on before the line (the program reads null).
+  sleep 1
 }
 tty_script() { # TYPESCRIPT PROGRAM
   if [ "$(uname)" = Darwin ]; then script -q -F "$1" "$2"; else script -q -f -e -c "$2" "$1"; fi
