@@ -6990,8 +6990,10 @@ extern const sd_site_rec __start_sd_sites[], __stop_sd_sites[];
 _Static_assert(sizeof(sd_site) == 24, "SD_SA assumes 24-byte sites");
 
 /* An empty record of the runtime's own, so that the section exists in
- * every program. */
-__attribute__((used, section(SD_SITES_CSECTION))) static sd_site_rec sd_site_none_ = {0, NULL};
+ * every program. It is written in assembler like the marks' records: a C
+ * variable there would get AddressSanitizer's redzones around it (macOS),
+ * which site_init would then read as records. */
+__asm__(".pushsection " SD_SITES_SECTION "\n\t.p2align 3\n\t.quad 0, 0\n\t.popsection");
 
 /* The site of the records at the entry of functions (SD_SA_FN). */
 const sd_site sd_site_fn_start_ = {"", "", 0, 0};
