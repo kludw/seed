@@ -874,3 +874,126 @@ time.) `seed test lib` gains little from the cache: each package under test
 is compiled with its tests, so only its imports come from the cache, and
 most of the time is the test programs running. The compiler's own build
 (`make`) uses `seed c` and the Makefile's `-O2`, unchanged.
+
+## JSON
+
+`json` was the one benchmark at Go's level rather than below it on Linux:
+0.71-0.81 s against Go's 0.75-0.79 s (0.9-1.1x, depending on the run).
+It builds a 1 MB document of 6,000 objects and then, 30 times, prints it
+with `doc.string()` and parses it back with `json.parse`.
+
+**Where the time went.** `perf record` (task-clock samples) of the
+benchmark before, flat:
+
+| Function | Share |
+|---|---|
+| `JsonParser.value`, `.str`, `.object`, `.array`, `skipSpace` | 26% |
+| `sd_mem_alloc` + `sd_mem_free` + `sd_release` | 19% |
+| float formatting: glibc's `__printf_fp_buffer`, `__printf_buffer`, `__mpn_divrem`, `round_and_return`, `strlen` | 10% |
+| `strtod` (parsing numbers, and checking each formatting attempt) | 4% |
+| `memmove` | 6% |
+| `JsonWriter.write`, `jsonQuote`, `sd_list_join`, `sd_str_concat_n` | 14% |
+| maps (`map_probe`, `key_hash`, `sd_map_set`) | 5% |
+
+Three things stood out. `f.string()` of the 3,000 non-integral scores per
+document (`4498.5`) tried `%.*e` with 1, 2, ... digits and read each
+attempt back with `strtod` until one round-tripped: about ten library
+calls per number. The printer pushed every piece (`"{"`, a quoted key,
+`":"`, a number's text) onto a `[]string` and joined it at the end, so each
+quoted string and number was a string of its own, copied twice. And the
+parser's common paths had cleanup frames (the string function's frame had
+13 fields for its rare escape path, `value`'s 9 for its error messages and
+the `true`/`false` boxes it built before checking the literal), and it
+compared each literal by slicing it out of the text.
+
+**What changed.**
+
+1. **Float to text without printf** (runtime/README.md, section 6). An
+   exact short decimal (`x = n / 10^k` with `n < 10^15`: integers, halves,
+   `4498.5`) is its own digits; anything else goes through Ryu, with the
+   printf loop kept as the definition for the rare value where the two
+   differ (Ryu's `vr == vm`). Output is byte-for-byte the same, checked
+   against seed0's formatter on 200 million doubles on x86-64 (four runs of
+   50 million: random bit patterns, short decimals, decimal strings of 1-17
+   digits rounded to doubles, neighbours of powers of two and ten), 50
+   million with the 64-bit fallback for `unsigned __int128`
+   (`-DSD_NO_INT128`), and 10 million on arm64 under qemu: no difference.
+   About 0.2% of the values that reach Ryu take the printf loop.
+2. **Text to float with Clinger's fast path**: short decimal text (at most
+   19 digits, power of ten within 10^22) is one exact multiplication or
+   division; the rest is `strtod`, as before. Checked bit for bit against
+   `strtod` in the same runs (a quarter of the cases parse shortest texts,
+   `%.*e` and `%.*f` texts and random digit strings).
+3. **Appending to a string field in place** (compiler/README.md, "Memory
+   management"). `w.out = w.out + a + b` on a field of a local struct or a
+   mut receiver now appends in place, as `x = x + ...` on a local string
+   did, and several parts (strings, or ints written as digits) are appended
+   with one `sd_str_append_parts` instead of being concatenated first.
+   `sd_str_append` and `sd_str_append_parts` are inline in `seed.h` for an
+   unshared string with room; the general case is out of line.
+4. **The json package** (lib/README.md, "json"): the printer appends to one
+   string (no list, no join; a plain string is `"` + s + `"` straight into
+   it, escaped strings are copied in runs between escapes, whole numbers
+   are written as digits); the parser's string fast path is a function of
+   its own without a frame, escapes and errors are in separate functions,
+   literals are compared byte by byte, and escaped strings are built with
+   in-place appends instead of a `[]string` and a join.
+5. **String slices** check small-int bounds inline instead of calling
+   `sd_int_to_i64` twice.
+
+**After.** The same profile:
+
+| Function | Share |
+|---|---|
+| parser (`object`, `str`, `value`, `strRest`, `skipSpace`, `number`, `array`, `skipDigits`) | 33% |
+| printer (`quote`, `write`) | 16% |
+| `sd_mem_alloc` + `sd_mem_free` + `sd_release` + `sd_flush_batch` | 17% |
+| maps (`key_hash`, `map_probe`, `sd_map_set`) | 9% |
+| `memmove` | 4% |
+| `sd_str_slice` | 2.5% |
+
+No printf, `strtod` or `sd_list_join` is left. Instructions (cachegrind):
+6,251 M before, 4,196 M after (-33%); the time fell more than the
+instructions (-40%), since the printf and strtod paths and the join's
+copies were slow instructions.
+
+`RUNS=7 bench/run.sh json`, three separate runs (Linux x86-64, 4 cores, a
+VM shared with other work):
+
+| Run | Seed (s) | Go (s) | Seed / Go |
+|---|---|---|---|
+| 1 | 0.417 | 0.783 | 0.53 |
+| 2 | 0.461 | 0.752 | 0.61 |
+| 3 | 0.435 | 0.763 | 0.57 |
+
+The full set, `RUNS=5 bench/run.sh`, before and after (seconds; the
+compiler and runtime of the previous section against this one, run one
+after the other):
+
+| Benchmark | Before | After | Go (before / after runs) |
+|---|---|---|---|
+| `fib` | 0.393 | 0.403 | 0.637 / 0.595 |
+| `intloop` | 0.318 | 0.330 | 0.347 / 0.359 |
+| `json` | 0.706 | 0.430 | 0.750 / 0.796 |
+| `maps` | 0.698 | 0.667 | 1.319 / 1.338 |
+| `pingpong` | 0.107 | 0.108 | 0.118 / 0.130 |
+| `sort` | 0.555 | 0.594 | 0.839 / 0.710 |
+| `spawn` | 0.045 | 0.047 | 0.068 / 0.069 |
+| `strings` | 0.502 | 0.483 | 1.506 / 1.585 |
+
+The other benchmarks run the same instructions as before (cachegrind:
+`sort` 2,740.1 M both, `fib` 4,281.3 M, `intloop` 4,801.2 M, `maps`
+2,875.4 M), except `strings`, 5,096 M to 5,012 M (its `acc = acc + s`
+appends are inline now); their differences above are this machine's noise
+(interleaved, best of 7: `sort` 586/556 ms, `fib` 392/377 ms, `intloop`
+298/311 ms, old/new). The compiler compiling itself runs 1,543.3 M
+instructions before and 1,536.2 M after, in the same time (best of 7:
+228-249 ms before, 227-232 ms after); its binary is 1.7% larger (the
+inline appends and Ryu's tables).
+
+What is left in the profile is the work Go's `encoding/json` does too
+(a box per value, a map per object, a string per key and value, freeing the
+document) and the per-byte loops of the parser and printer: their index is
+a general `int` (it starts at a struct field, which the interval analysis
+cannot bound), so each byte costs a tag test, a bounds check and an
+overflow check, about 18 instructions where C would take 5.

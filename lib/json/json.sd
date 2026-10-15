@@ -90,9 +90,11 @@ fn (JsonParser p) mut skipSpace() {
     }
 }
 
+// The rare paths (errors, the true/false/null boxes) are calls of their
+// own, so that the common ones need no cleanup frame.
 fn (JsonParser p) mut value() (Value, error) {
     if (p.pos >= p.text.len()) {
-        return null, p.fail(p.pos, "unexpected end of input")
+        return p.failValue(p.pos, "unexpected end of input")
     }
     byte c = p.text[p.pos]
     switch (c) {
@@ -104,29 +106,49 @@ fn (JsonParser p) mut value() (Value, error) {
         string s = try p.str()
         return Value.String(s), null
     case 't':
-        return p.literal("true", Value.Bool(true))
+        try p.literal("true")
+        return Value.Bool(true), null
     case 'f':
-        return p.literal("false", Value.Bool(false))
+        try p.literal("false")
+        return Value.Bool(false), null
     case 'n':
-        return p.literal("null", Value.Null)
+        try p.literal("null")
+        return Value.Null, null
     case '-', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
         return p.number()
-    case '/':
-        return null, p.fail(p.pos, "unexpected character '/' (comments are not allowed)")
-    case '\'':
-        return null, p.fail(p.pos, "unexpected character ''' (strings use double quotes)")
     default:
-        return null, p.fail(p.pos, "unexpected " + jsonDescribe(c))
+        return p.unexpected(c)
     }
 }
 
-fn (JsonParser p) mut literal(string word, Value v) (Value, error) {
+// The error for byte c, which cannot start a value.
+fn (JsonParser p) unexpected(byte c) (Value, error) {
+    if (c == '/') {
+        return p.failValue(p.pos, "unexpected character '/' (comments are not allowed)")
+    }
+    if (c == '\'') {
+        return p.failValue(p.pos, "unexpected character ''' (strings use double quotes)")
+    }
+    return p.failValue(p.pos, "unexpected " + jsonDescribe(c))
+}
+
+fn (JsonParser p) failValue(int at, string reason) (Value, error) {
+    return null, p.fail(at, reason)
+}
+
+// The literal `word` (true, false or null) at the current position.
+fn (JsonParser p) mut literal(string word) error {
     int end = p.pos + word.len()
-    if (end > p.text.len() || p.text.slice(p.pos, end) != word) {
-        return null, p.fail(p.pos, "invalid literal (expected " + word + ")")
+    if (end > p.text.len()) {
+        return p.fail(p.pos, "invalid literal (expected " + word + ")")
+    }
+    for (int i = 1; i < word.len(); i++) {
+        if (p.text[p.pos + i] != word[i]) {
+            return p.fail(p.pos, "invalid literal (expected " + word + ")")
+        }
     }
     p.pos = end
-    return v, null
+    return null
 }
 
 fn (JsonParser p) mut enter() error {
@@ -259,31 +281,39 @@ fn (JsonParser p) mut skipDigits() {
 }
 
 // A string starting at the opening quote. Returns the decoded bytes.
+// Printable ASCII without escapes is one slice of the text; anything else
+// goes to strRest.
 fn (JsonParser p) mut str() (string, error) {
+    int n = p.text.len()
+    int start = p.pos + 1
+    for (int i = start; i < n; i++) {
+        byte c = p.text[i]
+        if (c == '"') {
+            p.pos = i + 1
+            return p.text.slice(start, i), null
+        }
+        if (c == '\\' || c < ' ' || c >= '\x80') {
+            return p.strRest(i)
+        }
+    }
+    return p.strRest(n)
+}
+
+// The rest of the string whose opening quote is at p.pos, from byte i on
+// (the bytes before it are plain).
+fn (JsonParser p) mut strRest(int from) (string, error) {
     int open = p.pos
     int n = p.text.len()
     p.pos++
-    // Fast path: printable ASCII without escapes.
-    int i = p.pos
-    for (; i < n; i++) {
-        byte c = p.text[i]
-        if (c == '"') {
-            string s = p.text.slice(p.pos, i)
-            p.pos = i + 1
-            return s, null
-        }
-        if (c == '\\' || c < ' ' || c >= '\x80') {
-            break
-        }
-    }
-    []string parts = []string{}
+    int i = from
+    string out = ""
     int runStart = p.pos
     for (; i < n; ) {
         byte c = p.text[i]
         if (c == '"') {
-            parts.push(p.text.slice(runStart, i))
+            out = out + p.text.slice(runStart, i)
             p.pos = i + 1
-            return parts.join(""), null
+            return out, null
         }
         if (c < ' ') {
             return null, p.fail(i, "unescaped control character " + jsonDescribe(c) + " in string")
@@ -300,24 +330,24 @@ fn (JsonParser p) mut str() (string, error) {
             i++
             continue
         }
-        parts.push(p.text.slice(runStart, i))
+        out = out + p.text.slice(runStart, i)
         if (i + 1 >= n) {
             break
         }
         byte esc = p.text[i + 1]
         switch (esc) {
         case '"', '\\', '/':
-            parts.push(string([]byte{esc}))
+            out = out + p.text.slice(i + 1, i + 2)
         case 'b':
-            parts.push("\x08")
+            out = out + "\x08"
         case 'f':
-            parts.push("\x0c")
+            out = out + "\x0c"
         case 'n':
-            parts.push("\n")
+            out = out + "\n"
         case 'r':
-            parts.push("\r")
+            out = out + "\r"
         case 't':
-            parts.push("\t")
+            out = out + "\t"
         case 'u':
             int cp = jsonHex4(p.text, i + 2)
             if (cp < 0) {
@@ -338,7 +368,7 @@ fn (JsonParser p) mut str() (string, error) {
             } else if (cp >= 0xdc00 && cp <= 0xdfff) {
                 cp = 0xfffd
             }
-            parts.push(jsonUtf8Encode(cp))
+            out = out + jsonUtf8Encode(cp)
             runStart = i
             continue
         default:
@@ -460,31 +490,33 @@ fn jsonDescribe(byte c) string {
 // Compact JSON with no spaces: {"a":[1,2.5,"x"]}. Crashes if the value
 // contains nan or an infinity.
 pub fn (Value v) string() string {
-    JsonWriter w = JsonWriter{out: []string{}, pretty: false, method: "json.Value.string"}
+    JsonWriter w = JsonWriter{out: "", pretty: false, method: "json.Value.string"}
     w.write(v, 0)
-    return w.out.join("")
+    return w.out
 }
 
 // JSON indented by two spaces per level, "key": value with one space, no
 // trailing newline. Empty arrays and objects print as [] and {}. Crashes if
 // the value contains nan or an infinity.
 pub fn (Value v) pretty() string {
-    JsonWriter w = JsonWriter{out: []string{}, pretty: true, method: "json.Value.pretty"}
+    JsonWriter w = JsonWriter{out: "", pretty: true, method: "json.Value.pretty"}
     w.write(v, 0)
-    return w.out.join("")
+    return w.out
 }
 
+// The text so far is one string that grows in place (w.out = w.out + ...
+// appends to it), so printing allocates little besides it.
 type JsonWriter struct {
-    []string out
+    string out
     bool pretty
     string method
 }
 
 fn (JsonWriter w) mut newline(int indent) {
     if (w.pretty) {
-        w.out.push("\n")
+        w.out = w.out + "\n"
         for (int i = 0; i < indent; i++) {
-            w.out.push("  ")
+            w.out = w.out + "  "
         }
     }
 }
@@ -492,45 +524,45 @@ fn (JsonWriter w) mut newline(int indent) {
 fn (JsonWriter w) mut write(Value v, int indent) {
     switch (v) {
     case Value.Null:
-        w.out.push("null")
+        w.out = w.out + "null"
     case Value.Bool(bool b):
-        w.out.push(b.string())
+        w.out = w.out + b.string()
     case Value.Number(float n):
-        w.out.push(jsonNumber(n, w.method))
+        w.number(n)
     case Value.String(string s):
-        w.out.push(jsonQuote(s))
+        w.quote(s)
     case Value.Array([]Value items):
         if (items.len() == 0) {
-            w.out.push("[]")
+            w.out = w.out + "[]"
             return
         }
-        w.out.push("[")
+        w.out = w.out + "["
         for (int i = 0; i < items.len(); i++) {
             if (i > 0) {
-                w.out.push(",")
+                w.out = w.out + ","
             }
             w.newline(indent + 1)
             w.write(items[i], indent + 1)
         }
         w.newline(indent)
-        w.out.push("]")
+        w.out = w.out + "]"
     case Value.Object(map[string]Value fields):
         if (fields.len() == 0) {
-            w.out.push("{}")
+            w.out = w.out + "{}"
             return
         }
-        w.out.push("{")
+        w.out = w.out + "{"
         []string keys = fields.keys()
         for (int i = 0; i < keys.len(); i++) {
             if (i > 0) {
-                w.out.push(",")
+                w.out = w.out + ","
             }
             w.newline(indent + 1)
-            w.out.push(jsonQuote(keys[i]))
+            w.quote(keys[i])
             if (w.pretty) {
-                w.out.push(": ")
+                w.out = w.out + ": "
             } else {
-                w.out.push(":")
+                w.out = w.out + ":"
             }
             Value? field = fields[keys[i]]
             if (field != null) {
@@ -538,96 +570,101 @@ fn (JsonWriter w) mut write(Value v, int indent) {
             }
         }
         w.newline(indent)
-        w.out.push("}")
+        w.out = w.out + "}"
     }
 }
 
 // A whole number with absolute value below 1e21 prints without a fraction
 // (-0 for negative zero); other numbers print as f.string() does.
-fn jsonNumber(float n, string method) string {
+fn (JsonWriter w) mut number(float n) {
     if (n != n) {
-        os.crash(method + ": nan cannot be written in JSON")
+        os.crash(w.method + ": nan cannot be written in JSON")
     }
     if (n - n != 0.0) {
-        os.crash(method + ": " + n.string() + " cannot be written in JSON")
+        os.crash(w.method + ": " + n.string() + " cannot be written in JSON")
     }
     if (n > -1.0e21 && n < 1.0e21) {
         int i = int(n)
         if (float(i) == n) {
             if (i == 0 && 1.0 / n < 0.0) {
-                return "-0"
+                w.out = w.out + "-0"
+            } else {
+                w.out = w.out + i.string()
             }
-            return i.string()
+            return
         }
     }
-    return n.string()
+    w.out = w.out + n.string()
 }
 
 // `s` as a JSON string literal: '"', '\' and bytes below 0x20 are escaped,
-// other valid UTF-8 is kept, and each invalid byte becomes U+FFFD.
-fn jsonQuote(string s) string {
-    bool plain = true
-    for (int i = 0; i < s.len(); i++) {
+// other valid UTF-8 is kept, and each invalid byte becomes U+FFFD. The runs
+// between escapes are copied whole.
+fn (JsonWriter w) mut quote(string s) {
+    int n = s.len()
+    int i = 0
+    for (; i < n; i++) {
         byte c = s[i]
         if (c < ' ' || c == '"' || c == '\\' || c >= '\x80') {
-            plain = false
             break
         }
     }
-    if (plain) {
-        return "\"" + s + "\""
+    if (i == n) {
+        w.out = w.out + "\"" + s + "\""
+        return
     }
-    string digits = "0123456789abcdef"
-    []byte out = []byte{'"'}
-    for (int i = 0; i < s.len(); ) {
+    w.out = w.out + "\"" + s.slice(0, i)
+    int run = i
+    for (; i < n; ) {
         byte c = s[i]
-        if (c >= '\x80') {
-            int k = jsonUtf8Len(s, i)
-            if (k == 0) {
-                out.push('\xef')
-                out.push('\xbf')
-                out.push('\xbd')
-                i++
-                continue
-            }
-            for (int j = i; j < i + k; j++) {
-                out.push(s[j])
-            }
-            i = i + k
+        if (c >= ' ' && c != '"' && c != '\\' && c < '\x80') {
+            i++
             continue
         }
-        if (c == '"' || c == '\\') {
-            out.push('\\')
-            out.push(c)
-        } else if (c == '\n') {
-            out.push('\\')
-            out.push('n')
-        } else if (c == '\t') {
-            out.push('\\')
-            out.push('t')
-        } else if (c == '\r') {
-            out.push('\\')
-            out.push('r')
-        } else if (c == '\x08') {
-            out.push('\\')
-            out.push('b')
-        } else if (c == '\x0c') {
-            out.push('\\')
-            out.push('f')
-        } else if (c < ' ') {
-            out.push('\\')
-            out.push('u')
-            out.push('0')
-            out.push('0')
-            out.push(digits[int(c) >> 4])
-            out.push(digits[int(c) & 15])
-        } else {
-            out.push(c)
+        int k = 0
+        if (c >= '\x80') {
+            k = jsonUtf8Len(s, i)
+            if (k > 0) {
+                i = i + k
+                continue
+            }
         }
+        if (i > run) {
+            w.out = w.out + s.slice(run, i)
+        }
+        w.out = w.out + jsonEscape(c)
         i++
+        run = i
     }
-    out.push('"')
-    return string(out)
+    w.out = w.out + s.slice(run, n) + "\""
+}
+
+// The escape written for byte c of a string: \" \\ \n \t \r \b \f, \u00xx
+// for the other control characters, and U+FFFD for a byte that is not part
+// of valid UTF-8 (c >= 0x80).
+fn jsonEscape(byte c) string {
+    switch (c) {
+    case '"':
+        return "\\\""
+    case '\\':
+        return "\\\\"
+    case '\n':
+        return "\\n"
+    case '\t':
+        return "\\t"
+    case '\r':
+        return "\\r"
+    case '\x08':
+        return "\\b"
+    case '\x0c':
+        return "\\f"
+    default:
+        if (c >= '\x80') {
+            return "\xef\xbf\xbd"
+        }
+        string digits = "0123456789abcdef"
+        return "\\u00" + string([]byte{digits[int(c) >> 4], digits[int(c) & 15]})
+    }
 }
 
 // --------------------------------------------------------------- accessors

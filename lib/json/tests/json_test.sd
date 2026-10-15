@@ -388,3 +388,51 @@ test "pretty inf crashes" {
     assert(err != null)
     assert(err.message() == "crash: json.Value.pretty: -inf cannot be written in JSON")
 }
+
+test "printing strings with escapes between plain runs" {
+    assert(Value.String("plain text").string() == "\"plain text\"")
+    assert(Value.String("ab\ncd\"ef\\gh").string() == "\"ab\\ncd\\\"ef\\\\gh\"")
+    assert(Value.String("\"").string() == "\"\\\"\"")
+    assert(Value.String("x\xffy\xc3\xa9z\x01").string() == "\"x\xef\xbf\xbdy\xc3\xa9z\\u0001\"")
+    assert(Value.String("\x1f\x1f\n").string() == "\"\\u001f\\u001f\\n\"")
+    assert(Value.String("\xc3\xa9\n").string() == "\"\xc3\xa9\\n\"")
+    []Value items = []Value{}
+    for (int i = 0; i < 3000; i++) {
+        items.push(Value.String("s" + i.string() + "\t"))
+    }
+    string text = Value.Array(items).string()
+    assert(text.len() == 2 + 2999 + 3000 * 5 + 10 + 90 * 2 + 900 * 3 + 2000 * 4)
+    assert(text.startsWith("[\"s0\\t\",\"s1\\t\","))
+    assert(text.endsWith(",\"s2999\\t\"]"))
+    Value back, error err = parse(text)
+    assert(err == null && back == Value.Array(items))
+}
+
+test "printing big whole numbers" {
+    assert(Value.Number(123456789012345683968.0).string() == "123456789012345683968")
+    assert(Value.Number(-4611686018427387904.0).string() == "-4611686018427387904")
+    assert(Value.Number(9223372036854775808.0).string() == "9223372036854775808")
+    assert(Value.Number(4498.5).string() == "4498.5")
+    assert(Value.Number(1000000000000000.5).string() == "1000000000000000.5")
+    assert(Value.Array([]Value{Value.Number(1.0e20), Value.Number(-0.0), Value.Number(0.5)}).string() == "[100000000000000000000,-0,0.5]")
+}
+
+test "parse literal errors" {
+    assert(jsonTestError("tru") == "json.parse: line 1, column 1: invalid literal (expected true)")
+    assert(jsonTestError("trUe") == "json.parse: line 1, column 1: invalid literal (expected true)")
+    assert(jsonTestError("[nul]") == "json.parse: line 1, column 2: invalid literal (expected null)")
+    assert(jsonTestError("[1,falsy]") == "json.parse: line 1, column 4: invalid literal (expected false)")
+    assert(jsonTestError("nulll") == "json.parse: line 1, column 5: unexpected character 'l' after the value")
+    assert(jsonTestRoundTrip("[true,false,null]") == "[true,false,null]")
+}
+
+test "parse strings with escapes between plain runs" {
+    Value v, error err = parse("\"ab\\ncd\\\"ef\"")
+    assert(err == null && v == Value.String("ab\ncd\"ef"))
+    v, err = parse("\"\\\\\"")
+    assert(err == null && v == Value.String("\\"))
+    v, err = parse("\"\\/x\\u0041\xc3\xa9\\t\"")
+    assert(err == null && v == Value.String("/xA\xc3\xa9\t"))
+    v, err = parse("[\"\xc3\xa9\",\"b\\n\\\"c\\\"\",\"plain\"]")
+    assert(err == null && v == Value.Array([]Value{Value.String("\xc3\xa9"), Value.String("b\n\"c\""), Value.String("plain")}))
+}

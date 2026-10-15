@@ -293,8 +293,17 @@ one-million-`a` vector, and RFC 4231 cases 1, 2, 3, 4, 6 and 7).
   infinity crashes: `json.Value.string: nan cannot be written in JSON`.
 - json uses only `errors` (plus `os` for `os.crash`), not `strings` and
   `math` as the dependency table in docs/stdlib.md allows.
+- Printing appends to one string that grows in place (`w.out = w.out +
+  ...` on the writer's field, which the compiler turns into an in-place
+  append), with string runs between escapes copied whole and whole numbers
+  written as digits straight into it. Parsing takes a string without
+  escapes as one slice of the text (`str`); strings with escapes, and
+  errors, are separate functions (`strRest`, `failValue`, `unexpected`), so
+  the common paths need no cleanup frame. docs/performance.md, "JSON", has
+  the profile.
 - Measured: parsing and printing a 3.8 MB document takes about 0.15 s
-  (~25 MB/s for parse plus print).
+  (~25 MB/s for parse plus print) before this; `bench/seed/json.sd` (1 MB,
+  30 rounds) went from 0.71 s to 0.42-0.46 s on Linux x86-64 (Go: 0.75-0.80 s).
 
 ### io
 

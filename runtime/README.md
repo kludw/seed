@@ -294,16 +294,58 @@ sd_str u = sd_str_concat_n(parts, 4);              /* a + " " + b + c, one alloc
 acc = sd_str_append(acc, piece);                   /* acc = acc + piece: consumes acc; amortised O(1) when unshared */
 ```
 
-Use `sd_str_append` for `x = x + e` when `x` is a local, so building a string
-in a loop is linear. `SD_STR_LIT` works inside functions; for file scope use
+Use `sd_str_append` for `x = x + e` when `x` is a local (or a field the
+generated code holds a pointer to), so building a string in a loop is
+linear; `sd_str_append_parts(acc, parts, n)` appends several parts (strings
+`{s}`, or ints `{NULL, i}` written as digits) the same way. Both are
+inline in `seed.h` for the common case (an unshared string with room for
+the parts, none of which is the string itself) and call
+`sd_str_append_slow_` / `sd_str_append_parts_slow_` otherwise, which grow
+the block by doubling or copy a shared string. `SD_STR_LIT` works inside functions; for file scope use
 `SD_STR_STATIC(name, "text")` and `SD_STR_REF(name)`. `sd_str_cstr(s)` gives
 the NUL-terminated bytes (borrowed).
 
 `float.string()` is the shortest text that reads back as the same double,
 fixed notation when the decimal exponent is in `-4 .. 15`, otherwise
 `1e+300` style, always with a `.` or an `e`; `nan`, `inf`, `-inf`. It is
-byte-for-byte identical to seed0's (the tests check 20,000 random values
-against seed0's implementation, kept in `tests/ref_float.c`).
+byte-for-byte identical to seed0's, which is defined by a printf loop: the
+value correctly rounded to 1, 2, ... 17 significant digits (`%.*e`) until
+`strtod` reads it back as `x`. That loop is kept as the definition
+(`sd_float_digits_slow_`), and two fast paths compute the same digits
+without printf or strtod:
+
+- **Exact short decimals.** When `x = m * 2^e` is exactly `n / 10^k` with
+  `n < 10^15` (integers, halves, `4498.5`, `0.375`), `n`'s digits are the
+  answer: any decimal of at most 15 significant digits reads back from its
+  nearest double, so no shorter one rounds to `x`, and `x` rounded to `n`'s
+  length is `n` itself. Found with a trailing-zero count and one checked
+  multiplication by `5^k`.
+- **Ryu** (Ulf Adams, PLDI 2018) for the rest: the shortest decimal in
+  `x`'s rounding interval, nearest to `x`, from two 128-bit products with
+  tables of `5^i` and `2^j / 5^i` to 125 bits (`sd_pow5_split_`,
+  `sd_pow5_inv_split_`, generated with Python's big integers; 10.7 KB). It
+  is printf's answer except when the value nearest to `x` at the shortest
+  length lies just outside the interval and another one is inside (`vr ==
+  vm` in Ryu's terms, about 0.2% of random bit patterns): Ryu takes the
+  other one, printf more digits, so `sd_ryu_` returns false and the printf
+  loop decides. Without `unsigned __int128` (or with `-DSD_NO_INT128`) the
+  products are made from 64-bit halves.
+
+Verified against seed0's formatter (`tests/ref_float.c`) on 200 million
+doubles on x86-64 (random bit patterns, short decimals, decimal strings of
+1-17 digits, the neighbours of every power of two and ten), 50 million
+with the 64-bit fallback, and 10 million on arm64 (qemu); `test_str` checks
+20,000 random values and those neighbours on every run.
+
+`s.toFloat()` is `strtod`'s value bit for bit. Text of the form
+`[+-]digits[.digits][e[+-]digits]` with at most 19 significant digits
+whose value is `w * 10^q` with `w <= 2^53` and `|q| <= 22` takes Clinger's
+fast path: `w` and `10^|q|` are exact doubles, so one correctly rounded
+multiplication or division gives strtod's result (`q` up to 37 when `w *
+10^(q-22)` is still an exact integer below 2^53). Everything else (more
+digits, larger exponents, hex, `inf`, `nan`, invalid text) goes to
+`strtod`, as before. The fast path needs `FLT_EVAL_METHOD == 0` (x86-64,
+arm64) and is compiled out otherwise.
 
 ## 7. Lists, maps, boxes and copy-on-write
 
@@ -1175,7 +1217,8 @@ Arguments are borrowed and results owned unless marked **consumes** or
 | `uint8_t sd_str_at(s, sd_int i)` | `s[i]` |
 | `sd_str sd_str_concat(a, b)`, `sd_str_concat_n(parts, n)` | `a + b` |
 | `sd_str sd_str_concat_parts(const sd_str_part *parts, int n)` | `a + n.string() + b`: a part is a string `{s}` or an int `{NULL, i}` whose text is written into the result |
-| `sd_str sd_str_append(a, b)` | `a = a + b`; **consumes** `a` |
+| `sd_str sd_str_append(a, b)` | `a = a + b`; **consumes** `a`; inline when `a` is unshared with room |
+| `sd_str sd_str_append_parts(a, const sd_str_part *parts, int n)` | `a = a + p1 + p2 ...` (parts as for `concat_parts`); **consumes** `a` |
 | `bool sd_str_eq(a, b)`, `int sd_str_cmp(a, b)`, `bool sd_str_lt(a, b)` | `==`, ordering; `eq` is NULL-safe |
 | `uint64_t sd_str_hash(s)` | |
 | `sd_str sd_str_slice(s, sd_int a, sd_int b)` | `s.slice(a, b)` |

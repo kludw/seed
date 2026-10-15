@@ -60,6 +60,93 @@ static void test_float_format(void) {
     CHECK(sd_err_is_null(e) && back == x);
     sd_str_release(s);
   }
+  /* the neighbours of every power of two and ten, where the rounding
+   * interval is uneven or the digits are few: Ryu, the exact fast path and
+   * the printf loop (which decides the rare cases) must agree */
+  double edges[3];
+  for (int k = -1074; k <= 1023; k += 3) {
+    edges[0] = ldexp(1.0, k);
+    edges[1] = nextafter(edges[0], 0.0);
+    edges[2] = nextafter(edges[0], INFINITY);
+    for (int j = 0; j < 3; j++) {
+      ref_float_str(edges[j], want, sizeof want);
+      CHECK_SDSTR(sd_float_to_str(edges[j]), want);
+    }
+  }
+  for (int k = -323; k <= 308; k += 2) {
+    char lit[16];
+    snprintf(lit, sizeof lit, "1e%d", k);
+    edges[0] = strtod(lit, NULL);
+    edges[1] = nextafter(edges[0], 0.0);
+    edges[2] = nextafter(edges[0], INFINITY);
+    for (int j = 0; j < 3; j++) {
+      ref_float_str(-edges[j], want, sizeof want);
+      CHECK_SDSTR(sd_float_to_str(-edges[j]), want);
+    }
+  }
+  /* exact short decimals (the fast path without Ryu) and their neighbours */
+  for (int i = 0; i < 3000; i++) {
+    double x = (double)(i * 7919 % 100003) / 8.0 + (double)(i % 3) * 1e9;
+    ref_float_str(x, want, sizeof want);
+    CHECK_SDSTR(sd_float_to_str(x), want);
+    x = nextafter(x, INFINITY);
+    ref_float_str(x, want, sizeof want);
+    CHECK_SDSTR(sd_float_to_str(x), want);
+  }
+}
+
+/* sd_str_to_float is strtod's value bit for bit, fast path or not, and
+ * rejects what it always rejected. */
+static void test_float_parse(void) {
+  const char *texts[] = {"0", "-0", "+0", "0.0", "-0.0", ".5", "5.", "1e5", "1E+5", "1e-5", "2.5e3", "4498.5",
+                         "0.1", "0.3", "123456.789", "-1.5e-3", "1e22", "1e23", "1e-22", "1e-23", "9007199254740992",
+                         "9007199254740993", "9007199254740991e15", "1234567890123456789", "12345678901234567890",
+                         "0.000000000000000000000000000001", "123456789012345678901234567890", "1e400", "1e-400",
+                         "4.35679e+37", "2.2250738585072011e-308", "1.7976931348623157e308", "5e-324", "00012.50",
+                         "1.00000000000000011102230246251565404236316680908203125", "inf", "-infinity", "nan",
+                         "0x1p3", "0x10", "1e99999999999999999999", "1e-99999999999999999999"};
+  for (size_t i = 0; i < sizeof texts / sizeof texts[0]; i++) {
+    double d = 1, want = strtod(texts[i], NULL);
+    sd_str s = S(texts[i]);
+    sd_err e = sd_str_to_float(s, &d);
+    CHECK(sd_err_is_null(e) && memcmp(&d, &want, sizeof d) == 0);
+    if (!sd_err_is_null(e)) {
+      fprintf(stderr, "toFloat(%s) failed\n", texts[i]);
+      sd_err_release(e);
+    }
+    sd_str_release(s);
+  }
+  const char *bad[] = {"", ".", "-", "+", "e5", "1e", "1e+", "1.5x", "1..5", "--1", " 1", "1 ", "\t1", "0x"};
+  for (size_t i = 0; i < sizeof bad / sizeof bad[0]; i++) {
+    double d = 1;
+    sd_str s = S(bad[i]);
+    sd_err e = sd_str_to_float(s, &d);
+    CHECK(!sd_err_is_null(e) && d == 0);
+    if (!sd_err_is_null(e)) sd_err_release(e);
+    sd_str_release(s);
+  }
+  /* random decimal texts */
+  uint64_t r = 0x9e3779b97f4a7c15ULL;
+  char buf[48];
+  for (int i = 0; i < 20000; i++) {
+    r ^= r << 13;
+    r ^= r >> 7;
+    r ^= r << 17;
+    int n = 0, digits = 1 + (int)(r % 20), dot = (int)((r >> 8) % 24);
+    if ((r >> 16) & 1) buf[n++] = '-';
+    for (int j = 0; j < digits; j++) {
+      if (j == dot) buf[n++] = '.';
+      buf[n++] = (char)('0' + (r >> (20 + j * 2)) % 10);
+    }
+    if ((r >> 60) & 1) n += snprintf(buf + n, sizeof buf - (size_t)n, "e%d", (int)((r >> 32) % 70) - 35);
+    buf[n] = 0;
+    double d, want = strtod(buf, NULL);
+    sd_str s = S(buf);
+    sd_err e = sd_str_to_float(s, &d);
+    CHECK(sd_err_is_null(e) && memcmp(&d, &want, sizeof d) == 0);
+    if (!sd_err_is_null(e)) sd_err_release(e);
+    sd_str_release(s);
+  }
 }
 
 static void test_scalars_to_str(void) {
@@ -197,6 +284,30 @@ static void test_concat(void) {
   for (int i = 0; i < 10000; i++) acc = sd_str_append(acc, SD_STR_LIT("x"));
   CHECK(acc->len == 10006 && acc->cap >= acc->len && acc->data[acc->len] == 0);
   sd_str_release(acc);
+  /* append_parts: strings and ints written in place, or into a copy */
+  acc = sd_str_append_parts(S("n="), (sd_str_part[]){{NULL, SD_INT(-42)}, {SD_STR_LIT(",")}, {b}}, 3);
+  CHECK_STREQ(sd_str_cstr(acc), "n=-42,bar");
+  sd_str shared = sd_str_retain(acc);
+  acc = sd_str_append_parts(acc, (sd_str_part[]){{SD_STR_LIT("!")}}, 1); /* shared: copies */
+  CHECK_STREQ(sd_str_cstr(shared), "n=-42,bar");
+  CHECK_STREQ(sd_str_cstr(acc), "n=-42,bar!");
+  sd_str_release(shared);
+  acc = sd_str_append_parts(acc, (sd_str_part[]){{acc}, {SD_STR_LIT("|")}, {acc}}, 3); /* a part is acc itself */
+  CHECK_STREQ(sd_str_cstr(acc), "n=-42,bar!n=-42,bar!|n=-42,bar!");
+  sd_int big = sd_int_shl(SD_INT(1), SD_INT(100));
+  acc = sd_str_append_parts(acc, (sd_str_part[]){{SD_STR_LIT(" ")}, {NULL, big}, {SD_STR_LIT("")}}, 3);
+  CHECK(acc->len > 31 && strcmp(acc->data + acc->len - 31, "1267650600228229401496703205376") == 0);
+  sd_int_release(big);
+  acc = sd_str_append_parts(acc, (sd_str_part[]){{SD_STR_LIT("")}}, 1); /* nothing to add */
+  for (int i = 0; i < 3000; i++) acc = sd_str_append_parts(acc, (sd_str_part[]){{SD_STR_LIT("ab")}, {NULL, SD_INT(i % 10)}}, 2);
+  CHECK(acc->len == 63 + 3000 * 3 && acc->data[acc->len] == 0 && acc->data[acc->len - 1] == '9');
+  sd_str_release(acc);
+  acc = sd_str_append_parts(SD_STR_LIT(""), (sd_str_part[]){{a}}, 1); /* an immortal start */
+  CHECK_STREQ(sd_str_cstr(acc), "foo");
+  sd_str_release(acc);
+  acc = sd_str_append(sd_str_retain(a), a); /* b is a itself */
+  CHECK_STREQ(sd_str_cstr(acc), "foofoo");
+  sd_str_release(acc);
   /* literals are immortal */
   sd_str lit = SD_STR_LIT("literal");
   CHECK(lit->rc == SD_RC_IMMORTAL);
@@ -211,6 +322,7 @@ int main(void) {
   test_float_format();
   test_scalars_to_str();
   test_concat();
+  test_float_parse();
   int64_t live1 = sd_live_objects();
   CHECK(live1 == live0);
   test_methods();

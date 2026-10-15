@@ -562,8 +562,17 @@ generated.
   Other variables cannot alias the place: locals are values, parameters are
   read-only and borrowed from the caller, and a mut call keeps a copy of
   every argument read from its receiver's own variable (`mutArgs`).
-- `x = x + a + b` on a local string appends in place (`sd_str_append`);
-  other string `+` chains are one `sd_str_concat_n`. When a part of the
+- `x = x + a + b` on a local string, or on a string field of a local
+  struct or of a mut method's receiver through struct fields only
+  (`w.out = w.out + s + ","`, `d.body.text = d.body.text + s`), appends in
+  place (`genAppend`): `sd_str_append` for one part, `sd_str_append_parts`
+  for several (the parts are written straight into the string, ints as
+  their digits, with no concatenation of their own). The place is computed
+  after the parts, which must not mention the variable (`appendRoot`,
+  `samePlace`); a field of a list element, a map entry or a nullable box
+  takes the general path. The borrow analysis already treats the
+  assignment as a change of the variable, so no borrowed local can see the
+  string change. Other string `+` chains are one `sd_str_concat_n`. When a part of the
   chain is `n.string()` on an int, the chain is one `sd_str_concat_parts`
   instead, which writes the digits straight into the result (no string is
   made for the number).

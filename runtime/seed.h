@@ -418,7 +418,40 @@ sd_str sd_str_concat_n(const sd_str *parts, int n); /* a + b + c + ... in one al
  * of the int i, which is written straight into the result. */
 typedef struct { sd_str s; sd_int i; } sd_str_part;
 sd_str sd_str_concat_parts(const sd_str_part *parts, int n); /* "id " + i.string() + ...: one allocation */
-sd_str sd_str_append(sd_str a, sd_str b);        /* CONSUMES a; in place when a is unshared */
+/* a + b, CONSUMES a: in place (amortised O(1)) when a is unshared. The
+ * inline part is the common case, an unshared a with room for b. */
+sd_str sd_str_append_slow_(sd_str a, sd_str b);
+SD_INLINE sd_str sd_str_append(sd_str a, sd_str b) {
+  int64_t need = a->len + b->len;
+  if (SD_LIKELY(a->rc == 1 && need <= a->cap && a != b)) {
+    memcpy(a->data + a->len, b->data, (size_t)b->len);
+    a->len = need;
+    a->data[need] = 0;
+    return a;
+  }
+  return sd_str_append_slow_(a, b);
+}
+/* a + parts[0] + parts[1] + ..., CONSUMES a: in place when a is unshared
+ * (x = x + "k" + i.string(), w.out = w.out + s + ","). Inline when every
+ * part is a string other than a and they fit. */
+sd_str sd_str_append_parts_slow_(sd_str a, const sd_str_part *parts, int n);
+SD_INLINE sd_str sd_str_append_parts(sd_str a, const sd_str_part *parts, int n) {
+  if (a->rc != 1) return sd_str_append_parts_slow_(a, parts, n);
+  int64_t need = a->len;
+  for (int i = 0; i < n; i++) {
+    if (!parts[i].s || parts[i].s == a) return sd_str_append_parts_slow_(a, parts, n);
+    need += parts[i].s->len;
+  }
+  if (need > a->cap) return sd_str_append_parts_slow_(a, parts, n);
+  char *p = a->data + a->len;
+  for (int i = 0; i < n; i++) {
+    memcpy(p, parts[i].s->data, (size_t)parts[i].s->len);
+    p += parts[i].s->len;
+  }
+  a->len = need;
+  a->data[need] = 0;
+  return a;
+}
 bool sd_str_eq(sd_str a, sd_str b);               /* null-safe */
 int sd_str_cmp(sd_str a, sd_str b);               /* bytewise, -1/0/1 */
 SD_INLINE bool sd_str_lt(sd_str a, sd_str b) { return sd_str_cmp(a, b) < 0; }

@@ -1,0 +1,100 @@
+// x = x + ... appends in place to a local string and to a string field of
+// a local struct or of a mut receiver (also through nested struct fields);
+// copies of the old value, and appends whose rest reads the variable, must
+// see ordinary value semantics.
+package main
+
+import "fmt"
+
+type Buf struct {
+    string text
+    int n
+}
+
+type Doc struct {
+    Buf head
+    Buf body
+    string title
+}
+
+fn (Buf b) mut add(string s) {
+    b.text = b.text + s
+    b.n++
+}
+
+fn (Buf b) mut addLine(string s, int k) {
+    b.text = b.text + s + " #" + k.string() + "\n"
+}
+
+fn (Doc d) mut write(string s) {
+    d.body.text = d.body.text + "[" + s + "]"
+    d.title = d.title + s.slice(0, 1)
+}
+
+fn (Buf b) mut twice() {
+    b.text = b.text + b.text
+}
+
+fn (Buf b) mut prefixed(string p) {
+    b.text = p + b.text
+}
+
+fn (Buf b) mut addOwn() {
+    b.add(b.text)
+}
+
+fn main([]string args) error {
+    Buf a = Buf{text: "", n: 0}
+    for (int i = 0; i < 5; i++) {
+        a.add("x" + i.string())
+    }
+    fmt.println(a.text + " " + a.n.string())
+    Buf copy = a
+    a.add("!")
+    fmt.println(a.text)
+    fmt.println(copy.text)
+    a.twice()
+    fmt.println(a.text)
+    a.addOwn()
+    fmt.println(a.text.len().string() + " " + a.n.string())
+    Buf c = Buf{text: "c", n: 0}
+    c.text = c.text + "1" + "2"
+    string kept = c.text
+    c.text = c.text + "3"
+    fmt.println(c.text + " " + kept)
+    Doc d = Doc{head: Buf{text: "", n: 0}, body: Buf{text: "", n: 0}, title: ""}
+    d.write("alpha")
+    Doc before = d
+    d.write("beta")
+    d.head.text = d.head.text + d.title
+    fmt.println(d.body.text + " " + d.title + " " + d.head.text)
+    fmt.println(before.body.text + " " + before.title + " " + before.head.text)
+    Buf e = Buf{text: "e", n: 0}
+    e.addLine("a", 7)
+    e.addLine("b", 123456789012345678901234567890)
+    int big = 1
+    for (int j = 0; j < 70; j++) {
+        big = big * 2
+    }
+    e.text = e.text + big.string() + "/" + (-big).string()
+    fmt.println(e.text)
+    Buf g = Buf{text: "", n: 0}
+    for (int k = 0; k < 10000; k++) {
+        g.add("ab")
+    }
+    fmt.println(g.text.len().string() + " " + g.n.string() + " " + g.text.slice(19990, 20000))
+    []Buf bs = []Buf{Buf{text: "l", n: 0}}
+    Buf first = bs[0]
+    bs[0].text = bs[0].text + "m"
+    fmt.println(bs[0].text + " " + first.text)
+    string s = "s"
+    for (int m = 0; m < 3; m++) {
+        s = s + "-" + m.string()
+    }
+    string t = s
+    s = s + "!"
+    fmt.println(s + " " + t)
+    a.prefixed(">")
+    fmt.println(a.text.slice(0, 8))
+    return null
+}

@@ -355,16 +355,20 @@ fn (Gen g) mentionsVar(int e, int v) bool {
     return false
 }
 
-// x = x + a + b on a local string x appends in place (amortised O(1) when
-// the string is not shared), as long as the rest does not read x.
+// x = x + a + b on a local string x, or on a string field of a local
+// struct or of a mut method's receiver (w.out = w.out + a, also through
+// nested struct fields), appends in place (amortised O(1) when the string
+// is not shared), as long as the rest does not read the variable. The
+// parts are written straight into the string, ints as their digits
+// (sd_str_append_parts), with no concatenation of their own.
 fn (Gen g) mut genAppend(Stmt st, Target tg) bool {
     Expr lx = g.c.ast.exprs[tg.expr]
     ExprInfo li = g.c.info[tg.expr]
-    if (lx.kind != ExprKind.Ident || li.res != Res.Local || li.ty != tyString) {
+    if (li.ty != tyString) {
         return false
     }
-    int v = li.ref
-    if (g.c.vars[v].kind != VarKind.Local) {
+    int v = g.appendRoot(tg.expr)
+    if (v < 0 || (lx.kind == ExprKind.Ident && g.c.vars[v].kind != VarKind.Local)) {
         return false
     }
     Expr rx = g.c.ast.exprs[st.expr]
@@ -374,9 +378,7 @@ fn (Gen g) mut genAppend(Stmt st, Target tg) bool {
     }
     []int leaves = g.concatLeaves(rx.a, []int{})
     leaves = g.concatLeaves(rx.b, leaves)
-    Expr first = g.c.ast.exprs[leaves[0]]
-    ExprInfo fi = g.c.info[leaves[0]]
-    if (first.kind != ExprKind.Ident || fi.res != Res.Local || fi.ref != v || fi.narrowed) {
+    if (!g.samePlace(leaves[0], tg.expr)) {
         return false
     }
     []int rest = leaves.slice(1, leaves.len())
@@ -385,10 +387,85 @@ fn (Gen g) mut genAppend(Stmt st, Target tg) bool {
             return false
         }
     }
-    string tail = g.concatOf(rest)
-    string name = g.lname(v)
-    g.emit(name + " = sd_str_append(" + name + ", " + tail + ");")
+    []int ops = []int{}
+    []bool ints = []bool{}
+    for (int j = 0; j < rest.len(); j++) {
+        if (g.isIntString(rest[j])) {
+            ops.push(g.recvOf(rest[j]))
+            ints.push(true)
+        } else {
+            ops.push(rest[j])
+            ints.push(false)
+        }
+    }
+    []string vals = g.operands(ops)
+    string dest = g.lname(v)
+    if (lx.kind != ExprKind.Ident) {
+        string pt = g.newTmp()
+        g.emit("sd_str *" + pt + " = " + g.gplace(tg.expr) + ";")
+        dest = "*" + pt
+    }
+    if (vals.len() == 1 && !ints[0]) {
+        g.emit(dest + " = sd_str_append(" + dest + ", " + vals[0] + ");")
+        return true
+    }
+    []string parts = []string{}
+    for (int k = 0; k < vals.len(); k++) {
+        if (ints[k]) {
+            parts.push("{NULL, " + vals[k] + "}")
+        } else {
+            parts.push("{" + vals[k] + "}")
+        }
+    }
+    string arr = g.newTmp()
+    g.emit("sd_str_part " + arr + "[] = {" + parts.join(", ") + "};")
+    g.emit(dest + " = sd_str_append_parts(" + dest + ", " + arr + ", " + vals.len().string() + ");")
     return true
+}
+
+// The variable a string place e is rooted at, when x = x + ... can append
+// to it in place: a local, or a field path of a local struct or of a mut
+// receiver through struct fields only (no list element, map entry or
+// nullable box on the way). -1 otherwise.
+fn (Gen g) appendRoot(int e) int {
+    Expr x = g.c.ast.exprs[e]
+    ExprInfo i = g.c.info[e]
+    if (i.narrowed || i.wrap || i.ifaceFrom >= 0) {
+        return -1
+    }
+    if (x.kind == ExprKind.Ident) {
+        if (i.res != Res.Local || g.isBorrowed(i.ref)) {
+            return -1
+        }
+        VarKind k = g.c.vars[i.ref].kind
+        if (k != VarKind.Local && k != VarKind.MutRecv) {
+            return -1
+        }
+        return i.ref
+    }
+    if (x.kind == ExprKind.Field && i.res == Res.Field && g.kindOf(g.typeOf(x.a)) == Kind.Struct) {
+        return g.appendRoot(x.a)
+    }
+    return -1
+}
+
+// Whether the expressions a and b name the same place: the same variable,
+// or the same fields of it.
+fn (Gen g) samePlace(int a, int b) bool {
+    Expr xa = g.c.ast.exprs[a]
+    Expr xb = g.c.ast.exprs[b]
+    ExprInfo ia = g.c.info[a]
+    ExprInfo ib = g.c.info[b]
+    if (xa.kind != xb.kind || ia.narrowed || ib.narrowed || ia.wrap || ib.wrap || ia.ifaceFrom >= 0 || ib.ifaceFrom >= 0) {
+        return false
+    }
+    if (xa.kind == ExprKind.Ident) {
+        return ia.res == Res.Local && ib.res == Res.Local && ia.ref == ib.ref
+    }
+    if (xa.kind == ExprKind.Field) {
+        return ia.res == Res.Field && ib.res == Res.Field && xa.text == xb.text && g.samePlace(xa.a, xb.a)
+    }
+    return false
 }
 
 // T a, U b = f(): the tuple's parts move into the targets; discarded parts
