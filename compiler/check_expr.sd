@@ -8,7 +8,19 @@ fn (Checker c) mut notValue(int e) {
     if (t == tyVoid) {
         c.error(c.ast.exprs[e].pos, c.describe(e) + " does not return a value")
     } else if (c.types.isTuple(t)) {
-        c.errorHint(c.ast.exprs[e].pos, c.describe(e) + " returns " + c.types.count(t).string() + " values " + c.typeName(t), "assign them with a declaration such as T a, error err = ...")
+        string hint = "assign them with a declaration such as T a, error err = ..."
+        if (c.types.endsWithError(t) && c.ast.exprs[e].kind == ExprKind.Call) {
+            string src = c.ast.fullText(e)
+            if (src == "") {
+                src = "..."
+            }
+            string vals = "T a"
+            if (c.types.count(t) > 2) {
+                vals = "T a, U b"
+            }
+            hint = "use try to pass the error up (try " + src + "), or handle it yourself: " + vals + ", error err = " + src
+        }
+        c.errorHint(c.ast.exprs[e].pos, c.describe(e) + " returns " + c.types.count(t).string() + " values " + c.typeName(t), hint)
     }
 }
 
@@ -196,9 +208,12 @@ fn (Checker c) mut requireMutable(int e, string what) {
         target = "an element of " + v.name
     }
     if (v.kind == VarKind.Recv) {
-        c.errorHint(pos, "cannot " + what + " " + target + ": parameters are read-only, and " + v.name + " is the receiver of a method that is not mut", "make the method mut, or copy " + v.name + " into a local variable first")
-    } else if (v.kind == VarKind.Param) {
-        c.errorHint(pos, "cannot " + what + " " + target + ": parameters are read-only", "copy it into a local variable and change that; return the new value if the caller needs it")
+        c.errorHint(pos, "cannot " + what + " " + target + ": " + v.name + " is the receiver of a method that is not mut, so it is read-only", "make the method mut, or copy " + v.name + " into a local variable first")
+    } else if (v.kind == VarKind.Param && (r != e || what != "assign to")) {
+        // A parameter can be given a new value as a whole (which changes
+        // only the function's copy), but not changed in place: in Go, that
+        // would change the caller's slice or map.
+        c.errorHint(pos, "cannot " + what + " " + target + ": a parameter can be assigned a new value, but not changed in place", "copy it into a local variable and change that; return the new value if the caller needs it")
     } else if (v.kind == VarKind.LocalConst) {
         c.error(pos, "cannot " + what + " the constant " + v.name)
     }
@@ -645,13 +660,19 @@ fn (Checker c) mut checkBinary(int e) {
         }
         if (at != bt) {
             if ((c.types.isOpt(at) && c.types.elem(at) == bt) || (c.types.isOpt(bt) && c.types.elem(bt) == at)) {
-                int n = a
+                // A T? compared with a T: false when the T? is null (true
+                // for !=). The T becomes a T? for the comparison.
+                int plain = b
                 int nt = at
                 if (c.types.isOpt(bt)) {
-                    n = b
+                    plain = a
                     nt = bt
                 }
-                c.errorHint(c.ast.exprs[n].pos, c.describe(n) + " is nullable (" + c.typeName(nt) + "), so it can only be compared with null", "check " + c.describe(n) + " != null first, then compare it")
+                if (!c.comparable(c.types.elem(nt), []int{})) {
+                    c.errorHint(x.pos, "values of type " + c.typeName(c.types.elem(nt)) + " cannot be compared with " + ops, "function values and channels (and types that contain them) have no ==")
+                    return
+                }
+                c.coerce(plain, nt, "in the comparison")
             } else {
                 c.error(x.pos, "mismatched types " + c.typeName(at) + " and " + c.typeName(bt) + " for " + ops)
             }

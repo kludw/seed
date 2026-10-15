@@ -1,0 +1,100 @@
+// case v = ch.receive(): a select case can receive into an existing
+// variable of the received type (T?, or error for a chan error), like an
+// assignment. The variable's old value is released.
+package main
+
+import "errors"
+import "fmt"
+import "time"
+
+type Point struct {
+    int x
+    []string tags
+}
+
+// Keeps the latest value of each of two channels until both are closed.
+fn latest(chan string words, chan Point points) string {
+    string? word = null
+    Point? point = null
+    bool wordsOpen = true
+    bool pointsOpen = true
+    string seen = ""
+    for (; wordsOpen || pointsOpen; ) {
+        string? w = null
+        select {
+        case w = words.receive():
+            if (w == null) {
+                wordsOpen = false
+                words = chan string(1)
+            } else {
+                word = w
+                seen = seen + w
+            }
+        case point = points.receive():
+            if (point == null) {
+                pointsOpen = false
+                points = chan Point(1)
+            }
+        }
+    }
+    if (word != null) {
+        seen = seen + " last=" + word
+    }
+    return seen + " point=" + (point == null).string()
+}
+
+fn main([]string args) error {
+    chan string words = chan string(3)
+    chan Point points = chan Point(2)
+    words.send("a")
+    words.send("b")
+    words.close()
+    points.send(Point{x: 1, tags: []string{"p"}})
+    points.close()
+    fmt.println(latest(words, points))
+
+    // Several kinds of values, received in a loop into the same variables.
+    chan int ints = chan int(4)
+    chan []int lists = chan []int(4)
+    chan error errs = chan error(4)
+    int? n = null
+    []int? xs = null
+    error err = null
+    for (int i = 0; i < 4; i++) {
+        ints.send(i)
+        lists.send([]int{i, i})
+        errs.send(errors.new("e" + i.string()))
+    }
+    int total = 0
+    for (int k = 0; k < 12; k++) {
+        select {
+        case n = ints.receive():
+            if (n != null) {
+                total = total + n
+            }
+        case xs = lists.receive():
+            if (xs != null) {
+                total = total + xs.len()
+            }
+        case err = errs.receive():
+            if (err != null) {
+                total = total + err.message().len()
+            }
+        }
+    }
+    fmt.println(total.string() + " " + (n == 3).string() + " " + (xs == []int{3, 3}).string())
+    if (err != null) {
+        fmt.println(err.message())
+    }
+
+    // A timeout received into an existing variable.
+    chan int never = chan int(0)
+    int? fired = null
+    select {
+    case n = never.receive():
+        fmt.println("unexpected")
+    case fired = time.after(time.millisecond).receive():
+        fmt.println("timeout " + (fired != null).string())
+    }
+    return null
+}

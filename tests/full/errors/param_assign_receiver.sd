@@ -1,0 +1,22 @@
+// expect-error: param_assign_receiver.sd:14:5: error: cannot assign to c: c is the receiver of a method that is not mut, so it is read-only
+// expect-errors: 1
+// The receiver of a method that is not mut cannot be assigned, unlike a
+// parameter.
+package main
+
+import "fmt"
+
+type Counter struct {
+    int n
+}
+
+fn (Counter c) reset() Counter {
+    c = Counter{n: 0}
+    return c
+}
+
+fn main([]string args) error {
+    Counter c = Counter{n: 3}
+    fmt.println(c.reset().n.string())
+    return null
+}

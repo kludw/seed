@@ -83,13 +83,13 @@ fn main([]string args) error {
 failed: divide by zero
 ```
 
-Parameters are read-only: a function cannot change its caller's variables through them. It returns new values instead (see [chapter 7](07-structs-and-methods.md)). A function's result must be used; to throw a result away on purpose, assign it to `_`: `_ = cache.add(key)`.
+A function cannot change its caller's variables through its parameters. A parameter is the function's own copy: it can be assigned a new value (`n = n - 1`, `args = args.slice(1, args.len())`) without the caller seeing it, but not changed in place, with a `mut` method or through a field or element ([chapter 7](07-structs-and-methods.md) says why). To give something back, a function returns new values. A function's result must be used; to throw a result away on purpose, assign it to `_`: `_ = cache.add(key)`.
 
 ## Errors are values
 
 A function that can fail returns an `error` as its last result. `error` is a built-in interface with one method, `message() string`, and it is the one type that can be `null` without a `?`: a `null` error means success. `errors.new(text)` makes a simple error.
 
-Unlike a `T?`, an `error` is not null-checked by the compiler: calling `err.message()` on a `null` error compiles, and crashes (`crash: message() called on a null error`). Check `err != null` first, as every example here does.
+Like a `T?`, an `error` must be checked before use: `err.message()` compiles only where the compiler can see that `err` is not `null`, such as inside `if (err != null)` or after `if (err == null) { return ... }` ([chapter 5](05-null-safety.md#error-is-narrowed-too) has the rules). Every example here checks it anyway, before reading the other results.
 
 When the error is not `null`, the other results are `null` too. That's why `divide` above returns `null, errors.new(...)`, even though its first result is a plain `int`. The compiler makes sure you never see those nulls: it won't let you read `q` until `err` has been checked.
 

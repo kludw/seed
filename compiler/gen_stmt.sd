@@ -368,7 +368,7 @@ fn (Gen g) mut genAppend(Stmt st, Target tg) bool {
         return false
     }
     int v = g.appendRoot(tg.expr)
-    if (v < 0 || (lx.kind == ExprKind.Ident && g.c.vars[v].kind != VarKind.Local)) {
+    if (v < 0 || (lx.kind == ExprKind.Ident && g.c.vars[v].kind != VarKind.Local && !g.isOwnedParam(v))) {
         return false
     }
     Expr rx = g.c.ast.exprs[st.expr]
@@ -438,7 +438,7 @@ fn (Gen g) appendRoot(int e) int {
             return -1
         }
         VarKind k = g.c.vars[i.ref].kind
-        if (k != VarKind.Local && k != VarKind.MutRecv) {
+        if (k != VarKind.Local && k != VarKind.MutRecv && !g.isOwnedParam(i.ref)) {
             return -1
         }
         return i.ref
@@ -1269,6 +1269,14 @@ fn (Gen g) mut genReceived(int comm, string ok, string d) {
     int opt = g.typeOf(e)
     int v = -1
     if (st.kind == StmtKind.Assign) {
+        Target tg = g.c.ast.targets[g.c.ast.at(st.list, 0)]
+        if (tg.kind == TargetKind.Place) {
+            // case x = ch.receive(): x's old value is released.
+            int mark = g.slots.len()
+            g.gstore(tg.expr, g.alias(opt, g.okOpt(opt, ok, d)))
+            g.releaseTo(mark)
+            return
+        }
         v = g.c.targetVar[g.c.ast.at(st.list, 0)]
     }
     if (v >= 0) {

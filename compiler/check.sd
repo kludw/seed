@@ -136,6 +136,8 @@ type Builtin enum {
     Send
     Receive
     Close
+    GetOr
+    EnumName
 }
 
 // The checker's result for one expression.
@@ -455,7 +457,11 @@ fn (Checker c) mut pkgMember(int pkg, string name, Pos pos) int? {
                 s.consider(gl.name)
             }
         }
-        c.errorHint(pos, "package " + pk.name + " has no " + name, s.hint())
+        string hint = s.hint()
+        if (pk.isLib && pk.name == "fmt" && isFormatName(name)) {
+            hint = "Seed has no format strings: join text with + and .string() (\"n=\" + n.string()), or use fmt.fixed(f, places) for a float"
+        }
+        c.errorHint(pos, "package " + pk.name + " has no " + name, hint)
         return null
     }
     if (!c.globalPub(g)) {
@@ -463,6 +469,13 @@ fn (Checker c) mut pkgMember(int pkg, string name, Pos pos) int? {
         return null
     }
     return g
+}
+
+// Whether name is one of Go's or C's formatting functions (fmt.printf,
+// fmt.Sprintf, ...), which Seed has no equivalent of.
+fn isFormatName(string name) bool {
+    string n = name.toLower()
+    return n == "printf" || n == "sprintf" || n == "fprintf" || n == "eprintf" || n == "errorf" || n == "format" || n == "sprint" || n == "sprintln"
 }
 
 fn (Checker c) globalPub(int g) bool {
@@ -665,6 +678,10 @@ fn (Checker c) mut resolveSignature(int f) {
     c.teType[fd.recvType] = c.declType[d]
     c.fnRecv.push(d)
     c.fnCName.push("sd_m_" + prefix + td.name + "__" + fd.name)
+    if (td.kind == DeclKind.Enum && fd.name == "name") {
+        c.errorHint(fd.pos, "enum " + td.name + " cannot declare a method name: every enum has a built-in name() that returns the name of its case", "use the built-in name(), or give the method another name (such as label)")
+        return
+    }
     string key = methodKey(d, fd.name)
     if (c.methods[key] != null) {
         c.error(fd.pos, "method " + td.name + "." + fd.name + " is declared twice")
@@ -1308,13 +1325,30 @@ fn (Checker c) mut joinNarrows([]Narrow other, []string after) {
 }
 
 // Whether the checked expression e is a value that is never null (a T, not
-// a T?, null or error); assigning it to a T? path narrows the path.
+// a T?, null or error, or an error known not to be null); assigning it to
+// a T? or error path narrows the path.
 fn (Checker c) isNonNullValue(int e) bool {
     int t = c.typeOf(e)
-    if (t == tyNull || t == tyInvalid || t == tyVoid || t == tyError) {
+    if (t == tyError) {
+        return c.errorKnownNonNull(e)
+    }
+    if (t == tyNull || t == tyInvalid || t == tyVoid) {
         return false
     }
     return !c.types.isOpt(t) && !c.types.isTuple(t)
+}
+
+// Whether the checked error e is known not to be null: a variable or a
+// path of fields that a check (or an assignment of a value that is never
+// null) narrowed, like a T?.
+fn (Checker c) errorKnownNonNull(int e) bool {
+    string key = c.pathKey(e)
+    return key != "" && c.isNarrowed(key)
+}
+
+// Whether a path of type t can be narrowed (a T? or an error).
+fn (Checker c) narrowable(int t) bool {
+    return t == tyError || c.types.isOpt(t)
 }
 
 // Whether key is prefix or a path under it (or only under it, if strict).

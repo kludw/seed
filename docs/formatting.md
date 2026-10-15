@@ -7,9 +7,11 @@ The style is close to Go's `gofmt`, with 4-space indentation and C-style conditi
 ## The command
 
 ```
-seed fmt <file.sd>...            rewrite the files in canonical form
-seed fmt --check <file.sd>...    change nothing; report unformatted files
+seed fmt <file.sd | dir>...            rewrite the files in canonical form
+seed fmt --check <file.sd | dir>...    change nothing; report unformatted files
 ```
+
+A directory stands for every `.sd` file under it, in its subdirectories too, in sorted order; directories whose names start with `.` are skipped, and files that don't end in `.sd` are left alone. `seed fmt .` formats a whole project.
 
 `--check` prints, for every file that is not formatted, the first line that differs, and a hint, to stderr:
 

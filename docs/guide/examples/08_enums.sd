@@ -19,7 +19,7 @@ fn area(Shape s) float {
     }
 }
 
-fn (Shape s) name() string {
+fn (Shape s) describe() string {
     switch (s) {
     case Shape.Circle(float r):
         return "circle of radius " + r.string()
@@ -51,8 +51,10 @@ fn find(string key) Lookup {
 fn main([]string args) error {
     []Shape shapes = []Shape{Shape.Circle(1.0), Shape.Rect(2.0, 3.5), Shape.Dot}
     for (int i = 0; i < shapes.len(); i++) {
-        fmt.println(shapes[i].name() + ": " + area(shapes[i]).string())
+        fmt.println(shapes[i].describe() + ": " + area(shapes[i]).string())
     }
+    // Every enum has the built-in name(): the name of the case.
+    fmt.println(shapes[0].name() + " " + Shape.Dot.name())
 
     []string keys = []string{"one", "t", "zzz"}
     for (int i = 0; i < keys.len(); i++) {

@@ -41,6 +41,9 @@ fn recheck(int n) (string, error) {
         return null, err
     }
     err = errors.new("later")
+    if (err == null) {
+        return s, null
+    }
     return s + " " + err.message(), null
 }
 

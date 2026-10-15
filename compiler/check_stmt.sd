@@ -612,7 +612,7 @@ fn (Checker c) mut checkAssign(int s) {
             c.coerce(st.expr, t, "to initialize " + tg.name)
             int v = c.declare(tg.name, t, VarKind.Local, tg.pos)
             c.targetVar[ti] = v
-            if (declNonNull && c.types.isOpt(t)) {
+            if (declNonNull && c.narrowable(t)) {
                 c.addNarrow("v" + v.string())
             }
         case TargetKind.Discard:
@@ -634,7 +634,7 @@ fn (Checker c) mut checkAssign(int s) {
             c.assigned(key)
             // A T? path that was just given a T is not null until it may
             // become null again (assigned, a mut call, a loop).
-            if (nonNull && key != "" && c.types.isOpt(lt)) {
+            if (nonNull && key != "" && c.narrowable(lt)) {
                 c.addNarrow(key)
             }
         }
@@ -738,7 +738,7 @@ fn (Checker c) mut addGuards(int s, int rt) {
         int v = -1
         if (tg.kind == TargetKind.Decl) {
             v = c.targetVar[ti]
-        } else if (c.ast.exprs[tg.expr].kind == ExprKind.Ident && c.info[tg.expr].res == Res.Local && c.vars[c.info[tg.expr].ref].kind == VarKind.Local) {
+        } else if (c.ast.exprs[tg.expr].kind == ExprKind.Ident && c.info[tg.expr].res == Res.Local && (c.vars[c.info[tg.expr].ref].kind == VarKind.Local || c.vars[c.info[tg.expr].ref].kind == VarKind.Param)) {
             v = c.info[tg.expr].ref
         } else {
             // A field, an element or a mut receiver cannot be guarded: it
@@ -1056,8 +1056,9 @@ fn (Checker c) isChanOp(int e, bool sendOk) bool {
     return b == Builtin.Receive || (sendOk && b == Builtin.Send)
 }
 
-// select: every case is a channel operation, ch.send(v), ch.receive() or
-// T? v = ch.receive(), whose operands are evaluated before select waits.
+// select: every case is a channel operation, ch.send(v), ch.receive(),
+// T? v = ch.receive() or v = ch.receive() (an existing variable), whose
+// operands are evaluated before select waits.
 fn (Checker c) mut checkSelect(Stmt st) {
     if (st.count == 0) {
         c.errorHint(st.pos, "select has no cases and would wait forever", "add a case such as case int? v = ch.receive():")
@@ -1084,7 +1085,7 @@ fn (Checker c) mut checkSelectComm(int s) {
         return
     }
     Stmt st = c.ast.stmts[s]
-    string hint = "a case is ch.send(v), ch.receive() or T? v = ch.receive()"
+    string hint = "a case is ch.send(v), ch.receive(), T? v = ch.receive() or v = ch.receive()"
     if (st.kind == StmtKind.ExprStmt) {
         c.checkExpr(st.expr)
         int et = c.typeOf(st.expr)
@@ -1111,7 +1112,19 @@ fn (Checker c) mut checkSelectComm(int s) {
         rt = tyInvalid
     }
     if (tg.kind == TargetKind.Place) {
-        c.errorHint(tg.pos, "a select case cannot assign to an existing variable", "declare a new one (T? v = ch.receive()) and assign it in the case body")
+        // case v = ch.receive(): an existing variable of the received type.
+        if (c.ast.exprs[tg.expr].kind != ExprKind.Ident) {
+            c.checkExpr(tg.expr)
+            c.errorHint(tg.pos, "a select case can only receive into a variable, not into " + c.describe(tg.expr), "receive into a variable (T? v = ch.receive()) and store it in the case body")
+            return
+        }
+        c.checkLvalue(tg.expr)
+        int lt = c.typeOf(tg.expr)
+        c.targetType[ti] = lt
+        if (lt != tyInvalid && rt != tyInvalid && lt != rt) {
+            c.errorHint(tg.pos, "the received value has type " + c.typeName(rt) + ", which cannot be assigned to " + c.describe(tg.expr) + " (type " + c.typeName(lt) + ")", "receive into a variable of type " + c.typeName(rt) + ", such as a new one: case " + c.typeName(rt) + " v = ...:")
+        }
+        c.assigned(c.pathKey(tg.expr))
         return
     }
     if (tg.kind == TargetKind.Discard) {

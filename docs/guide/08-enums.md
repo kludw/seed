@@ -41,7 +41,7 @@ fn area(Shape s) float {
     }
 }
 
-fn (Shape s) name() string {
+fn (Shape s) describe() string {
     switch (s) {
     case Shape.Circle(float r):
         return "circle of radius " + r.string()
@@ -73,8 +73,10 @@ fn find(string key) Lookup {
 fn main([]string args) error {
     []Shape shapes = []Shape{Shape.Circle(1.0), Shape.Rect(2.0, 3.5), Shape.Dot}
     for (int i = 0; i < shapes.len(); i++) {
-        fmt.println(shapes[i].name() + ": " + area(shapes[i]).string())
+        fmt.println(shapes[i].describe() + ": " + area(shapes[i]).string())
     }
+    // Every enum has the built-in name(): the name of the case.
+    fmt.println(shapes[0].name() + " " + Shape.Dot.name())
 
     []string keys = []string{"one", "t", "zzz"}
     for (int i = 0; i < keys.len(); i++) {
@@ -98,13 +100,20 @@ fn main([]string args) error {
 circle of radius 1.0: 3.0
 2.0 by 3.5 rectangle: 7.0
 dot: 0.0
+Circle Dot
 one = 1
 t could be two or three
 zzz is missing
 true false
 ```
 
-The bound names are new variables, so they can be called anything (`float r` for the field `radius`), and they follow the no-shadowing rule. Enums can have methods, like `name()` above.
+The bound names are new variables, so they can be called anything (`float r` for the field `radius`), and they follow the no-shadowing rule. Enums can have methods, like `describe()` above.
+
+### The name of a case
+
+Every enum has a built-in method `name()`, which returns the name of the value's case as a `string`, without the type's name and without the data: `Shape.Circle(1.0).name()` is `"Circle"`, and `Direction.North.name()` is `"North"`. For an enum without data, that is its text form, with no `switch` to write; for one with data, write a method that shows the data too, like `describe()` above.
+
+Because `name()` is built in, an enum can't declare a method of its own called `name` (the compiler says so and suggests another name). It does count for `implements`: an enum satisfies an interface that asks for `name() string`, as `Blob` does in [chapter 9](09-interfaces-and-functions.md#interfaces).
 
 ### Exhaustive, with no default
 

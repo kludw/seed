@@ -91,13 +91,22 @@ Strings are immutable UTF-8 bytes. Lengths and indexes count bytes.
 |---|---|
 | `m[k]` | `V?`. |
 | `m[k] = v` | Inserts or replaces. A new key goes to the end of the order. (`m[k]++` and `m[k]--` are not allowed: the entry may be missing.) |
+| `m.getOr(k, d)` | `V`: the value for `k`, or `d` (of type `V`) when `k` is missing. Does not change the map; `d` is evaluated either way. Counting is `m[k] = m.getOr(k, 0) + 1`. |
 | `m.len()` | `int`. |
 | `m.delete(k)` | `mut`. Does nothing if `k` is missing. The order of the other keys is kept. |
 | `m.keys()` | `[]K` in insertion order. |
 
+## Enums
+
+| Method | Result |
+|---|---|
+| `e.name()` | The name of the value's case as a `string`, without the type or the data: `Direction.North.name()` is `"North"`, `Shape.Circle(2.0).name()` is `"Circle"`. |
+
+Every enum has `name()`, so an enum cannot declare a method of its own called `name`. The built-in method counts for `implements`: an enum satisfies an interface that requires `name() string`.
+
 ## error
 
-`error` is an interface with one method, `message() string`.
+`error` is an interface with one method, `message() string`. An error is null when there is no error, so, like a `T?`, it must be known not to be null before `message()` is called (`if (err != null) { ... err.message() ... }`); the compiler rejects the call otherwise ([SPEC.md](../SPEC.md#errors)).
 
 ## Channels `chan T`
 
@@ -132,6 +141,8 @@ Errors follow [stdlib.md](stdlib.md#error-messages): `<package>.<function>: <sub
 | `fmt.println(string s)` | Writes `s` and a newline to stdout. |
 | `fmt.eprint(string s)` | Writes `s` to stderr. |
 | `fmt.eprintln(string s)` | Writes `s` and a newline to stderr. |
+
+There are no format strings (`printf`): text is joined with `+`, numbers become text with `.string()`, and `fmt.fixed(f, places)` ([stdlib.md](stdlib.md#fmt)) writes a float with a fixed number of decimals.
 
 ### os
 

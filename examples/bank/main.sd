@@ -58,7 +58,10 @@ fn main([]string args) error {
 
     []error problems = b.closeMonth()
     for (int i = 0; i < problems.len(); i++) {
-        fmt.println("problem: " + problems[i].message())
+        error problem = problems[i]
+        if (problem != null) {
+            fmt.println("problem: " + problem.message())
+        }
     }
 
     fmt.println("")

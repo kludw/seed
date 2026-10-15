@@ -1,18 +1,16 @@
-// expect-error: a select case cannot assign to an existing variable
-// A receive case declares a new variable.
+// expect-error: select_assign_existing.sd:11:10: error: the received value has type int?, which cannot be assigned to v (type int)
+// A receive case can assign an existing variable only of the received type.
 package main
 
 import "fmt"
 
 fn main([]string args) error {
     chan int ch = chan int(1)
-    int? v = null
+    int v = 0
     select {
     case v = ch.receive():
         fmt.println("received")
     }
-    if (v != null) {
-        fmt.println(v.string())
-    }
+    fmt.println(v.string())
     return null
 }

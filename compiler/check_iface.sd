@@ -131,6 +131,13 @@ fn (Checker c) mut checkImplementsOne(int d, int iface, Pos pos) {
         bool wantMut = c.ifaceMethodMut(iface, i)
         string sig = methodSigText(name, c.typeName(want), wantMut)
         int? m = c.methods[methodKey(d, name)]
+        if (m == null && c.ast.typeDecls[d].kind == DeclKind.Enum && name == "name") {
+            // The built-in name() of every enum (see checkSelectorCall).
+            if (want != tyInvalid && (want != c.types.funcOf([]int{}, tyString) || wantMut)) {
+                c.errorHint(pos, tname + " does not implement " + iname + ": its built-in method name() string does not match " + iname + "." + sig, "an enum's name() is built in and returns the name of its case; rename the interface's method")
+            }
+            continue
+        }
         if (m == null) {
             c.errorHint(pos, tname + " does not implement " + iname + ": it has no method " + sig, "add the method: fn (" + c.ast.typeDecls[d].name + " v) " + sig + " { ... }")
             continue

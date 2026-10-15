@@ -1,9 +1,13 @@
-// expect-error: parameters are read-only
+// expect-error: cannot assign to p.x: a parameter can be assigned a new value, but not changed in place
 package main
 
-fn f(int x) int {
-    x = 2
-    return x
+type P struct {
+    int x
+}
+
+fn f(P p) int {
+    p.x = 2
+    return p.x
 }
 
 fn main([]string args) error {

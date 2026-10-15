@@ -1,0 +1,8 @@
+fine / negative: -2
+a ok, negative: -1. / negative: -3
+parse error on line 7
+parse error on line 7
+field: negative: -5
+received: first
+received: parse error on line 2
+group: from a goroutine

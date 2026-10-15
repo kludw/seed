@@ -1,0 +1,13 @@
+// expect-error: hint: a null check narrows only variables and their fields; store it first (error v = errs[1]), then check v != null before calling message()
+// expect-errors: 1
+// An element of a []error has to be stored in a variable and checked.
+package main
+
+import "errors"
+import "fmt"
+
+fn main([]string args) error {
+    []error errs = []error{errors.new("a"), null}
+    fmt.println(errs[1].message())
+    return null
+}

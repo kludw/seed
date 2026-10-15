@@ -119,14 +119,16 @@ fn callHandler(Handler handler, Request req) Response {
     error err = group {
         spawn runHandler(handler, req, out)
     }
-    if (err == null) {
+    string reason = "the handler sent no response"
+    if (err != null) {
+        reason = err.message()
+    } else {
         Response? resp = out.receive()
         if (resp != null) {
             return resp
         }
-        err = errors.new("the handler sent no response")
     }
-    fmt.eprintln("http: " + req.method + " " + req.path() + ": " + err.message())
+    fmt.eprintln("http: " + req.method + " " + req.path() + ": " + reason)
     return textResponse(statusInternalServerError, "internal server error\n")
 }
 

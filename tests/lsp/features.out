@@ -1,0 +1,14 @@
+== initialize
+{"jsonrpc":"2.0","id":0,"result":{"capabilities":{"positionEncoding":"utf-16","textDocumentSync":{"openClose":true,"change":1,"save":{"includeText":false}},"documentFormattingProvider":true,"definitionProvider":true,"hoverProvider":true,"completionProvider":{"triggerCharacters":["."]},"documentSymbolProvider":true},"serverInfo":{"name":"seed lsp"}}}
+== notification textDocument/publishDiagnostics
+{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{"uri":"file://$DIR/programs/three.sd","diagnostics":[]}}
+== hover programs/three.sd 11 25
+{"jsonrpc":"2.0","id":1,"result":{"contents":{"kind":"markdown","value":"```seed\nmap[string]int.getOr() int\n```\n\nbuilt-in method (docs/builtins.md)"},"range":{"start":{"line":11,"character":25},"end":{"line":11,"character":30}}}}
+== hover programs/three.sd 13 18
+{"jsonrpc":"2.0","id":2,"result":{"contents":{"kind":"markdown","value":"```seed\nLight.name() string\n```\n\nbuilt-in method (docs/builtins.md)"},"range":{"start":{"line":13,"character":18},"end":{"line":13,"character":22}}}}
+== completion programs/three.sd 11 25
+{"jsonrpc":"2.0","id":3,"result":{"isIncomplete":false,"items":[{"label":"len","kind":2,"detail":"fn len() int","documentation":{"kind":"markdown","value":"built-in method (docs/builtins.md)"}},{"label":"getOr","kind":2,"detail":"fn getOr(string key, int default) int","documentation":{"kind":"markdown","value":"built-in method (docs/builtins.md)"}},{"label":"delete","kind":2,"detail":"fn mut delete(string key)","documentation":{"kind":"markdown","value":"built-in method (docs/builtins.md)"}},{"label":"keys","kind":2,"detail":"fn keys() []string","documentation":{"kind":"markdown","value":"built-in method (docs/builtins.md)"}}]}}
+== completion programs/three.sd 13 18
+{"jsonrpc":"2.0","id":4,"result":{"isIncomplete":false,"items":[{"label":"name","kind":2,"detail":"fn name() string","documentation":{"kind":"markdown","value":"built-in method: the name of the case (docs/builtins.md)"}}]}}
+== shutdown
+{"jsonrpc":"2.0","id":5,"result":null}

@@ -1,0 +1,17 @@
+package main
+
+import "errors"
+import "fmt"
+
+fn check(int n) error {
+    if (n < 0) {
+        return errors.new("negative")
+    }
+    return null
+}
+
+fn main([]string args) error {
+    error err = check(1)
+    fmt.println(err.message())
+    return null
+}

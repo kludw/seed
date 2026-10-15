@@ -881,6 +881,9 @@ fn lspTypeItems(Checker c, int t, Pos at) []json.Value {
                 items.push(lspItem(fd.name, 2, lspFnSig(c.ast, f), lspDocComment(c.ast, fd.file, fd.start.line)))
             }
         }
+        if (k == Kind.Enum) {
+            items.push(lspItem("name", 2, "fn name() string", "built-in method: the name of the case (docs/builtins.md)"))
+        }
         return items
     }
     if (k == Kind.Interface) {
@@ -944,7 +947,7 @@ fn lspBuiltinItems(Checker c, int ty) []json.Value {
     } else if (k == Kind.Map) {
         elem = c.typeName(c.types.elem(ty))
         key = c.typeName(c.types.key(ty))
-        specs = []string{"len|fn len() int", "delete|fn mut delete(K key)", "keys|fn keys() []K"}
+        specs = []string{"len|fn len() int", "getOr|fn getOr(K key, T default) T", "delete|fn mut delete(K key)", "keys|fn keys() []K"}
     } else if (k == Kind.Chan) {
         elem = c.typeName(c.types.elem(ty))
         specs = []string{"send|fn send(T v)", "receive|fn receive() T?", "close|fn close()"}

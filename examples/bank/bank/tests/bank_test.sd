@@ -58,6 +58,7 @@ test "checking allows an overdraft up to its limit" {
 test "savings has no overdraft and earns interest" {
     Account a = newAccount("S", "ann", Savings{basisPoints: 150})
     error err = a.withdraw(1, "x")
+    assert(err != null)
     assert(err.message() == "S: withdrawal: x: insufficient funds (balance 0.00, savings overdraft limit 0.00)")
     try a.deposit(100000, "x")
     try a.closeMonth()
@@ -94,6 +95,7 @@ test "a failed transfer changes neither account" {
     assert(balanceOf(b, "ACC-1") == 0)
     assert(balanceOf(b, "ACC-2") == 1000)
     err = b.transfer("ACC-1", "ACC-7", 10)
+    assert(err != null)
     assert(err.message() == "no account ACC-7")
     err = b.transfer("ACC-1", "ACC-1", 10)
     assert(err != null)
@@ -112,7 +114,9 @@ test "month end reports an account that cannot pay and closes the rest" {
     try b.deposit("ACC-2", 10000, "x")
     []error problems = b.closeMonth()
     assert(problems.len() == 1)
-    assert(problems[0].message().startsWith("month end: ACC-1: fee: monthly account fee: insufficient funds"))
+    error first = problems[0]
+    assert(first != null)
+    assert(first.message().startsWith("month end: ACC-1: fee: monthly account fee: insufficient funds"))
     assert(balanceOf(b, "ACC-1") == -49800)
     assert(balanceOf(b, "ACC-2") == 10100)
 }

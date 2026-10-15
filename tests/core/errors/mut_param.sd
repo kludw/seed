@@ -1,4 +1,4 @@
-// expect-error: parameters are read-only
+// expect-error: a parameter can be assigned a new value, but not changed in place
 package main
 
 fn add([]int xs) {

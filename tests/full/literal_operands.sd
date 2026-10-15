@@ -22,7 +22,9 @@ fn main([]string args) error {
     ce.send(errors.new("e"))
     error e1 = ce.receive()
     error e2 = ce.receive()
-    fmt.println((e1 == null).string() + " " + e2.message())
+    if (e2 != null) {
+        fmt.println((e1 == null).string() + " " + e2.message())
+    }
     []error es = []error{null}
     fmt.println(es.contains(null).string())
     map[bool]int mb = map[bool]int{true: 1}

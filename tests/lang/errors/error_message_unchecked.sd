@@ -1,4 +1,6 @@
-// Calling message() on a null error crashes.
+// expect-error: error_message_unchecked.sd:19:17: error: err may be null (an error is null when there is no error)
+// An error is null when there is no error, so message() needs a check
+// first, like any T?.
 package main
 
 import "errors"

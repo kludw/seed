@@ -235,6 +235,14 @@ fn (Checker c) mut checkSelectorCall(int e) {
             c.checkValueCall(e)
             return
         }
+        if (m == null && k == Kind.Enum && name == "name") {
+            // Every enum has the built-in name(): the case's name.
+            c.info[e].res = Res.Builtin
+            c.info[e].builtin = Builtin.EnumName
+            c.setType(e, tyString)
+            c.checkArgs(e, []int{}, "name()")
+            return
+        }
         if (m == null) {
             if (fi >= 0) {
                 c.error(callee.pos, name + " is a field of " + tname + ", not a method")
@@ -502,11 +510,22 @@ fn (Checker c) mut checkBuiltin(int e, int recv, string name) {
         } else if (name == "keys") {
             b = Builtin.Keys
             res = c.types.listOf(c.types.key(rt))
+        } else if (name == "getOr") {
+            b = Builtin.GetOr
+            ps = []int{c.types.key(rt), c.types.elem(rt)}
+            res = c.types.elem(rt)
         }
     } else if (k == Kind.Error) {
         if (name == "message") {
             b = Builtin.Message
             res = tyString
+        }
+        // An error may be null (no error) unless a check shows it is not,
+        // like a T?.
+        if (b != Builtin.None && !c.errorKnownNonNull(recv)) {
+            c.errorHint(c.ast.exprs[recv].pos, c.describe(recv) + " may be null (an error is null when there is no error)", c.nullHint(recv, rt, "calling " + name + "()"))
+            c.checkArgsLoosely(e)
+            return
         }
     } else if (k == Kind.Chan) {
         int ce = c.types.elem(rt)

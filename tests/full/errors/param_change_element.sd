@@ -1,0 +1,18 @@
+// expect-error: param_change_element.sd:11:7: error: cannot assign to an element of xs: a parameter can be assigned a new value, but not changed in place
+// expect-errors: 1
+// A parameter can be assigned a new value, but its elements cannot be
+// changed: in Go that would change the caller's slice.
+package main
+
+import "fmt"
+
+fn fill([]int xs) []int {
+    xs = []int{0, 0}
+    xs[0] = 1
+    return xs
+}
+
+fn main([]string args) error {
+    fmt.println(fill([]int{}).len().string())
+    return null
+}

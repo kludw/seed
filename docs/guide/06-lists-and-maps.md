@@ -119,13 +119,20 @@ Keys are `int`, `byte`, `bool` or `string`. Values can be anything.
 |---|---|
 | `m[k]` | The value as a `V?`, or `null` if the key is missing. |
 | `m[k] = v` | Inserts or replaces. A new key goes to the end of the order; an existing key keeps its place. |
+| `m.getOr(k, d)` | The value for `k`, or `d` if the key is missing (a plain `V`). Doesn't change the map. |
 | `m.len()` | The number of entries. |
 | `m.delete(k)` | Removes a key, if it is there. `mut` |
 | `m.keys()` | The keys as a `[]K`, in insertion order. |
 
 **Maps keep insertion order**, so looping over `m.keys()` gives the same order on every run. Go randomises map order to stop programs from depending on it; Seed makes the order something you can depend on.
 
-A lookup returns `V?` because the key may be missing. Store the result in a variable and check it before use ([chapter 5](05-null-safety.md)):
+A lookup returns `V?` because the key may be missing. Store the result in a variable and check it before use ([chapter 5](05-null-safety.md)), or compare it with a value: `counts["cat"] == 2` is false when the key is missing. When a missing key has a natural default, `m.getOr(k, d)` returns a plain `V`, the value or `d`. Counting is the classic case, one line per count:
+
+```seed
+counts[w] = counts.getOr(w, 0) + 1
+```
+
+(`counts[w]++` is not allowed: `counts[w]` may be missing, and `++` would have to invent a value for it.)
 
 ```seed
 package main
@@ -136,22 +143,21 @@ fn main([]string args) error {
     map[string]int counts = map[string]int{}
     []string words = "the cat saw the dog and the cat ran".split(" ")
     for (int i = 0; i < words.len(); i++) {
-        int? seen = counts[words[i]]
-        if (seen == null) {
-            counts[words[i]] = 1
-        } else {
-            counts[words[i]] = seen + 1
-        }
+        counts[words[i]] = counts.getOr(words[i], 0) + 1
     }
 
     // keys() is in insertion order, so this output is always the same.
     []string keys = counts.keys()
     for (int i = 0; i < keys.len(); i++) {
-        int? n = counts[keys[i]]
-        if (n != null) {
-            fmt.println(keys[i] + " " + n.string())
-        }
+        fmt.println(keys[i] + " " + counts.getOr(keys[i], 0).string())
     }
+
+    // A lookup is an int?: check it, or compare it with an int.
+    int? dogs = counts["dog"]
+    if (dogs != null) {
+        fmt.println("dog: " + dogs.string())
+    }
+    fmt.println((counts["cat"] == 2).string() + " " + (counts["cow"] == 0).string())
 
     counts.delete("the")
     counts.delete("missing")
@@ -175,6 +181,8 @@ saw 1
 dog 1
 and 1
 ran 1
+dog: 1
+true false
 5 words left
 cat saw dog and ran the
 true false
@@ -191,7 +199,7 @@ package main
 
 import "fmt"
 
-// xs is a read-only copy of the caller's list.
+// xs is the function's own copy of the caller's list.
 fn withZero([]int xs) []int {
     []int out = xs
     out.push(0)

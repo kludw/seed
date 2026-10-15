@@ -64,7 +64,7 @@ fn (Light l) mut toggle() {
     }
 }
 
-fn (Light l) name() string {
+fn (Light l) label() string {
     switch (l) {
     case Light.Red:
         return "red"
@@ -107,10 +107,10 @@ fn main([]string args) error {
 
     Light l = Light.Red
     l.toggle()
-    fmt.println(l.name())
+    fmt.println(l.label())
     []Light ls = []Light{Light.Red, Light.Red}
     ls[1].toggle()
-    fmt.println(ls[0].name() + " " + ls[1].name())
+    fmt.println(ls[0].label() + " " + ls[1].label())
 
     map[string][]int m = map[string][]int{}
     m["a"] = []int{}

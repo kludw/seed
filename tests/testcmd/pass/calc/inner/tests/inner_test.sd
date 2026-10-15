@@ -5,5 +5,7 @@ test "add" {
 }
 
 test "odd error" {
-    assert(oddError(7).message() == "calc.half: 7 is odd")
+    error e = oddError(7)
+    assert(e != null)
+    assert(e.message() == "calc.half: 7 is odd")
 }

@@ -3,7 +3,7 @@
 //   seed build [-o out] <dir | file.sd>   compile a program to an executable
 //   seed run <dir | file.sd> [args...]    compile and run, passing the exit code
 //   seed test [-v] [--run text] [dir...]  run the tests of the packages under the dirs
-//   seed fmt [--check] <file.sd>...       format the files in place (see fmt.sd)
+//   seed fmt [--check] <file.sd | dir>... format the files in place (see fmt.sd)
 //   seed c <dir | file.sd...>             write the C program to stdout (for tests)
 //   seed ast <file.sd>...                 print the syntax tree (for debugging)
 //   seed lsp                              a language server on stdin/stdout (lsp.sd)
@@ -29,7 +29,7 @@ const string buildOpt = "-O2"
 const string quickOpt = "-O1"
 const []string cLibs = []string{"-lm", "-lpthread"}
 
-const string usage = "usage:\n  seed build [-o out] <dir | file.sd>\n  seed run <dir | file.sd> [args...]\n  seed test [-v] [--run text] [dir...]\n  seed fmt [--check] <file.sd>...\n  seed c <dir | file.sd...>\n  seed ast <file.sd>...\n  seed lsp\n"
+const string usage = "usage:\n  seed build [-o out] <dir | file.sd>\n  seed run <dir | file.sd> [args...]\n  seed test [-v] [--run text] [dir...]\n  seed fmt [--check] <file.sd | dir>...\n  seed c <dir | file.sd...>\n  seed ast <file.sd>...\n  seed lsp\n"
 
 fn main([]string args) error {
     if (args.len() < 2) {

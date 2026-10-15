@@ -1,0 +1,180 @@
+// A parameter can be assigned a new value: only the function's copy
+// changes, never the caller's variable. The parameter then owns its value
+// (it is borrowed from the caller until then), for every kind of type.
+package main
+
+import "errors"
+import "fmt"
+
+type Point struct {
+    int x
+    string label
+}
+
+type Shape enum {
+    Dot
+    Circle(float r, []string tags)
+}
+
+type Named interface {
+    title() string
+}
+
+type Book struct implements Named {
+    string name
+}
+
+fn (Book b) title() string {
+    return b.name
+}
+
+// Shifting args after reading a flag, the case from docs/first-impressions.md.
+fn shift([]string args) []string {
+    args = args.slice(1, args.len())
+    if (args.len() > 0 && args[0] == "-v") {
+        args = args.slice(1, args.len())
+    }
+    return args
+}
+
+// A string parameter appended to in a loop (in place once it owns a copy).
+fn repeat(string s, int n) string {
+    for (; n > 1; n--) {
+        s = s + "-" + s.slice(0, 1)
+    }
+    return s
+}
+
+// A pure int function with an assigned parameter (it gets a fast version).
+fn gcd(int a, int b) int {
+    for (; b != 0; ) {
+        int t = a % b
+        a = b
+        b = t
+    }
+    return a
+}
+
+// A big int parameter replaced (its old value must not be released by the
+// callee, which never owned it).
+fn grow(int n, int times) int {
+    for (int i = 0; i < times; i++) {
+        n = n * n
+    }
+    return n
+}
+
+fn moveRight(Point p) Point {
+    p = Point{x: p.x + 1, label: p.label + ">"}
+    return p
+}
+
+fn widen(Shape s) Shape {
+    switch (s) {
+    case Shape.Dot:
+        s = Shape.Circle(1.0, []string{"was a dot"})
+    case Shape.Circle(float r, []string tags):
+        s = Shape.Circle(r * 2.0, tags)
+    }
+    return s
+}
+
+fn defaulted(string? name) string {
+    if (name == null) {
+        name = "anonymous"
+    }
+    return name
+}
+
+fn rename(Named n, string to) string {
+    string before = n.title()
+    n = Book{name: to}
+    return before + " -> " + n.title()
+}
+
+fn retry(error err, int attempts) string {
+    for (int i = 0; i < attempts; i++) {
+        if (err == null) {
+            return "ok after " + i.string()
+        }
+        err = null
+    }
+    return "gave up"
+}
+
+fn half(int n) (int, error) {
+    if (n % 2 != 0) {
+        return 0, errors.new("odd")
+    }
+    return n / 2, null
+}
+
+// A parameter assigned beside an error is guarded like a local.
+fn halve(int n) string {
+    error err = null
+    n, err = half(n)
+    if (err != null) {
+        return err.message()
+    }
+    return n.string()
+}
+
+// A deferred call gets the value the parameter had when defer ran.
+fn deferred(string s) {
+    defer fmt.println("deferred: " + s)
+    s = "changed"
+    fmt.println("now: " + s)
+}
+
+// A crash after the parameter took a new value: the cleanup frame releases
+// it (tests/leaks.sh).
+fn crashAfter([]string xs, int i) error {
+    xs = []string{"fresh " + i.string(), "list"}
+    fmt.println(xs[i])
+    return null
+}
+
+// The receiver of a select case can be a parameter too.
+fn lastOf(chan int ch, int? last) int? {
+    for (int i = 0; i < 3; i++) {
+        select {
+        case last = ch.receive():
+        }
+    }
+    return last
+}
+
+fn main([]string args) error {
+    []string argv = []string{"prog", "-v", "a", "b"}
+    fmt.println(shift(argv).join(",") + " / " + argv.join(","))
+    string word = "ab"
+    fmt.println(repeat(word, 4) + " / " + word)
+    fmt.println(gcd(84, 36).string() + " " + gcd(17, 5).string())
+    int big = 3
+    fmt.println(grow(big, 7).string().len().string() + " / " + big.string())
+    Point p = Point{x: 1, label: "p"}
+    Point q = moveRight(moveRight(p))
+    fmt.println(q.x.string() + q.label + " / " + p.x.string() + p.label)
+    Shape d = Shape.Dot
+    fmt.println(widen(d).name() + " " + widen(widen(d)).name() + " / " + d.name())
+    fmt.println(defaulted(null) + " " + defaulted("ann"))
+    Book b = Book{name: "old"}
+    fmt.println(rename(b, "new") + " / " + b.name)
+    fmt.println(retry(errors.new("x"), 3) + " " + retry(errors.new("x"), 0))
+    fmt.println(halve(10) + " " + halve(7))
+    deferred("original")
+    error err = group {
+        spawn crashAfter([]string{"a"}, 5)
+    }
+    if (err != null) {
+        fmt.println(err.message())
+    }
+    chan int ch = chan int(3)
+    ch.send(1)
+    ch.send(2)
+    ch.send(3)
+    int? none = null
+    int? got = lastOf(ch, none)
+    fmt.println((got == 3).string() + " / " + (none == null).string())
+    return null
+}

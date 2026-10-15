@@ -123,7 +123,7 @@ The compiler narrows a variable, or a field of a variable such as `u.email` or `
 - through `!`: `if (!(x == null))` narrows like `if (x != null)`;
 - after an assignment of a value that is never null (a `T`, not a `T?`): after `if (x == null) { x = "none" }`, `x` is a `string` on every path, as `greeting` above shows.
 
-A `T?` that is not narrowed can only be compared with `null`: for an `int? n`, `n == 2` is an error. Write `n != null && n == 2`. (Nullable fields and elements inside a struct, list or enum compare as part of it, so `[](int?){1, null} == [](int?){1, null}` is fine.)
+A `T?` compares with `null`, and with a plain `T`: for an `int? n`, `n == 2` is false when `n` is null (and `n != 2` is true), so `counts["a"] == 3` works on a map lookup directly. Two `T?` values don't compare with each other (`a == b` for two `int?` is an error, because "are both null?" is rarely what you mean): check them first. A comparison with a value doesn't narrow: after `if (n == 2)`, `n` is still an `int?`. (Nullable fields and elements inside a struct, list or enum compare as part of it, so `[](int?){1, null} == [](int?){1, null}` is fine.)
 
 Narrowing ends:
 
@@ -165,6 +165,28 @@ Only variables and their fields are narrowed, not other expressions. `stock["app
       |                       ^
     hint: check the value != null first
 ```
+
+## error is narrowed too
+
+An `error` can be null without a `?`: a null error means "no error" ([chapter 4](04-functions-and-errors.md)). The compiler treats it like a `T?`: `err.message()` compiles only where `err` is known not to be null, by the same rules as above. In practice that is the code after the check you write anyway:
+
+```seed
+error err = save(doc)
+if (err != null) {
+    fmt.println("not saved: " + err.message())
+}
+```
+
+A value of a type that implements `error` is never null, so `error e = ParseError{line: 3}` narrows `e` like an assignment of a `T`. A call result, such as `errors.new("x")`, is an `error` that may be null as far as the type says, so store it and check it like any other. Calling `message()` on an error that may be null is an error:
+
+```
+05_error_unchecked.sd:15:17: error: err may be null (an error is null when there is no error)
+   15 |     fmt.println(err.message())
+      |                 ^
+    hint: check err != null before calling message()
+```
+
+In a test, `assert(err != null)` narrows `err` for the rest of the test, like an `if` that returns.
 
 ## Why no nil?
 

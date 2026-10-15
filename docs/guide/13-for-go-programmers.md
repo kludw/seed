@@ -13,7 +13,7 @@ Seed started from Go and kept most of its spirit: a small language, fast to lear
 |---|---|---|
 | `var n int`, `n := 0`, `var n = 0` | `int n = 0` | One form. The type is always visible, and every variable starts with a value. |
 | Zero values | No zero values: every declaration and struct literal is complete | A forgotten field is a compile error, not a silent `0` or `""`. |
-| `nil` for pointers, maps, slices, interfaces, channels, funcs | `T?` and `null`, only where the type says so | "Might be missing" is part of the type, and the compiler makes you check it. |
+| `nil` for pointers, maps, slices, interfaces, channels, funcs | `T?` and `null`, only where the type says so (and `error`, which the compiler checks like a `T?`) | "Might be missing" is part of the type, and the compiler makes you check it. |
 | `*T`, `&x`, pointer and value receivers | No pointers. Values only; `mut` methods change the caller's variable | No aliasing, no nil dereference, no data races, no `*T` versus `T` decision. |
 | Slices share their backing array; `append` may or may not copy | `[]T` is a value; copy-on-write makes copies cheap | A list you passed somewhere never changes under you. |
 | `append(xs, x)` | `xs.push(x)` | One way to add to a list. |
@@ -31,7 +31,9 @@ Seed started from Go and kept most of its spirit: a small language, fast to lear
 | `if err != nil { return ..., err }` | Same, or `try f()` | Passing an error up is the common case, so it gets the one piece of sugar. |
 | `f()` silently drops a returned error; `v, _ :=` | Every error must be handled; `_` is explicit, and the value becomes `T?` | Errors can't be lost by accident. |
 | `panic`, `recover` | Crashes (exit code 2, or the group's error); no recover | Bugs crash; expected failures are errors. |
-| `fmt.Printf("%d items", n)` | `fmt.println(n.string() + " items")` | No format-string language to learn or get wrong. |
+| `fmt.Printf("%d items", n)` | `fmt.println(n.string() + " items")` (`fmt.fixed(f, 2)` for decimals) | No format-string language to learn or get wrong. |
+| `m[k]++` on a missing key | `m[k] = m.getOr(k, 0) + 1` | A missing key has no hidden zero value; the default is written where it is used. |
+| `String()` on an `iota` type | Every enum has `name()`: `Direction.North.name()` is `"North"` | Printing a case needs no hand-written switch. |
 | Capitalised names are exported | `pub` keyword; naming style is fixed by the compiler | Visibility doesn't fight with naming rules, and making a name public doesn't rename it. |
 | Struct fields exported by capital letter | Fields are private unless `pub` | A package can protect its invariants. |
 | Package-level `var`, `init()` | Only `const` at package level; nothing runs on import | No global mutable state, no hidden start-up code. |
@@ -49,10 +51,11 @@ Seed started from Go and kept most of its spirit: a small language, fast to lear
 - **Conditions need parentheses**: `if (x > 0) {`. And `if` has no init statement.
 - **Integer division by zero crashes**, but float division by zero gives `inf` or `nan`, as IEEE says.
 - **`s[i]` is a `byte`**, and `byte.string()` gives its number (`'a'.string()` is `"97"`). Use `string([]byte{b})` or `s.slice(i, i + 1)` to get text.
-- **A map lookup returns `V?`**, not a zero value with a `bool`. Store it in a variable and check it.
+- **A map lookup returns `V?`**, not a zero value with a `bool`. Store it in a variable and check it, compare it with a value (`m[k] == 3` is false when `k` is missing), or use `m.getOr(k, default)`.
 - **`ch.receive()` returns `T?`**; `null` means the channel is closed and empty.
 - **`main` returns an `error`** and receives the arguments: `fn main([]string args) error`.
-- **Function parameters are read-only**, including lists and maps. Copy into a local to change one.
+- **Function parameters can be reassigned but not changed in place**: `args = args.slice(1, args.len())` is fine (only the function's copy changes), while `xs[0] = 1` or `xs.push(1)` on a parameter is an error, because in Go it would change the caller's slice. Copy into a local to change one.
+- **An `error` must be checked before `err.message()`**, like a `T?`: the compiler rejects `message()` on an error that may be null.
 - **`defer` with an error result** needs `defer _ = f()`.
 
 ## What you give up, and what you get

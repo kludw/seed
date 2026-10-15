@@ -1,0 +1,20 @@
+// expect-error: enum_method_name.sd:13:14: error: enum Light cannot declare a method name: every enum has a built-in name() that returns the name of its case
+// expect-errors: 1
+// An enum has a built-in name(), so it cannot declare its own.
+package main
+
+import "fmt"
+
+type Light enum {
+    Red
+    Green
+}
+
+fn (Light l) name() string {
+    return "light"
+}
+
+fn main([]string args) error {
+    fmt.println(Light.Red.name())
+    return null
+}
