@@ -35,6 +35,7 @@
 #include <limits.h>
 #include <poll.h>
 #include <pthread.h>
+#include <sched.h>
 #include <setjmp.h>
 #include <signal.h>
 #include <stdatomic.h>
@@ -75,6 +76,7 @@
 #define SD_RUNQ 256                        /* a P's run queue (a power of two) */
 #define SD_GFREE_LOCAL 64                  /* finished goroutines kept per P ... */
 #define SD_GFREE_GLOBAL 4096               /* ... and shared */
+#define SD_SFREE_LOCAL 32                  /* free stacks kept per P (the rest shared, as many) */
 
 #if defined(__has_feature)
 #if __has_feature(address_sanitizer) || __has_feature(thread_sanitizer) || __has_feature(memory_sanitizer)
@@ -204,7 +206,7 @@ struct sd_task {
   pthread_cond_t cv;
 
   sd_group *group;          /* the group this goroutine belongs to (NULL for main) */
-  sd_task *next, *prev;     /* the other running members of that group */
+  _Atomic(sd_task *) *gslot; /* its slot in the group's members */
   sd_task_fn body;
   void *args;
   const sd_type *args_type;
@@ -225,19 +227,37 @@ struct sd_task {
   void *sp;           /* saved stack pointer (or ucontext) while switched out */
   sd_stack stk;
   sd_task *schedlink; /* in a run queue or a free list */
+  sd_task *gbatch;    /* in the shared free list: the next batch (on a batch's first) */
+  int gbatchn;        /* ... and this batch's length */
   void *tsan_fiber;
 };
 
 enum { SD_BLOCK_NONE = 0, SD_BLOCK_RECV, SD_BLOCK_SEND, SD_BLOCK_SELECT, SD_BLOCK_GROUP };
 
+/* A group's running goroutines are in slots, in chunks that never move
+ * while the group lives. Only the goroutine that runs the group block
+ * spawns (the compiler allows spawn nowhere else), so it alone fills slots,
+ * scanning from a cursor for an empty one (or adding a chunk when a whole
+ * chunk's worth is full); a goroutine that ends empties its own. Neither
+ * takes a lock: spawning and ending touch the group's count and one slot,
+ * never another goroutine's memory. A cancellation (under the group's lock)
+ * pins each slot it visits (the low bit) while it cancels that goroutine;
+ * one that ends meanwhile waits for the pin to go. */
+#define SD_GSLOTS 63
+typedef struct sd_gchunk {
+  _Atomic(struct sd_gchunk *) next;
+  _Atomic(sd_task *) slot[SD_GSLOTS];
+} sd_gchunk;
+
 struct sd_group {
-  pthread_mutex_t mu;
-  sd_task *members; /* running goroutines */
-  sd_task *dead;    /* finished goroutines not freed yet (linked by next) */
-  int64_t running;
-  bool failed;
+  pthread_mutex_t mu;      /* serialises cancellations; protects err */
+  _Atomic int64_t state;   /* running goroutines * 2, + 1 once the owner waits */
+  atomic_int failed;
   sd_err err;
   sd_task *waiter;
+  sd_gchunk *cur, *tail;   /* the spawner's: where to look for a slot, the last chunk */
+  int curi;
+  sd_gchunk first;
 };
 
 #define SEL_CANCELLED (-1)
@@ -291,8 +311,10 @@ struct sd_p {
   int64_t sm_swhen;
   _Atomic int preempt;           /* 1: the running goroutine is asked to yield (counted in sd_preempt_req_) */
   sd_p *link;                    /* in the idle list */
-  sd_task *gfree;                /* finished goroutines kept for reuse */
+  sd_task *gfree;                /* finished goroutines kept for reuse (no stacks) */
   int ngfree;
+  int nsfree;                    /* free stacks, the newest last */
+  sd_stack sfree[SD_SFREE_LOCAL];
   uint32_t ntrim;
 };
 
@@ -335,9 +357,12 @@ static struct {
   _Atomic int nmspinning;
   int nprocs;
   sd_p *allp;
-  pthread_mutex_t gmu;    /* finished goroutines shared by the Ps */
-  sd_task *gfree;
+  pthread_mutex_t gmu;    /* finished goroutines and free stacks shared by the Ps */
+  sd_task *gfree;         /* batches (linked by gbatch) of goroutines (by schedlink) */
   _Atomic int ngfree;
+  sd_stack *sfree;
+  _Atomic size_t nsfree;  /* written under gmu */
+  size_t capsfree;
 } sched = {.mu = PTHREAD_MUTEX_INITIALIZER, .gmu = PTHREAD_MUTEX_INITIALIZER};
 
 static pthread_once_t sched_once = PTHREAD_ONCE_INIT;
@@ -737,7 +762,7 @@ static void task_reset(sd_task *t) {
   t->hnext = NULL;
   t->blockdepth = 0;
   t->group = NULL;
-  t->next = t->prev = NULL;
+  t->gslot = NULL;
   t->body = NULL;
   t->args = NULL;
   t->args_type = NULL;
@@ -746,6 +771,7 @@ static void task_reset(sd_task *t) {
   t->blocked_kind = SD_BLOCK_NONE;
   t->blocked_n = 0;
   t->schedlink = NULL;
+  t->sp = NULL; /* its context is made when it first runs (switch_to_g) */
 }
 
 static void sched_init(void);
@@ -756,122 +782,205 @@ static sd_p *cur_p(void) {
   return m && m->curg ? m->p : NULL;
 }
 
-/* A goroutine with a stack, from the current P's free list, the shared
- * one, or new. */
+/* Goroutines and stacks are pooled apart, as in Go: a goroutine's structure
+ * (sd_task) is reused by whoever spawns next, but its stack is taken when it
+ * first runs, from the free stacks of the P that runs it, and given back to
+ * that P's when it ends. A P that runs goroutines one after another so
+ * reuses the same few stacks, whose top pages are in its cache and TLB (each
+ * stack is a mapping of its own, so a cold one costs a page walk as well as
+ * cache misses). Each pool is a per-P cache in front of a shared one; the
+ * shared list of goroutines holds batches, so that moving SD_GFREE_LOCAL / 2
+ * of them between a P and it takes O(1) under the lock and touches none. */
+
+/* A goroutine without a stack (stack == SD_GOROUTINE_STACK: it gets one when
+ * it first runs) or with one of the given size (the main goroutine's), from
+ * the current P's free list, the shared one, or new. */
 static sd_task *g_get(size_t stack) {
   pthread_once(&sched_once, sched_init);
+  if (stack != SD_GOROUTINE_STACK) {
+    sd_task *t = task_alloc();
+    if (!stack_alloc(&t->stk, stack)) sd_fatal("cannot start a goroutine (out of memory for its stack)");
+#if defined(SD_TSAN)
+    t->tsan_fiber = __tsan_create_fiber(0);
+#endif
+    return t;
+  }
   sd_task *t = NULL;
-  sd_p *p = stack == SD_GOROUTINE_STACK ? cur_p() : NULL;
-  if (p) {
-    if (!p->gfree && atomic_load_explicit(&sched.ngfree, memory_order_relaxed) > 0) {
-      /* refill half of the local list from the shared one */
-      pthread_mutex_lock(&sched.gmu);
-      while (sched.gfree && p->ngfree < SD_GFREE_LOCAL / 2) {
-        sd_task *g = sched.gfree;
-        sched.gfree = g->schedlink;
-        sched.ngfree--;
-        g->schedlink = p->gfree;
-        p->gfree = g;
-        p->ngfree++;
-      }
-      pthread_mutex_unlock(&sched.gmu);
+  sd_p *p = cur_p();
+  if (p && !p->gfree && atomic_load_explicit(&sched.ngfree, memory_order_relaxed) > 0) {
+    /* take a batch from the shared list */
+    pthread_mutex_lock(&sched.gmu);
+    sd_task *b = sched.gfree;
+    if (b) {
+      sched.gfree = b->gbatch;
+      atomic_fetch_sub_explicit(&sched.ngfree, b->gbatchn, memory_order_relaxed);
     }
+    pthread_mutex_unlock(&sched.gmu);
+    if (b) {
+      p->gfree = b;
+      p->ngfree = b->gbatchn;
+    }
+  }
+  if (p) {
     t = p->gfree;
     if (t) {
       p->gfree = t->schedlink;
       p->ngfree--;
     }
-  } else if (stack == SD_GOROUTINE_STACK && atomic_load_explicit(&sched.ngfree, memory_order_relaxed) > 0) {
+  } else if (atomic_load_explicit(&sched.ngfree, memory_order_relaxed) > 0) {
+    /* a thread without a P: one goroutine off the first batch */
     pthread_mutex_lock(&sched.gmu);
     t = sched.gfree;
     if (t) {
-      sched.gfree = t->schedlink;
-      sched.ngfree--;
+      sd_task *rest = t->schedlink;
+      if (rest) {
+        rest->gbatch = t->gbatch;
+        rest->gbatchn = t->gbatchn - 1;
+        sched.gfree = rest;
+      } else {
+        sched.gfree = t->gbatch;
+      }
+      atomic_fetch_sub_explicit(&sched.ngfree, 1, memory_order_relaxed);
     }
     pthread_mutex_unlock(&sched.gmu);
   }
   if (t) {
     t->schedlink = NULL;
+    t->gbatch = NULL;
+    t->gbatchn = 0;
     return t;
   }
   t = task_alloc();
-  if (!stack_alloc(&t->stk, stack)) sd_fatal("cannot start a goroutine (out of memory for its stack)");
 #if defined(SD_TSAN)
   t->tsan_fiber = __tsan_create_fiber(0);
 #endif
   return t;
 }
 
-/* A finished goroutine goes back to a free list (or is freed). */
-static void g_put(sd_task *t) {
+/* Pushes a list of n goroutines (linked by schedlink) as one batch on the
+ * shared list, or frees them if it is full. */
+static void gfree_push_batch(sd_task *head, int n) {
+  pthread_mutex_lock(&sched.gmu);
+  bool keep = atomic_load_explicit(&sched.ngfree, memory_order_relaxed) + n <= SD_GFREE_GLOBAL;
+  if (keep) {
+    head->gbatch = sched.gfree;
+    head->gbatchn = n;
+    sched.gfree = head;
+    atomic_fetch_add_explicit(&sched.ngfree, n, memory_order_relaxed);
+  }
+  pthread_mutex_unlock(&sched.gmu);
+  if (!keep) {
+    while (head) {
+      sd_task *g = head;
+      head = g->schedlink;
+      task_destroy(g);
+    }
+  }
+}
+
+/* A finished goroutine (its stack given back already, unless it is not of
+ * the pooled size) goes back to p's free list (the shared one without p),
+ * or is freed. Called by the P where it ran (on g0, as it ends), so the
+ * reset writes memory that is in this CPU's cache. */
+static void g_put(sd_p *p, sd_task *t) {
   task_reset(t);
-  if ((size_t)(t->stk.hi - t->stk.lo) != page_round(SD_GOROUTINE_STACK)) {
+  if (t->stk.kind != SD_STACK_NONE) {
     task_destroy(t);
     return;
   }
+  if (!p) {
+    t->schedlink = NULL;
+    gfree_push_batch(t, 1);
+    return;
+  }
+  t->schedlink = p->gfree;
+  p->gfree = t;
+  if (++p->ngfree <= SD_GFREE_LOCAL) return;
+  /* move half to the shared list */
+  sd_task *head = p->gfree, *tail = head;
+  int n = SD_GFREE_LOCAL / 2;
+  for (int i = 1; i < n; i++) tail = tail->schedlink;
+  p->gfree = tail->schedlink;
+  p->ngfree -= n;
+  tail->schedlink = NULL;
+  gfree_push_batch(head, n);
+}
+
+/* A stack for a goroutine about to run on p (NULL: a thread without one). */
+static void stack_get(sd_p *p, sd_stack *s) {
+  if (p && p->nsfree == 0 && atomic_load_explicit(&sched.nsfree, memory_order_relaxed) > 0) {
+    pthread_mutex_lock(&sched.gmu);
+    size_t n = atomic_load_explicit(&sched.nsfree, memory_order_relaxed);
+    while (n > 0 && p->nsfree < SD_SFREE_LOCAL / 2) p->sfree[p->nsfree++] = sched.sfree[--n];
+    atomic_store_explicit(&sched.nsfree, n, memory_order_relaxed);
+    pthread_mutex_unlock(&sched.gmu);
+  }
+  if (p && p->nsfree > 0) {
+    *s = p->sfree[--p->nsfree];
+    return;
+  }
+  if (!p && atomic_load_explicit(&sched.nsfree, memory_order_relaxed) > 0) {
+    pthread_mutex_lock(&sched.gmu);
+    size_t n = atomic_load_explicit(&sched.nsfree, memory_order_relaxed);
+    if (n > 0) {
+      *s = sched.sfree[--n];
+      atomic_store_explicit(&sched.nsfree, n, memory_order_relaxed);
+    }
+    pthread_mutex_unlock(&sched.gmu);
+    if (s->kind != SD_STACK_NONE) return;
+  }
+  if (!stack_alloc(s, SD_GOROUTINE_STACK)) sd_fatal("cannot start a goroutine (out of memory for its stack)");
+}
+
+/* Stacks into the shared pool (trimmed: stack_trim), or unmapped if it is
+ * full. */
+static void stack_put_shared(sd_stack *ss, int n) {
+  for (int i = 0; i < n; i++) stack_trim(&ss[i]);
+  pthread_mutex_lock(&sched.gmu);
+  size_t k = atomic_load_explicit(&sched.nsfree, memory_order_relaxed);
+  int i = 0;
+  for (; i < n && k < SD_GFREE_GLOBAL; i++) {
+    if (k == sched.capsfree) {
+      sched.capsfree = sched.capsfree ? sched.capsfree * 2 : 64;
+      sched.sfree = sd_realloc(sched.sfree, sched.capsfree * sizeof *sched.sfree);
+    }
+    sched.sfree[k++] = ss[i];
+  }
+  atomic_store_explicit(&sched.nsfree, k, memory_order_relaxed);
+  pthread_mutex_unlock(&sched.gmu);
+  for (; i < n; i++) stack_free(&ss[i]);
+}
+
+/* A finished goroutine's stack goes back to the free stacks of p, the P it
+ * ended on (the shared ones without p). */
+static void stack_put(sd_p *p, sd_stack *s) {
 #if defined(SD_ASAN)
   /* Frames of the goroutine that never returned leave their redzones
    * poisoned; the stack's top part is what the next one uses. */
   {
-    size_t n = (size_t)(t->stk.hi - t->stk.lo);
+    size_t n = (size_t)(s->hi - s->lo);
     if (n > ((size_t)256 << 10)) n = (size_t)256 << 10;
-    __asan_unpoison_memory_region(t->stk.hi - n, n);
+    __asan_unpoison_memory_region(s->hi - n, n);
   }
 #endif
-  sd_p *p = cur_p();
-  if (p) {
-    /* A stack that went deep gives its memory back (stack_trim). Looking
-     * costs a page of the stack the goroutine did not use, so a P checks
-     * every fourth one it keeps, and every one it passes on. */
-    if ((++p->ntrim & 3) == 0) stack_trim(&t->stk);
-    t->schedlink = p->gfree;
-    p->gfree = t;
-    if (++p->ngfree <= SD_GFREE_LOCAL) return;
-    /* move half to the shared list */
-    sd_task *batch = NULL;
-    int n = 0;
-    while (p->ngfree > SD_GFREE_LOCAL / 2) {
-      sd_task *g = p->gfree;
-      p->gfree = g->schedlink;
-      p->ngfree--;
-      g->schedlink = batch;
-      batch = g;
-      stack_trim(&g->stk);
-      n++;
-    }
-    pthread_mutex_lock(&sched.gmu);
-    sd_task *extra = NULL;
-    while (batch) {
-      sd_task *g = batch;
-      batch = g->schedlink;
-      if (sched.ngfree < SD_GFREE_GLOBAL) {
-        g->schedlink = sched.gfree;
-        sched.gfree = g;
-        sched.ngfree++;
-      } else {
-        g->schedlink = extra;
-        extra = g;
-      }
-    }
-    pthread_mutex_unlock(&sched.gmu);
-    while (extra) {
-      sd_task *g = extra;
-      extra = g->schedlink;
-      task_destroy(g);
-    }
-    (void)n;
+  sd_stack st = *s;
+  memset(s, 0, sizeof *s); /* kind SD_STACK_NONE */
+  if (!p) {
+    stack_put_shared(&st, 1);
     return;
   }
-  stack_trim(&t->stk);
-  pthread_mutex_lock(&sched.gmu);
-  bool keep = sched.ngfree < SD_GFREE_GLOBAL;
-  if (keep) {
-    t->schedlink = sched.gfree;
-    sched.gfree = t;
-    sched.ngfree++;
+  /* A stack that went deep gives its memory back (stack_trim). Looking
+   * costs a page of the stack the goroutine did not use, so a P checks
+   * every fourth one it keeps, and every one it passes on. */
+  if ((++p->ntrim & 3) == 0) stack_trim(&st);
+  if (p->nsfree == SD_SFREE_LOCAL) {
+    /* move the older half to the shared pool */
+    enum { H = SD_SFREE_LOCAL / 2 };
+    stack_put_shared(p->sfree, H);
+    memmove(p->sfree, p->sfree + H, (size_t)(SD_SFREE_LOCAL - H) * sizeof *p->sfree);
+    p->nsfree -= H;
   }
-  pthread_mutex_unlock(&sched.gmu);
-  if (!keep) task_destroy(t);
+  p->sfree[p->nsfree++] = st;
 }
 
 /* The current goroutine. A thread that did not start through sd_main or
@@ -927,7 +1036,11 @@ static void report_put(deadlock_report *r, const char *fmt, ...) {
 static void report_task(deadlock_report *r, sd_task *t, int depth);
 
 static void report_group(deadlock_report *r, sd_group *g, int depth) {
-  for (sd_task *m = g->members; m; m = m->next) report_task(r, m, depth);
+  for (sd_gchunk *k = &g->first; k; k = atomic_load_explicit(&k->next, memory_order_acquire))
+    for (int i = 0; i < SD_GSLOTS; i++) {
+      sd_task *m = (sd_task *)((uintptr_t)atomic_load(&k->slot[i]) & ~(uintptr_t)1);
+      if (m) report_task(r, m, depth);
+    }
 }
 
 static void report_task(deadlock_report *r, sd_task *t, int depth) {
@@ -1440,6 +1553,13 @@ static void ctx_prepare(sd_task *t) { t->sp = ctx_make(t->stk.hi, g_entry); }
 
 /* g0 -> g: runs g until it switches back. */
 static void switch_to_g(sd_m *m, sd_task *g) {
+  /* A goroutine's first run: its context is made here rather than by
+   * sd_spawn, so that the top of its stack is written by the CPU that runs
+   * it (which often is not the spawner's). */
+  if (!g->sp) {
+    if (g->stk.kind == SD_STACK_NONE) stack_get(m->p, &g->stk);
+    ctx_prepare(g);
+  }
 #if defined(SD_TSAN)
   __tsan_switch_to_fiber(g->tsan_fiber, 0);
 #endif
@@ -1567,7 +1687,7 @@ top:;
   goto top;
 }
 
-static void goroutine_exit_g0(sd_task *t);
+static void goroutine_exit_g0(sd_m *m, sd_task *t);
 
 /* What a goroutine that switched to g0 asked for. Returns the goroutine to
  * run next (the same one, readied meanwhile), or NULL. */
@@ -1588,7 +1708,7 @@ static sd_task *handle_act(sd_m *m, sd_task *g) {
     return g;
   }
   case SD_ACT_EXIT:
-    goroutine_exit_g0(g);
+    goroutine_exit_g0(m, g);
     return NULL;
   case SD_ACT_YIELD:
     /* g was preempted: to the global queue's tail, behind what waits. */
@@ -2085,9 +2205,55 @@ static void task_cancel(sd_task *m) {
 }
 
 static void group_cancel_locked(sd_group *g) {
-  if (g->failed) return;
-  g->failed = true;
-  for (sd_task *m = g->members; m; m = m->next) task_cancel(m);
+  if (atomic_load(&g->failed)) return;
+  /* Sequentially consistent, against sd_spawn: either it sees failed after
+   * filling its slot, or this sees the slot filled. */
+  atomic_store(&g->failed, 1);
+  for (sd_gchunk *k = &g->first; k; k = atomic_load_explicit(&k->next, memory_order_acquire))
+    for (int i = 0; i < SD_GSLOTS; i++) {
+      sd_task *m = atomic_load(&k->slot[i]);
+      if (!m) continue;
+      /* pin it: the goroutine cannot end (and be reused) while it is cancelled */
+      if (!atomic_compare_exchange_strong(&k->slot[i], &m, (sd_task *)((uintptr_t)m | 1))) continue;
+      task_cancel(m);
+      atomic_store(&k->slot[i], m);
+    }
+}
+
+/* Empties t's slot (waiting while a cancellation has it pinned). */
+static void group_slot_clear(_Atomic(sd_task *) *slot, sd_task *t) {
+  for (int spins = 0;; spins++) {
+    sd_task *e = t;
+    if (atomic_compare_exchange_weak(slot, &e, NULL)) return;
+    if (spins < 100) cpu_relax();
+    else sched_yield();
+  }
+}
+
+/* The spawner's: an empty slot, after the last one it filled. */
+static _Atomic(sd_task *) *group_slot_take(sd_group *g) {
+  sd_gchunk *k = g->cur;
+  int i = g->curi;
+  for (int n = 0; n < SD_GSLOTS; n++, i++) {
+    if (i == SD_GSLOTS) {
+      k = atomic_load_explicit(&k->next, memory_order_relaxed);
+      if (!k) k = &g->first;
+      i = 0;
+    }
+    if (!atomic_load_explicit(&k->slot[i], memory_order_relaxed)) {
+      g->cur = k;
+      g->curi = i + 1;
+      return &k->slot[i];
+    }
+  }
+  /* SD_GSLOTS full slots in a row: a new chunk */
+  sd_gchunk *nk = calloc(1, sizeof *nk);
+  if (!nk) sd_fatal("out of memory");
+  atomic_store_explicit(&g->tail->next, nk, memory_order_release);
+  g->tail = nk;
+  g->cur = nk;
+  g->curi = 1;
+  return &nk->slot[0];
 }
 
 static void group_cancel(sd_group *g) {
@@ -2101,6 +2267,7 @@ sd_group *sd_group_begin(void) {
   sd_group *g = calloc(1, sizeof *g);
   if (!g) sd_fatal("out of memory");
   spin_mutex_init(&g->mu);
+  g->cur = g->tail = &g->first;
   cl_push(t, (sd_cleanup){NULL, g, t->arena_len, 0});
   return g;
 }
@@ -2155,46 +2322,35 @@ static SD_NORETURN void goroutine_main(sd_task *t) {
   __builtin_unreachable();
 }
 
-/* On g0, after goroutine t returned (its result in t->result): moves it to
- * its group's dead list (its last use: the group may free it from then on). */
-static void goroutine_exit_g0(sd_task *t) {
+/* On g0, after goroutine t returned (its result in t->result): takes it out
+ * of its group (the group may be freed once the count is down) and puts it
+ * on this P's free list, as Go's goexit0 does: the reset writes lines that
+ * are in this CPU's cache, where the spawner would have pulled each one
+ * over. */
+static void goroutine_exit_g0(sd_m *m, sd_task *t) {
   sd_err result = t->result;
   t->result = SD_ERR_NULL;
   sd_group *g = t->group;
-  lock_briefly(&g->mu);
+  group_slot_clear(t->gslot, t);
   if (!sd_err_is_null(result)) {
+    pthread_mutex_lock(&g->mu);
     if (sd_err_is_null(g->err)) {
       g->err = result;
       result = SD_ERR_NULL;
     }
     group_cancel_locked(g);
+    pthread_mutex_unlock(&g->mu);
+    sd_err_release(result);
   }
-  if (t->prev) t->prev->next = t->next;
-  else g->members = t->next;
-  if (t->next) t->next->prev = t->prev;
-  t->prev = NULL;
-  t->next = g->dead;
-  g->dead = t;
-  sd_task *w = NULL;
-  if (--g->running == 0) {
-    w = g->waiter;
-    g->waiter = NULL;
-  }
-  pthread_mutex_unlock(&g->mu);
-  sd_err_release(result);
-  if (w) unpark(w);
+  /* The last one wakes the owner if it waits (the group is not freed before
+   * that); otherwise g may be gone after this. */
+  if (atomic_fetch_sub_explicit(&g->state, 2, memory_order_acq_rel) == 3) unpark(g->waiter);
+  if ((size_t)(t->stk.hi - t->stk.lo) == page_round(SD_GOROUTINE_STACK)) stack_put(m->p, &t->stk);
+  g_put(m->p, t);
   running_dec();
 }
 
-/* Frees a list of finished goroutines (linked by next): they no longer run
- * (goroutine_exit_g0's last use is under the group's lock). */
-static void reap(sd_task *m) {
-  for (sd_task *next; m; m = next) {
-    next = m->next;
-    g_put(m);
-  }
-}
-
+/* Called only by the goroutine that runs g's block (see sd_group). */
 void sd_spawn(sd_group *g, sd_task_fn body, const sd_type *args_type, const void *args) {
   sd_task *parent = task_current();
   sd_task *c = g_get(SD_GOROUTINE_STACK);
@@ -2213,19 +2369,18 @@ void sd_spawn(sd_group *g, sd_task_fn body, const sd_type *args_type, const void
     c->args = args_type->size <= sizeof c->argbuf ? (void *)c->argbuf : sd_alloc(args_type->size);
     sd_clone_deep(args_type, c->args, args);
   }
-  lock_briefly(&g->mu);
-  /* Finished goroutines of the group are freed here (outside the lock). */
-  sd_task *dead = g->dead;
-  g->dead = NULL;
-  bool start = !g->failed && !atomic_load(&parent->cancelled);
+  bool start = !atomic_load_explicit(&g->failed, memory_order_relaxed) && !atomic_load(&parent->cancelled);
   if (start) {
-    c->next = g->members;
-    if (c->next) c->next->prev = c;
-    g->members = c;
-    g->running++;
+    c->gslot = group_slot_take(g);
+    atomic_fetch_add_explicit(&g->state, 2, memory_order_relaxed);
+    atomic_store(c->gslot, c);
+    if (atomic_load(&g->failed)) {
+      /* failed meanwhile (a cancellation may have seen c: it only marked it) */
+      group_slot_clear(c->gslot, c);
+      atomic_fetch_sub_explicit(&g->state, 2, memory_order_relaxed);
+      start = false;
+    }
   }
-  pthread_mutex_unlock(&g->mu);
-  reap(dead);
   if (!start) {
     /* The group is already failing: the goroutine is not started. */
     if (args_type) {
@@ -2233,12 +2388,10 @@ void sd_spawn(sd_group *g, sd_task_fn body, const sd_type *args_type, const void
       if (c->args != (void *)c->argbuf) free(c->args);
       c->args = NULL;
     }
-    c->next = NULL;
-    g_put(c);
+    g_put(cur_p(), c);
     return;
   }
   atomic_fetch_add(&sd_running, 1);
-  ctx_prepare(c);
   pthread_once(&sysmon_once, sysmon_start); /* preemption needs it from now on */
   ready(c);
 }
@@ -2251,25 +2404,22 @@ static void group_join(sd_task *t, sd_group *g) {
   t->blocked_kind = SD_BLOCK_GROUP;
   pthread_mutex_unlock(&t->mu);
   if (atomic_load(&t->cancelled)) group_cancel(g);
-  pthread_mutex_lock(&g->mu);
-  bool wait = g->running > 0;
-  if (wait) g->waiter = t;
-  pthread_mutex_unlock(&g->mu);
-  if (wait) park(t, true);
+  g->waiter = t;
+  /* published by the release; the last goroutine to end sees the bit */
+  if (atomic_fetch_or_explicit(&g->state, 1, memory_order_acq_rel) >= 2) park(t, true);
+  atomic_store_explicit(&g->state, 0, memory_order_relaxed);
   pthread_mutex_lock(&t->mu);
   t->waiting_group = NULL;
   t->blocked_kind = SD_BLOCK_NONE;
   pthread_mutex_unlock(&t->mu);
-  /* Every member has finished, so all are on the dead list now. */
-  pthread_mutex_lock(&g->mu);
-  sd_task *dead = g->dead;
-  g->dead = NULL;
-  pthread_mutex_unlock(&g->mu);
-  reap(dead);
 }
 
 static void group_destroy(sd_group *g) {
   pthread_mutex_destroy(&g->mu);
+  for (sd_gchunk *k = atomic_load(&g->first.next), *n; k; k = n) {
+    n = atomic_load(&k->next);
+    free(k);
+  }
   free(g);
 }
 
@@ -3716,7 +3866,6 @@ int sd_main(int argc, char **argv, sd_err (*main_fn)(sd_list *args)) {
   sd_task *t = g_get(main_stack_size());
   sd_main_task = t;
   atomic_fetch_add(&sd_running, 1);
-  ctx_prepare(t);
   pthread_mutex_lock(&sched.mu);
   sd_p *p = pidle_get_locked();
   pthread_mutex_unlock(&sched.mu);
