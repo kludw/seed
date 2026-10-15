@@ -94,14 +94,32 @@ else
   failed "seed fmt on a file with syntax errors" "exit $code: $out"
 fi
 if (cd "$tmp/fmt" && "$seed" fmt --check bad.sd > /dev/null 2>&1); then failed "seed fmt --check bad.sd" "exit code 0 for a file with syntax errors"; else pass=$((pass+1)); fi
-# seed fmt takes files: a directory is an error that says so, rather than
-# a failed read.
-out=$(cd "$tmp/fmt" && "$seed" fmt . 2>&1); code=$?
-if [ "$code" = 1 ] && [ "$out" = "error: seed fmt: . is a directory; name the .sd files, such as seed fmt ./*.sd" ]; then
+# seed fmt DIR formats every .sd file under DIR (subdirectories included,
+# hidden ones and other files left alone); --check reports each unformatted
+# one. Files and directories can be mixed.
+mkdir -p "$tmp/fmtdir/sub/deeper" "$tmp/fmtdir/.hidden"
+cp "$here/full/errors/unformatted_code.sd" "$tmp/fmtdir/a.sd"
+cp "$here/full/errors/unformatted_code.sd" "$tmp/fmtdir/sub/deeper/b.sd"
+cp "$here/lang/hello.sd" "$tmp/fmtdir/sub/ok.sd"
+cp "$here/full/errors/unformatted_code.sd" "$tmp/fmtdir/.hidden/c.sd"
+cp "$here/full/errors/unformatted_code.sd" "$tmp/fmtdir/notes.txt"
+cp "$here/full/errors/unformatted_code.sd" "$tmp/fmt/single.sd"
+out=$(cd "$tmp" && "$seed" fmt --check fmtdir 2>&1 >/dev/null); code=$?
+if [ "$code" = 1 ] && [ "$out" = "$(printf 'fmtdir/a.sd:9: not formatted\n    hint: run: seed fmt fmtdir/a.sd\nfmtdir/sub/deeper/b.sd:9: not formatted\n    hint: run: seed fmt fmtdir/sub/deeper/b.sd')" ]; then
+  pass=$((pass+1))
+else
+  failed "seed fmt --check on a directory" "exit $code: $out"
+fi
+out=$(cd "$tmp" && "$seed" fmt fmtdir fmt/single.sd 2>&1); code=$?
+if [ "$code" = 0 ] && [ -z "$out" ] && (cd "$tmp" && "$seed" fmt --check fmtdir/ fmt/single.sd > /dev/null 2>&1) &&
+  cmp -s "$tmp/fmtdir/.hidden/c.sd" "$here/full/errors/unformatted_code.sd" && cmp -s "$tmp/fmtdir/notes.txt" "$here/full/errors/unformatted_code.sd" &&
+  cmp -s "$tmp/fmtdir/sub/ok.sd" "$here/lang/hello.sd"; then
   pass=$((pass+1))
 else
   failed "seed fmt on a directory" "exit $code: $out"
 fi
+out=$(cd "$tmp/fmtdir" && "$seed" fmt --check . 2>&1); code=$?
+if [ "$code" = 0 ] && [ -z "$out" ]; then pass=$((pass+1)); else failed "seed fmt --check ." "exit $code: $out"; fi
 
 # seed test on a package's tests/ directory (which holds no package with
 # tests of its own) names the package directory to use instead of reporting

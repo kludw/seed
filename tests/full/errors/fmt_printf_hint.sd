@@ -1,0 +1,12 @@
+// expect-error: hint: Seed has no format strings: join text with + and .string() ("n=" + n.string()), or use fmt.fixed(f, places) for a float
+// expect-errors: 1
+// There are no format strings: the hint says what to write instead.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    int n = 3
+    fmt.printf("n=%d\n", n)
+    return null
+}

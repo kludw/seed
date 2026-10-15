@@ -1,0 +1,74 @@
+// A T? compares with a T: == is false when the T? is null, != is true.
+// Either side can be the nullable one, for every type that has ==.
+package main
+
+import "fmt"
+
+type Point struct {
+    int x
+    int y
+}
+
+type Color enum {
+    Red
+    Rgb(int r, int g, int b)
+}
+
+type Named interface {
+    title() string
+}
+
+type Book struct implements Named {
+    string name
+}
+
+fn (Book b) title() string {
+    return b.name
+}
+
+fn find(map[string]int m, string k) int? {
+    return m[k]
+}
+
+fn show(bool b) string {
+    if (b) {
+        return "T"
+    }
+    return "F"
+}
+
+fn main([]string args) error {
+    map[string]int counts = map[string]int{"a": 3, "b": 0}
+    // A map lookup compares directly, no variable needed.
+    fmt.println(show(counts["a"] == 3) + show(counts["a"] == 4) + show(counts["z"] == 3) + show(counts["z"] != 3) + show(3 == counts["a"]) + show(0 != counts["b"]))
+    int? n = null
+    int big = 1
+    for (int i = 0; i < 70; i++) {
+        big = big * 2
+    }
+    int? bigOpt = big
+    fmt.println(show(n == 0) + show(n != 0) + show(bigOpt == big) + show(bigOpt == big + 1) + show(find(counts, "b") == 0))
+    float? f = 2.5
+    bool? flag = null
+    byte? b = 'x'
+    fmt.println(show(f == 2.5) + show(f != 2.5) + show(flag == false) + show(flag != true) + show(b == 'x') + show('y' == b))
+    string? s = null
+    string word = "hi"
+    fmt.println(show(s == "hi") + show(s != word) + show(word == s))
+    s = "hi"
+    // s is narrowed here, so this is a plain comparison.
+    fmt.println(show(s == word))
+    Point? p = Point{x: 1, y: 2}
+    Point? none = null
+    fmt.println(show(p == Point{x: 1, y: 2}) + show(Point{x: 1, y: 3} == p) + show(none == Point{x: 0, y: 0}) + show(none != Point{x: 0, y: 0}))
+    Color? c = Color.Rgb(1, 2, 3)
+    Color? noColor = null
+    fmt.println(show(c == Color.Rgb(1, 2, 3)) + show(c == Color.Red) + show(noColor == Color.Red) + show(Color.Red != noColor))
+    []int? xs = []int{1, 2}
+    map[string]int? m = null
+    fmt.println(show(xs == []int{1, 2}) + show(xs == []int{2, 1}) + show(m == map[string]int{}) + show(m != counts))
+    Named? named = Book{name: "x"}
+    Named other = Book{name: "x"}
+    fmt.println(show(named == other) + show(other != named))
+    return null
+}

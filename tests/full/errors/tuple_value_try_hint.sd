@@ -1,0 +1,20 @@
+// expect-error: hint: use try to pass the error up (try div(...)), or handle it yourself: T a, error err = div(...)
+// expect-errors: 1
+// A (T, error) call used as one value: the hint names try first.
+package main
+
+import "errors"
+import "fmt"
+
+fn div(int a, int b) (int, error) {
+    if (b == 0) {
+        return 0, errors.new("divide by zero")
+    }
+    return a / b, null
+}
+
+fn main([]string args) error {
+    int q = div(1, 2)
+    fmt.println(q.string())
+    return null
+}

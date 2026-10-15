@@ -6,7 +6,10 @@ import "fmt"
 
 fn main([]string args) error {
     error inner = errors.new("disk full")
-    fmt.println(errors.wrap(inner, "saving").message())
+    error outer = errors.wrap(inner, "saving")
+    if (outer != null) {
+        fmt.println(outer.message())
+    }
     error none = null
     error wrapped = errors.wrap(none, "saving")
     fmt.println("not reached " + (wrapped == null).string())

@@ -1,0 +1,13 @@
+// expect-error: map_get_or_default_type.sd:10:31: error: cannot use "none" (type string) as int as argument 2 of getOr()
+// expect-errors: 1
+// The default of getOr has the map's value type.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    map[string]int counts = map[string]int{}
+    int n = counts.getOr("a", "none")
+    fmt.println(n.string())
+    return null
+}

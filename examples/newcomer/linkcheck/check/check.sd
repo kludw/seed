@@ -71,7 +71,11 @@ pub fn checkOne(string url, int timeout) Outcome {
     }
     Outcome? o = result.receive()
     if (o == null) {
-        return Outcome.Failed(err.message())
+        string reason = "no result"
+        if (err != null) {
+            reason = err.message()
+        }
+        return Outcome.Failed(reason)
     }
     return o
 }

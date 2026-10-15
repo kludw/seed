@@ -2,6 +2,7 @@ package errors
 
 test "new keeps the message" {
     error err = new("disk full")
+    assert(err != null)
     assert(err.message() == "disk full")
 }
 
@@ -12,6 +13,7 @@ test "errors with the same message are equal" {
 
 test "wrap adds context" {
     error err = wrap(new("fs.read: a.txt: no such file or directory"), "loading config")
+    assert(err != null)
     assert(err.message() == "loading config: fs.read: a.txt: no such file or directory")
 }
 

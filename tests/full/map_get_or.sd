@@ -1,0 +1,65 @@
+// m.getOr(key, default): the value for key, or default when the key is
+// missing. It does not change the map. The counting idiom is
+// m[k] = m.getOr(k, 0) + 1.
+package main
+
+import "fmt"
+
+type Point struct {
+    int x
+    string label
+}
+
+type Kind enum {
+    Plain
+    Tagged(string tag)
+}
+
+fn defaultLabel() string {
+    fmt.println("default computed")
+    return "none"
+}
+
+fn main([]string args) error {
+    map[string]int counts = map[string]int{}
+    []string words = "the cat and the dog and the bird".split(" ")
+    for (int i = 0; i < words.len(); i++) {
+        counts[words[i]] = counts.getOr(words[i], 0) + 1
+    }
+    []string keys = counts.keys()
+    for (int j = 0; j < keys.len(); j++) {
+        fmt.println(keys[j] + " " + counts.getOr(keys[j], -1).string())
+    }
+    fmt.println(counts.getOr("fish", 0).string() + " " + counts.len().string())
+
+    // Values of every kind; the default is evaluated (once) even when the
+    // key is present.
+    map[int]string names = map[int]string{1: "one"}
+    fmt.println(names.getOr(1, defaultLabel()) + " " + names.getOr(2, defaultLabel()))
+    map[string][]int lists = map[string][]int{"a": []int{1, 2}}
+    []int got = lists.getOr("a", []int{})
+    got.push(3)
+    fmt.println(got.len().string() + " " + lists.getOr("a", []int{}).len().string() + " " + lists.getOr("b", []int{9}).len().string())
+    map[string]Point points = map[string]Point{"p": Point{x: 1, label: "p"}}
+    fmt.println(points.getOr("p", Point{x: 0, label: "?"}).label + points.getOr("q", Point{x: 0, label: "?"}).label)
+    map[bool]Kind kinds = map[bool]Kind{true: Kind.Tagged("t")}
+    fmt.println(kinds.getOr(true, Kind.Plain).name() + " " + kinds.getOr(false, Kind.Plain).name())
+    map[byte]float scores = map[byte]float{'a': 1.5}
+    fmt.println(scores.getOr('a', 0.0).string() + " " + scores.getOr('b', 0.0).string())
+
+    // A list of lists, grown through getOr and stored back.
+    map[string][]string groups = map[string][]string{}
+    for (int k = 0; k < words.len(); k++) {
+        string first = words[k].slice(0, 1)
+        []string g = groups.getOr(first, []string{})
+        g.push(words[k])
+        groups[first] = g
+    }
+    fmt.println(groups.getOr("t", []string{}).join(",") + " " + groups.getOr("x", []string{}).len().string())
+
+    // getOr on an element of a list.
+    []map[string]int ms = []map[string]int{counts}
+    ms[0]["the"] = ms[0].getOr("the", 0) + 10
+    fmt.println(ms[0].getOr("the", 0).string() + " " + counts.getOr("the", 0).string())
+    return null
+}

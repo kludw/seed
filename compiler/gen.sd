@@ -128,6 +128,9 @@ type Gen struct {
     []MutEvent bwEvents
     []BorrowCand bwCands
     bool bwOn
+    // Parameters that the current function assigns: they own a copy of
+    // their value (see ownParams).
+    map[int]bool ownedParams
     // Fast versions of pure int functions (gen_fast.sd): the functions
     // that have one, and the state of the search and of the generator.
     map[int]bool fastFns
@@ -201,6 +204,7 @@ fn newGen(Checker c) Gen {
         bwEvents: []MutEvent{},
         bwCands: []BorrowCand{},
         bwOn: false,
+        ownedParams: map[int]bool{},
         fastFns: map[int]bool{},
         fastCalls: []int{},
         fastLoops: []int{},
@@ -1320,10 +1324,17 @@ fn (Gen g) mut genVtables(int unit) {
             int sig = g.c.ifaceMethodSig(im.iface, j)
             bool isMut = g.c.ifaceMethodMut(im.iface, j)
             int? m = g.c.methods[methodKey(im.decl, name)]
+            string thunk = vt + "__" + name
+            if (m == null && g.kindOf(t) == Kind.Enum && name == "name") {
+                // The built-in name() (the checker checked the signature).
+                string tag = "SD_BOX_GET(*(sd_box * const *)self, sd_E_" + g.declName(t) + ").tag"
+                g.thunks.push("static sd_str " + thunk + "(const void *self) { int32_t tag_ = " + tag + "; return " + g.enumNameChain(t, "tag_") + "; }\n")
+                entries.push(thunk)
+                continue
+            }
             if (m == null) {
                 continue
             }
-            string thunk = vt + "__" + name
             string self = "*(" + g.ctype(t) + " const *)self"
             if (isMut) {
                 self = "(" + g.ctype(t) + " *)self"
@@ -1594,6 +1605,7 @@ fn (Gen g) mut genFn(int f) {
     g.analyzeInts(fd.body)
     g.analyzeBorrows(fd.body)
     g.analyzeMoves(fd.body)
+    g.findOwnedParams(f)
     g.pcStart(fd.body)
     g.defers = g.blockHasDefer(fd.body)
     string sig = g.fnSig(f)
@@ -1610,7 +1622,10 @@ fn (Gen g) mut genFn(int f) {
     if (g.defers) {
         g.emit("size_t _dm = sd_defer_mark();")
     }
+    g.pushScope()
+    g.ownParams(f)
     g.genBody(fd.body)
+    g.popScope(!g.c.blockExits(fd.body))
     if (fd.resultCount == 0 && !g.c.blockExits(fd.body)) {
         g.emit(leaveFrame)
         if (g.defers) {
@@ -1675,6 +1690,57 @@ fn (Gen g) mut genFn(int f) {
         text.push(line)
     }
     g.fnText.push(text.join(""))
+}
+
+// The parameters of f that its body assigns (as a whole: the checker
+// allows nothing else), found among the mutations of the borrow analysis.
+fn (Gen g) mut findOwnedParams(int f) {
+    g.ownedParams = map[int]bool{}
+    FnDecl fd = g.c.ast.fns[f]
+    for (int i = 0; i < fd.paramCount; i++) {
+        int v = g.c.paramVar[g.c.ast.at(fd.params, i)]
+        if (v < 0) {
+            continue
+        }
+        for (int j = 0; j < g.bwEvents.len(); j++) {
+            if (g.bwEvents[j].root == v) {
+                g.ownedParams[v] = true
+                break
+            }
+        }
+    }
+}
+
+// Whether v is a parameter that owns a copy of its value.
+fn (Gen g) isOwnedParam(int v) bool {
+    return g.ownedParams[v] != null
+}
+
+// Parameters are borrowed from the caller, so one that the function
+// assigns gets a local of its own (o_<name>, perhaps in the frame) that
+// owns a copy of the value: an assignment then releases the old value as
+// for any local, and the scope around the body releases the last one.
+fn (Gen g) mut ownParams(int f) {
+    FnDecl fd = g.c.ast.fns[f]
+    for (int i = 0; i < fd.paramCount; i++) {
+        int pi = g.c.ast.at(fd.params, i)
+        int v = g.c.paramVar[pi]
+        if (v < 0 || !g.isOwnedParam(v)) {
+            continue
+        }
+        int t = g.c.vars[v].ty
+        string n = "o_" + g.c.vars[v].name
+        string val = g.retainExpr(t, "l_" + g.c.vars[v].name)
+        if (g.inFrame(t)) {
+            string fld = g.frameField(n, t)
+            g.varC[v] = fld
+            g.emit(declText(g.ctype(t), fld) + " = " + val + ";")
+        } else {
+            g.varC[v] = n
+            g.emit(g.ctype(t) + " " + n + " = " + val + ";")
+        }
+        g.pushLocal(v, t)
+    }
 }
 
 // A line with the placeholders of frameField (\x01name\x01, \x01Dname\x01

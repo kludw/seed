@@ -49,6 +49,9 @@ fn indexCrash() error {
     Shape sh = Shape.Named(s, xs)
     Named nm = Box{text: s}
     error e = errors.new("held " + s)
+    if (e == null) {
+        return null
+    }
     fmt.println(deeper(3, xs) + it.name + nm.label() + e.message() + m.len().string())
     if (sh == Shape.Empty) {
         return null
@@ -225,6 +228,8 @@ fn main([]string args) error {
         spawn sender(busy)
         spawn failer()
     }
-    fmt.println("stopped: " + err.message())
+    if (err != null) {
+        fmt.println("stopped: " + err.message())
+    }
     return null
 }

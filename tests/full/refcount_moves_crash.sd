@@ -62,19 +62,27 @@ fn main([]string args) error {
     error e1 = group {
         spawn movedIntoStruct()
     }
-    fmt.println("struct: " + e1.message())
+    if (e1 != null) {
+        fmt.println("struct: " + e1.message())
+    }
     error e2 = group {
         spawn movedThenCrash()
     }
-    fmt.println("list: " + e2.message())
+    if (e2 != null) {
+        fmt.println("list: " + e2.message())
+    }
     error e3 = group {
         spawn borrowedArg()
     }
-    fmt.println("borrowed: " + e3.message())
+    if (e3 != null) {
+        fmt.println("borrowed: " + e3.message())
+    }
     error e4 = group {
         spawn movedIntoMap()
     }
-    fmt.println("map: " + e4.message())
+    if (e4 != null) {
+        fmt.println("map: " + e4.message())
+    }
     []string xs = []string{"main"}
     Bag last = Bag{items: xs, name: "last"}
     fmt.println(pick(last.items, 2))

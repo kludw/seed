@@ -25,7 +25,9 @@ fn main([]string args) error {
     string a = try load("ok")
     fmt.println(a)
     string? b, error err = load("")
-    fmt.println((b == null).string() + " " + err.message())
+    if (err != null) {
+        fmt.println((b == null).string() + " " + err.message())
+    }
     string c = try load("bad")
     fmt.println(c.len().string())
     return null

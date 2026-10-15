@@ -1,4 +1,4 @@
-// expect-error: cannot call the mut method push() on an element of rows: parameters are read-only
+// expect-error: cannot call the mut method push() on an element of rows: a parameter can be assigned a new value, but not changed in place
 // The error names the parameter whose element would be changed (it said "the value").
 package main
 

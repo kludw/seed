@@ -41,7 +41,8 @@ fn (Square s) name() string {
     return "square"
 }
 
-// Enums can implement interfaces too.
+// Enums can implement interfaces too. Blob's name() is the built-in one
+// that every enum has (chapter 8): the name of its case.
 type Blob enum implements Shape {
     Small
     Big(float size)
@@ -54,10 +55,6 @@ fn (Blob b) area() float {
     case Blob.Big(float size):
         return size
     }
-}
-
-fn (Blob b) name() string {
-    return "blob"
 }
 
 // An interface method can be mut.
@@ -108,8 +105,8 @@ fn main([]string args) error {
 
 ```
 square 4.0
-blob 1.0
-blob 2.5
+Small 1.0
+Big 2.5
 total 7.5
 7
 no shape

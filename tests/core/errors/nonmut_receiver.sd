@@ -1,4 +1,4 @@
-// expect-error: parameters are read-only
+// expect-error: c is the receiver of a method that is not mut, so it is read-only
 package main
 
 type C struct {

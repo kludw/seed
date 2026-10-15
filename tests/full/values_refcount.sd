@@ -131,8 +131,8 @@ fn main([]string args) error {
     if (e1 == null) {
         fmt.println(r1)
     }
-    string? r2, error e2 = useTry(-1)
-    if (e2 != null || r2 == null) {
+    _, error e2 = useTry(-1)
+    if (e2 != null) {
         fmt.println(e2.message())
     }
     string r3, error e3 = useTry(0)

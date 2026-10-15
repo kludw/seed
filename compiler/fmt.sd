@@ -14,15 +14,15 @@
 // fmt_print.sd prints the tokens.
 package main
 
-import "errors"
 import "fmt"
 import "fs"
 import "os"
 
-const string fmtUsage = "usage:\n  seed fmt <file.sd>...\n  seed fmt --check <file.sd>...\n  seed fmt --verify <file.sd>...\n"
+const string fmtUsage = "usage:\n  seed fmt <file.sd | dir>...\n  seed fmt --check <file.sd | dir>...\n  seed fmt --verify <file.sd | dir>...\n"
 
-// `seed fmt [--check | --verify] <file.sd>...`. Returns the exit code: 1 if
-// a file has syntax errors, is not formatted (--check) or fails the
+// `seed fmt [--check | --verify] <file.sd | dir>...`. A directory stands
+// for every .sd file under it (see sdFilesUnder). Returns the exit code: 1
+// if a file has syntax errors, is not formatted (--check) or fails the
 // formatter's own test (--verify), otherwise 0.
 //
 // --verify is for testing the formatter (make test-fmt). It writes nothing
@@ -31,22 +31,27 @@ const string fmtUsage = "usage:\n  seed fmt <file.sd>...\n  seed fmt --check <fi
 // Files with syntax errors are skipped.
 fn fmtCommand([]string args) (int, error) {
     string mode = ""
-    []string files = args
+    []string named = args
     if (args.len() > 0 && (args[0] == "--check" || args[0] == "--verify")) {
         mode = args[0]
-        files = args.slice(1, args.len())
+        named = args.slice(1, args.len())
     }
-    if (files.len() == 0) {
+    if (named.len() == 0) {
         fmt.eprint(fmtUsage)
         os.exit(2)
+    }
+    []string files = []string{}
+    for (int n = 0; n < named.len(); n++) {
+        if (fs.isDir(named[n])) {
+            files = try sdFilesUnder(named[n], files)
+        } else {
+            files.push(named[n])
+        }
     }
     int code = 0
     int skipped = 0
     for (int i = 0; i < files.len(); i++) {
         string path = files[i]
-        if (fs.isDir(path)) {
-            return null, errors.new("seed fmt: " + path + " is a directory; name the .sd files, such as seed fmt " + path + "/*.sd")
-        }
         string src = try fs.read(path)
         if (mode == "--verify") {
             if (fmtParse(path, src).diags.count() > 0) {
@@ -77,6 +82,31 @@ fn fmtCommand([]string args) (int, error) {
         fmt.println("seed fmt --verify: " + checked.string() + " files checked, " + skipped.string() + " skipped (syntax errors)")
     }
     return code, null
+}
+
+// The .sd files under the directory dir, in sorted order and all
+// subdirectories included (except hidden ones, whose names start with a
+// dot), added to found.
+fn sdFilesUnder(string dir, []string found) ([]string, error) {
+    []string out = found
+    []string names = try fs.list(dir)
+    names.sort()
+    []string subs = []string{}
+    for (int i = 0; i < names.len(); i++) {
+        if (names[i].startsWith(".")) {
+            continue
+        }
+        string path = joinPath(dir, names[i])
+        if (fs.isDir(path)) {
+            subs.push(path)
+        } else if (names[i].endsWith(".sd")) {
+            out.push(path)
+        }
+    }
+    for (int j = 0; j < subs.len(); j++) {
+        out = try sdFilesUnder(subs[j], out)
+    }
+    return out, null
 }
 
 // Parses one file on its own.

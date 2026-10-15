@@ -158,16 +158,16 @@ fn main([]string args) error {
 111
 ```
 
-**Function parameters are read-only.** A function can't change its caller's data, so `mut` methods (including `push`) can't be called on a parameter:
+**Function parameters can't be changed in place.** A function can't change its caller's data. A parameter is the function's own copy of the argument, so it can be given a new value (`args = args.slice(2, args.len())` after reading two flags), like any local, and the caller doesn't see it. But `mut` methods (including `push`) can't be called on a parameter, and its fields and elements can't be assigned: in Go, `tags[0] = "x"` in a function changes the caller's slice (and `m[k] = v` the caller's map), and in Seed it wouldn't, so the compiler rejects the change rather than let it silently do less than it seems to:
 
 ```
-07_mut_on_param.sd:6:5: error: cannot call the mut method push() on tags: parameters are read-only
+07_mut_on_param.sd:6:5: error: cannot call the mut method push() on tags: a parameter can be assigned a new value, but not changed in place
     6 |     tags.push("new")
       |     ^
     hint: copy it into a local variable and change that; return the new value if the caller needs it
 ```
 
-To change something, a function returns the new value (`mine = withInterest(mine, 10)`), or the change is a `mut` method called on the caller's own variable (`mine.deposit(10)`). Either way, the line that changes a variable names that variable. Copying a parameter into a local, as `withInterest` does, is cheap: the data is shared until the copy is changed ([copy-on-write](06-lists-and-maps.md#values-and-copy-on-write)).
+To change something, a function returns the new value (`mine = withInterest(mine, 10)`), or the change is a `mut` method called on the caller's own variable (`mine.deposit(10)`). Either way, the line that changes a variable names that variable. The receiver of a method that is not `mut` can't even be assigned: only a `mut` method changes its receiver. Copying a parameter into a local, as `withInterest` does, is cheap: the data is shared until the copy is changed ([copy-on-write](06-lists-and-maps.md#values-and-copy-on-write)).
 
 ### Why no pointers?
 

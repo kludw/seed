@@ -1,0 +1,21 @@
+// expect-error: select_receive_field.sd:17:10: error: a select case can only receive into a variable, not into b.value
+// expect-errors: 1
+// A select case receives into a variable, not into a field or element.
+package main
+
+import "fmt"
+
+type Box struct {
+    int? value
+}
+
+fn main([]string args) error {
+    chan int ch = chan int(1)
+    ch.send(1)
+    Box b = Box{value: null}
+    select {
+    case b.value = ch.receive():
+        fmt.println("received")
+    }
+    return null
+}

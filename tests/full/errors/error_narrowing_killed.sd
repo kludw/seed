@@ -1,0 +1,23 @@
+// expect-error: error_narrowing_killed.sd:20:21: error: err may be null (an error is null when there is no error)
+// expect-errors: 1
+// Assigning an error that may be null ends its narrowing, as for a T?.
+package main
+
+import "errors"
+import "fmt"
+
+fn check(int n) error {
+    if (n < 0) {
+        return errors.new("negative")
+    }
+    return null
+}
+
+fn main([]string args) error {
+    error err = check(-1)
+    if (err != null) {
+        err = check(1)
+        fmt.println(err.message())
+    }
+    return null
+}

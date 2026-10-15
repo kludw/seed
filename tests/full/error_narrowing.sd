@@ -1,0 +1,95 @@
+// An error may be null (no error), so it is narrowed like a T?: message()
+// can be called where a check, or an assignment of an error that is never
+// null, shows that it is not null.
+package main
+
+import "errors"
+import "fmt"
+
+type ParseError struct implements error {
+    int line
+}
+
+fn (ParseError p) message() string {
+    return "parse error on line " + p.line.string()
+}
+
+type Result struct {
+    string value
+    error err
+}
+
+fn check(int n) error {
+    if (n < 0) {
+        return errors.new("negative: " + n.string())
+    }
+    return null
+}
+
+// An early return narrows the rest of the function.
+fn describe(int n) string {
+    error err = check(n)
+    if (err == null) {
+        return "fine"
+    }
+    return err.message()
+}
+
+// The else branch of a null check, and && and ||.
+fn both(int a, int b) string {
+    error ea = check(a)
+    error eb = check(b)
+    string out = ""
+    if (ea == null) {
+        out = "a ok"
+    } else {
+        out = ea.message()
+    }
+    if (eb != null && eb.message().len() > 0) {
+        out = out + ", " + eb.message()
+    }
+    if (ea == null || ea.message() == "") {
+        out = out + "."
+    }
+    return out
+}
+
+fn main([]string args) error {
+    fmt.println(describe(1) + " / " + describe(-2))
+    fmt.println(both(1, -1) + " / " + both(-3, 4))
+
+    // A struct that implements error is never null.
+    error pe = ParseError{line: 7}
+    fmt.println(pe.message())
+    // Neither is an error copied from one known not to be null.
+    error copy = pe
+    fmt.println(copy.message())
+
+    // A field of type error narrows like a variable.
+    Result r = Result{value: "", err: check(-5)}
+    if (r.err != null) {
+        fmt.println("field: " + r.err.message())
+    }
+
+    // A loop over a channel of errors.
+    chan error errs = chan error(3)
+    errs.send(errors.new("first"))
+    errs.send(ParseError{line: 2})
+    errs.close()
+    for (error e = errs.receive(); e != null; e = errs.receive()) {
+        fmt.println("received: " + e.message())
+    }
+
+    // The error of a group.
+    error g = group {
+        spawn failing()
+    }
+    if (g != null) {
+        fmt.println("group: " + g.message())
+    }
+    return null
+}
+
+fn failing() error {
+    return errors.new("from a goroutine")
+}

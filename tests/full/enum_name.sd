@@ -1,0 +1,80 @@
+// Every enum has the built-in name(): the name of the value's case, without
+// the type or the data. It also implements an interface's name() string.
+package main
+
+import "fmt"
+import "json"
+
+type Direction enum {
+    North
+    East
+    South
+    West
+}
+
+type Only enum {
+    One
+}
+
+type Shape enum {
+    Circle(float r)
+    Rect(float w, float h)
+    Empty
+}
+
+type Named interface {
+    name() string
+}
+
+type Token enum implements Named {
+    Word(string text)
+    Number(int value)
+    Eof
+}
+
+type Person struct implements Named {
+    string first
+}
+
+fn (Person p) name() string {
+    return p.first
+}
+
+const string firstName = Direction.North.name()
+
+fn turn(Direction d) Direction {
+    switch (d) {
+    case Direction.North:
+        return Direction.East
+    case Direction.East:
+        return Direction.South
+    case Direction.South:
+        return Direction.West
+    case Direction.West:
+        return Direction.North
+    }
+}
+
+fn main([]string args) error {
+    Direction d = Direction.North
+    []string seen = []string{}
+    for (int i = 0; i < 5; i++) {
+        seen.push(d.name())
+        d = turn(d)
+    }
+    fmt.println(seen.join(" ") + " " + firstName)
+    fmt.println(Only.One.name() + " " + Shape.Circle(1.0).name() + " " + Shape.Rect(1.0, 2.0).name() + " " + Shape.Empty.name())
+    []Named all = []Named{Token.Word("hi"), Token.Eof, Person{first: "ann"}, Token.Number(7)}
+    for (int j = 0; j < all.len(); j++) {
+        fmt.println(all[j].name())
+    }
+    Shape? maybe = Shape.Empty
+    if (maybe != null) {
+        fmt.println(maybe.name())
+    }
+    // An enum of another package.
+    json.Value v = try json.parse("[1]")
+    fmt.println(v.name() + " " + json.Value.Null.name())
+    fmt.println((Direction.West.name() == "West").string())
+    return null
+}

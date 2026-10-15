@@ -1,0 +1,16 @@
+// expect-error: compare_nullable_func.sd:14:20: error: values of type fn() int cannot be compared with ==
+// expect-errors: 1
+// A T? compares with a T only when T itself has ==.
+package main
+
+import "fmt"
+
+fn one() int {
+    return 1
+}
+
+fn main([]string args) error {
+    (fn() int)? f = one
+    fmt.println((f == one).string())
+    return null
+}

@@ -1,0 +1,22 @@
+// expect-error: enum_name_iface_mismatch.sd:13:28: error: Light does not implement Labelled: its built-in method name() string does not match Labelled.name() int
+// expect-errors: 1
+// The built-in name() of an enum is name() string; it does not satisfy an
+// interface whose name() has another signature.
+package main
+
+import "fmt"
+
+type Labelled interface {
+    name() int
+}
+
+type Light enum implements Labelled {
+    Red
+    Green
+}
+
+fn main([]string args) error {
+    Labelled l = Light.Red
+    fmt.println(l.name().string())
+    return null
+}

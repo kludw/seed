@@ -43,7 +43,10 @@ fn main([]string args) error {
     if (e2 != null) {
         fmt.println(e2.message())
     }
-    fmt.println(errors.new("boom").message())
+    error boom = errors.new("boom")
+    if (boom != null) {
+        fmt.println(boom.message())
+    }
     error none = null
     fmt.println((none == null).string())
     none = errors.new("now set")

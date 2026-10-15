@@ -1,4 +1,4 @@
-// message() on a null error crashes.
+// expect-error: hint: check e != null before calling message()
 package main
 
 import "fmt"

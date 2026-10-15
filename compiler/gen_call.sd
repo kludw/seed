@@ -294,6 +294,14 @@ fn (Gen g) mut gbuiltin(int e) string {
     case Builtin.Close:
         g.emit("sd_chan_close(" + v + ");")
         return ""
+    case Builtin.GetOr:
+        // Borrowed: the value in the map, or the default.
+        int vt = g.elemOf(rt)
+        string p = g.newTmp()
+        g.emit(g.ctype(vt) + " *" + p + " = sd_map_get(" + v + ", " + g.addr(g.c.types.key(rt), vals[1]) + ");")
+        return "(" + p + " ? *" + p + " : " + vals[2] + ")"
+    case Builtin.EnumName:
+        return g.genumName(rt, v)
     case Builtin.None, Builtin.Push, Builtin.Pop, Builtin.Insert, Builtin.Remove, Builtin.Reverse, Builtin.Sort:
         return "/* internal error: builtin */"
     case Builtin.SortBy, Builtin.Delete:
@@ -335,7 +343,37 @@ fn builtinFn(Builtin b) string {
         return ""
     case Builtin.Reverse, Builtin.Sort, Builtin.SortBy, Builtin.Delete, Builtin.Send, Builtin.Receive, Builtin.Close:
         return ""
+    case Builtin.GetOr, Builtin.EnumName:
+        return ""
     }
+}
+
+// The name of the case of the enum value v (of enum type t), as an
+// immortal string literal.
+fn (Gen g) mut genumName(int t, string v) string {
+    int d = g.c.types.decl(t)
+    TypeDecl td = g.c.ast.typeDecls[d]
+    if (td.caseCount < 2) {
+        return g.enumNameChain(t, "0")
+    }
+    string tag = g.newTmp()
+    g.emit("int32_t " + tag + " = SD_BOX_GET(" + v + ", sd_E_" + g.declName(t) + ").tag;")
+    return g.enumNameChain(t, tag)
+}
+
+// The name of the case of the enum type t whose tag is the C expression
+// tag (evaluated more than once): a chain of ?: over string literals.
+fn (Gen g) enumNameChain(int t, string tag) string {
+    int d = g.c.types.decl(t)
+    TypeDecl td = g.c.ast.typeDecls[d]
+    if (td.caseCount == 0) {
+        return "SD_STR_LIT(\"\")"
+    }
+    string out = "SD_STR_LIT(" + cString(g.c.enumCase(d, td.caseCount - 1).name) + ")"
+    for (int i = td.caseCount - 2; i >= 0; i--) {
+        out = "(" + tag + " == " + i.string() + " ? SD_STR_LIT(" + cString(g.c.enumCase(d, i).name) + ") : " + out + ")"
+    }
+    return out
 }
 
 // The owned T? (or error) made from an owned T in o that is present when
@@ -406,7 +444,7 @@ fn (Gen g) mut gmutBuiltin(int e, Builtin b, int r, int rt, []int args) string {
         return ""
     case Builtin.ToFloat, Builtin.Bytes, Builtin.LContains, Builtin.LIndex, Builtin.LSlice, Builtin.Join, Builtin.Keys:
         return ""
-    case Builtin.Message, Builtin.Chars, Builtin.Send, Builtin.Receive, Builtin.Close:
+    case Builtin.Message, Builtin.Chars, Builtin.Send, Builtin.Receive, Builtin.Close, Builtin.GetOr, Builtin.EnumName:
         return ""
     }
 }

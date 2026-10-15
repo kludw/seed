@@ -71,8 +71,11 @@ fn httpTestClient(net.Listener ln, fn(string, chan string) error client, chan st
 
 // "<status> <body>" of a response, or the error.
 fn httpTestShow(Response? resp, error err) string {
-    if (err != null || resp == null) {
+    if (err != null) {
         return "error: " + err.message()
+    }
+    if (resp == null) {
+        return "error: no response"
     }
     return resp.status.string() + " " + resp.body
 }

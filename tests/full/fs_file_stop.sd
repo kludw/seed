@@ -45,7 +45,9 @@ fn main([]string args) error {
         spawn readLine(fifo, opened)
         spawn failOnceOpen(opened)
     }
-    fmt.println(err.message())
+    if (err != null) {
+        fmt.println(err.message())
+    }
     fmt.println((time.monotonic() - start < 10 * time.second).string())
     try fs.removeAll(dir)
     return null

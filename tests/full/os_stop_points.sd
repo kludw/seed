@@ -38,7 +38,9 @@ fn main([]string args) error {
         spawn outputWaits()
         spawn failSoon()
     }
-    fmt.println(err.message())
+    if (err != null) {
+        fmt.println(err.message())
+    }
     int took = time.monotonic() - start
     fmt.println((took < 10 * time.second).string())
     return null
