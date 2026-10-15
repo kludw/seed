@@ -594,7 +594,7 @@ fn macroArg(string v, string name) string {
 // plain C on int64_t, or "" when the operation is not one of those: a
 // comparison when both operands are small, an arithmetic operation when its
 // result is small too (so it cannot overflow, nor divide by zero).
-fn (Gen g) smallBinary(int e, []string vals) string {
+fn (Gen g) mut smallBinary(int e, []string vals) string {
     Expr x = g.c.ast.exprs[e]
     if (g.typeOf(x.a) != tyInt || !g.isSmallInt(x.a) || !g.isSmallInt(x.b)) {
         return ""
@@ -607,10 +607,113 @@ fn (Gen g) smallBinary(int e, []string vals) string {
     }
     if (op == Tok.Plus || op == Tok.Minus || op == Tok.Star || op == Tok.Slash || op == Tok.Percent || op == Tok.Amp) {
         if (g.isSmallInt(e)) {
+            if (op == Tok.Slash || op == Tok.Percent) {
+                string d = g.divNonNeg(e, a, b)
+                if (d != "") {
+                    return "SD_INT_S(" + d + ")"
+                }
+            }
             return "SD_INT_S((" + a + " " + op.text() + " " + b + "))"
         }
     }
     return ""
+}
+
+// ---- division of non-negative ints ----
+//
+// C's / and % on int64_t round toward zero, as Seed's do, so a signed
+// division by a constant compiles to a multiplication by a magic number and
+// a correction for negative dividends (on x86-64: mov, sar $63, sub). The C
+// compiler cannot tell that i * i is not negative (and GCC turns an
+// unsigned division whose operand it knows to be non-negative back into the
+// signed one, correction included), but the intervals can: when the
+// dividend is known to be >= 0 (and small, so below 2^62) and the divisor is
+// a simple constant c > 0, a / c is emitted as the multiplication itself
+// (sd_divc_: the high word of a * m, shifted right by s), or a shift for a
+// power of two, and a % c as a - (a / c) * c, or a mask; with a divisor
+// that is not constant but known > 0, as an unsigned division.
+
+// The C helpers of the magic divisions, once per C unit (the guard keeps a
+// second copy harmless). Without unsigned __int128 (a 32-bit target), the
+// division is the C compiler's.
+const string divcHelpers = "#ifndef SD_DIVC_\n#define SD_DIVC_\n/* x / c for 0 <= x < 2^62 and a constant c > 0, as (x * m) >> (64 + s) (gen_int.sd). */\nstatic inline __attribute__((unused)) int64_t sd_divc_(int64_t x, uint64_t m, int s, int64_t c) {\n#ifdef __SIZEOF_INT128__\n  (void)c;\n  return (int64_t)((uint64_t)(((unsigned __int128)(uint64_t)x * m) >> 64) >> s);\n#else\n  (void)m; (void)s;\n  return (int64_t)((uint64_t)x / (uint64_t)c);\n#endif\n}\nstatic inline __attribute__((unused)) int64_t sd_modc_(int64_t x, uint64_t m, int s, int64_t c) {\n  return x - sd_divc_(x, m, s, c) * c;\n}\n#endif\n"
+
+// a / b or a % b (e, on the int64_t C values a and b) when the dividend is
+// known to be >= 0 and the divisor > 0 (see above), or "".
+fn (Gen g) mut divNonNeg(int e, string a, string b) string {
+    Expr x = g.c.ast.exprs[e]
+    IntRange ra = g.smallRange(x.a)
+    IntRange rb = g.smallRange(x.b)
+    if (!isSmallRange(ra) || !isSmallRange(rb) || ra.lo < 0 || rb.lo <= 0) {
+        return ""
+    }
+    bool div = x.op == Tok.Slash
+    if (rb.lo != rb.hi || !g.isSimpleSmall(x.b)) {
+        string uop = " % "
+        if (div) {
+            uop = " / "
+        }
+        return "((int64_t)((uint64_t)(" + a + ")" + uop + "(uint64_t)(" + b + ")))"
+    }
+    // A constant divisor (simple, so not evaluating it changes nothing).
+    int c = rb.lo
+    int k = log2Exact(c)
+    if (k >= 0) {
+        if (div) {
+            return "((" + a + ") >> " + k.string() + ")"
+        }
+        return "((" + a + ") & " + (c - 1).string() + ")"
+    }
+    MagicDiv md = magicDiv(c, ra.hi)
+    if (!g.helpers.contains(divcHelpers)) {
+        g.helpers.push(divcHelpers)
+    }
+    string f = "sd_modc_("
+    if (div) {
+        f = "sd_divc_("
+    }
+    return f + a + ", " + md.m.string() + "ull, " + md.s.string() + ", " + c.string() + ")"
+}
+
+// k when c is 2^k, else -1 (c > 0).
+fn log2Exact(int c) int {
+    int k = 0
+    for (int p = 1; p <= c; p = p * 2) {
+        if (p == c) {
+            return k
+        }
+        k++
+    }
+    return -1
+}
+
+// The magic number of a division by c (> 1, not a power of two) of
+// dividends in 0..max (max < 2^62): m < 2^64 and s such that
+// x / c == (x * m) >> (64 + s) for every such x. With m = ceil(2^(64+s) / c)
+// and e = m * c - 2^(64+s) (0 < e < c), x * m / 2^(64+s) = x / c + x * e /
+// (c * 2^(64+s)), which has the floor of x / c when x * e < 2^(64+s); the
+// smallest such s is taken, and s = floor(log2(c)) always works (2^s > c / 2,
+// so x * e < 2^62 * c < 2^(63+s), and m < 2^64 since 2^s < c).
+type MagicDiv struct {
+    int m
+    int s
+}
+
+fn magicDiv(int c, int max) MagicDiv {
+    int two64 = 1
+    for (int i = 0; i < 64; i++) {
+        two64 = two64 * 2
+    }
+    int p = two64
+    int s = 0
+    for (;;) {
+        int m = (p + c - 1) / c
+        if (m < two64 && (m * c - p) * max < p) {
+            return MagicDiv{m: m, s: s}
+        }
+        p = p * 2
+        s++
+    }
 }
 
 // Whether e is small and simple: made of int literals, constants and

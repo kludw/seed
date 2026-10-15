@@ -626,6 +626,109 @@ before both changes (mean of 20 runs; instructions where measured):
 packages' C around it changed), so its 5% is layout, as is most of the
 `strings` and `spawn` movement.
 
+### Bounded loops
+
+The two things left above are gone (compiler/README.md, "Bounded
+accumulators" and "Small ints"), and `intloop` is now faster than Go:
+
+- **No overflow check when the trip count bounds the sum.** The counter
+  `i` is unboxed with the interval `0..300000000` (`n` is a local that is
+  never assigned again), and it takes a different value in each iteration,
+  so the loop runs at most 300,000,001 times; `(i * i) % 7 + (i & 3)` is
+  in `0..9`. Whatever `sum` holds when the loop starts (a small int, below
+  2^62 in magnitude), adding at most 2.7 * 10^9 cannot leave `int64_t`, so
+  the update is `r_sum_2 += _t4`: no `jo`, and no spill code. The rule is
+  general: in a counted loop whose counter's interval is `lo..hi`, an
+  accumulator whose every update adds or subtracts at most `d` needs no
+  check when `(hi - lo + 1) * d <= 2^62` (a `count++` over a list's length
+  qualifies: `2^62 * 1`).
+- **Division of non-negative ints by constants.** The interval of `i * i`
+  is `0..9 * 10^16`, so `% 7` needs no correction for negative dividends;
+  C's signed `%` has one (`mov`, `sar $63`, `sub`), and GCC keeps it even
+  for `(uint64_t)x % 7` when it knows `x >= 0` (it turns the unsigned
+  division back into the signed one, which it thinks cheaper, correction
+  included). The generator now emits the multiplication by the magic
+  number itself when the dividend is known `>= 0`: `sd_modc_(x, m, s, 7)`
+  is `x - (hi64(x * m) >> s) * 7`, with `m` and `s` chosen for the
+  dividend's upper bound (here `m = ceil(2^64 / 7)`, `s = 0`: no shift at
+  all); a power of two is a shift or a mask.
+
+```c
+int64_t _t4 = sd_modc_((l_i * l_i), 2635249153387078803ull, 0, 7) + (l_i & ((int64_t)3));
+r_sum_2 += _t4;
+```
+
+```asm
+.L4168: mov  %rbx,%rcx          ; i * i
+        imul %rbx,%rcx
+        mov  %rcx,%rax          ; high word of (i * i) * m
+        imul %rbp
+        lea  0(,%rdx,8),%rax    ; q * 7
+        sub  %rdx,%rax
+        sub  %rax,%rcx          ; (i * i) % 7
+        mov  %rbx,%rax
+        add  $1,%rbx
+        and  $3,%eax            ; i & 3
+        add  %rax,%rcx
+        add  %rcx,%rdi          ; sum
+        test $0x3ff,%ebx        ; preemption check, every 1024th
+        jne  .L4148
+        ...
+.L4148: cmp  $300000000,%rbx
+        je   .L4150
+```
+
+16 instructions per iteration, against Go's 17 and the 21 before
+(valgrind's instruction count, whole program):
+
+| `intloop` | Instructions | `bench/run.sh` best of 7 |
+|---|---|---|
+| loop accumulators (before) | 6,301 M (21 per iteration) | 0.373-0.387 s |
+| bounded, magic `% 7` | 4,801 M (16) | 0.302-0.314 s |
+| Go | 5,100 M (17) | 0.333-0.385 s |
+
+On this VM (Linux x86_64, Cascade Lake, GCC 13) timings move by 5-10%
+between runs, hence the ranges; `intloop` is 0.8-0.9x Go in every run.
+Each change alone gets about half of it (the same C, edited by hand, best
+of 9): without the overflow check only, 0.34-0.38 s; with the magic
+division only, 0.34 s; both, 0.29-0.31 s.
+
+The JCC erratum mitigation (`-Wa,-mbranches-within-32B-boundaries`) was
+measured again for all the benchmarks, with the runtime and packages
+rebuilt with it: no benchmark moved by more than the noise (`maps` and
+`spawn` were slower in both runs, `json` and `intloop` faster in one), so
+it is not in the C flags. The new loop's branches do not cross or end at a
+32-byte boundary anyway.
+
+The other benchmarks have a few such divisions (`json`, `maps`, `sort`,
+`strings`) but none in a hot loop: their instruction counts moved by
++0.0003% (`json`), -0.02% (`maps`), -0.46% (`sort`), -0.01% (`strings`),
+and `fib`'s not at all. Two runs of `RUNS=5 bench/run.sh`, before and
+after (seconds, Go in parentheses; the spread is the VM's):
+
+| Benchmark | Before | After |
+|---|---|---|
+| `fib` | 0.384 (0.600) | 0.371-0.388 (0.599-0.609) |
+| `intloop` | 0.387 (0.350) | 0.304-0.326 (0.349-0.355) |
+| `json` | 0.677 (0.774) | 0.689-0.723 (0.781-0.826) |
+| `maps` | 0.620 (1.303) | 0.721-0.854 (1.443-1.455) |
+| `pingpong` | 0.105 (0.128) | 0.113-0.123 (0.121-0.126) |
+| `sort` | 0.536 (0.805) | 0.579-0.610 (0.787-0.831) |
+| `spawn` | 0.082 (0.063) | 0.085-0.089 (0.064-0.068) |
+| `strings` | 0.465 (1.535) | 0.464-0.526 (1.635-1.759) |
+
+The compiler compiling itself runs the same number of instructions
+(1,530.4 M before, 1,530.8 M after) and its binary is 0.8% larger.
+
+Correctness: tests/full/int_bounded_loops.sd (the edges of the rule, loops
+whose bound or counter is assigned inside, nested runs, every divisor kind
+against the same divisions on general ints, near the top of the small
+range), the magic numbers checked in Python against exact division for
+5,000 divisors at their bounds, the C with `__int128` disabled (the
+fallback), on aarch64 under qemu and with clang, and 100 random programs of
+20 accumulator loops and 5 division loops each, compared with the previous
+compiler's output.
+
 ## Build speed
 
 Building a program was almost all C compiler: the front end and generator

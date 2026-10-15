@@ -1,0 +1,224 @@
+// Counted loops whose accumulators cannot overflow a machine word (the
+// trip count times the largest step fits), and divisions of ints known to
+// be non-negative by constants: the compiler drops the overflow checks and
+// the sign corrections, which must give exactly the same results as
+// general ints, at the edges too.
+package main
+
+import "fmt"
+
+const int big = 4611686018427387903
+const int two61 = 2305843009213693952
+const int seven = 7
+
+// The shape of bench/seed/intloop.sd.
+fn intloop(int n) int {
+    int m = n
+    int sum = 0
+    for (int i = 0; i < m; i++) {
+        sum = sum + (i * i) % 7 + (i & 3)
+    }
+    return sum
+}
+
+fn intloopLocal() int {
+    int n = 100000
+    int sum = 0
+    for (int i = 0; i < n; i++) {
+        sum = sum + (i * i) % 7 + (i & 3)
+    }
+    return sum
+}
+
+// i is in 0..1 (two trips at most) and the step is 2^61: 2 * 2^61 = 2^62
+// is exactly the headroom above the small range, and the result leaves it.
+fn edgeUp() int {
+    int sum = big
+    for (int i = 0; i < 1; i++) {
+        sum = sum + two61
+    }
+    return sum
+}
+
+fn edgeDown() int {
+    int sum = -big - 1
+    for (int i = 0; i < 1; i++) {
+        sum = sum - two61
+    }
+    return sum
+}
+
+// One more than the headroom: checked, and past 2^63.
+fn pastEdge() int {
+    int sum = big
+    for (int i = 0; i < 2; i++) {
+        sum = sum + big
+    }
+    return sum
+}
+
+fn pastEdgeDown() int {
+    int sum = -big - 1
+    for (int i = 0; i < 2; i++) {
+        sum = sum - big - 1
+    }
+    return sum
+}
+
+// A count over a length: up to 2^62 trips of 1.
+fn countFrom(int start, []int xs) int {
+    int c = start
+    for (int i = 0; i < xs.len(); i++) {
+        c++
+    }
+    return c
+}
+
+fn countDownFrom(int start, []int xs) int {
+    int c = start
+    for (int i = xs.len() - 1; i >= 0; i--) {
+        c--
+    }
+    return c
+}
+
+// The bound changes inside the loop.
+fn boundChanges() int {
+    int n = 5
+    int sum = big - 2
+    for (int i = 0; i < n; i++) {
+        if (n < 8) {
+            n = n + 1
+        }
+        sum = sum + big / 2
+    }
+    return sum
+}
+
+// The counter changes inside the loop.
+fn counterJumps() int {
+    int sum = big - 2
+    for (int i = 0; i < 10; i++) {
+        if (i == 3) {
+            i = 7
+        }
+        sum = sum + big / 3
+    }
+    return sum
+}
+
+// The inner loop is bounded for each of its runs, the sum is not: it
+// leaves the small range, and the next runs take the general copy.
+fn nestedRuns() int {
+    int sum = big - 10
+    for (int k = 0; k < 5; k++) {
+        for (int i = 0; i < 1; i++) {
+            sum = sum + two61
+        }
+    }
+    return sum
+}
+
+// Negative counters, steps of both signs, ++ and -- in branches.
+fn mixed() (int, int, int) {
+    int a = big
+    int b = -big - 1
+    int c = 0
+    for (int i = -30; i < 30; i++) {
+        if (i < 0) {
+            a = a + i * 3
+        } else if (i % 2 == 0) {
+            a = a - i
+            continue
+        } else {
+            b--
+        }
+        c = c + i % 5 + i / 4
+    }
+    return a, b, c
+}
+
+// Division by constants of dividends known to be >= 0, up to the top of
+// the small range, against the same divisions on general ints.
+fn gdiv(int a, int b) int {
+    return a / b
+}
+
+fn gmod(int a, int b) int {
+    return a % b
+}
+
+fn divisions() (int, int) {
+    int bad = 0
+    int check = 0
+    int d13 = 13
+    for (int i = 0; i < 300; i++) {
+        int x = big - i * 7919
+        int y = i * i
+        []int q = []int{x / 3, x % 3, x / 7, x % 7, x / 10, x % 10, x / 641, x % 641, x / 1000000007, x % 1000000007}
+        []int w = []int{gdiv(x, 3), gmod(x, 3), gdiv(x, 7), gmod(x, 7), gdiv(x, 10), gmod(x, 10), gdiv(x, 641), gmod(x, 641), gdiv(x, 1000000007), gmod(x, 1000000007)}
+        q.push(x / big)
+        w.push(gdiv(x, big))
+        q.push(x % big)
+        w.push(gmod(x, big))
+        q.push(x / two61)
+        w.push(gdiv(x, two61))
+        q.push(x % (two61 + 1))
+        w.push(gmod(x, two61 + 1))
+        q.push(x / 4096)
+        w.push(gdiv(x, 4096))
+        q.push(x % 4096)
+        w.push(gmod(x, 4096))
+        q.push(x / 1)
+        w.push(gdiv(x, 1))
+        q.push(x % 1)
+        w.push(gmod(x, 1))
+        q.push(x / seven)
+        w.push(gdiv(x, seven))
+        q.push(x % d13)
+        w.push(gmod(x, d13))
+        q.push(y / 7 + y % 7 + y / 6 + y % 6 + y / 1000 + y % 1000)
+        w.push(gdiv(y, 7) + gmod(y, 7) + gdiv(y, 6) + gmod(y, 6) + gdiv(y, 1000) + gmod(y, 1000))
+        for (int d = 1; d < 40; d++) {
+            q.push(x / d + x % d)
+            w.push(gdiv(x, d) + gmod(x, d))
+        }
+        for (int k = 0; k < q.len(); k++) {
+            if (q[k] != w[k]) {
+                bad++
+            }
+            check = (check * 31 + q[k]) % 1000000007
+        }
+    }
+    return bad, check
+}
+
+// Negative dividends and divisors keep C's (and Seed's) truncation.
+fn negatives() int {
+    int s = 0
+    for (int i = -50; i < 50; i++) {
+        s = s * 3 % 1000003 + i % 7 + i / 7 + (i * 3) % 8 + i / 4 + i % -5 + i / -3
+    }
+    return s
+}
+
+fn main([]string args) error {
+    fmt.println(intloop(100000).string())
+    fmt.println(intloopLocal().string())
+    fmt.println(edgeUp().string())
+    fmt.println(edgeDown().string())
+    fmt.println(pastEdge().string())
+    fmt.println(pastEdgeDown().string())
+    fmt.println(countFrom(big - 1, []int{1, 2, 3}).string())
+    fmt.println(countFrom(0, []int{}).string())
+    fmt.println(countDownFrom(-big, []int{1, 2, 3}).string())
+    fmt.println(boundChanges().string())
+    fmt.println(counterJumps().string())
+    fmt.println(nestedRuns().string())
+    int a, int b, int c = mixed()
+    fmt.println(a.string() + " " + b.string() + " " + c.string())
+    int bad, int check = divisions()
+    fmt.println(bad.string() + " " + check.string())
+    fmt.println(negatives().string())
+    return null
+}

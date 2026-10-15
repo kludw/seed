@@ -602,7 +602,7 @@ fn (Gen g) mut genFor(Stmt st) {
         g.ntmp++
         label = g.ntmp
     }
-    g.genLoopCopy(st, label, []int{}, -1, done >= 0)
+    g.genLoopCopy(st, label, []int{}, []int{}, -1, done >= 0)
     if (done >= 0) {
         g.emit("_d" + done.string() + ":;")
     }
@@ -612,10 +612,11 @@ fn (Gen g) mut genFor(Stmt st) {
 }
 
 // for (;;) { check; if (!cond) break; { body } _cN:; post }, with continue
-// label number label (-1: none), raw accumulators acc and the general
-// copy's continue label accTo (gen_acc.sd); spills: whether this is the
-// general copy of a loop with accumulators.
-fn (Gen g) mut genLoopCopy(Stmt st, int label, []int acc, int accTo, bool spills) {
+// label number label (-1: none), raw accumulators acc (of which bounded
+// need no overflow checks) and the general copy's continue label accTo
+// (gen_acc.sd); spills: whether this is the general copy of a loop with
+// accumulators.
+fn (Gen g) mut genLoopCopy(Stmt st, int label, []int acc, []int bounded, int accTo, bool spills) {
     g.emit("for (;;) {")
     g.indent++
     g.emit(g.loopCheck(st, acc))
@@ -624,7 +625,7 @@ fn (Gen g) mut genLoopCopy(Stmt st, int label, []int acc, int accTo, bool spills
         string c = g.condVal(g.gexpr(st.expr), mark)
         g.emit("if (!(" + c + ")) break;")
     }
-    g.loops.push(LoopCtx{mark: g.slots.len(), label: label, acc: acc, accTo: accTo})
+    g.loops.push(LoopCtx{mark: g.slots.len(), label: label, acc: acc, bounded: bounded, accTo: accTo})
     g.emit("{")
     g.indent++
     g.genBody(st.body)

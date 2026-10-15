@@ -629,7 +629,20 @@ and `+ - * / % &` whose result is small too, is plain C on `int64_t` with
 no temporary (`smallBinary`). In an int `+` chain, the simple small operands
 (literals, constants, unboxed locals and arithmetic on them) are added in C
 first and then added to the others with one general addition (`gsumSmall`;
-ints never overflow, so `+` is associative).
+ints never overflow, so `+` is associative). A small `/` or `%` whose
+dividend's interval is `>= 0` (`divNonNeg`): by a simple constant `c > 0`,
+a power of two is a shift or a mask, and anything else a multiplication by
+a magic number, `sd_divc_(x, m, s, c)` = the high word of `x * m` shifted
+right by `s` (`magicDiv` takes the smallest `s` with `m = ceil(2^(64+s) /
+c) < 2^64` and `(m * c - 2^(64+s)) * max < 2^(64+s)` for the dividend's
+upper bound `max`, which makes it exact on `0..max`), and `sd_modc_` = `x -
+sd_divc_(x) * c`; by a divisor that is `> 0` but not constant, an unsigned
+division. C's signed division by a constant needs a correction for
+negative dividends (`sar $63`, `sub`), which GCC keeps even when it could
+know the operand is not negative (it turns an unsigned division of a value
+it knows to be non-negative back into the signed one). The helpers are
+emitted once per C unit (`divcHelpers`, behind `#ifndef SD_DIVC_`) and use
+`unsigned __int128`, or C's unsigned division where it does not exist.
 
 *Int fast paths* (gen_int.sd, gen_fast.sd, gen_expr.sd):
 
@@ -773,6 +786,23 @@ overflow flag across it with `seto`/`test`/`jne`. tests/full/
 int_accumulators.sd crosses 2^63 and -2^63, the small range both ways,
 starts big, and uses `++`, `--`, `continue`, `break`, `return`, nested
 loops and `switch`.
+
+*Bounded accumulators* (`accBounded`): in a counted loop (`countedVar`: the
+post statement is `i++` or `i--` and nothing else in the loop assigns `i`)
+whose counter is unboxed with interval `lo..hi`, one run of the loop has at
+most `hi - lo + 1` iterations (the counter takes a different value in each,
+all in its interval, which holds everywhere in the function), and each
+iteration runs at most one update of a given accumulator (tail position).
+When every update of an accumulator adds or subtracts a raw small value of
+magnitude at most `d` (`accStep`) and `(hi - lo + 1) * d <= 2^62`, the raw
+value, which enters the fast copy in `-2^62..2^62-1`, stays inside
+`int64_t` for the whole run, so its updates are a plain `+=`/`-=` with no
+overflow check and no spill (`LoopCtx.bounded`). The end of the loop makes
+it a general int as before, big when it left the small range.
+tests/full/int_bounded_loops.sd has loops right at the edge (two trips of
+2^61 from the top and bottom of the small range), one past it, counts over a
+length, bounds and counters assigned in the loop, nested runs, and the
+divisions above against general ints.
 
 Per-type helpers (`sd_rt_`/`sd_rl_` retain and release for structs and
 tuples, `sd_eq_` for struct `==`, `sd_less_` sortBy adapters) are requested

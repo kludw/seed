@@ -414,11 +414,68 @@ fn (Gen g) mut genAccLoop(Stmt st, []int acc, int general, int done) {
         g.emit("int64_t " + g.rawName(acc[j]) + " = SD_SMALL(" + g.lname(acc[j]) + ");")
     }
     g.ntmp++
-    g.genLoopCopy(st, g.ntmp, acc, general, false)
+    g.genLoopCopy(st, g.ntmp, acc, g.accBounded(st, acc), general, false)
     g.emitMaterialise(acc, -1)
     g.emit("goto _d" + done.string() + ";")
     g.indent--
     g.emit("}")
+}
+
+// The accumulators among acc (of loop st) whose updates need no overflow
+// check in the fast copy: the loop is counted (countedVar) with an unboxed
+// counter i in lo..hi, so one run of it has at most hi - lo + 1 iterations
+// (i takes a different value in each); each iteration runs at most one
+// update of an accumulator (they are in tail position), and each of its
+// updates adds or subtracts a small raw value of magnitude at most d. The
+// raw value starts small (in -2^62..2^62-1, or the fast copy is not
+// entered), so when (hi - lo + 1) * d <= 2^62 it stays inside int64_t
+// whatever the updates do.
+fn (Gen g) accBounded(Stmt st, []int acc) []int {
+    int i = g.countedVar(st)
+    IntRange? ir = g.varRange[i]
+    if (i < 0 || ir == null || ir.state != 1) {
+        return []int{}
+    }
+    int trips = ir.hi - ir.lo + 1
+    []int sites = g.accTail(st.body, []int{})
+    []int out = []int{}
+    for (int k = 0; k < acc.len(); k++) {
+        int most = 0
+        bool ok = true
+        for (int j = 0; j < sites.len(); j++) {
+            AccUpdate u = g.accUpdate(sites[j])
+            if (u.var == acc[k]) {
+                int d = g.accStep(u)
+                if (d < 0) {
+                    ok = false
+                }
+                most = maxOf(most, d)
+            }
+        }
+        if (ok && trips * most <= smallIntMax + 1) {
+            out.push(acc[k])
+        }
+    }
+    return out
+}
+
+// The largest magnitude of what update u adds or subtracts, when it is
+// done on raw values in the fast copy (see genAccUpdate); else -1.
+fn (Gen g) accStep(AccUpdate u) int {
+    if (u.rest.len() == 0) {
+        return 1
+    }
+    IntRange total = knownRange(0, 0)
+    for (int i = 0; i < u.rest.len(); i++) {
+        if (!g.isSimpleSmall(u.rest[i])) {
+            return -1
+        }
+        total = binRange(Tok.Plus, total, g.smallRange(u.rest[i]))
+    }
+    if (!isSmallRange(total)) {
+        return -1
+    }
+    return maxOf(absOf(total.lo), absOf(total.hi))
 }
 
 // Makes the accumulators but skip (-1: none) general ints again, from their
@@ -479,6 +536,15 @@ fn (Gen g) mut genAccUpdate(int s) bool {
                 b = g.alias(tyInt, b)
             }
         }
+    }
+    if (raw != "" && lc.bounded.contains(u.var)) {
+        // The loop's trip count bounds the total (accBounded).
+        string cop = " += "
+        if (u.sub) {
+            cop = " -= "
+        }
+        g.emit(r + cop + raw + ";")
+        return true
     }
     string old = r
     string t = ""

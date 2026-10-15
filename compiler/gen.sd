@@ -54,11 +54,13 @@ type Slot struct {
 // label is the number of the continue label (_cN) when the loop has one,
 // or -1 when C's continue does the job. In the fast copy of a loop with
 // accumulators (gen_acc.sd), acc are the accumulators, raw in this copy,
-// and accTo is the number of the general copy's continue label.
+// and accTo is the number of the general copy's continue label; bounded
+// are the accumulators whose updates cannot overflow int64_t there.
 type LoopCtx struct {
     int mark
     int label
     []int acc
+    []int bounded
     int accTo
 }
 
