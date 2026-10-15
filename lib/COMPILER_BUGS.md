@@ -6,30 +6,14 @@ should do, and the workaround used (with the file it is in).
 
 Open:
 
-- Returning a list element of struct type as the function's nullable
-  result generates C that does not compile: the element is read as if the
-  list held boxes (`S?`), not `S` values.
-
-  ```
-  type F struct {
-      string name
-  }
-
-  fn first([]F fs) F? {
-      for (int i = 0; i < fs.len(); i++) {
-          return fs[i]
-      }
-      return null
-  }
-  ```
-
-  `cc` reports `incompatible type for argument 1 of 'sd_rt_S1F'`
-  (`expected 'sd_S_F' but argument is of type 'sd_box *'`); the program
-  should compile and return the element. Workaround: copy the element to a
-  variable first (`F f = fs[i]` then `return f`), as `flags.Spec.find` and
-  `findShort` do (lib/flags/flags.sd).
+None.
 
 Fixed since the library was first written (each with tests):
+
+- Returning (or passing) a list element where a `T?` is expected read the
+  element as if the list held `T?` boxes, and the C did not compile; it is
+  read as the list's own element type, then widened
+  (tests/full/index_widened_return.sd).
 
 - Two typed discards in one declaration (`string _, int _, error err =
   three()`) were rejected with `_ is declared twice`: `_` is never entered

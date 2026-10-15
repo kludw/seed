@@ -1,0 +1,36 @@
+// An element returned or passed where a T? is expected is read as the
+// list's own element type, then widened (lib/COMPILER_BUGS.md).
+package main
+
+import "fmt"
+
+type Point struct {
+    int x
+    int y
+}
+
+fn pickPoint([]Point ps, int i) Point? {
+    return ps[i]
+}
+
+fn pickInt([]int xs, int i) int? {
+    return xs[i]
+}
+
+fn pickString([]string xs, int i) string? {
+    return xs[i]
+}
+
+fn main([]string args) error {
+    Point? p = pickPoint([]Point{Point{x: 1, y: 2}, Point{x: 3, y: 4}}, 1)
+    if (p != null) {
+        fmt.println(p.x.string() + " " + p.y.string())
+    }
+    int? n = pickInt([]int{5, 6}, 0)
+    fmt.println((n == 5).string())
+    string? s = pickString([]string{"a", "b"}, 1)
+    if (s != null) {
+        fmt.println(s)
+    }
+    return null
+}

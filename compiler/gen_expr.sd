@@ -753,13 +753,12 @@ fn (Gen g) mut gindex(int e) string {
         return "sd_str_at_s(" + vals[0] + ", " + vals[1] + ", " + g.siteAddr(g.c.ast.exprs[x.a].pos) + ")"
     }
     if (i.res == Res.ListIndex) {
-        int el = i.ty
-        if (i.narrowed) {
-            el = i.orig
-        }
+        // The list's own element type: the expression's type may be the
+        // T? it was widened to (return xs[i] from a function returning T?).
+        int el = g.elemOf(g.typeOf(x.a))
         string v = "SD_LIST_GET_AT(" + vals[0] + ", " + g.ctype(el) + ", " + vals[1] + ", " + g.siteAddr(g.c.ast.exprs[x.a].pos) + ")"
         if (i.narrowed) {
-            return g.unwrapVal(i.orig, v)
+            return g.unwrapVal(el, v)
         }
         return v
     }
