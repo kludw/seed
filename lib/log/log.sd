@@ -1,0 +1,240 @@
+package log
+
+// Leveled logging (docs/stdlib.md, "log"): one line per message, in the
+// key=value format of Go's log/slog text handler,
+//
+//     time=2026-10-15T08:30:00.123Z level=INFO msg="listening" addr=:8080
+//
+// with the time in UTC (RFC 3339, milliseconds). Pure Seed.
+//
+// There are no package-level variables in Seed, so there is no default
+// logger: a Logger is a value that the program makes once and passes
+// around (or stores in the structs that need it). Copies share the
+// output. Each line is written with a single write (fmt.eprint, one
+// fs.File.write or one channel send), so lines from concurrent goroutines
+// never interleave.
+
+import "errors"
+import "fmt"
+import "fs"
+import "os"
+import "time"
+
+// How important a message is. A Logger writes the messages at or above
+// its minimum level.
+pub type Level enum {
+    Debug
+    Info
+    Warn
+    Error
+}
+
+// Where the lines go.
+pub type Output enum {
+    Stderr
+    Stdout
+    File(fs.File file)
+    Lines(chan string lines)
+}
+
+// A logger: a minimum level, an output, and the fields that every line
+// carries (added with with).
+pub type Logger struct {
+    Level min
+    Output out
+    string fields
+    fn() int clock
+}
+
+// A logger that writes the messages at level min and above to out. Lines
+// to Lines are sent without their "\n".
+pub fn new(Level min, Output out) Logger {
+    return Logger{min: min, out: out, fields: "", clock: time.now}
+}
+
+fn rank(Level l) int {
+    switch (l) {
+    case Level.Debug:
+        return 0
+    case Level.Info:
+        return 1
+    case Level.Warn:
+        return 2
+    case Level.Error:
+        return 3
+    }
+}
+
+// "DEBUG", "INFO", "WARN" or "ERROR", as in the lines.
+pub fn (Level l) string() string {
+    switch (l) {
+    case Level.Debug:
+        return "DEBUG"
+    case Level.Info:
+        return "INFO"
+    case Level.Warn:
+        return "WARN"
+    case Level.Error:
+        return "ERROR"
+    }
+}
+
+// Reads a level name, in any case: "debug", "info", "warn" (or
+// "warning") or "error". For a flag or an environment variable:
+// `log.parseLevel: verbose: unknown level (use debug, info, warn or
+// error)`.
+pub fn parseLevel(string text) (Level, error) {
+    switch (text.toLower()) {
+    case "debug":
+        return Level.Debug, null
+    case "info":
+        return Level.Info, null
+    case "warn", "warning":
+        return Level.Warn, null
+    case "error":
+        return Level.Error, null
+    default:
+        return null, errors.new("log.parseLevel: " + text + ": unknown level (use debug, info, warn or error)")
+    }
+}
+
+// Whether a value must be quoted: it is empty, or has a space, a control
+// character, '=' or '"'.
+fn needsQuotes(string s) bool {
+    if (s == "") {
+        return true
+    }
+    for (int i = 0; i < s.len(); i++) {
+        byte b = s[i]
+        if (int(b) <= 0x20 || int(b) == 0x7f || b == '=' || b == '"') {
+            return true
+        }
+    }
+    return false
+}
+
+// s in double quotes, with '"', '\' and control characters escaped as in
+// Go's strconv.Quote.
+fn quote(string s) string {
+    []string out = []string{"\""}
+    string hex = "0123456789abcdef"
+    int start = 0
+    for (int i = 0; i < s.len(); i++) {
+        byte b = s[i]
+        string esc = ""
+        if (b == '"') {
+            esc = "\\\""
+        } else if (b == '\\') {
+            esc = "\\\\"
+        } else if (b == '\n') {
+            esc = "\\n"
+        } else if (b == '\r') {
+            esc = "\\r"
+        } else if (b == '\t') {
+            esc = "\\t"
+        } else if (int(b) < 0x20 || int(b) == 0x7f) {
+            esc = "\\x" + string([]byte{hex[int(b) >> 4], hex[int(b) & 15]})
+        }
+        if (esc != "") {
+            out.push(s.slice(start, i))
+            out.push(esc)
+            start = i + 1
+        }
+    }
+    out.push(s.slice(start, s.len()))
+    out.push("\"")
+    return out.join("")
+}
+
+fn render(string s) string {
+    if (needsQuotes(s)) {
+        return quote(s)
+    }
+    return s
+}
+
+// A copy of the logger whose lines also carry key=value (after the fields
+// it already has). The value is quoted when needed; the key must be a
+// non-empty word without spaces, '=', '"' or control characters, or this
+// crashes.
+pub fn (Logger l) with(string key, string value) Logger {
+    if (needsQuotes(key)) {
+        os.crash("log.Logger.with: invalid key \"" + key + "\"")
+    }
+    Logger out = l
+    out.fields = l.fields + " " + key + "=" + render(value)
+    return out
+}
+
+// A copy of the logger that takes the time of each line from now (Unix
+// nanoseconds, like time.now) instead of the clock: for tests and
+// reproducible output.
+pub fn (Logger l) withClock(fn() int now) Logger {
+    Logger out = l
+    out.clock = now
+    return out
+}
+
+// Whether messages at level are written, to skip building costly ones.
+pub fn (Logger l) enabled(Level level) bool {
+    return rank(level) >= rank(l.min)
+}
+
+fn pad(int n, int width) string {
+    string s = n.string()
+    for (; s.len() < width; ) {
+        s = "0" + s
+    }
+    return s
+}
+
+// t as 2026-10-15T08:30:00.123Z.
+fn timestamp(int t) string {
+    time.Date d = time.date(t)
+    return pad(d.year, 4) + "-" + pad(d.month, 2) + "-" + pad(d.day, 2) + "T" + pad(d.hour, 2) + ":" + pad(d.minute, 2) + ":" + pad(d.second, 2) + "." + pad(d.nanosecond / 1000000, 3) + "Z"
+}
+
+// The line for a message, without its "\n".
+fn (Logger l) line(Level level, string msg) string {
+    return "time=" + timestamp(l.clock()) + " level=" + level.string() + " msg=" + render(msg) + l.fields
+}
+
+// Writes msg at level, if level is enabled. Write errors (a full disk, a
+// closed file) are ignored, as fmt's are; sending to a closed Lines
+// channel crashes, as any send does.
+pub fn (Logger l) log(Level level, string msg) {
+    if (!l.enabled(level)) {
+        return
+    }
+    string text = l.line(level, msg)
+    switch (l.out) {
+    case Output.Stderr:
+        fmt.eprint(text + "\n")
+    case Output.Stdout:
+        fmt.print(text + "\n")
+    case Output.File(fs.File f):
+        _ = f.write(text + "\n")
+    case Output.Lines(chan string lines):
+        lines.send(text)
+    }
+}
+
+// A message about details that only matter when looking for a problem.
+pub fn (Logger l) debug(string msg) {
+    l.log(Level.Debug, msg)
+}
+
+// A message about normal operation.
+pub fn (Logger l) info(string msg) {
+    l.log(Level.Info, msg)
+}
+
+// A message about something unexpected that the program handled.
+pub fn (Logger l) warn(string msg) {
+    l.log(Level.Warn, msg)
+}
+
+// A message about a failure.
+pub fn (Logger l) error(string msg) {
+    l.log(Level.Error, msg)
+}
