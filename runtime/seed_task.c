@@ -1385,7 +1385,6 @@ static void sysmon_wake(void);
 
 /* ------------------------------------------------------- idle Ps and Ms */
 
-
 static void pidle_put_locked(sd_p *p) {
   running_flush(p);
   preempt_clear(p);
@@ -2392,6 +2391,7 @@ void sd_spawn(sd_group *g, sd_task_fn body, const sd_type *args_type, const void
   c->body = body;
   c->group = g;
   c->args_type = args_type;
+  c->args = NULL;
   /* Generated code names the descriptor of a spawn's arguments after the
    * spawn ("spawn worker(i, jobs)"): the goroutine's name in reports. */
   c->name = args_type && args_type->name && strncmp(args_type->name, "spawn ", 6) == 0 ? args_type->name + 6 : NULL;
