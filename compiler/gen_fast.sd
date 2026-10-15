@@ -264,7 +264,7 @@ fn (Gen g) fastHead(int f) string {
             ps.push("bool " + names[i])
         }
     }
-    return g.linkage() + "int64_t " + g.fastName(f) + "(" + ps.join(", ") + ")"
+    return g.noTailCalls(f) + g.linkage() + "int64_t " + g.fastName(f) + "(" + ps.join(", ") + ")"
 }
 
 // Emits the fast version of f and the function under f's own name that

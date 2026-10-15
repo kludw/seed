@@ -33,7 +33,9 @@ run_limited() {
   exec 3<&0
   "$@" <&3 & pid=$!
   exec 3<&-
-  ( sleep "$limit"; kill -9 "$pid" 2> /dev/null ) > /dev/null 2>&1 & watcher=$!
+  ( trap 'kill "$s" 2> /dev/null; exit 0' TERM
+    sleep "$limit" & s=$!
+    wait "$s" && kill -9 "$pid" 2> /dev/null ) > /dev/null 2>&1 & watcher=$!
   wait "$pid"; rc=$?
   kill "$watcher" 2> /dev/null; wait "$watcher" 2> /dev/null
   return $rc

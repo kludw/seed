@@ -58,6 +58,17 @@ SD_NOINLINE __attribute__((unused)) static int *sd_errno_loc_(void) {
 }
 #undef errno
 #define errno (*sd_errno_loc_())
+/* On functions that may recurse (a cycle of the call graph): no tail-call
+ * elimination, so a recursion that does not end overflows the stack and
+ * crashes, as with every C compiler, rather than becoming a loop that never
+ * ends (clang turns `return f(n + 1) + 1` into one). */
+#if defined(__clang__)
+#define SD_NO_TCE __attribute__((disable_tail_calls))
+#elif defined(__GNUC__)
+#define SD_NO_TCE __attribute__((optimize("no-optimize-sibling-calls")))
+#else
+#define SD_NO_TCE
+#endif
 #define SD_LIKELY(x) __builtin_expect(!!(x), 1)
 #define SD_UNLIKELY(x) __builtin_expect(!!(x), 0)
 #define SD_PRINTF(a, b) __attribute__((format(printf, a, b)))

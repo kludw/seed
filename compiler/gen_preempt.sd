@@ -86,6 +86,16 @@ fn (Gen g) preemptsOnEntry(int f) bool {
     return g.preemptFns[f] != null
 }
 
+// The attribute that keeps the C compiler from turning f's recursion into a
+// loop (SD_NO_TCE, runtime/seed.h): a recursion that never ends must
+// overflow the stack and crash, whatever the C compiler.
+fn (Gen g) noTailCalls(int f) string {
+    if (f >= 0 && f < g.pcCyclic.len() && g.pcCyclic[f]) {
+        return "SD_NO_TCE "
+    }
+    return ""
+}
+
 // Whether a direct call of callee from the function being generated may
 // close a cycle: both are in one component, which has a cycle.
 fn (Gen g) callMayRecurse(int callee) bool {

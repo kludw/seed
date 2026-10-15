@@ -59,6 +59,17 @@ SD_NOINLINE __attribute__((unused)) static int *sd_errno_loc_(void) {
 }
 #undef errno
 #define errno (*sd_errno_loc_())
+/* On functions that may recurse (a cycle of the call graph): no tail-call
+ * elimination, so a recursion that does not end overflows the stack and
+ * crashes, as with every C compiler, rather than becoming a loop that never
+ * ends (clang turns `return f(n + 1) + 1` into one). */
+#if defined(__clang__)
+#define SD_NO_TCE __attribute__((disable_tail_calls))
+#elif defined(__GNUC__)
+#define SD_NO_TCE __attribute__((optimize("no-optimize-sibling-calls")))
+#else
+#define SD_NO_TCE
+#endif
 #define SD_LIKELY(x) __builtin_expect(!!(x), 1)
 #define SD_UNLIKELY(x) __builtin_expect(!!(x), 0)
 #define SD_PRINTF(a, b) __attribute__((format(printf, a, b)))
@@ -8484,6 +8495,7 @@ typedef struct sd_E_Tok sd_E_Tok;
 typedef struct sd_E_TopKind sd_E_TopKind;
 typedef struct sd_E_TypeExprKind sd_E_TypeExprKind;
 typedef struct sd_E_VarKind sd_E_VarKind;
+typedef struct sd_E_json_Value sd_E_json_Value;
 typedef struct sd_S_AccUpdate sd_S_AccUpdate;
 typedef struct sd_S_Ast sd_S_Ast;
 typedef struct sd_S_Block sd_S_Block;
@@ -8516,6 +8528,12 @@ typedef struct sd_S_Label sd_S_Label;
 typedef struct sd_S_Lexer sd_S_Lexer;
 typedef struct sd_S_Loader sd_S_Loader;
 typedef struct sd_S_LoopCtx sd_S_LoopCtx;
+typedef struct sd_S_LspAnalysis sd_S_LspAnalysis;
+typedef struct sd_S_LspDoc sd_S_LspDoc;
+typedef struct sd_S_LspJob sd_S_LspJob;
+typedef struct sd_S_LspLocal sd_S_LspLocal;
+typedef struct sd_S_LspServer sd_S_LspServer;
+typedef struct sd_S_LspSym sd_S_LspSym;
 typedef struct sd_S_MagicDiv sd_S_MagicDiv;
 typedef struct sd_S_MethodSig sd_S_MethodSig;
 typedef struct sd_S_MutEvent sd_S_MutEvent;
@@ -8541,15 +8559,20 @@ typedef struct sd_S_Var sd_S_Var;
 typedef struct sd_S_errors_TextError sd_S_errors_TextError;
 typedef struct sd_S_fs_File sd_S_fs_File;
 typedef struct sd_S_fs_Info sd_S_fs_Info;
+typedef struct sd_S_json_JsonParser sd_S_json_JsonParser;
+typedef struct sd_S_json_JsonWriter sd_S_json_JsonWriter;
+typedef struct sd_T_T2E10json_Valuee sd_T_T2E10json_Valuee;
 typedef struct sd_T_T2Lie sd_T_T2Lie;
 typedef struct sd_T_T2Lse sd_T_T2Lse;
 typedef struct sd_T_T2OS7Checkere sd_T_T2OS7Checkere;
 typedef struct sd_T_T2Ose sd_T_T2Ose;
+typedef struct sd_T_T2S11LspAnalysise sd_T_T2S11LspAnalysise;
 typedef struct sd_T_T2S5Builde sd_T_T2S5Builde;
 typedef struct sd_T_T2S6Parsere sd_T_T2S6Parsere;
 typedef struct sd_T_T2S7fs_Filee sd_T_T2S7fs_Filee;
 typedef struct sd_T_T2S7fs_Infoe sd_T_T2S7fs_Infoe;
 typedef struct sd_T_T2be sd_T_T2be;
+typedef struct sd_T_T2fe sd_T_T2fe;
 typedef struct sd_T_T2ib sd_T_T2ib;
 typedef struct sd_T_T2ie sd_T_T2ie;
 typedef struct sd_T_T2se sd_T_T2se;
@@ -8572,6 +8595,10 @@ struct sd_S_IntEvent { sd_int f_var; sd_int f_expr; bool f_top; sd_int f_bound; 
 struct sd_S_IntRange { sd_int f_state; sd_int f_lo; sd_int f_hi; };
 struct sd_S_Lexer { sd_int f_file; sd_str f_src; sd_int f_i; sd_int f_line; sd_int f_col; sd_box * f_last; bool f_lineHasToken; sd_list * f_tokens; sd_list * f_comments; sd_list * f_errors; };
 struct sd_S_LoopCtx { sd_int f_mark; sd_int f_label; sd_list * f_acc; sd_list * f_bounded; sd_int f_accTo; };
+struct sd_S_LspDoc { sd_str f_uri; sd_str f_path; sd_str f_text; };
+struct sd_S_LspJob { sd_str f_kind; sd_str f_seedRoot; sd_str f_path; sd_map * f_overlay; sd_int f_line; sd_int f_character; };
+struct sd_S_LspLocal { sd_str f_name; sd_str f_detail; };
+struct sd_S_LspServer { sd_str f_seedRoot; sd_map * f_docs; bool f_shutdown; };
 struct sd_S_MagicDiv { sd_int f_m; sd_int f_s; };
 struct sd_S_MutEvent { sd_int f_root; sd_str f_path; sd_int f_method; };
 struct sd_S_Narrow { sd_str f_key; bool f_dead; };
@@ -8586,6 +8613,8 @@ struct sd_S_Unit { sd_str f_path; bool f_root; sd_str f_text; };
 struct sd_S_errors_TextError { sd_str f_text; };
 struct sd_S_fs_File { sd_int f_id; bool f_writing; sd_str f_path; };
 struct sd_S_fs_Info { sd_int f_size; bool f_isDir; sd_int f_modified; };
+struct sd_S_json_JsonParser { sd_str f_text; sd_int f_pos; sd_int f_depth; };
+struct sd_S_json_JsonWriter { sd_str f_out; bool f_pretty; sd_str f_method; };
 struct sd_S_Block { sd_S_Pos f_pos; sd_S_Pos f_end; sd_int f_list; sd_int f_count; };
 struct sd_S_Case { sd_S_Pos f_pos; bool f_isDefault; sd_int f_labels; sd_int f_labelCount; sd_int f_comm; sd_int f_body; };
 struct sd_S_Checker { sd_S_Ast f_ast; sd_S_Diags f_diags; sd_S_Types f_types; sd_map * f_globals; sd_list * f_globalList; sd_map * f_imported; sd_map * f_usedImports; sd_map * f_methods; sd_map * f_mutNames; sd_map * f_builtinNamed; sd_list * f_impls; sd_list * f_methodSigType; sd_list * f_declType; sd_list * f_teType; sd_list * f_fnRet; sd_list * f_fnRecv; sd_list * f_fnCName; sd_list * f_recvVar; sd_list * f_constType; sd_list * f_constState; sd_list * f_info; sd_list * f_targetVar; sd_list * f_targetType; sd_list * f_stmtVar; sd_list * f_stmtDiscard; sd_list * f_labelCase; sd_list * f_paramVar; sd_list * f_vars; sd_list * f_scope; sd_list * f_scopeMarks; sd_list * f_narrows; sd_list * f_narrowMarks; sd_list * f_guards; sd_list * f_breakGuards; sd_list * f_breakMarks; sd_list * f_contGuards; sd_list * f_contMarks; sd_list * f_loopScopes; sd_list * f_caseGuards; sd_int f_curFn; sd_int f_loopDepth; sd_int f_groupDepth; sd_int f_groupLoop; sd_int f_allowGroup; bool f_testMode; sd_str f_libDir; sd_str f_projectRoot; };
@@ -8599,6 +8628,7 @@ struct sd_S_Global { sd_box * f_kind; sd_int f_index; sd_S_Pos f_pos; sd_int f_p
 struct sd_S_Guard { sd_str f_key; sd_str f_errKey; sd_str f_errName; sd_int f_var; sd_S_Pos f_pos; bool f_lost; };
 struct sd_S_Import { sd_S_Pos f_pos; sd_int f_file; sd_str f_path; sd_str f_name; sd_int f_target; };
 struct sd_S_Label { sd_S_Pos f_pos; bool f_isPattern; bool f_parens; sd_str f_pkg; sd_str f_typeName; sd_str f_caseName; sd_int f_expr; sd_int f_params; sd_int f_paramCount; };
+struct sd_S_LspSym { bool f_found; sd_S_Pos f_pos; sd_int f_len; sd_str f_sig; sd_str f_doc; };
 struct sd_S_MethodSig { sd_S_Pos f_pos; bool f_isMut; sd_str f_name; sd_int f_params; sd_int f_paramCount; sd_int f_results; sd_int f_resultCount; };
 struct sd_S_Param { sd_S_Pos f_pos; sd_int f_typeExpr; sd_str f_name; bool f_isPub; };
 struct sd_S_Parser { sd_S_Ast f_ast; sd_S_Diags f_diags; sd_list * f_toks; sd_int f_pos; sd_int f_file; bool f_failed; sd_int f_nesting; sd_list * f_depths; };
@@ -8611,7 +8641,8 @@ struct sd_S_TypeDecl { sd_S_Pos f_pos; sd_int f_file; bool f_isPub; sd_str f_nam
 struct sd_S_TypeExpr { sd_box * f_kind; sd_S_Pos f_pos; sd_str f_pkg; sd_str f_name; sd_int f_a; sd_int f_b; sd_int f_list; sd_int f_count; sd_int f_results; sd_int f_resultCount; };
 struct sd_S_Var { sd_str f_name; sd_int f_ty; sd_box * f_kind; sd_S_Pos f_pos; bool f_used; };
 struct sd_S_Gen { sd_S_Checker f_c; sd_list * f_out; sd_list * f_fnText; sd_list * f_decls; sd_list * f_gprotos; sd_list * f_protos; sd_list * f_helpers; sd_list * f_thunks; sd_list * f_consts; sd_list * f_queue; sd_list * f_slots; sd_list * f_scopes; sd_list * f_loops; sd_list * f_groups; sd_int f_indent; sd_int f_ntmp; sd_int f_ndefer; sd_int f_nspawn; sd_int f_curFn; bool f_defers; bool f_frameOn; sd_list * f_frame; sd_map * f_frameIdx; sd_map * f_varC; sd_list * f_moved; bool f_popped; sd_map * f_fcCache; sd_int f_crashSeq; sd_int f_nslot; sd_map * f_fieldNeeded; sd_map * f_slotDone; sd_list * f_frameSlots; sd_map * f_safeCalls; sd_map * f_varRange; sd_list * f_intEvents; sd_map * f_intDeclared; sd_map * f_movable; sd_map * f_moveAt; sd_list * f_mvStmtAt; sd_map * f_mvLevel; sd_map * f_mvDecl; sd_map * f_mvLast; sd_map * f_mvCount; sd_map * f_mvCond; sd_map * f_modSets; sd_map * f_borrowed; sd_map * f_borrowRoots; sd_list * f_bwEvents; sd_list * f_bwCands; bool f_bwOn; sd_map * f_fastFns; sd_list * f_fastCalls; sd_list * f_fastLoops; sd_map * f_preemptFns; sd_list * f_pcComp; sd_list * f_pcCyclic; sd_list * f_pcCallees; sd_int f_pcBody; bool f_pcSeen; bool f_pcTop; sd_int f_pcCond; bool f_split; sd_map * f_refs; };
-struct sd_S_Loader { sd_S_Parser f_p; sd_str f_seedRoot; sd_str f_projectRoot; sd_str f_libDir; sd_map * f_byDir; sd_list * f_unformatted; };
+struct sd_S_Loader { sd_S_Parser f_p; sd_str f_seedRoot; sd_str f_projectRoot; sd_str f_libDir; sd_map * f_byDir; sd_list * f_unformatted; sd_map * f_overlay; };
+struct sd_S_LspAnalysis { sd_S_Checker f_c; sd_int f_file; bool f_clean; bool f_whole; sd_list * f_unformatted; sd_str f_src; };
 struct sd_E_Builtin { int32_t tag; };
 struct sd_E_DeclKind { int32_t tag; };
 struct sd_E_ExprKind { int32_t tag; };
@@ -8628,15 +8659,19 @@ struct sd_E_Tok { int32_t tag; };
 struct sd_E_TopKind { int32_t tag; };
 struct sd_E_TypeExprKind { int32_t tag; };
 struct sd_E_VarKind { int32_t tag; };
+struct sd_E_json_Value { int32_t tag; union { struct { bool f0; } c_Bool; struct { double f0; } c_Number; struct { sd_str f0; } c_String; struct { sd_list * f0; } c_Array; struct { sd_map * f0; } c_Object; } u; };
+struct sd_T_T2E10json_Valuee { sd_box * r0; sd_err r1; };
 struct sd_T_T2Lie { sd_list * r0; sd_err r1; };
 struct sd_T_T2Lse { sd_list * r0; sd_err r1; };
 struct sd_T_T2OS7Checkere { sd_box * r0; sd_err r1; };
 struct sd_T_T2Ose { sd_str r0; sd_err r1; };
+struct sd_T_T2S11LspAnalysise { sd_S_LspAnalysis r0; sd_err r1; };
 struct sd_T_T2S5Builde { sd_S_Build r0; sd_err r1; };
 struct sd_T_T2S6Parsere { sd_S_Parser r0; sd_err r1; };
 struct sd_T_T2S7fs_Filee { sd_S_fs_File r0; sd_err r1; };
 struct sd_T_T2S7fs_Infoe { sd_S_fs_Info r0; sd_err r1; };
 struct sd_T_T2be { bool r0; sd_err r1; };
+struct sd_T_T2fe { double r0; sd_err r1; };
 struct sd_T_T2ib { sd_int r0; bool r1; };
 struct sd_T_T2ie { sd_int r0; sd_err r1; };
 struct sd_T_T2se { sd_str r0; sd_err r1; };
@@ -8682,6 +8717,12 @@ static const sd_type sd_D_Label;
 static const sd_type sd_D_Lexer;
 static const sd_type sd_D_Loader;
 static const sd_type sd_D_LoopCtx;
+static const sd_type sd_D_LspAnalysis;
+static const sd_type sd_D_LspDoc;
+static const sd_type sd_D_LspJob;
+static const sd_type sd_D_LspLocal;
+static const sd_type sd_D_LspServer;
+static const sd_type sd_D_LspSym;
 static const sd_type sd_D_MagicDiv;
 static const sd_type sd_D_MethodSig;
 static const sd_type sd_D_MutEvent;
@@ -8714,6 +8755,9 @@ static const sd_type sd_D_VarKind;
 static const sd_type sd_D_errors_TextError;
 static const sd_type sd_D_fs_File;
 static const sd_type sd_D_fs_Info;
+static const sd_type sd_D_json_JsonParser;
+static const sd_type sd_D_json_JsonWriter;
+static const sd_type sd_D_json_Value;
 static const sd_field sd_F_AccUpdate[] = {SD_FIELD(sd_S_AccUpdate, f_var, &sd_type_int), SD_FIELD(sd_S_AccUpdate, f_sub, &sd_type_bool), SD_FIELD(sd_S_AccUpdate, f_rest, &sd_type_list)};
 static const sd_type sd_D_AccUpdate = SD_STRUCT_TYPE("AccUpdate", sd_S_AccUpdate, sd_F_AccUpdate);
 static const sd_field sd_F_Ast[] = {SD_FIELD(sd_S_Ast, f_files, &sd_type_list), SD_FIELD(sd_S_Ast, f_exprs, &sd_type_list), SD_FIELD(sd_S_Ast, f_stmts, &sd_type_list), SD_FIELD(sd_S_Ast, f_blocks, &sd_type_list), SD_FIELD(sd_S_Ast, f_targets, &sd_type_list), SD_FIELD(sd_S_Ast, f_cases, &sd_type_list), SD_FIELD(sd_S_Ast, f_labels, &sd_type_list), SD_FIELD(sd_S_Ast, f_typeExprs, &sd_type_list), SD_FIELD(sd_S_Ast, f_params, &sd_type_list), SD_FIELD(sd_S_Ast, f_fns, &sd_type_list), SD_FIELD(sd_S_Ast, f_typeDecls, &sd_type_list), SD_FIELD(sd_S_Ast, f_enumCases, &sd_type_list), SD_FIELD(sd_S_Ast, f_methodSigs, &sd_type_list), SD_FIELD(sd_S_Ast, f_consts, &sd_type_list), SD_FIELD(sd_S_Ast, f_tests, &sd_type_list), SD_FIELD(sd_S_Ast, f_imports, &sd_type_list), SD_FIELD(sd_S_Ast, f_pkgs, &sd_type_list), SD_FIELD(sd_S_Ast, f_tops, &sd_type_list), SD_FIELD(sd_S_Ast, f_comments, &sd_type_list), SD_FIELD(sd_S_Ast, f_lists, &sd_type_list)};
@@ -8792,10 +8836,22 @@ static const sd_field sd_F_Label[] = {SD_FIELD(sd_S_Label, f_pos, &sd_D_Pos), SD
 static const sd_type sd_D_Label = SD_STRUCT_TYPE("Label", sd_S_Label, sd_F_Label);
 static const sd_field sd_F_Lexer[] = {SD_FIELD(sd_S_Lexer, f_file, &sd_type_int), SD_FIELD(sd_S_Lexer, f_src, &sd_type_str), SD_FIELD(sd_S_Lexer, f_i, &sd_type_int), SD_FIELD(sd_S_Lexer, f_line, &sd_type_int), SD_FIELD(sd_S_Lexer, f_col, &sd_type_int), SD_FIELD(sd_S_Lexer, f_last, &sd_type_box), SD_FIELD(sd_S_Lexer, f_lineHasToken, &sd_type_bool), SD_FIELD(sd_S_Lexer, f_tokens, &sd_type_list), SD_FIELD(sd_S_Lexer, f_comments, &sd_type_list), SD_FIELD(sd_S_Lexer, f_errors, &sd_type_list)};
 static const sd_type sd_D_Lexer = SD_STRUCT_TYPE("Lexer", sd_S_Lexer, sd_F_Lexer);
-static const sd_field sd_F_Loader[] = {SD_FIELD(sd_S_Loader, f_p, &sd_D_Parser), SD_FIELD(sd_S_Loader, f_seedRoot, &sd_type_str), SD_FIELD(sd_S_Loader, f_projectRoot, &sd_type_str), SD_FIELD(sd_S_Loader, f_libDir, &sd_type_str), SD_FIELD(sd_S_Loader, f_byDir, &sd_type_map), SD_FIELD(sd_S_Loader, f_unformatted, &sd_type_list)};
+static const sd_field sd_F_Loader[] = {SD_FIELD(sd_S_Loader, f_p, &sd_D_Parser), SD_FIELD(sd_S_Loader, f_seedRoot, &sd_type_str), SD_FIELD(sd_S_Loader, f_projectRoot, &sd_type_str), SD_FIELD(sd_S_Loader, f_libDir, &sd_type_str), SD_FIELD(sd_S_Loader, f_byDir, &sd_type_map), SD_FIELD(sd_S_Loader, f_unformatted, &sd_type_list), SD_FIELD(sd_S_Loader, f_overlay, &sd_type_map)};
 static const sd_type sd_D_Loader = SD_STRUCT_TYPE("Loader", sd_S_Loader, sd_F_Loader);
 static const sd_field sd_F_LoopCtx[] = {SD_FIELD(sd_S_LoopCtx, f_mark, &sd_type_int), SD_FIELD(sd_S_LoopCtx, f_label, &sd_type_int), SD_FIELD(sd_S_LoopCtx, f_acc, &sd_type_list), SD_FIELD(sd_S_LoopCtx, f_bounded, &sd_type_list), SD_FIELD(sd_S_LoopCtx, f_accTo, &sd_type_int)};
 static const sd_type sd_D_LoopCtx = SD_STRUCT_TYPE("LoopCtx", sd_S_LoopCtx, sd_F_LoopCtx);
+static const sd_field sd_F_LspAnalysis[] = {SD_FIELD(sd_S_LspAnalysis, f_c, &sd_D_Checker), SD_FIELD(sd_S_LspAnalysis, f_file, &sd_type_int), SD_FIELD(sd_S_LspAnalysis, f_clean, &sd_type_bool), SD_FIELD(sd_S_LspAnalysis, f_whole, &sd_type_bool), SD_FIELD(sd_S_LspAnalysis, f_unformatted, &sd_type_list), SD_FIELD(sd_S_LspAnalysis, f_src, &sd_type_str)};
+static const sd_type sd_D_LspAnalysis = SD_STRUCT_TYPE("LspAnalysis", sd_S_LspAnalysis, sd_F_LspAnalysis);
+static const sd_field sd_F_LspDoc[] = {SD_FIELD(sd_S_LspDoc, f_uri, &sd_type_str), SD_FIELD(sd_S_LspDoc, f_path, &sd_type_str), SD_FIELD(sd_S_LspDoc, f_text, &sd_type_str)};
+static const sd_type sd_D_LspDoc = SD_STRUCT_TYPE("LspDoc", sd_S_LspDoc, sd_F_LspDoc);
+static const sd_field sd_F_LspJob[] = {SD_FIELD(sd_S_LspJob, f_kind, &sd_type_str), SD_FIELD(sd_S_LspJob, f_seedRoot, &sd_type_str), SD_FIELD(sd_S_LspJob, f_path, &sd_type_str), SD_FIELD(sd_S_LspJob, f_overlay, &sd_type_map), SD_FIELD(sd_S_LspJob, f_line, &sd_type_int), SD_FIELD(sd_S_LspJob, f_character, &sd_type_int)};
+static const sd_type sd_D_LspJob = SD_STRUCT_TYPE("LspJob", sd_S_LspJob, sd_F_LspJob);
+static const sd_field sd_F_LspLocal[] = {SD_FIELD(sd_S_LspLocal, f_name, &sd_type_str), SD_FIELD(sd_S_LspLocal, f_detail, &sd_type_str)};
+static const sd_type sd_D_LspLocal = SD_STRUCT_TYPE("LspLocal", sd_S_LspLocal, sd_F_LspLocal);
+static const sd_field sd_F_LspServer[] = {SD_FIELD(sd_S_LspServer, f_seedRoot, &sd_type_str), SD_FIELD(sd_S_LspServer, f_docs, &sd_type_map), SD_FIELD(sd_S_LspServer, f_shutdown, &sd_type_bool)};
+static const sd_type sd_D_LspServer = SD_STRUCT_TYPE("LspServer", sd_S_LspServer, sd_F_LspServer);
+static const sd_field sd_F_LspSym[] = {SD_FIELD(sd_S_LspSym, f_found, &sd_type_bool), SD_FIELD(sd_S_LspSym, f_pos, &sd_D_Pos), SD_FIELD(sd_S_LspSym, f_len, &sd_type_int), SD_FIELD(sd_S_LspSym, f_sig, &sd_type_str), SD_FIELD(sd_S_LspSym, f_doc, &sd_type_str)};
+static const sd_type sd_D_LspSym = SD_STRUCT_TYPE("LspSym", sd_S_LspSym, sd_F_LspSym);
 static const sd_field sd_F_MagicDiv[] = {SD_FIELD(sd_S_MagicDiv, f_m, &sd_type_int), SD_FIELD(sd_S_MagicDiv, f_s, &sd_type_int)};
 static const sd_type sd_D_MagicDiv = SD_STRUCT_TYPE("MagicDiv", sd_S_MagicDiv, sd_F_MagicDiv);
 static const sd_field sd_F_MethodSig[] = {SD_FIELD(sd_S_MethodSig, f_pos, &sd_D_Pos), SD_FIELD(sd_S_MethodSig, f_isMut, &sd_type_bool), SD_FIELD(sd_S_MethodSig, f_name, &sd_type_str), SD_FIELD(sd_S_MethodSig, f_params, &sd_type_int), SD_FIELD(sd_S_MethodSig, f_paramCount, &sd_type_int), SD_FIELD(sd_S_MethodSig, f_results, &sd_type_int), SD_FIELD(sd_S_MethodSig, f_resultCount, &sd_type_int)};
@@ -8860,6 +8916,17 @@ static const sd_field sd_F_fs_File[] = {SD_FIELD(sd_S_fs_File, f_id, &sd_type_in
 static const sd_type sd_D_fs_File = SD_STRUCT_TYPE("fs_File", sd_S_fs_File, sd_F_fs_File);
 static const sd_field sd_F_fs_Info[] = {SD_FIELD(sd_S_fs_Info, f_size, &sd_type_int), SD_FIELD(sd_S_fs_Info, f_isDir, &sd_type_bool), SD_FIELD(sd_S_fs_Info, f_modified, &sd_type_int)};
 static const sd_type sd_D_fs_Info = SD_STRUCT_TYPE("fs_Info", sd_S_fs_Info, sd_F_fs_Info);
+static const sd_field sd_F_json_JsonParser[] = {SD_FIELD(sd_S_json_JsonParser, f_text, &sd_type_str), SD_FIELD(sd_S_json_JsonParser, f_pos, &sd_type_int), SD_FIELD(sd_S_json_JsonParser, f_depth, &sd_type_int)};
+static const sd_type sd_D_json_JsonParser = SD_STRUCT_TYPE("json_JsonParser", sd_S_json_JsonParser, sd_F_json_JsonParser);
+static const sd_field sd_F_json_JsonWriter[] = {SD_FIELD(sd_S_json_JsonWriter, f_out, &sd_type_str), SD_FIELD(sd_S_json_JsonWriter, f_pretty, &sd_type_bool), SD_FIELD(sd_S_json_JsonWriter, f_method, &sd_type_str)};
+static const sd_type sd_D_json_JsonWriter = SD_STRUCT_TYPE("json_JsonWriter", sd_S_json_JsonWriter, sd_F_json_JsonWriter);
+static const sd_field sd_F_json_Value__Bool[] = {SD_FIELD(sd_E_json_Value, u.c_Bool.f0, &sd_type_bool)};
+static const sd_field sd_F_json_Value__Number[] = {SD_FIELD(sd_E_json_Value, u.c_Number.f0, &sd_type_float)};
+static const sd_field sd_F_json_Value__String[] = {SD_FIELD(sd_E_json_Value, u.c_String.f0, &sd_type_str)};
+static const sd_field sd_F_json_Value__Array[] = {SD_FIELD(sd_E_json_Value, u.c_Array.f0, &sd_type_list)};
+static const sd_field sd_F_json_Value__Object[] = {SD_FIELD(sd_E_json_Value, u.c_Object.f0, &sd_type_map)};
+static const sd_variant sd_V_json_Value[] = {{"Null", NULL, 0}, {"Bool", sd_F_json_Value__Bool, 1}, {"Number", sd_F_json_Value__Number, 1}, {"String", sd_F_json_Value__String, 1}, {"Array", sd_F_json_Value__Array, 1}, {"Object", sd_F_json_Value__Object, 1}};
+static const sd_type sd_D_json_Value = SD_ENUM_TYPE("json_Value", sd_E_json_Value, sd_V_json_Value);
 SD_BOX_STATIC(sd_k_Builtin__Bytes, &sd_D_Builtin, sd_E_Builtin, {.tag = 15});
 SD_BOX_STATIC(sd_k_Builtin__Chars, &sd_D_Builtin, sd_E_Builtin, {.tag = 29});
 SD_BOX_STATIC(sd_k_Builtin__Close, &sd_D_Builtin, sd_E_Builtin, {.tag = 33});
@@ -9079,6 +9146,7 @@ SD_BOX_STATIC(sd_k_VarKind__LocalConst, &sd_D_VarKind, sd_E_VarKind, {.tag = 4})
 SD_BOX_STATIC(sd_k_VarKind__MutRecv, &sd_D_VarKind, sd_E_VarKind, {.tag = 3});
 SD_BOX_STATIC(sd_k_VarKind__Param, &sd_D_VarKind, sd_E_VarKind, {.tag = 1});
 SD_BOX_STATIC(sd_k_VarKind__Recv, &sd_D_VarKind, sd_E_VarKind, {.tag = 2});
+SD_BOX_STATIC(sd_k_json_Value__Null, &sd_D_json_Value, sd_E_json_Value, {.tag = 0});
 static sd_str sd_c_buildOpt(void);
 static sd_str sd_c_cCompiler(void);
 static sd_list * sd_c_cFlags(void);
@@ -9092,8 +9160,12 @@ static sd_int sd_c_helperEq(void);
 static sd_int sd_c_helperLess(void);
 static sd_int sd_c_helperRelease(void);
 static sd_int sd_c_helperRetain(void);
+static sd_int sd_c_json_jsonMaxDepth(void);
 static sd_map * sd_c_keywords(void);
 static sd_str sd_c_leaveFrame(void);
+static sd_list * sd_c_lspBuiltinTypes(void);
+static sd_list * sd_c_lspKeywords(void);
+static sd_str sd_c_lspPlaceholder(void);
 static sd_int sd_c_maxErrors(void);
 static sd_int sd_c_maxNesting(void);
 static sd_int sd_c_minInt(void);
@@ -9185,6 +9257,9 @@ static sd_int sd_f_hexValue(uint8_t l_c);
 static sd_str sd_f_intLit(sd_S_Expr l_x);
 static sd_str sd_f_intOpName(sd_box * l_op);
 static sd_str sd_f_intUpdate(sd_str l_lv, sd_str l_op, sd_str l_b);
+static sd_T_T2Ose sd_f_io_read(sd_int l_max);
+static sd_T_T2se sd_f_io_readAll(void);
+static sd_T_T2Ose sd_f_io_readLine(void);
 static bool sd_f_isBuiltinMutName(sd_str l_n);
 static bool sd_f_isBuiltinTypeName(sd_str l_n);
 static bool sd_f_isCamelCase(sd_str l_name);
@@ -9208,6 +9283,13 @@ static sd_str sd_f_joinField(sd_str l_a, sd_str l_b);
 static sd_list * sd_f_joinGuards(sd_list * l_a, sd_list * l_b);
 static sd_str sd_f_joinPath(sd_str l_dir, sd_str l_name);
 static sd_S_IntRange sd_f_joinRange(sd_S_IntRange l_a, sd_S_IntRange l_b);
+static sd_str sd_f_json_jsonDescribe(uint8_t l_c);
+static sd_str sd_f_json_jsonEscape(uint8_t l_c);
+static sd_int sd_f_json_jsonHex4(sd_str l_text, sd_int l_i);
+static bool sd_f_json_jsonIsDigit(uint8_t l_c);
+static sd_str sd_f_json_jsonUtf8Encode(sd_int l_cp);
+static sd_int sd_f_json_jsonUtf8Len(sd_str l_s, sd_int l_i);
+static sd_T_T2E10json_Valuee sd_f_json_parse(sd_str l_text);
 static sd_list * sd_f_keptTokens(sd_str l_src);
 static bool sd_f_keyExtends(sd_str l_key, sd_str l_prefix, bool l_strict);
 static sd_S_IntRange sd_f_knownRange(sd_int l_lo, sd_int l_hi);
@@ -9217,6 +9299,88 @@ static sd_S_Lexer sd_f_lex(sd_int l_file, sd_str l_src);
 static sd_str sd_f_literalKey(sd_S_Expr l_x);
 static sd_int sd_f_log2Exact(sd_int l_c);
 static uint8_t sd_f_lowerByte(uint8_t l_c);
+static sd_T_T2S11LspAnalysise sd_f_lspAnalyze(sd_S_LspJob l_job, bool l_checkBroken);
+static sd_str sd_f_lspApplyChange(sd_str l_text, sd_box * l_change);
+static bool sd_f_lspBlockHas(sd_S_Ast l_ast, sd_int l_b, sd_S_Pos l_at);
+static sd_list * sd_f_lspBuiltinItems(sd_S_Checker l_c, sd_int l_ty);
+static sd_box * sd_f_lspCapabilities(void);
+static sd_list * sd_f_lspCaseItems(sd_S_Checker l_c, sd_int l_d);
+static sd_S_LspSym sd_f_lspCaseSym(sd_S_Checker l_c, sd_int l_d, sd_int l_ci);
+static sd_int sd_f_lspCharBytes(uint8_t l_b);
+static sd_err sd_f_lspCommand(sd_str l_seedRoot);
+static sd_T_T2E10json_Valuee sd_f_lspCompletion(sd_S_LspJob l_job);
+static sd_S_LspSym sd_f_lspConstSym(sd_S_Checker l_c, sd_int l_k);
+static sd_S_LspSym sd_f_lspDeclAt(sd_S_Checker l_c, sd_list * l_toks, sd_int l_ti);
+static sd_S_Pos sd_f_lspDeclEnd(sd_list * l_toks, sd_S_Pos l_start);
+static sd_box * sd_f_lspDiagJson(sd_str l_src, sd_S_Pos l_pos, sd_str l_message, sd_int l_severity);
+static sd_box * sd_f_lspDiagParams(sd_str l_uri, sd_list * l_diags);
+static sd_T_T2E10json_Valuee sd_f_lspDiagnostics(sd_S_LspJob l_job);
+static sd_str sd_f_lspDocComment(sd_S_Ast l_ast, sd_int l_file, sd_int l_line);
+static sd_box * sd_f_lspErrorResponse(sd_box * l_id, sd_int l_code, sd_str l_message);
+static sd_S_LspSym sd_f_lspExprAt(sd_S_Checker l_c, sd_list * l_toks, sd_S_Pos l_p, sd_str l_name);
+static sd_S_LspSym sd_f_lspExprSym(sd_S_Checker l_c, sd_list * l_toks, sd_int l_e, sd_str l_name);
+static sd_S_LspSym sd_f_lspFieldSym(sd_S_Checker l_c, sd_int l_d, sd_int l_i);
+static sd_str sd_f_lspFnSig(sd_S_Ast l_ast, sd_int l_f);
+static sd_S_LspSym sd_f_lspFnSym(sd_S_Checker l_c, sd_int l_f);
+static sd_box * sd_f_lspFormat(sd_S_LspJob l_job);
+static sd_box * sd_f_lspGlobalItem(sd_S_Checker l_c, sd_int l_g);
+static sd_S_LspSym sd_f_lspGlobalSym(sd_S_Checker l_c, sd_int l_g);
+static bool sd_f_lspHasMain(sd_str l_text);
+static bool sd_f_lspIdentByte(uint8_t l_b);
+static sd_S_LspSym sd_f_lspIfaceMethodSym(sd_S_Checker l_c, sd_int l_d, sd_int l_mi);
+static sd_box * sd_f_lspItem(sd_str l_label, sd_int l_kind, sd_str l_detail, sd_str l_doc);
+static sd_err sd_f_lspJobTask(sd_S_LspJob l_job, sd_chan * l_out);
+static sd_str sd_f_lspJoinDoc(sd_str l_a, sd_str l_b);
+static sd_int sd_f_lspLineStart(sd_str l_src, sd_int l_line);
+static sd_list * sd_f_lspLocals(sd_S_Ast l_ast, sd_S_Pos l_at);
+static sd_T_T2E10json_Valuee sd_f_lspLookup(sd_S_LspJob l_job);
+static sd_list * sd_f_lspMemberItems(sd_S_Checker l_c, sd_S_Pos l_at, sd_str l_text, sd_int l_dot);
+static sd_str sd_f_lspMethodSigText(sd_S_Ast l_ast, sd_int l_m);
+static sd_S_LspSym sd_f_lspNameSym(sd_S_Checker l_c, sd_int l_file, sd_str l_name);
+static sd_int sd_f_lspNamedType(sd_S_Checker l_c, sd_int l_e);
+static sd_S_LspSym sd_f_lspNoSym(void);
+static sd_box * sd_f_lspNotification(sd_str l_method, sd_box * l_params);
+static sd_box * sd_f_lspNum(sd_int l_n);
+static sd_int sd_f_lspOffset(sd_str l_src, sd_int l_line, sd_int l_character);
+static sd_str sd_f_lspPackageClause(sd_str l_text);
+static sd_str sd_f_lspParamsText(sd_S_Ast l_ast, sd_int l_list, sd_int l_count);
+static sd_str sd_f_lspPathToUri(sd_str l_path);
+static sd_S_LspSym sd_f_lspPkgSym(sd_S_Checker l_c, sd_int l_pkg);
+static sd_S_Pos sd_f_lspPosOf(sd_str l_src, sd_int l_file, sd_int l_line, sd_int l_character);
+static sd_box * sd_f_lspPosition(sd_str l_src, sd_S_Pos l_pos);
+static sd_str sd_f_lspProjectRoot(sd_S_Loader l_l, sd_str l_pkgDir);
+static sd_S_LspSym sd_f_lspQualified(sd_S_Checker l_c, sd_list * l_toks, sd_int l_ti);
+static sd_box * sd_f_lspRange(sd_str l_src, sd_S_Pos l_start, sd_S_Pos l_end);
+static sd_T_T2Ose sd_f_lspReadMessage(void);
+static sd_T_T2se sd_f_lspReadText(sd_str l_path, sd_map * l_overlay);
+SD_NO_TCE static sd_str sd_f_lspRecvTypeName(sd_S_Ast l_ast, sd_int l_t);
+static sd_S_Ast sd_f_lspRepair(sd_S_Ast l_tree);
+static sd_S_LspSym sd_f_lspResolve(sd_S_Checker l_c, sd_list * l_toks, sd_int l_ti);
+static sd_box * sd_f_lspResponse(sd_box * l_id, sd_box * l_result);
+static sd_str sd_f_lspResultsText(sd_S_Ast l_ast, sd_int l_list, sd_int l_count);
+static sd_T_T2E10json_Valuee sd_f_lspRunJob(sd_S_LspJob l_job);
+static sd_list * sd_f_lspScopeItems(sd_S_Checker l_c, sd_S_Pos l_at);
+static void sd_f_lspSend(sd_box * l_msg);
+static sd_T_T2Lse sd_f_lspSourceFiles(sd_str l_dir, sd_map * l_overlay);
+static sd_int sd_f_lspStructDecl(sd_S_Checker l_c, sd_int l_t);
+static sd_S_LspSym sd_f_lspSymOf(sd_S_Pos l_pos, sd_str l_name, sd_str l_sig, sd_str l_doc);
+static sd_box * sd_f_lspSymbolJson(sd_str l_text, sd_str l_name, sd_int l_kind, sd_str l_detail, sd_S_Pos l_start, sd_S_Pos l_end, sd_S_Pos l_sel, sd_int l_selLen, sd_list * l_children);
+static sd_box * sd_f_lspSymbols(sd_S_LspJob l_job);
+static sd_int sd_f_lspTokenAt(sd_list * l_toks, sd_S_Pos l_cur);
+static sd_box * sd_f_lspTryJob(sd_S_LspJob l_job);
+static sd_S_LspSym sd_f_lspTypeDeclSym(sd_S_Checker l_c, sd_int l_d);
+static sd_list * sd_f_lspTypeItems(sd_S_Checker l_c, sd_int l_t, sd_S_Pos l_at);
+static sd_str sd_f_lspTypeSig(sd_S_Ast l_ast, sd_int l_d);
+static sd_S_LspSym sd_f_lspTypeSym(sd_S_Checker l_c, sd_int l_t);
+static sd_box * sd_f_lspTypeSymbolJson(sd_S_Ast l_ast, sd_str l_text, sd_list * l_toks, sd_int l_d);
+static sd_int sd_f_lspUnits(sd_str l_src, sd_int l_start, sd_int l_end);
+static sd_str sd_f_lspUriToPath(sd_str l_uri);
+static sd_S_LspSym sd_f_lspVarSym(sd_S_Checker l_c, sd_int l_v);
+static sd_S_LspSym sd_f_lspVarSymIn(sd_S_Checker l_c, sd_list * l_toks, sd_int l_v);
+SD_NO_TCE static sd_list * sd_f_lspWalkBlock(sd_S_Ast l_ast, sd_int l_b, sd_S_Pos l_at, sd_list * l_found);
+SD_NO_TCE static sd_list * sd_f_lspWalkExpr(sd_S_Ast l_ast, sd_int l_e, sd_S_Pos l_at, sd_list * l_found);
+SD_NO_TCE static sd_list * sd_f_lspWalkStmt(sd_S_Ast l_ast, sd_int l_s, sd_S_Pos l_at, sd_list * l_found);
+static sd_S_Pos sd_f_lspWordEnd(sd_str l_src, sd_S_Pos l_pos);
 static sd_str sd_f_macroArg(sd_str l_v, sd_str l_name);
 static sd_S_MagicDiv sd_f_magicDiv(sd_int l_c, sd_int l_max);
 static sd_err sd_f_main(sd_list * l_args);
@@ -9277,7 +9441,7 @@ static sd_T_T2S5Builde sd_f_targetOf(sd_list * l_args);
 static sd_str sd_f_tempDir(void);
 static sd_T_T2ie sd_f_testCommand(sd_str l_root, sd_list * l_args);
 static sd_T_T2Lie sd_f_testPackage(sd_str l_root, sd_str l_base, sd_str l_dir, sd_str l_work, sd_list * l_opts);
-static sd_T_T2Lse sd_f_testPackages(sd_str l_dir, sd_list * l_found);
+SD_NO_TCE static sd_T_T2Lse sd_f_testPackages(sd_str l_dir, sd_list * l_found);
 static sd_str sd_f_tokenChange(sd_str l_a, sd_str l_b);
 static sd_str sd_f_tokenDesc(sd_S_Token l_t);
 static sd_S_IntRange sd_f_topRange(void);
@@ -9304,90 +9468,91 @@ static sd_int sd_m_Ast__addTypeExpr(sd_S_Ast * l_a, sd_S_TypeExpr l_t);
 static sd_int sd_m_Ast__at(sd_S_Ast l_a, sd_int l_start, sd_int l_i);
 static sd_str sd_m_Ast__describe(sd_S_Ast l_a, sd_int l_e);
 static sd_str sd_m_Ast__dump(sd_S_Ast l_a);
-static sd_str sd_m_Ast__dumpBlock(sd_S_Ast l_a, sd_int l_b, sd_str l_indent);
-static sd_str sd_m_Ast__dumpCase(sd_S_Ast l_a, sd_int l_c, sd_str l_indent);
-static sd_str sd_m_Ast__dumpExpr(sd_S_Ast l_a, sd_int l_e);
-static sd_str sd_m_Ast__dumpExprs(sd_S_Ast l_a, sd_int l_start, sd_int l_count);
+SD_NO_TCE static sd_str sd_m_Ast__dumpBlock(sd_S_Ast l_a, sd_int l_b, sd_str l_indent);
+SD_NO_TCE static sd_str sd_m_Ast__dumpCase(sd_S_Ast l_a, sd_int l_c, sd_str l_indent);
+SD_NO_TCE static sd_str sd_m_Ast__dumpExpr(sd_S_Ast l_a, sd_int l_e);
+SD_NO_TCE static sd_str sd_m_Ast__dumpExprs(sd_S_Ast l_a, sd_int l_start, sd_int l_count);
 static sd_str sd_m_Ast__dumpParams(sd_S_Ast l_a, sd_int l_start, sd_int l_count);
-static sd_str sd_m_Ast__dumpStmt(sd_S_Ast l_a, sd_int l_s, sd_str l_indent);
-static sd_str sd_m_Ast__dumpTarget(sd_S_Ast l_a, sd_int l_t);
+SD_NO_TCE static sd_str sd_m_Ast__dumpStmt(sd_S_Ast l_a, sd_int l_s, sd_str l_indent);
+SD_NO_TCE static sd_str sd_m_Ast__dumpTarget(sd_S_Ast l_a, sd_int l_t);
 static sd_str sd_m_Ast__dumpTop(sd_S_Ast l_a, sd_S_TopDecl l_t);
-static sd_str sd_m_Ast__dumpType(sd_S_Ast l_a, sd_int l_t);
+SD_NO_TCE static sd_str sd_m_Ast__dumpType(sd_S_Ast l_a, sd_int l_t);
 static sd_str sd_m_Ast__dumpTypes(sd_S_Ast l_a, sd_int l_start, sd_int l_count);
-static sd_str sd_m_Ast__exprText(sd_S_Ast l_a, sd_int l_e);
-static sd_str sd_m_Ast__fullText(sd_S_Ast l_a, sd_int l_e);
-static sd_str sd_m_Ast__typeExprText(sd_S_Ast l_a, sd_int l_t);
-static void sd_m_CallGraph__strong(sd_S_CallGraph * l_cg, sd_int l_v);
+SD_NO_TCE static sd_str sd_m_Ast__exprText(sd_S_Ast l_a, sd_int l_e);
+SD_NO_TCE static sd_str sd_m_Ast__fullText(sd_S_Ast l_a, sd_int l_e);
+static void sd_m_Ast__lspRepairList(sd_S_Ast * l_a, sd_int l_start, sd_int l_count, sd_int l_m);
+SD_NO_TCE static sd_str sd_m_Ast__typeExprText(sd_S_Ast l_a, sd_int l_t);
+SD_NO_TCE static void sd_m_CallGraph__strong(sd_S_CallGraph * l_cg, sd_int l_v);
 static void sd_m_Checker__addGlobal(sd_S_Checker * l_c, sd_str l_name, sd_box * l_kind, sd_int l_index, sd_S_Pos l_pos);
 static void sd_m_Checker__addGuards(sd_S_Checker * l_c, sd_int l_s, sd_int l_rt);
 static void sd_m_Checker__addNarrow(sd_S_Checker * l_c, sd_str l_key);
 static void sd_m_Checker__applyNarrowing(sd_S_Checker * l_c, sd_int l_e);
 static bool sd_m_Checker__assignable(sd_S_Checker l_c, sd_int l_from, sd_int l_to);
 static void sd_m_Checker__assigned(sd_S_Checker * l_c, sd_str l_key);
-static bool sd_m_Checker__blockExits(sd_S_Checker l_c, sd_int l_b);
-static bool sd_m_Checker__blockReads(sd_S_Checker l_c, sd_int l_b, sd_int l_v);
+SD_NO_TCE static bool sd_m_Checker__blockExits(sd_S_Checker l_c, sd_int l_b);
+SD_NO_TCE static bool sd_m_Checker__blockReads(sd_S_Checker l_c, sd_int l_b, sd_int l_v);
 static sd_int sd_m_Checker__caseParamType(sd_S_Checker l_c, sd_int l_d, sd_int l_ci, sd_int l_k);
 static sd_str sd_m_Checker__casePattern(sd_S_Checker l_c, sd_int l_d, sd_int l_ci);
-static void sd_m_Checker__checkArgs(sd_S_Checker * l_c, sd_int l_call, sd_list * l_params, sd_str l_what);
-static void sd_m_Checker__checkArgsLoosely(sd_S_Checker * l_c, sd_int l_e);
-static void sd_m_Checker__checkAssert(sd_S_Checker * l_c, sd_S_Stmt l_st);
-static void sd_m_Checker__checkAssign(sd_S_Checker * l_c, sd_int l_s);
-static void sd_m_Checker__checkBinary(sd_S_Checker * l_c, sd_int l_e);
-static void sd_m_Checker__checkBlock(sd_S_Checker * l_c, sd_int l_b);
-static sd_list * sd_m_Checker__checkBlockLive(sd_S_Checker * l_c, sd_int l_b);
-static void sd_m_Checker__checkBuiltin(sd_S_Checker * l_c, sd_int l_e, sd_int l_recv, sd_str l_name);
-static void sd_m_Checker__checkCall(sd_S_Checker * l_c, sd_int l_e);
+SD_NO_TCE static void sd_m_Checker__checkArgs(sd_S_Checker * l_c, sd_int l_call, sd_list * l_params, sd_str l_what);
+SD_NO_TCE static void sd_m_Checker__checkArgsLoosely(sd_S_Checker * l_c, sd_int l_e);
+SD_NO_TCE static void sd_m_Checker__checkAssert(sd_S_Checker * l_c, sd_S_Stmt l_st);
+SD_NO_TCE static void sd_m_Checker__checkAssign(sd_S_Checker * l_c, sd_int l_s);
+SD_NO_TCE static void sd_m_Checker__checkBinary(sd_S_Checker * l_c, sd_int l_e);
+SD_NO_TCE static void sd_m_Checker__checkBlock(sd_S_Checker * l_c, sd_int l_b);
+SD_NO_TCE static sd_list * sd_m_Checker__checkBlockLive(sd_S_Checker * l_c, sd_int l_b);
+SD_NO_TCE static void sd_m_Checker__checkBuiltin(sd_S_Checker * l_c, sd_int l_e, sd_int l_recv, sd_str l_name);
+SD_NO_TCE static void sd_m_Checker__checkCall(sd_S_Checker * l_c, sd_int l_e);
 static void sd_m_Checker__checkCamel(sd_S_Checker * l_c, sd_str l_name, sd_S_Pos l_pos, sd_str l_what);
-static void sd_m_Checker__checkConst(sd_S_Checker * l_c, sd_int l_i);
-static void sd_m_Checker__checkConversion(sd_S_Checker * l_c, sd_int l_e, sd_str l_n);
+SD_NO_TCE static void sd_m_Checker__checkConst(sd_S_Checker * l_c, sd_int l_i);
+SD_NO_TCE static void sd_m_Checker__checkConversion(sd_S_Checker * l_c, sd_int l_e, sd_str l_n);
 static void sd_m_Checker__checkDeclNames(sd_S_Checker * l_c);
-static void sd_m_Checker__checkDefer(sd_S_Checker * l_c, sd_S_Stmt l_st);
-static void sd_m_Checker__checkEnumNew(sd_S_Checker * l_c, sd_int l_e, sd_int l_d, sd_str l_name);
-static void sd_m_Checker__checkEnumSwitch(sd_S_Checker * l_c, sd_S_Stmt l_st, sd_int l_t);
-static void sd_m_Checker__checkExpr(sd_S_Checker * l_c, sd_int l_e);
-static void sd_m_Checker__checkExprStmt(sd_S_Checker * l_c, sd_S_Stmt l_st);
-static void sd_m_Checker__checkField(sd_S_Checker * l_c, sd_int l_e);
-static void sd_m_Checker__checkFieldValuesLoosely(sd_S_Checker * l_c, sd_int l_e);
+SD_NO_TCE static void sd_m_Checker__checkDefer(sd_S_Checker * l_c, sd_S_Stmt l_st);
+SD_NO_TCE static void sd_m_Checker__checkEnumNew(sd_S_Checker * l_c, sd_int l_e, sd_int l_d, sd_str l_name);
+SD_NO_TCE static void sd_m_Checker__checkEnumSwitch(sd_S_Checker * l_c, sd_S_Stmt l_st, sd_int l_t);
+SD_NO_TCE static void sd_m_Checker__checkExpr(sd_S_Checker * l_c, sd_int l_e);
+SD_NO_TCE static void sd_m_Checker__checkExprStmt(sd_S_Checker * l_c, sd_S_Stmt l_st);
+SD_NO_TCE static void sd_m_Checker__checkField(sd_S_Checker * l_c, sd_int l_e);
+SD_NO_TCE static void sd_m_Checker__checkFieldValuesLoosely(sd_S_Checker * l_c, sd_int l_e);
 static void sd_m_Checker__checkFnBody(sd_S_Checker * l_c, sd_int l_f);
-static void sd_m_Checker__checkFor(sd_S_Checker * l_c, sd_S_Stmt l_st);
-static void sd_m_Checker__checkGlobalCall(sd_S_Checker * l_c, sd_int l_e, sd_int l_g, sd_str l_what);
-static void sd_m_Checker__checkGroup(sd_S_Checker * l_c, sd_int l_e);
-static void sd_m_Checker__checkIdent(sd_S_Checker * l_c, sd_int l_e);
-static void sd_m_Checker__checkIf(sd_S_Checker * l_c, sd_S_Stmt l_st);
-static void sd_m_Checker__checkIfaceCall(sd_S_Checker * l_c, sd_int l_e, sd_int l_base, sd_int l_it, sd_str l_name);
+SD_NO_TCE static void sd_m_Checker__checkFor(sd_S_Checker * l_c, sd_S_Stmt l_st);
+SD_NO_TCE static void sd_m_Checker__checkGlobalCall(sd_S_Checker * l_c, sd_int l_e, sd_int l_g, sd_str l_what);
+SD_NO_TCE static void sd_m_Checker__checkGroup(sd_S_Checker * l_c, sd_int l_e);
+SD_NO_TCE static void sd_m_Checker__checkIdent(sd_S_Checker * l_c, sd_int l_e);
+SD_NO_TCE static void sd_m_Checker__checkIf(sd_S_Checker * l_c, sd_S_Stmt l_st);
+SD_NO_TCE static void sd_m_Checker__checkIfaceCall(sd_S_Checker * l_c, sd_int l_e, sd_int l_base, sd_int l_it, sd_str l_name);
 static void sd_m_Checker__checkImplements(sd_S_Checker * l_c);
 static void sd_m_Checker__checkImplementsOne(sd_S_Checker * l_c, sd_int l_d, sd_int l_iface, sd_S_Pos l_pos);
 static void sd_m_Checker__checkImports(sd_S_Checker * l_c);
-static void sd_m_Checker__checkIncDec(sd_S_Checker * l_c, sd_S_Stmt l_st);
-static void sd_m_Checker__checkIndex(sd_S_Checker * l_c, sd_int l_e);
+SD_NO_TCE static void sd_m_Checker__checkIncDec(sd_S_Checker * l_c, sd_S_Stmt l_st);
+SD_NO_TCE static void sd_m_Checker__checkIndex(sd_S_Checker * l_c, sd_int l_e);
 static void sd_m_Checker__checkLoopGuards(sd_S_Checker * l_c, sd_S_Stmt l_st, sd_list * l_before);
-static void sd_m_Checker__checkLvalue(sd_S_Checker * l_c, sd_int l_e);
+SD_NO_TCE static void sd_m_Checker__checkLvalue(sd_S_Checker * l_c, sd_int l_e);
 static void sd_m_Checker__checkMain(sd_S_Checker * l_c);
-static void sd_m_Checker__checkMapLit(sd_S_Checker * l_c, sd_int l_e);
-static void sd_m_Checker__checkNamedCall(sd_S_Checker * l_c, sd_int l_e, sd_str l_n);
+SD_NO_TCE static void sd_m_Checker__checkMapLit(sd_S_Checker * l_c, sd_int l_e);
+SD_NO_TCE static void sd_m_Checker__checkNamedCall(sd_S_Checker * l_c, sd_int l_e, sd_str l_n);
 static void sd_m_Checker__checkPascal(sd_S_Checker * l_c, sd_str l_name, sd_S_Pos l_pos, sd_str l_what);
 static void sd_m_Checker__checkPattern(sd_S_Checker * l_c, sd_int l_li, sd_int l_d, sd_int l_ci, bool l_shared);
 static void sd_m_Checker__checkProgram(sd_S_Checker * l_c);
-static void sd_m_Checker__checkReturn(sd_S_Checker * l_c, sd_S_Stmt l_st);
-static void sd_m_Checker__checkSelect(sd_S_Checker * l_c, sd_S_Stmt l_st);
-static void sd_m_Checker__checkSelectComm(sd_S_Checker * l_c, sd_int l_s);
-static void sd_m_Checker__checkSelectorCall(sd_S_Checker * l_c, sd_int l_e);
-static void sd_m_Checker__checkSpawn(sd_S_Checker * l_c, sd_S_Stmt l_st);
-static void sd_m_Checker__checkStmt(sd_S_Checker * l_c, sd_int l_s);
-static void sd_m_Checker__checkStructCycles(sd_S_Checker * l_c, sd_int l_d, sd_list * l_path);
-static void sd_m_Checker__checkStructLit(sd_S_Checker * l_c, sd_int l_e);
-static void sd_m_Checker__checkSwitch(sd_S_Checker * l_c, sd_S_Stmt l_st);
-static void sd_m_Checker__checkSwitchCases(sd_S_Checker * l_c, sd_S_Stmt l_st);
-static void sd_m_Checker__checkTry(sd_S_Checker * l_c, sd_int l_e);
+SD_NO_TCE static void sd_m_Checker__checkReturn(sd_S_Checker * l_c, sd_S_Stmt l_st);
+SD_NO_TCE static void sd_m_Checker__checkSelect(sd_S_Checker * l_c, sd_S_Stmt l_st);
+SD_NO_TCE static void sd_m_Checker__checkSelectComm(sd_S_Checker * l_c, sd_int l_s);
+SD_NO_TCE static void sd_m_Checker__checkSelectorCall(sd_S_Checker * l_c, sd_int l_e);
+SD_NO_TCE static void sd_m_Checker__checkSpawn(sd_S_Checker * l_c, sd_S_Stmt l_st);
+SD_NO_TCE static void sd_m_Checker__checkStmt(sd_S_Checker * l_c, sd_int l_s);
+SD_NO_TCE static void sd_m_Checker__checkStructCycles(sd_S_Checker * l_c, sd_int l_d, sd_list * l_path);
+SD_NO_TCE static void sd_m_Checker__checkStructLit(sd_S_Checker * l_c, sd_int l_e);
+SD_NO_TCE static void sd_m_Checker__checkSwitch(sd_S_Checker * l_c, sd_S_Stmt l_st);
+SD_NO_TCE static void sd_m_Checker__checkSwitchCases(sd_S_Checker * l_c, sd_S_Stmt l_st);
+SD_NO_TCE static void sd_m_Checker__checkTry(sd_S_Checker * l_c, sd_int l_e);
 static void sd_m_Checker__checkUnusedImports(sd_S_Checker * l_c);
 static void sd_m_Checker__checkUnusedResult(sd_S_Checker * l_c, sd_int l_e);
 static void sd_m_Checker__checkUnusedVars(sd_S_Checker * l_c, sd_int l_first);
-static void sd_m_Checker__checkValue(sd_S_Checker * l_c, sd_int l_e, sd_int l_want, sd_str l_context);
-static void sd_m_Checker__checkValueCall(sd_S_Checker * l_c, sd_int l_e);
+SD_NO_TCE static void sd_m_Checker__checkValue(sd_S_Checker * l_c, sd_int l_e, sd_int l_want, sd_str l_context);
+SD_NO_TCE static void sd_m_Checker__checkValueCall(sd_S_Checker * l_c, sd_int l_e);
 static void sd_m_Checker__coerce(sd_S_Checker * l_c, sd_int l_e, sd_int l_want, sd_str l_context);
 static void sd_m_Checker__collectGlobals(sd_S_Checker * l_c);
-static bool sd_m_Checker__comparable(sd_S_Checker l_c, sd_int l_t, sd_list * l_seen);
-static sd_list * sd_m_Checker__condKeys(sd_S_Checker l_c, sd_int l_cond, bool l_when, sd_list * l_out);
+SD_NO_TCE static bool sd_m_Checker__comparable(sd_S_Checker l_c, sd_int l_t, sd_list * l_seen);
+SD_NO_TCE static sd_list * sd_m_Checker__condKeys(sd_S_Checker l_c, sd_int l_cond, bool l_when, sd_list * l_out);
 static sd_str sd_m_Checker__declCName(sd_S_Checker l_c, sd_int l_d);
 static sd_str sd_m_Checker__declDisplayName(sd_S_Checker l_c, sd_int l_d);
 static sd_int sd_m_Checker__declPkg(sd_S_Checker l_c, sd_int l_d);
@@ -9400,7 +9565,7 @@ static void sd_m_Checker__endGuard(sd_S_Checker * l_c, sd_str l_key);
 static sd_S_EnumCase sd_m_Checker__enumCase(sd_S_Checker l_c, sd_int l_d, sd_int l_i);
 static void sd_m_Checker__error(sd_S_Checker * l_c, sd_S_Pos l_pos, sd_str l_message);
 static void sd_m_Checker__errorHint(sd_S_Checker * l_c, sd_S_Pos l_pos, sd_str l_message, sd_str l_hint);
-static bool sd_m_Checker__exprReads(sd_S_Checker l_c, sd_int l_e, sd_int l_v);
+SD_NO_TCE static bool sd_m_Checker__exprReads(sd_S_Checker l_c, sd_int l_e, sd_int l_v);
 static sd_str sd_m_Checker__fieldName(sd_S_Checker l_c, sd_int l_d, sd_int l_i);
 static sd_int sd_m_Checker__fieldType(sd_S_Checker l_c, sd_int l_d, sd_int l_i);
 static bool sd_m_Checker__fieldVisible(sd_S_Checker l_c, sd_int l_d, sd_int l_i, sd_S_Pos l_pos);
@@ -9413,9 +9578,9 @@ static sd_int sd_m_Checker__global(sd_S_Checker l_c, sd_int l_pkg, sd_str l_name
 static bool sd_m_Checker__globalPub(sd_S_Checker l_c, sd_int l_g);
 static void sd_m_Checker__guardError(sd_S_Checker * l_c, sd_int l_g, sd_str l_n, sd_S_Pos l_pos);
 static sd_int sd_m_Checker__guardOf(sd_S_Checker l_c, sd_int l_v);
-static bool sd_m_Checker__hasBreak(sd_S_Checker l_c, sd_int l_b);
-static bool sd_m_Checker__hasChan(sd_S_Checker l_c, sd_int l_t, sd_list * l_seen);
-static void sd_m_Checker__identGlobal(sd_S_Checker * l_c, sd_int l_e, sd_int l_g);
+SD_NO_TCE static bool sd_m_Checker__hasBreak(sd_S_Checker l_c, sd_int l_b);
+SD_NO_TCE static bool sd_m_Checker__hasChan(sd_S_Checker l_c, sd_int l_t, sd_list * l_seen);
+SD_NO_TCE static void sd_m_Checker__identGlobal(sd_S_Checker * l_c, sd_int l_e, sd_int l_g);
 static sd_S_MethodSig sd_m_Checker__ifaceMethod(sd_S_Checker l_c, sd_int l_d, sd_int l_i);
 static sd_int sd_m_Checker__ifaceMethodCount(sd_S_Checker l_c, sd_int l_iface);
 static bool sd_m_Checker__ifaceMethodMut(sd_S_Checker l_c, sd_int l_iface, sd_int l_i);
@@ -9443,11 +9608,11 @@ static sd_list * sd_m_Checker__liveNarrows(sd_S_Checker l_c);
 static sd_int sd_m_Checker__lookupVar(sd_S_Checker l_c, sd_str l_name);
 static sd_list * sd_m_Checker__loopGuards(sd_S_Checker l_c);
 static void sd_m_Checker__narrowOn(sd_S_Checker * l_c, sd_int l_cond, bool l_when);
-static sd_int sd_m_Checker__nonConstant(sd_S_Checker l_c, sd_int l_e);
+SD_NO_TCE static sd_int sd_m_Checker__nonConstant(sd_S_Checker l_c, sd_int l_e);
 static void sd_m_Checker__notValue(sd_S_Checker * l_c, sd_int l_e);
 static sd_str sd_m_Checker__nullHint(sd_S_Checker l_c, sd_int l_e, sd_int l_t, sd_str l_action);
 static sd_int sd_m_Checker__paramType(sd_S_Checker l_c, sd_int l_f, sd_int l_i);
-static sd_str sd_m_Checker__pathKey(sd_S_Checker l_c, sd_int l_e);
+SD_NO_TCE static sd_str sd_m_Checker__pathKey(sd_S_Checker l_c, sd_int l_e);
 static sd_int sd_m_Checker__pkgMember(sd_S_Checker * l_c, sd_int l_pkg, sd_str l_name, sd_S_Pos l_pos);
 static sd_int sd_m_Checker__pkgNamed(sd_S_Checker * l_c, sd_int l_e);
 static sd_int sd_m_Checker__pkgOf(sd_S_Checker l_c, sd_S_Pos l_pos);
@@ -9458,22 +9623,22 @@ static bool sd_m_Checker__readsBeforeAssign(sd_S_Checker l_c, sd_S_Stmt l_loop, 
 static void sd_m_Checker__reportUnreachable(sd_S_Checker * l_c, sd_int l_s);
 static void sd_m_Checker__requireConstant(sd_S_Checker * l_c, sd_int l_e, sd_str l_name);
 static void sd_m_Checker__requireMutable(sd_S_Checker * l_c, sd_int l_e, sd_str l_what);
-static sd_int sd_m_Checker__resolve(sd_S_Checker * l_c, sd_int l_te);
+SD_NO_TCE static sd_int sd_m_Checker__resolve(sd_S_Checker * l_c, sd_int l_te);
 static void sd_m_Checker__resolveInterface(sd_S_Checker * l_c, sd_int l_d);
 static sd_int sd_m_Checker__resolveQualified(sd_S_Checker * l_c, sd_S_TypeExpr l_x);
 static void sd_m_Checker__resolveSignature(sd_S_Checker * l_c, sd_int l_f);
-static void sd_m_Checker__resolveType(sd_S_Checker * l_c, sd_int l_te);
+SD_NO_TCE static void sd_m_Checker__resolveType(sd_S_Checker * l_c, sd_int l_te);
 static void sd_m_Checker__resolveTypeDecl(sd_S_Checker * l_c, sd_int l_d);
-static sd_int sd_m_Checker__resolveUncached(sd_S_Checker * l_c, sd_int l_te);
+SD_NO_TCE static sd_int sd_m_Checker__resolveUncached(sd_S_Checker * l_c, sd_int l_te);
 static sd_int sd_m_Checker__resultOf(sd_S_Checker * l_c, sd_list * l_rs);
 static sd_int sd_m_Checker__resultType(sd_S_Checker l_c, sd_int l_f, sd_int l_i);
-static void sd_m_Checker__scanBlockKills(sd_S_Checker * l_c, sd_int l_b);
-static void sd_m_Checker__scanExprKills(sd_S_Checker * l_c, sd_int l_e);
-static void sd_m_Checker__scanStmtKills(sd_S_Checker * l_c, sd_int l_s);
+SD_NO_TCE static void sd_m_Checker__scanBlockKills(sd_S_Checker * l_c, sd_int l_b);
+SD_NO_TCE static void sd_m_Checker__scanExprKills(sd_S_Checker * l_c, sd_int l_e);
+SD_NO_TCE static void sd_m_Checker__scanStmtKills(sd_S_Checker * l_c, sd_int l_s);
 static void sd_m_Checker__setType(sd_S_Checker * l_c, sd_int l_e, sd_int l_t);
-static bool sd_m_Checker__stmtExits(sd_S_Checker l_c, sd_int l_s);
-static bool sd_m_Checker__stmtHasBreak(sd_S_Checker l_c, sd_int l_s);
-static bool sd_m_Checker__stmtReads(sd_S_Checker l_c, sd_int l_s, sd_int l_v);
+SD_NO_TCE static bool sd_m_Checker__stmtExits(sd_S_Checker l_c, sd_int l_s);
+SD_NO_TCE static bool sd_m_Checker__stmtHasBreak(sd_S_Checker l_c, sd_int l_s);
+SD_NO_TCE static bool sd_m_Checker__stmtReads(sd_S_Checker l_c, sd_int l_s, sd_int l_v);
 static void sd_m_Checker__truncateNarrows(sd_S_Checker * l_c, sd_int l_n);
 static void sd_m_Checker__truncateScope(sd_S_Checker * l_c, sd_int l_n);
 static sd_str sd_m_Checker__typeName(sd_S_Checker l_c, sd_int l_t);
@@ -9513,19 +9678,19 @@ static void sd_m_Formatter__newline(sd_S_Formatter * l_f, sd_int l_indent, bool 
 static void sd_m_Formatter__openFrame(sd_S_Formatter * l_f, sd_int l_i);
 static bool sd_m_Formatter__operandEnd(sd_S_Formatter l_f, sd_int l_i);
 static sd_S_FmtPlace sd_m_Formatter__place(sd_S_Formatter l_f, sd_int l_i);
-static sd_int sd_m_Formatter__skipBaseType(sd_S_Formatter l_f, sd_int l_i);
+SD_NO_TCE static sd_int sd_m_Formatter__skipBaseType(sd_S_Formatter l_f, sd_int l_i);
 static bool sd_m_Formatter__statementFrame(sd_S_Formatter l_f, sd_int l_s);
 static bool sd_m_Formatter__structural(sd_S_Formatter l_f, sd_int l_s);
 static bool sd_m_Formatter__topBlank(sd_S_Formatter l_f, sd_int l_i, sd_int l_line);
-static bool sd_m_Gen__accBodyOk(sd_S_Gen l_g, sd_int l_b);
+SD_NO_TCE static bool sd_m_Gen__accBodyOk(sd_S_Gen l_g, sd_int l_b);
 static sd_list * sd_m_Gen__accBounded(sd_S_Gen l_g, sd_S_Stmt l_st, sd_list * l_acc);
 static sd_int sd_m_Gen__accLocal(sd_S_Gen l_g, sd_int l_e);
-static sd_int sd_m_Gen__accSize(sd_S_Gen l_g, sd_int l_b);
-static sd_int sd_m_Gen__accSizeStmt(sd_S_Gen l_g, sd_int l_s);
+SD_NO_TCE static sd_int sd_m_Gen__accSize(sd_S_Gen l_g, sd_int l_b);
+SD_NO_TCE static sd_int sd_m_Gen__accSizeStmt(sd_S_Gen l_g, sd_int l_s);
 static sd_int sd_m_Gen__accStep(sd_S_Gen l_g, sd_S_AccUpdate l_u);
-static bool sd_m_Gen__accStmtOk(sd_S_Gen l_g, sd_int l_s);
-static sd_list * sd_m_Gen__accTail(sd_S_Gen l_g, sd_int l_b, sd_list * l_acc);
-static sd_list * sd_m_Gen__accTailStmt(sd_S_Gen l_g, sd_int l_s, sd_list * l_acc);
+SD_NO_TCE static bool sd_m_Gen__accStmtOk(sd_S_Gen l_g, sd_int l_s);
+SD_NO_TCE static sd_list * sd_m_Gen__accTail(sd_S_Gen l_g, sd_int l_b, sd_list * l_acc);
+SD_NO_TCE static sd_list * sd_m_Gen__accTailStmt(sd_S_Gen l_g, sd_int l_s, sd_list * l_acc);
 static sd_S_AccUpdate sd_m_Gen__accUpdate(sd_S_Gen l_g, sd_int l_s);
 static sd_list * sd_m_Gen__accVars(sd_S_Gen l_g, sd_S_Stmt l_st);
 static void sd_m_Gen__addDecls(sd_S_Gen * l_g, sd_map * l_byKey);
@@ -9535,41 +9700,41 @@ static sd_str sd_m_Gen__alias(sd_S_Gen * l_g, sd_int l_t, sd_str l_cexpr);
 static void sd_m_Gen__analyzeBorrows(sd_S_Gen * l_g, sd_int l_b);
 static void sd_m_Gen__analyzeInts(sd_S_Gen * l_g, sd_int l_b);
 static void sd_m_Gen__analyzeMoves(sd_S_Gen * l_g, sd_int l_b);
-static sd_int sd_m_Gen__appendRoot(sd_S_Gen l_g, sd_int l_e);
+SD_NO_TCE static sd_int sd_m_Gen__appendRoot(sd_S_Gen l_g, sd_int l_e);
 static sd_int sd_m_Gen__arg(sd_S_Gen l_g, sd_int l_e, sd_int l_i);
 static sd_list * sd_m_Gen__argList(sd_S_Gen l_g, sd_int l_e);
 static sd_str sd_m_Gen__binaryOp(sd_S_Gen * l_g, sd_box * l_op, sd_int l_t, sd_str l_a, sd_str l_b);
-static bool sd_m_Gen__blockAssigns(sd_S_Gen l_g, sd_int l_b, sd_int l_v);
-static bool sd_m_Gen__blockHasDefer(sd_S_Gen l_g, sd_int l_b);
-static void sd_m_Gen__bwBlock(sd_S_Gen * l_g, sd_int l_b);
+SD_NO_TCE static bool sd_m_Gen__blockAssigns(sd_S_Gen l_g, sd_int l_b, sd_int l_v);
+SD_NO_TCE static bool sd_m_Gen__blockHasDefer(sd_S_Gen l_g, sd_int l_b);
+SD_NO_TCE static void sd_m_Gen__bwBlock(sd_S_Gen * l_g, sd_int l_b);
 static void sd_m_Gen__bwCandidate(sd_S_Gen * l_g, sd_int l_s);
 static void sd_m_Gen__bwEvent(sd_S_Gen * l_g, sd_int l_place, sd_int l_method);
-static void sd_m_Gen__bwExpr(sd_S_Gen * l_g, sd_int l_e);
-static void sd_m_Gen__bwStmt(sd_S_Gen * l_g, sd_int l_s);
+SD_NO_TCE static void sd_m_Gen__bwExpr(sd_S_Gen * l_g, sd_int l_e);
+SD_NO_TCE static void sd_m_Gen__bwStmt(sd_S_Gen * l_g, sd_int l_s);
 static sd_str sd_m_Gen__callFrom(sd_S_Gen * l_g, sd_int l_e, sd_list * l_vals);
 static bool sd_m_Gen__callMayRecurse(sd_S_Gen l_g, sd_int l_callee);
 static bool sd_m_Gen__callNeedsCheck(sd_S_Gen l_g, sd_int l_e);
 static sd_list * sd_m_Gen__callOperands(sd_S_Gen l_g, sd_int l_e);
 static sd_int sd_m_Gen__commExpr(sd_S_Gen l_g, sd_int l_comm);
 static void sd_m_Gen__computeModSets(sd_S_Gen * l_g);
-static sd_list * sd_m_Gen__concatLeaves(sd_S_Gen l_g, sd_int l_e, sd_list * l_acc);
-static sd_str sd_m_Gen__concatOf(sd_S_Gen * l_g, sd_list * l_leaves);
+SD_NO_TCE static sd_list * sd_m_Gen__concatLeaves(sd_S_Gen l_g, sd_int l_e, sd_list * l_acc);
+SD_NO_TCE static sd_str sd_m_Gen__concatOf(sd_S_Gen * l_g, sd_list * l_leaves);
 static sd_str sd_m_Gen__concatVals(sd_S_Gen * l_g, sd_list * l_vals);
 static sd_str sd_m_Gen__condVal(sd_S_Gen * l_g, sd_str l_c, sd_int l_mark);
-static sd_list * sd_m_Gen__conjuncts(sd_S_Gen l_g, sd_int l_e, sd_list * l_acc);
+SD_NO_TCE static sd_list * sd_m_Gen__conjuncts(sd_S_Gen l_g, sd_int l_e, sd_list * l_acc);
 static sd_str sd_m_Gen__constCName(sd_S_Gen l_g, sd_int l_i);
 static void sd_m_Gen__consume(sd_S_Gen * l_g, sd_str l_v);
 static sd_int sd_m_Gen__coreType(sd_S_Gen l_g, sd_int l_e);
-static sd_int sd_m_Gen__countVarBlock(sd_S_Gen l_g, sd_int l_b, sd_int l_v);
-static sd_int sd_m_Gen__countVarExpr(sd_S_Gen l_g, sd_int l_e, sd_int l_v);
-static sd_int sd_m_Gen__countVarStmt(sd_S_Gen l_g, sd_int l_s, sd_int l_v);
-static bool sd_m_Gen__counted(sd_S_Gen * l_g, sd_int l_t);
+SD_NO_TCE static sd_int sd_m_Gen__countVarBlock(sd_S_Gen l_g, sd_int l_b, sd_int l_v);
+SD_NO_TCE static sd_int sd_m_Gen__countVarExpr(sd_S_Gen l_g, sd_int l_e, sd_int l_v);
+SD_NO_TCE static sd_int sd_m_Gen__countVarStmt(sd_S_Gen l_g, sd_int l_s, sd_int l_v);
+SD_NO_TCE static bool sd_m_Gen__counted(sd_S_Gen * l_g, sd_int l_t);
 static sd_int sd_m_Gen__countedVar(sd_S_Gen l_g, sd_S_Stmt l_st);
-static sd_str sd_m_Gen__ctype(sd_S_Gen l_g, sd_int l_t);
+SD_NO_TCE static sd_str sd_m_Gen__ctype(sd_S_Gen l_g, sd_int l_t);
 static sd_str sd_m_Gen__declName(sd_S_Gen l_g, sd_int l_t);
 static void sd_m_Gen__declareLocal(sd_S_Gen * l_g, sd_int l_v, sd_int l_t, sd_str l_value);
 static bool sd_m_Gen__declaredIn(sd_S_Gen l_g, sd_int l_v, sd_S_Stmt l_st);
-static sd_str sd_m_Gen__desc(sd_S_Gen l_g, sd_int l_t);
+SD_NO_TCE static sd_str sd_m_Gen__desc(sd_S_Gen l_g, sd_int l_t);
 static sd_str sd_m_Gen__descriptorText(sd_S_Gen * l_g, sd_int l_d);
 static sd_str sd_m_Gen__divNonNeg(sd_S_Gen * l_g, sd_int l_e, sd_str l_a, sd_str l_b);
 static sd_int sd_m_Gen__elemOf(sd_S_Gen l_g, sd_int l_t);
@@ -9577,23 +9742,23 @@ static void sd_m_Gen__emit(sd_S_Gen * l_g, sd_str l_line);
 static void sd_m_Gen__emitMaterialise(sd_S_Gen * l_g, sd_list * l_acc, sd_int l_skip);
 static void sd_m_Gen__emitReturn(sd_S_Gen * l_g, sd_str l_value, sd_list * l_keep);
 static sd_str sd_m_Gen__enumDefText(sd_S_Gen l_g, sd_int l_d);
-static sd_str sd_m_Gen__eqExpr(sd_S_Gen * l_g, sd_int l_t, sd_str l_a, sd_str l_b);
+SD_NO_TCE static sd_str sd_m_Gen__eqExpr(sd_S_Gen * l_g, sd_int l_t, sd_str l_a, sd_str l_b);
 static sd_str sd_m_Gen__errReturn(sd_S_Gen l_g, sd_str l_err);
 static bool sd_m_Gen__eventHits(sd_S_Gen l_g, sd_S_MutEvent l_ev, sd_str l_p);
 static sd_S_IntRange sd_m_Gen__eventRange(sd_S_Gen l_g, sd_S_IntEvent l_ev, sd_map * l_cur);
 static sd_str sd_m_Gen__expandFrame(sd_S_Gen l_g, sd_str l_line);
-static sd_str sd_m_Gen__fastBinary(sd_S_Gen * l_g, sd_int l_e);
-static void sd_m_Gen__fastBlock(sd_S_Gen * l_g, sd_int l_b);
-static bool sd_m_Gen__fastBlockOk(sd_S_Gen * l_g, sd_int l_b);
+SD_NO_TCE static sd_str sd_m_Gen__fastBinary(sd_S_Gen * l_g, sd_int l_e);
+SD_NO_TCE static void sd_m_Gen__fastBlock(sd_S_Gen * l_g, sd_int l_b);
+SD_NO_TCE static bool sd_m_Gen__fastBlockOk(sd_S_Gen * l_g, sd_int l_b);
 static sd_str sd_m_Gen__fastConst(sd_S_Gen l_g, sd_int l_ci);
-static sd_str sd_m_Gen__fastExpr(sd_S_Gen * l_g, sd_int l_e);
-static bool sd_m_Gen__fastExprOk(sd_S_Gen * l_g, sd_int l_e);
+SD_NO_TCE static sd_str sd_m_Gen__fastExpr(sd_S_Gen * l_g, sd_int l_e);
+SD_NO_TCE static bool sd_m_Gen__fastExprOk(sd_S_Gen * l_g, sd_int l_e);
 static sd_str sd_m_Gen__fastHead(sd_S_Gen l_g, sd_int l_f);
 static bool sd_m_Gen__fastLocal(sd_S_Gen l_g, sd_int l_e);
 static sd_str sd_m_Gen__fastName(sd_S_Gen l_g, sd_int l_f);
 static bool sd_m_Gen__fastSignature(sd_S_Gen l_g, sd_int l_f);
-static void sd_m_Gen__fastStmt(sd_S_Gen * l_g, sd_int l_s);
-static bool sd_m_Gen__fastStmtOk(sd_S_Gen * l_g, sd_int l_s);
+SD_NO_TCE static void sd_m_Gen__fastStmt(sd_S_Gen * l_g, sd_int l_s);
+SD_NO_TCE static bool sd_m_Gen__fastStmtOk(sd_S_Gen * l_g, sd_int l_s);
 static sd_str sd_m_Gen__fastTemp(sd_S_Gen * l_g, sd_str l_ctype, sd_str l_cexpr);
 static sd_str sd_m_Gen__fieldPath(sd_S_Gen l_g, sd_int l_e);
 static void sd_m_Gen__findFastFns(sd_S_Gen * l_g);
@@ -9602,87 +9767,87 @@ static void sd_m_Gen__findPreemptFns(sd_S_Gen * l_g);
 static sd_int sd_m_Gen__findTemp(sd_S_Gen l_g, sd_str l_v);
 static sd_str sd_m_Gen__finishCall(sd_S_Gen * l_g, sd_int l_e, sd_str l_call);
 static sd_str sd_m_Gen__fnSig(sd_S_Gen * l_g, sd_int l_f);
-static bool sd_m_Gen__frameCounted(sd_S_Gen * l_g, sd_int l_t);
+SD_NO_TCE static bool sd_m_Gen__frameCounted(sd_S_Gen * l_g, sd_int l_t);
 static sd_str sd_m_Gen__frameField(sd_S_Gen * l_g, sd_str l_base, sd_int l_t);
-static sd_int sd_m_Gen__funcDepth(sd_S_Gen l_g, sd_int l_t);
-static sd_int sd_m_Gen__funcRank(sd_S_Gen l_g, sd_int l_f);
-static sd_str sd_m_Gen__gbinary(sd_S_Gen * l_g, sd_int l_e);
-static sd_str sd_m_Gen__gbuiltin(sd_S_Gen * l_g, sd_int l_e);
-static sd_str sd_m_Gen__gcall(sd_S_Gen * l_g, sd_int l_e);
-static sd_str sd_m_Gen__gconcat(sd_S_Gen * l_g, sd_int l_e);
-static sd_str sd_m_Gen__gconv(sd_S_Gen * l_g, sd_int l_e);
-static sd_str sd_m_Gen__gcore(sd_S_Gen * l_g, sd_int l_e);
-static void sd_m_Gen__genAccLoop(sd_S_Gen * l_g, sd_S_Stmt l_st, sd_list * l_acc, sd_int l_general, sd_int l_done);
-static bool sd_m_Gen__genAccUpdate(sd_S_Gen * l_g, sd_int l_s);
-static bool sd_m_Gen__genAppend(sd_S_Gen * l_g, sd_S_Stmt l_st, sd_S_Target l_tg);
-static void sd_m_Gen__genAssert(sd_S_Gen * l_g, sd_S_Stmt l_st);
-static void sd_m_Gen__genAssign(sd_S_Gen * l_g, sd_int l_s);
+SD_NO_TCE static sd_int sd_m_Gen__funcDepth(sd_S_Gen l_g, sd_int l_t);
+SD_NO_TCE static sd_int sd_m_Gen__funcRank(sd_S_Gen l_g, sd_int l_f);
+SD_NO_TCE static sd_str sd_m_Gen__gbinary(sd_S_Gen * l_g, sd_int l_e);
+SD_NO_TCE static sd_str sd_m_Gen__gbuiltin(sd_S_Gen * l_g, sd_int l_e);
+SD_NO_TCE static sd_str sd_m_Gen__gcall(sd_S_Gen * l_g, sd_int l_e);
+SD_NO_TCE static sd_str sd_m_Gen__gconcat(sd_S_Gen * l_g, sd_int l_e);
+SD_NO_TCE static sd_str sd_m_Gen__gconv(sd_S_Gen * l_g, sd_int l_e);
+SD_NO_TCE static sd_str sd_m_Gen__gcore(sd_S_Gen * l_g, sd_int l_e);
+SD_NO_TCE static void sd_m_Gen__genAccLoop(sd_S_Gen * l_g, sd_S_Stmt l_st, sd_list * l_acc, sd_int l_general, sd_int l_done);
+SD_NO_TCE static bool sd_m_Gen__genAccUpdate(sd_S_Gen * l_g, sd_int l_s);
+SD_NO_TCE static bool sd_m_Gen__genAppend(sd_S_Gen * l_g, sd_S_Stmt l_st, sd_S_Target l_tg);
+SD_NO_TCE static void sd_m_Gen__genAssert(sd_S_Gen * l_g, sd_S_Stmt l_st);
+SD_NO_TCE static void sd_m_Gen__genAssign(sd_S_Gen * l_g, sd_int l_s);
 static void sd_m_Gen__genBindings(sd_S_Gen * l_g, sd_int l_t, sd_str l_payload, sd_int l_li);
-static void sd_m_Gen__genBody(sd_S_Gen * l_g, sd_int l_b);
+SD_NO_TCE static void sd_m_Gen__genBody(sd_S_Gen * l_g, sd_int l_b);
 static void sd_m_Gen__genConsts(sd_S_Gen * l_g, sd_int l_unit);
-static void sd_m_Gen__genDefer(sd_S_Gen * l_g, sd_S_Stmt l_st);
+SD_NO_TCE static void sd_m_Gen__genDefer(sd_S_Gen * l_g, sd_S_Stmt l_st);
 static void sd_m_Gen__genFast(sd_S_Gen * l_g, sd_int l_f);
 static void sd_m_Gen__genFn(sd_S_Gen * l_g, sd_int l_f);
 static void sd_m_Gen__genFns(sd_S_Gen * l_g, sd_int l_unit);
-static void sd_m_Gen__genFor(sd_S_Gen * l_g, sd_S_Stmt l_st);
+SD_NO_TCE static void sd_m_Gen__genFor(sd_S_Gen * l_g, sd_S_Stmt l_st);
 static void sd_m_Gen__genHelper(sd_S_Gen * l_g, sd_int l_t, sd_int l_kind);
-static void sd_m_Gen__genIf(sd_S_Gen * l_g, sd_S_Stmt l_st);
-static void sd_m_Gen__genIncDec(sd_S_Gen * l_g, sd_int l_s);
-static bool sd_m_Gen__genIntUpdate(sd_S_Gen * l_g, sd_S_Stmt l_st, sd_S_Target l_tg);
-static void sd_m_Gen__genLoopCopy(sd_S_Gen * l_g, sd_S_Stmt l_st, sd_int l_label, sd_list * l_acc, sd_list * l_bounded, sd_int l_accTo, bool l_spills);
-static void sd_m_Gen__genMultiAssign(sd_S_Gen * l_g, sd_int l_s);
+SD_NO_TCE static void sd_m_Gen__genIf(sd_S_Gen * l_g, sd_S_Stmt l_st);
+SD_NO_TCE static void sd_m_Gen__genIncDec(sd_S_Gen * l_g, sd_int l_s);
+SD_NO_TCE static bool sd_m_Gen__genIntUpdate(sd_S_Gen * l_g, sd_S_Stmt l_st, sd_S_Target l_tg);
+SD_NO_TCE static void sd_m_Gen__genLoopCopy(sd_S_Gen * l_g, sd_S_Stmt l_st, sd_int l_label, sd_list * l_acc, sd_list * l_bounded, sd_int l_accTo, bool l_spills);
+SD_NO_TCE static void sd_m_Gen__genMultiAssign(sd_S_Gen * l_g, sd_int l_s);
 static void sd_m_Gen__genNative(sd_S_Gen * l_g, sd_int l_f);
 static sd_str sd_m_Gen__genProgram(sd_S_Gen * l_g, sd_str l_natives);
 static void sd_m_Gen__genProtos(sd_S_Gen * l_g);
 static void sd_m_Gen__genReceived(sd_S_Gen * l_g, sd_int l_comm, sd_str l_ok, sd_str l_d);
-static void sd_m_Gen__genReturn(sd_S_Gen * l_g, sd_S_Stmt l_st);
-static void sd_m_Gen__genSelect(sd_S_Gen * l_g, sd_S_Stmt l_st);
-static void sd_m_Gen__genSpawn(sd_S_Gen * l_g, sd_S_Stmt l_st);
-static void sd_m_Gen__genStmt(sd_S_Gen * l_g, sd_int l_s);
-static void sd_m_Gen__genStmts(sd_S_Gen * l_g, sd_int l_b);
-static void sd_m_Gen__genSwitch(sd_S_Gen * l_g, sd_S_Stmt l_st);
+SD_NO_TCE static void sd_m_Gen__genReturn(sd_S_Gen * l_g, sd_S_Stmt l_st);
+SD_NO_TCE static void sd_m_Gen__genSelect(sd_S_Gen * l_g, sd_S_Stmt l_st);
+SD_NO_TCE static void sd_m_Gen__genSpawn(sd_S_Gen * l_g, sd_S_Stmt l_st);
+SD_NO_TCE static void sd_m_Gen__genStmt(sd_S_Gen * l_g, sd_int l_s);
+SD_NO_TCE static void sd_m_Gen__genStmts(sd_S_Gen * l_g, sd_int l_b);
+SD_NO_TCE static void sd_m_Gen__genSwitch(sd_S_Gen * l_g, sd_S_Stmt l_st);
 static void sd_m_Gen__genTypes(sd_S_Gen * l_g);
 static sd_str sd_m_Gen__genUnit(sd_S_Gen * l_g, sd_int l_p, sd_str l_natives);
 static sd_list * sd_m_Gen__genUnits(sd_S_Gen * l_g, sd_list * l_natives);
 static void sd_m_Gen__genVtables(sd_S_Gen * l_g, sd_int l_unit);
 static sd_str sd_m_Gen__generalName(sd_S_Gen l_g, sd_int l_f);
-static sd_str sd_m_Gen__genumIs(sd_S_Gen * l_g, sd_int l_e);
-static sd_str sd_m_Gen__genumNew(sd_S_Gen * l_g, sd_int l_e);
-static sd_str sd_m_Gen__gexpr(sd_S_Gen * l_g, sd_int l_e);
-static sd_str sd_m_Gen__ggroup(sd_S_Gen * l_g, sd_int l_e);
-static sd_str sd_m_Gen__gindex(sd_S_Gen * l_g, sd_int l_e);
-static sd_str sd_m_Gen__glist(sd_S_Gen * l_g, sd_int l_e);
-static sd_str sd_m_Gen__gmap(sd_S_Gen * l_g, sd_int l_e);
-static sd_str sd_m_Gen__gmutBuiltin(sd_S_Gen * l_g, sd_int l_e, sd_box * l_b, sd_int l_r, sd_int l_rt, sd_list * l_args);
-static sd_str sd_m_Gen__gmutCall(sd_S_Gen * l_g, sd_int l_e);
-static sd_str sd_m_Gen__gplace(sd_S_Gen * l_g, sd_int l_e);
-static bool sd_m_Gen__groupHasDefer(sd_S_Gen l_g, sd_int l_e);
-static sd_str sd_m_Gen__gshort(sd_S_Gen * l_g, sd_int l_e);
-static void sd_m_Gen__gstore(sd_S_Gen * l_g, sd_int l_lv, sd_str l_v);
-static sd_str sd_m_Gen__gstruct(sd_S_Gen * l_g, sd_int l_e);
-static sd_str sd_m_Gen__gsumSmall(sd_S_Gen * l_g, sd_int l_e);
-static sd_str sd_m_Gen__gtry(sd_S_Gen * l_g, sd_int l_e);
-static bool sd_m_Gen__hasEffects(sd_S_Gen l_g, sd_int l_e);
-static bool sd_m_Gen__hasGroup(sd_S_Gen l_g, sd_int l_e);
-static bool sd_m_Gen__hasMutEffects(sd_S_Gen l_g, sd_int l_e);
+SD_NO_TCE static sd_str sd_m_Gen__genumIs(sd_S_Gen * l_g, sd_int l_e);
+SD_NO_TCE static sd_str sd_m_Gen__genumNew(sd_S_Gen * l_g, sd_int l_e);
+SD_NO_TCE static sd_str sd_m_Gen__gexpr(sd_S_Gen * l_g, sd_int l_e);
+SD_NO_TCE static sd_str sd_m_Gen__ggroup(sd_S_Gen * l_g, sd_int l_e);
+SD_NO_TCE static sd_str sd_m_Gen__gindex(sd_S_Gen * l_g, sd_int l_e);
+SD_NO_TCE static sd_str sd_m_Gen__glist(sd_S_Gen * l_g, sd_int l_e);
+SD_NO_TCE static sd_str sd_m_Gen__gmap(sd_S_Gen * l_g, sd_int l_e);
+SD_NO_TCE static sd_str sd_m_Gen__gmutBuiltin(sd_S_Gen * l_g, sd_int l_e, sd_box * l_b, sd_int l_r, sd_int l_rt, sd_list * l_args);
+SD_NO_TCE static sd_str sd_m_Gen__gmutCall(sd_S_Gen * l_g, sd_int l_e);
+SD_NO_TCE static sd_str sd_m_Gen__gplace(sd_S_Gen * l_g, sd_int l_e);
+SD_NO_TCE static bool sd_m_Gen__groupHasDefer(sd_S_Gen l_g, sd_int l_e);
+SD_NO_TCE static sd_str sd_m_Gen__gshort(sd_S_Gen * l_g, sd_int l_e);
+SD_NO_TCE static void sd_m_Gen__gstore(sd_S_Gen * l_g, sd_int l_lv, sd_str l_v);
+SD_NO_TCE static sd_str sd_m_Gen__gstruct(sd_S_Gen * l_g, sd_int l_e);
+SD_NO_TCE static sd_str sd_m_Gen__gsumSmall(sd_S_Gen * l_g, sd_int l_e);
+SD_NO_TCE static sd_str sd_m_Gen__gtry(sd_S_Gen * l_g, sd_int l_e);
+SD_NO_TCE static bool sd_m_Gen__hasEffects(sd_S_Gen l_g, sd_int l_e);
+SD_NO_TCE static bool sd_m_Gen__hasGroup(sd_S_Gen l_g, sd_int l_e);
+SD_NO_TCE static bool sd_m_Gen__hasMutEffects(sd_S_Gen l_g, sd_int l_e);
 static sd_str sd_m_Gen__helper(sd_S_Gen * l_g, sd_int l_t, sd_int l_kind, sd_str l_prefix);
 static sd_str sd_m_Gen__ifaceName(sd_S_Gen l_g, sd_int l_iface);
 static bool sd_m_Gen__inFrame(sd_S_Gen * l_g, sd_int l_t);
 static void sd_m_Gen__intEvent(sd_S_Gen * l_g, sd_int l_v, sd_int l_expr, bool l_top);
 static sd_int sd_m_Gen__intLocal(sd_S_Gen l_g, sd_int l_e);
-static void sd_m_Gen__intWalkBlock(sd_S_Gen * l_g, sd_int l_b);
-static void sd_m_Gen__intWalkExpr(sd_S_Gen * l_g, sd_int l_e);
-static void sd_m_Gen__intWalkPost(sd_S_Gen * l_g, sd_S_Stmt l_loop, sd_int l_first, sd_int l_end);
-static void sd_m_Gen__intWalkStmt(sd_S_Gen * l_g, sd_int l_s);
+SD_NO_TCE static void sd_m_Gen__intWalkBlock(sd_S_Gen * l_g, sd_int l_b);
+SD_NO_TCE static void sd_m_Gen__intWalkExpr(sd_S_Gen * l_g, sd_int l_e);
+SD_NO_TCE static void sd_m_Gen__intWalkPost(sd_S_Gen * l_g, sd_S_Stmt l_loop, sd_int l_first, sd_int l_end);
+SD_NO_TCE static void sd_m_Gen__intWalkStmt(sd_S_Gen * l_g, sd_int l_s);
 static bool sd_m_Gen__isBorrowed(sd_S_Gen l_g, sd_int l_v);
 static bool sd_m_Gen__isBoxOpt(sd_S_Gen l_g, sd_int l_t);
 static bool sd_m_Gen__isFast(sd_S_Gen l_g, sd_int l_f);
-static bool sd_m_Gen__isFieldRead(sd_S_Gen l_g, sd_int l_e);
+SD_NO_TCE static bool sd_m_Gen__isFieldRead(sd_S_Gen l_g, sd_int l_e);
 static bool sd_m_Gen__isIntString(sd_S_Gen l_g, sd_int l_e);
 static sd_str sd_m_Gen__isNull(sd_S_Gen l_g, sd_int l_t, sd_str l_v);
-static bool sd_m_Gen__isPlaceRead(sd_S_Gen l_g, sd_int l_e);
+SD_NO_TCE static bool sd_m_Gen__isPlaceRead(sd_S_Gen l_g, sd_int l_e);
 static bool sd_m_Gen__isPlainMove(sd_S_Gen l_g, sd_int l_e);
-static bool sd_m_Gen__isSimpleSmall(sd_S_Gen l_g, sd_int l_e);
+SD_NO_TCE static bool sd_m_Gen__isSimpleSmall(sd_S_Gen l_g, sd_int l_e);
 static bool sd_m_Gen__isSmallInt(sd_S_Gen l_g, sd_int l_e);
 static bool sd_m_Gen__isSmallOpt(sd_S_Gen l_g, sd_int l_t);
 static bool sd_m_Gen__isStable(sd_S_Gen l_g, sd_int l_e);
@@ -9696,72 +9861,73 @@ static sd_str sd_m_Gen__localDecl(sd_S_Gen * l_g, sd_int l_v, sd_int l_t);
 static sd_str sd_m_Gen__localInit(sd_S_Gen l_g, sd_int l_v, sd_str l_val);
 static sd_str sd_m_Gen__loopCheck(sd_S_Gen l_g, sd_S_Stmt l_st, sd_list * l_acc);
 static sd_str sd_m_Gen__mainText(sd_S_Gen l_g);
-static bool sd_m_Gen__mayCrash(sd_S_Gen l_g, sd_int l_e);
-static bool sd_m_Gen__mentionsVar(sd_S_Gen l_g, sd_int l_e, sd_int l_v);
+SD_NO_TCE static bool sd_m_Gen__mayCrash(sd_S_Gen l_g, sd_int l_e);
+SD_NO_TCE static bool sd_m_Gen__mentionsVar(sd_S_Gen l_g, sd_int l_e, sd_int l_v);
 static void sd_m_Gen__moveOut(sd_S_Gen * l_g, sd_int l_s);
 static sd_map * sd_m_Gen__movesAt(sd_S_Gen l_g, sd_int l_s);
-static sd_list * sd_m_Gen__mutArgs(sd_S_Gen * l_g, sd_int l_recv, sd_list * l_args);
-static void sd_m_Gen__mvBlock(sd_S_Gen * l_g, sd_int l_b);
+SD_NO_TCE static sd_list * sd_m_Gen__mutArgs(sd_S_Gen * l_g, sd_int l_recv, sd_list * l_args);
+SD_NO_TCE static void sd_m_Gen__mvBlock(sd_S_Gen * l_g, sd_int l_b);
 static void sd_m_Gen__mvDeclare(sd_S_Gen * l_g, sd_int l_v, sd_int l_s);
-static void sd_m_Gen__mvExpr(sd_S_Gen * l_g, sd_int l_e, bool l_cond);
+SD_NO_TCE static void sd_m_Gen__mvExpr(sd_S_Gen * l_g, sd_int l_e, bool l_cond);
 static void sd_m_Gen__mvMention(sd_S_Gen * l_g, sd_int l_v, bool l_cond);
-static void sd_m_Gen__mvNested(sd_S_Gen * l_g, sd_int l_s);
-static void sd_m_Gen__mvStmt(sd_S_Gen * l_g, sd_int l_s);
+SD_NO_TCE static void sd_m_Gen__mvNested(sd_S_Gen * l_g, sd_int l_s);
+SD_NO_TCE static void sd_m_Gen__mvStmt(sd_S_Gen * l_g, sd_int l_s);
 static sd_str sd_m_Gen__nativeName(sd_S_Gen l_g, sd_int l_f);
 static bool sd_m_Gen__needsRelease(sd_S_Gen * l_g, sd_int l_mark, sd_list * l_keep);
 static sd_str sd_m_Gen__newSlotName(sd_S_Gen * l_g, sd_int l_t);
 static sd_str sd_m_Gen__newTmp(sd_S_Gen * l_g);
+static sd_str sd_m_Gen__noTailCalls(sd_S_Gen l_g, sd_int l_f);
 static sd_str sd_m_Gen__nullOf(sd_S_Gen l_g, sd_int l_t);
 static bool sd_m_Gen__nullOnError(sd_S_Gen l_g, sd_S_Stmt l_st, sd_int l_i);
 static sd_str sd_m_Gen__okOpt(sd_S_Gen * l_g, sd_int l_opt, sd_str l_ok, sd_str l_o);
-static sd_list * sd_m_Gen__operands(sd_S_Gen * l_g, sd_list * l_es);
+SD_NO_TCE static sd_list * sd_m_Gen__operands(sd_S_Gen * l_g, sd_list * l_es);
 static sd_str sd_m_Gen__optFromPtr(sd_S_Gen * l_g, sd_int l_opt, sd_str l_p);
 static sd_str sd_m_Gen__ownVal(sd_S_Gen * l_g, sd_str l_v, sd_int l_t);
-static sd_list * sd_m_Gen__ownedOperands(sd_S_Gen * l_g, sd_list * l_es);
-static sd_str sd_m_Gen__ownedTemp(sd_S_Gen * l_g, sd_int l_e);
+SD_NO_TCE static sd_list * sd_m_Gen__ownedOperands(sd_S_Gen * l_g, sd_list * l_es);
+SD_NO_TCE static sd_str sd_m_Gen__ownedTemp(sd_S_Gen * l_g, sd_int l_e);
 static sd_list * sd_m_Gen__paramNames(sd_S_Gen l_g, sd_int l_f);
 static sd_int sd_m_Gen__paramType(sd_S_Gen l_g, sd_int l_f, sd_int l_i);
 static sd_list * sd_m_Gen__partExprs(sd_S_Gen l_g, sd_int l_t, sd_str l_v);
 static sd_list * sd_m_Gen__partTypes(sd_S_Gen l_g, sd_int l_t);
-static void sd_m_Gen__pcBlock(sd_S_Gen * l_g, sd_int l_b);
+SD_NO_TCE static void sd_m_Gen__pcBlock(sd_S_Gen * l_g, sd_int l_b);
 static bool sd_m_Gen__pcEnter(sd_S_Gen * l_g, sd_int l_b, sd_int l_s);
-static void sd_m_Gen__pcExpr(sd_S_Gen * l_g, sd_int l_e);
+SD_NO_TCE static void sd_m_Gen__pcExpr(sd_S_Gen * l_g, sd_int l_e);
 static void sd_m_Gen__pcStart(sd_S_Gen * l_g, sd_int l_body);
-static void sd_m_Gen__pcStmt(sd_S_Gen * l_g, sd_int l_s);
+SD_NO_TCE static void sd_m_Gen__pcStmt(sd_S_Gen * l_g, sd_int l_s);
 static sd_str sd_m_Gen__placeVar(sd_S_Gen * l_g, sd_str l_ptrType, sd_str l_p);
-static sd_str sd_m_Gen__plainCall(sd_S_Gen * l_g, sd_int l_e);
-static sd_list * sd_m_Gen__plusLeaves(sd_S_Gen l_g, sd_int l_e, sd_list * l_acc);
+SD_NO_TCE static sd_str sd_m_Gen__plainCall(sd_S_Gen * l_g, sd_int l_e);
+SD_NO_TCE static sd_list * sd_m_Gen__plusLeaves(sd_S_Gen l_g, sd_int l_e, sd_list * l_acc);
 static void sd_m_Gen__popScope(sd_S_Gen * l_g, bool l_release);
 static void sd_m_Gen__preemptCall(sd_S_Gen * l_g, sd_int l_e);
 static void sd_m_Gen__preemptLine(sd_S_Gen * l_g);
 static bool sd_m_Gen__preemptsOnEntry(sd_S_Gen l_g, sd_int l_f);
-static bool sd_m_Gen__pureBlock(sd_S_Gen l_g, sd_int l_b, sd_list * l_acc);
-static bool sd_m_Gen__pureCond(sd_S_Gen l_g, sd_int l_e);
-static bool sd_m_Gen__pureStmt(sd_S_Gen l_g, sd_int l_s, sd_list * l_acc);
+SD_NO_TCE static bool sd_m_Gen__pureBlock(sd_S_Gen l_g, sd_int l_b, sd_list * l_acc);
+SD_NO_TCE static bool sd_m_Gen__pureCond(sd_S_Gen l_g, sd_int l_e);
+SD_NO_TCE static bool sd_m_Gen__pureStmt(sd_S_Gen l_g, sd_int l_s, sd_list * l_acc);
 static void sd_m_Gen__pushLocal(sd_S_Gen * l_g, sd_int l_v, sd_int l_t);
 static void sd_m_Gen__pushScope(sd_S_Gen * l_g);
 static void sd_m_Gen__pushSlot(sd_S_Gen * l_g, sd_str l_name, sd_int l_t, bool l_temp);
-static sd_S_IntRange sd_m_Gen__rangeIn(sd_S_Gen l_g, sd_int l_e, sd_map * l_vars);
+SD_NO_TCE static sd_S_IntRange sd_m_Gen__rangeIn(sd_S_Gen l_g, sd_int l_e, sd_map * l_vars);
 static sd_str sd_m_Gen__rawName(sd_S_Gen l_g, sd_int l_v);
-static sd_str sd_m_Gen__rawPath(sd_S_Gen l_g, sd_int l_e);
+SD_NO_TCE static sd_str sd_m_Gen__rawPath(sd_S_Gen l_g, sd_int l_e);
 static sd_int sd_m_Gen__recvOf(sd_S_Gen l_g, sd_int l_e);
 static void sd_m_Gen__releaseAbove(sd_S_Gen * l_g, sd_int l_mark, sd_list * l_keep);
-static sd_str sd_m_Gen__releaseCall(sd_S_Gen * l_g, sd_int l_t, sd_str l_v);
+SD_NO_TCE static sd_str sd_m_Gen__releaseCall(sd_S_Gen * l_g, sd_int l_t, sd_str l_v);
 static void sd_m_Gen__releaseSlot(sd_S_Gen * l_g, sd_int l_i);
 static void sd_m_Gen__releaseTo(sd_S_Gen * l_g, sd_int l_mark);
-static sd_str sd_m_Gen__retainExpr(sd_S_Gen * l_g, sd_int l_t, sd_str l_v);
-static sd_int sd_m_Gen__rootVar(sd_S_Gen l_g, sd_int l_e);
-static bool sd_m_Gen__samePlace(sd_S_Gen l_g, sd_int l_a, sd_int l_b);
-static sd_str sd_m_Gen__showVal(sd_S_Gen l_g, sd_int l_t, sd_str l_v);
+SD_NO_TCE static sd_str sd_m_Gen__retainExpr(sd_S_Gen * l_g, sd_int l_t, sd_str l_v);
+SD_NO_TCE static sd_int sd_m_Gen__rootVar(sd_S_Gen l_g, sd_int l_e);
+SD_NO_TCE static bool sd_m_Gen__samePlace(sd_S_Gen l_g, sd_int l_a, sd_int l_b);
+SD_NO_TCE static sd_str sd_m_Gen__showVal(sd_S_Gen l_g, sd_int l_t, sd_str l_v);
 static void sd_m_Gen__slotEnd(sd_S_Gen * l_g, sd_S_Slot l_s);
 static sd_str sd_m_Gen__smallBinary(sd_S_Gen * l_g, sd_int l_e, sd_list * l_vals);
 static sd_S_IntRange sd_m_Gen__smallRange(sd_S_Gen l_g, sd_int l_e);
 static sd_str sd_m_Gen__spillBarrier(sd_S_Gen l_g, sd_S_Stmt l_st);
-static bool sd_m_Gen__stmtAssigns(sd_S_Gen l_g, sd_int l_s, sd_int l_v);
-static bool sd_m_Gen__stmtHasDefer(sd_S_Gen l_g, sd_int l_s);
+SD_NO_TCE static bool sd_m_Gen__stmtAssigns(sd_S_Gen l_g, sd_int l_s, sd_int l_v);
+SD_NO_TCE static bool sd_m_Gen__stmtHasDefer(sd_S_Gen l_g, sd_int l_s);
 static sd_str sd_m_Gen__structDefText(sd_S_Gen l_g, sd_int l_d);
-static sd_int sd_m_Gen__structRank(sd_S_Gen l_g, sd_int l_d);
-static sd_str sd_m_Gen__sumOf(sd_S_Gen * l_g, sd_list * l_leaves);
+SD_NO_TCE static sd_int sd_m_Gen__structRank(sd_S_Gen l_g, sd_int l_d);
+SD_NO_TCE static sd_str sd_m_Gen__sumOf(sd_S_Gen * l_g, sd_list * l_leaves);
 static bool sd_m_Gen__takesPart(sd_S_Gen l_g, sd_S_Stmt l_st, sd_int l_i);
 static sd_str sd_m_Gen__temp(sd_S_Gen * l_g, sd_int l_t, sd_str l_cexpr);
 static sd_str sd_m_Gen__testMain(sd_S_Gen l_g);
@@ -9796,7 +9962,11 @@ static sd_str sd_m_Loader__pkgLabel(sd_S_Loader l_l, sd_int l_pkg);
 static sd_T_T2Ose sd_m_Loader__projectPackage(sd_S_Loader l_l, sd_str l_path, sd_str l_std);
 static sd_str sd_m_Loader__resolve(sd_S_Loader l_l, sd_str l_path);
 static void sd_m_Loader__setNames(sd_S_Loader * l_l);
-static sd_list * sd_m_Loader__visit(sd_S_Loader * l_l, sd_int l_pkg, sd_list * l_state, sd_list * l_path);
+SD_NO_TCE static sd_list * sd_m_Loader__visit(sd_S_Loader * l_l, sd_int l_pkg, sd_list * l_state, sd_list * l_path);
+static void sd_m_LspServer__handle(sd_S_LspServer * l_s, sd_box * l_msg);
+static sd_map * sd_m_LspServer__overlay(sd_S_LspServer l_s);
+static void sd_m_LspServer__publishAll(sd_S_LspServer * l_s);
+static sd_box * sd_m_LspServer__runJob(sd_S_LspServer l_s, sd_str l_kind, sd_str l_path, sd_int l_line, sd_int l_character);
 static bool sd_m_Parser__accept(sd_S_Parser * l_p, sd_box * l_k);
 static sd_int sd_m_Parser__addExpr(sd_S_Parser * l_p, sd_S_Expr l_x);
 static void sd_m_Parser__addTop(sd_S_Parser * l_p, sd_box * l_kind, sd_int l_index);
@@ -9815,39 +9985,39 @@ static sd_box * sd_m_Parser__kind(sd_S_Parser l_p);
 static sd_box * sd_m_Parser__kindAt(sd_S_Parser l_p, sd_int l_i);
 static sd_S_Label sd_m_Parser__labelNames(sd_S_Parser l_p, sd_S_Label l_l, bool l_qualified);
 static sd_S_Token sd_m_Parser__next(sd_S_Parser * l_p);
-static sd_int sd_m_Parser__parseBaseType(sd_S_Parser * l_p, bool l_named);
-static sd_int sd_m_Parser__parseBinary(sd_S_Parser * l_p, sd_int l_minPrec);
-static sd_int sd_m_Parser__parseBlock(sd_S_Parser * l_p, sd_str l_context);
-static sd_int sd_m_Parser__parseBlockBody(sd_S_Parser * l_p, sd_str l_context, sd_S_Pos l_start);
-static sd_int sd_m_Parser__parseCaseBody(sd_S_Parser * l_p, sd_S_Pos l_start);
+SD_NO_TCE static sd_int sd_m_Parser__parseBaseType(sd_S_Parser * l_p, bool l_named);
+SD_NO_TCE static sd_int sd_m_Parser__parseBinary(sd_S_Parser * l_p, sd_int l_minPrec);
+SD_NO_TCE static sd_int sd_m_Parser__parseBlock(sd_S_Parser * l_p, sd_str l_context);
+SD_NO_TCE static sd_int sd_m_Parser__parseBlockBody(sd_S_Parser * l_p, sd_str l_context, sd_S_Pos l_start);
+SD_NO_TCE static sd_int sd_m_Parser__parseCaseBody(sd_S_Parser * l_p, sd_S_Pos l_start);
 static void sd_m_Parser__parseConstDecl(sd_S_Parser * l_p, bool l_isPub);
-static sd_int sd_m_Parser__parseExpr(sd_S_Parser * l_p);
-static sd_list * sd_m_Parser__parseExprList(sd_S_Parser * l_p, sd_box * l_close, sd_str l_context);
+SD_NO_TCE static sd_int sd_m_Parser__parseExpr(sd_S_Parser * l_p);
+SD_NO_TCE static sd_list * sd_m_Parser__parseExprList(sd_S_Parser * l_p, sd_box * l_close, sd_str l_context);
 static void sd_m_Parser__parseFile(sd_S_Parser * l_p, sd_int l_file);
 static void sd_m_Parser__parseFn(sd_S_Parser * l_p, bool l_isPub, sd_S_Pos l_start);
-static sd_int sd_m_Parser__parseFor(sd_S_Parser * l_p);
-static sd_int sd_m_Parser__parseIf(sd_S_Parser * l_p);
-static sd_int sd_m_Parser__parseLabel(sd_S_Parser * l_p);
-static sd_int sd_m_Parser__parseMapLit(sd_S_Parser * l_p);
+SD_NO_TCE static sd_int sd_m_Parser__parseFor(sd_S_Parser * l_p);
+SD_NO_TCE static sd_int sd_m_Parser__parseIf(sd_S_Parser * l_p);
+SD_NO_TCE static sd_int sd_m_Parser__parseLabel(sd_S_Parser * l_p);
+SD_NO_TCE static sd_int sd_m_Parser__parseMapLit(sd_S_Parser * l_p);
 static sd_int sd_m_Parser__parseMethodSig(sd_S_Parser * l_p);
 static sd_list * sd_m_Parser__parseParams(sd_S_Parser * l_p, sd_str l_context);
-static sd_int sd_m_Parser__parsePostfix(sd_S_Parser * l_p);
-static sd_int sd_m_Parser__parsePrimary(sd_S_Parser * l_p);
+SD_NO_TCE static sd_int sd_m_Parser__parsePostfix(sd_S_Parser * l_p);
+SD_NO_TCE static sd_int sd_m_Parser__parsePrimary(sd_S_Parser * l_p);
 static sd_list * sd_m_Parser__parseResult(sd_S_Parser * l_p);
-static sd_int sd_m_Parser__parseSelect(sd_S_Parser * l_p);
-static sd_int sd_m_Parser__parseSimple(sd_S_Parser * l_p);
-static sd_int sd_m_Parser__parseStmt(sd_S_Parser * l_p);
-static sd_int sd_m_Parser__parseStructLit(sd_S_Parser * l_p, sd_S_Pos l_pos, sd_str l_pkg, sd_str l_name);
-static sd_int sd_m_Parser__parseSwitch(sd_S_Parser * l_p);
+SD_NO_TCE static sd_int sd_m_Parser__parseSelect(sd_S_Parser * l_p);
+SD_NO_TCE static sd_int sd_m_Parser__parseSimple(sd_S_Parser * l_p);
+SD_NO_TCE static sd_int sd_m_Parser__parseStmt(sd_S_Parser * l_p);
+SD_NO_TCE static sd_int sd_m_Parser__parseStructLit(sd_S_Parser * l_p, sd_S_Pos l_pos, sd_str l_pkg, sd_str l_name);
+SD_NO_TCE static sd_int sd_m_Parser__parseSwitch(sd_S_Parser * l_p);
 static void sd_m_Parser__parseTest(sd_S_Parser * l_p);
 static void sd_m_Parser__parseTopDecl(sd_S_Parser * l_p);
-static sd_int sd_m_Parser__parseType(sd_S_Parser * l_p, bool l_named);
+SD_NO_TCE static sd_int sd_m_Parser__parseType(sd_S_Parser * l_p, bool l_named);
 static void sd_m_Parser__parseTypeDecl(sd_S_Parser * l_p, bool l_isPub);
 static sd_int sd_m_Parser__parseTypeName(sd_S_Parser * l_p);
-static sd_int sd_m_Parser__parseUnary(sd_S_Parser * l_p);
+SD_NO_TCE static sd_int sd_m_Parser__parseUnary(sd_S_Parser * l_p);
 static sd_box * sd_m_Parser__peek(sd_S_Parser l_p, sd_int l_ahead);
-static sd_int sd_m_Parser__scanBaseType(sd_S_Parser l_p, sd_int l_i, bool l_named);
-static sd_int sd_m_Parser__scanType(sd_S_Parser l_p, sd_int l_i, bool l_named);
+SD_NO_TCE static sd_int sd_m_Parser__scanBaseType(sd_S_Parser l_p, sd_int l_i, bool l_named);
+SD_NO_TCE static sd_int sd_m_Parser__scanType(sd_S_Parser l_p, sd_int l_i, bool l_named);
 static void sd_m_Parser__skipNewlines(sd_S_Parser * l_p);
 static sd_str sd_m_Parser__sourceText(sd_S_Parser l_p, sd_int l_from, sd_int l_to);
 static void sd_m_Parser__syncStatement(sd_S_Parser * l_p);
@@ -9886,6 +10056,35 @@ static void sd_m_fs_File__close(sd_S_fs_File l_f);
 static sd_T_T2Ose sd_m_fs_File__read(sd_S_fs_File l_f, sd_int l_max);
 static sd_T_T2Ose sd_m_fs_File__readLine(sd_S_fs_File l_f);
 static sd_err sd_m_fs_File__write(sd_S_fs_File l_f, sd_str l_data);
+SD_NO_TCE static sd_T_T2E10json_Valuee sd_m_json_JsonParser__array(sd_S_json_JsonParser * l_p);
+static sd_err sd_m_json_JsonParser__enter(sd_S_json_JsonParser * l_p);
+static sd_err sd_m_json_JsonParser__expected(sd_S_json_JsonParser l_p, sd_str l_want);
+static sd_err sd_m_json_JsonParser__fail(sd_S_json_JsonParser l_p, sd_int l_at, sd_str l_reason);
+static sd_T_T2E10json_Valuee sd_m_json_JsonParser__failValue(sd_S_json_JsonParser l_p, sd_int l_at, sd_str l_reason);
+static sd_err sd_m_json_JsonParser__literal(sd_S_json_JsonParser * l_p, sd_str l_word);
+static sd_T_T2E10json_Valuee sd_m_json_JsonParser__number(sd_S_json_JsonParser * l_p);
+SD_NO_TCE static sd_T_T2E10json_Valuee sd_m_json_JsonParser__object(sd_S_json_JsonParser * l_p);
+static void sd_m_json_JsonParser__skipDigits(sd_S_json_JsonParser * l_p);
+static void sd_m_json_JsonParser__skipSpace(sd_S_json_JsonParser * l_p);
+static sd_T_T2se sd_m_json_JsonParser__str(sd_S_json_JsonParser * l_p);
+static sd_T_T2se sd_m_json_JsonParser__strRest(sd_S_json_JsonParser * l_p, sd_int l_from);
+static sd_T_T2E10json_Valuee sd_m_json_JsonParser__unexpected(sd_S_json_JsonParser l_p, uint8_t l_c);
+SD_NO_TCE static sd_T_T2E10json_Valuee sd_m_json_JsonParser__value(sd_S_json_JsonParser * l_p);
+static void sd_m_json_JsonWriter__newline(sd_S_json_JsonWriter * l_w, sd_int l_indent);
+static void sd_m_json_JsonWriter__number(sd_S_json_JsonWriter * l_w, double l_n);
+static void sd_m_json_JsonWriter__quote(sd_S_json_JsonWriter * l_w, sd_str l_s);
+SD_NO_TCE static void sd_m_json_JsonWriter__write(sd_S_json_JsonWriter * l_w, sd_box * l_v, sd_int l_indent);
+static sd_list * sd_m_json_Value__asArray(sd_box * l_v);
+static sd_opt_bool sd_m_json_Value__asBool(sd_box * l_v);
+static sd_opt_float sd_m_json_Value__asFloat(sd_box * l_v);
+static sd_int sd_m_json_Value__asInt(sd_box * l_v);
+static sd_map * sd_m_json_Value__asObject(sd_box * l_v);
+static sd_str sd_m_json_Value__asString(sd_box * l_v);
+static sd_box * sd_m_json_Value__at(sd_box * l_v, sd_int l_i);
+static sd_box * sd_m_json_Value__get(sd_box * l_v, sd_str l_key);
+static bool sd_m_json_Value__isNull(sd_box * l_v);
+static sd_str sd_m_json_Value__pretty(sd_box * l_v);
+static sd_str sd_m_json_Value__string(sd_box * l_v);
 sd_err sd_lib_fs_read(sd_str, sd_str *);
 sd_err sd_lib_fs_write(sd_str, sd_str);
 sd_err sd_lib_fs_append(sd_str, sd_str);
@@ -9917,6 +10116,9 @@ sd_str sd_lib_os_executable(void);
 sd_err sd_lib_os_cwd(sd_str *);
 sd_err sd_lib_os_output(sd_list *, sd_str *, sd_int *);
 sd_err sd_lib_os_hostname(sd_str *);
+sd_err sd_lib_io_readLine(sd_str *);
+sd_err sd_lib_io_read(sd_int, sd_str *);
+sd_err sd_lib_io_readAll(sd_str *);
 sd_str sd_lib_crypto_sha256(sd_str);
 sd_str sd_lib_crypto_hmacSha256(sd_str, sd_str);
 sd_str sd_lib_crypto_randomBytes(sd_int);
@@ -9985,6 +10187,18 @@ static inline __attribute__((unused)) void sd_rl_S6Import(sd_S_Import v);
 static inline __attribute__((unused)) void sd_rl_T2Ose(sd_T_T2Ose v);
 static inline __attribute__((unused)) sd_S_Package sd_rt_S7Package(sd_S_Package v);
 static inline __attribute__((unused)) void sd_rl_S7Package(sd_S_Package v);
+static inline __attribute__((unused)) void sd_rl_S9LspServer(sd_S_LspServer v);
+static inline __attribute__((unused)) sd_S_LspDoc sd_rt_S6LspDoc(sd_S_LspDoc v);
+static inline __attribute__((unused)) void sd_rl_S6LspDoc(sd_S_LspDoc v);
+static inline __attribute__((unused)) void sd_rl_S6LspJob(sd_S_LspJob v);
+static inline __attribute__((unused)) void sd_rl_T2E10json_Valuee(sd_T_T2E10json_Valuee v);
+static inline __attribute__((unused)) void sd_rl_S6Loader(sd_S_Loader v);
+static inline __attribute__((unused)) void sd_rl_S3Ast(sd_S_Ast v);
+static inline __attribute__((unused)) void sd_rl_S8TypeExpr(sd_S_TypeExpr v);
+static inline __attribute__((unused)) void sd_rl_S11LspAnalysis(sd_S_LspAnalysis v);
+static inline __attribute__((unused)) void sd_rl_T2S11LspAnalysise(sd_T_T2S11LspAnalysise v);
+static inline __attribute__((unused)) void sd_rl_S6LspSym(sd_S_LspSym v);
+static inline __attribute__((unused)) sd_S_LspJob sd_rt_S6LspJob(sd_S_LspJob v);
 static inline __attribute__((unused)) void sd_rl_S5Build(sd_S_Build v);
 static inline __attribute__((unused)) void sd_rl_T2S5Builde(sd_T_T2S5Builde v);
 static inline __attribute__((unused)) void sd_rl_T2S6Parsere(sd_T_T2S6Parsere v);
@@ -9992,16 +10206,15 @@ static inline __attribute__((unused)) void sd_rl_T2ie(sd_T_T2ie v);
 static inline __attribute__((unused)) void sd_rl_T2be(sd_T_T2be v);
 static inline __attribute__((unused)) sd_S_Build sd_rt_S5Build(sd_S_Build v);
 static inline __attribute__((unused)) void sd_rl_T2OS7Checkere(sd_T_T2OS7Checkere v);
-static inline __attribute__((unused)) void sd_rl_S6Loader(sd_S_Loader v);
 static inline __attribute__((unused)) void sd_rl_T2Lie(sd_T_T2Lie v);
 static inline __attribute__((unused)) sd_S_Comment sd_rt_S7Comment(sd_S_Comment v);
 static inline __attribute__((unused)) void sd_rl_S5Token(sd_S_Token v);
 static inline __attribute__((unused)) void sd_rl_S10SourceFile(sd_S_SourceFile v);
-static inline __attribute__((unused)) void sd_rl_S8TypeExpr(sd_S_TypeExpr v);
 static inline __attribute__((unused)) void sd_rl_S5Types(sd_S_Types v);
 static inline __attribute__((unused)) sd_S_Type sd_rt_S4Type(sd_S_Type v);
 static inline __attribute__((unused)) void sd_rl_S4Type(sd_S_Type v);
-static inline __attribute__((unused)) void sd_rl_S3Ast(sd_S_Ast v);
+static inline __attribute__((unused)) void sd_rl_S15json_JsonParser(sd_S_json_JsonParser v);
+static inline __attribute__((unused)) void sd_rl_S15json_JsonWriter(sd_S_json_JsonWriter v);
 static inline __attribute__((unused)) sd_S_Types sd_rt_S5Types(sd_S_Types v);
 /* ---- lib/fs/fs.c ---- */
 /* Natives of package fs (runtime/README.md, "Native functions"). Errors
@@ -10606,6 +10819,62 @@ sd_err sd_lib_os_hostname(sd_str *out) {
   buf[sizeof buf - 1] = 0;
   *out = sd_str_from_cstr(buf);
   return SD_ERR_NULL;
+}
+
+/* ---- lib/io/io.c ---- */
+/* Natives of package io (runtime/README.md, "Native functions"). Stdin is a
+ * handle of the runtime's table (kind SD_HANDLE_STDIN), so that its reads
+ * are stop points, serialised between goroutines and buffered. */
+
+#include <pthread.h>
+#include <stdio.h>
+
+static int64_t io_stdin_id;
+static pthread_once_t io_stdin_once = PTHREAD_ONCE_INIT;
+
+static void io_stdin_init(void) { io_stdin_id = sd_handle_new(SD_HANDLE_STDIN, 0, ""); }
+
+static sd_handle *io_stdin(void) {
+  pthread_once(&io_stdin_once, io_stdin_init);
+  sd_block_begin(); /* stdout may be a full pipe */
+  fflush(stdout);
+  sd_block_end();
+  return sd_handle_acquire(io_stdin_id, SD_HANDLE_STDIN);
+}
+
+sd_err sd_lib_io_readLine(sd_str *out) {
+  sd_handle *h = io_stdin();
+  int err = 0;
+  int r = sd_handle_read_line(h, out, &err);
+  sd_err e = SD_ERR_NULL;
+  if (r != SD_IO_OK && r != SD_IO_EOF) e = sd_handle_error("io.readLine", h, SD_HANDLE_STDIN, r, err);
+  sd_handle_release(h);
+  return e;
+}
+
+sd_err sd_lib_io_read(sd_int max, sd_str *out) {
+  int64_t m;
+  if (!sd_int_to_i64(max, &m)) m = sd_int_lt(max, SD_INT(0)) ? -1 : INT64_MAX;
+  if (m < 1) {
+    sd_crash_int("io.read: max (%s) must be at least 1", max);
+  }
+  sd_handle *h = io_stdin();
+  int err = 0;
+  int r = sd_handle_read(h, m, out, &err);
+  sd_err e = SD_ERR_NULL;
+  if (r != SD_IO_OK && r != SD_IO_EOF) e = sd_handle_error("io.read", h, SD_HANDLE_STDIN, r, err);
+  sd_handle_release(h);
+  return e;
+}
+
+sd_err sd_lib_io_readAll(sd_str *out) {
+  sd_handle *h = io_stdin();
+  int err = 0;
+  int r = sd_handle_read_all(h, out, &err);
+  sd_err e = SD_ERR_NULL;
+  if (r != SD_IO_OK) e = sd_handle_error("io.readAll", h, SD_HANDLE_STDIN, r, err);
+  sd_handle_release(h);
+  return e;
 }
 
 /* ---- lib/crypto/crypto.c ---- */
@@ -11547,6 +11816,101 @@ static inline __attribute__((unused)) void sd_rl_S7Package(sd_S_Package v) {
   sd_str_release(v.f_dir);
   sd_str_release(v.f_cprefix);
 }
+static inline __attribute__((unused)) void sd_rl_S9LspServer(sd_S_LspServer v) {
+  sd_str_release(v.f_seedRoot);
+  sd_map_release(v.f_docs);
+}
+static inline __attribute__((unused)) sd_S_LspDoc sd_rt_S6LspDoc(sd_S_LspDoc v) {
+  v.f_uri = sd_str_retain(v.f_uri);
+  v.f_path = sd_str_retain(v.f_path);
+  v.f_text = sd_str_retain(v.f_text);
+  return v;
+}
+static inline __attribute__((unused)) void sd_rl_S6LspDoc(sd_S_LspDoc v) {
+  sd_str_release(v.f_uri);
+  sd_str_release(v.f_path);
+  sd_str_release(v.f_text);
+}
+static inline __attribute__((unused)) void sd_rl_S6LspJob(sd_S_LspJob v) {
+  sd_str_release(v.f_kind);
+  sd_str_release(v.f_seedRoot);
+  sd_str_release(v.f_path);
+  sd_map_release(v.f_overlay);
+  sd_int_release(v.f_line);
+  sd_int_release(v.f_character);
+}
+static inline __attribute__((unused)) void sd_rl_T2E10json_Valuee(sd_T_T2E10json_Valuee v) {
+  sd_box_release(v.r0);
+  sd_iface_release(v.r1);
+}
+static inline __attribute__((unused)) void sd_rl_S6Loader(sd_S_Loader v) {
+  sd_rl_S6Parser(v.f_p);
+  sd_str_release(v.f_seedRoot);
+  sd_str_release(v.f_projectRoot);
+  sd_str_release(v.f_libDir);
+  sd_map_release(v.f_byDir);
+  sd_list_release(v.f_unformatted);
+  sd_map_release(v.f_overlay);
+}
+static inline __attribute__((unused)) void sd_rl_S3Ast(sd_S_Ast v) {
+  sd_list_release(v.f_files);
+  sd_list_release(v.f_exprs);
+  sd_list_release(v.f_stmts);
+  sd_list_release(v.f_blocks);
+  sd_list_release(v.f_targets);
+  sd_list_release(v.f_cases);
+  sd_list_release(v.f_labels);
+  sd_list_release(v.f_typeExprs);
+  sd_list_release(v.f_params);
+  sd_list_release(v.f_fns);
+  sd_list_release(v.f_typeDecls);
+  sd_list_release(v.f_enumCases);
+  sd_list_release(v.f_methodSigs);
+  sd_list_release(v.f_consts);
+  sd_list_release(v.f_tests);
+  sd_list_release(v.f_imports);
+  sd_list_release(v.f_pkgs);
+  sd_list_release(v.f_tops);
+  sd_list_release(v.f_comments);
+  sd_list_release(v.f_lists);
+}
+static inline __attribute__((unused)) void sd_rl_S8TypeExpr(sd_S_TypeExpr v) {
+  sd_box_release(v.f_kind);
+  sd_rl_S3Pos(v.f_pos);
+  sd_str_release(v.f_pkg);
+  sd_str_release(v.f_name);
+  sd_int_release(v.f_a);
+  sd_int_release(v.f_b);
+  sd_int_release(v.f_list);
+  sd_int_release(v.f_count);
+  sd_int_release(v.f_results);
+  sd_int_release(v.f_resultCount);
+}
+static inline __attribute__((unused)) void sd_rl_S11LspAnalysis(sd_S_LspAnalysis v) {
+  sd_rl_S7Checker(v.f_c);
+  sd_int_release(v.f_file);
+  sd_list_release(v.f_unformatted);
+  sd_str_release(v.f_src);
+}
+static inline __attribute__((unused)) void sd_rl_T2S11LspAnalysise(sd_T_T2S11LspAnalysise v) {
+  sd_rl_S11LspAnalysis(v.r0);
+  sd_iface_release(v.r1);
+}
+static inline __attribute__((unused)) void sd_rl_S6LspSym(sd_S_LspSym v) {
+  sd_rl_S3Pos(v.f_pos);
+  sd_int_release(v.f_len);
+  sd_str_release(v.f_sig);
+  sd_str_release(v.f_doc);
+}
+static inline __attribute__((unused)) sd_S_LspJob sd_rt_S6LspJob(sd_S_LspJob v) {
+  v.f_kind = sd_str_retain(v.f_kind);
+  v.f_seedRoot = sd_str_retain(v.f_seedRoot);
+  v.f_path = sd_str_retain(v.f_path);
+  v.f_overlay = sd_map_retain(v.f_overlay);
+  v.f_line = sd_int_retain(v.f_line);
+  v.f_character = sd_int_retain(v.f_character);
+  return v;
+}
 static inline __attribute__((unused)) void sd_rl_S5Build(sd_S_Build v) {
   sd_list_release(v.f_files);
   sd_str_release(v.f_dir);
@@ -11579,14 +11943,6 @@ static inline __attribute__((unused)) void sd_rl_T2OS7Checkere(sd_T_T2OS7Checker
   sd_box_release(v.r0);
   sd_iface_release(v.r1);
 }
-static inline __attribute__((unused)) void sd_rl_S6Loader(sd_S_Loader v) {
-  sd_rl_S6Parser(v.f_p);
-  sd_str_release(v.f_seedRoot);
-  sd_str_release(v.f_projectRoot);
-  sd_str_release(v.f_libDir);
-  sd_map_release(v.f_byDir);
-  sd_list_release(v.f_unformatted);
-}
 static inline __attribute__((unused)) void sd_rl_T2Lie(sd_T_T2Lie v) {
   sd_list_release(v.r0);
   sd_iface_release(v.r1);
@@ -11611,18 +11967,6 @@ static inline __attribute__((unused)) void sd_rl_S10SourceFile(sd_S_SourceFile v
   sd_int_release(v.f_importCount);
   sd_int_release(v.f_tops);
   sd_int_release(v.f_topCount);
-}
-static inline __attribute__((unused)) void sd_rl_S8TypeExpr(sd_S_TypeExpr v) {
-  sd_box_release(v.f_kind);
-  sd_rl_S3Pos(v.f_pos);
-  sd_str_release(v.f_pkg);
-  sd_str_release(v.f_name);
-  sd_int_release(v.f_a);
-  sd_int_release(v.f_b);
-  sd_int_release(v.f_list);
-  sd_int_release(v.f_count);
-  sd_int_release(v.f_results);
-  sd_int_release(v.f_resultCount);
 }
 static inline __attribute__((unused)) void sd_rl_S5Types(sd_S_Types v) {
   sd_list_release(v.f_list);
@@ -11654,27 +11998,14 @@ static inline __attribute__((unused)) void sd_rl_S4Type(sd_S_Type v) {
   sd_int_release(v.f_rt);
   sd_int_release(v.f_helpers);
 }
-static inline __attribute__((unused)) void sd_rl_S3Ast(sd_S_Ast v) {
-  sd_list_release(v.f_files);
-  sd_list_release(v.f_exprs);
-  sd_list_release(v.f_stmts);
-  sd_list_release(v.f_blocks);
-  sd_list_release(v.f_targets);
-  sd_list_release(v.f_cases);
-  sd_list_release(v.f_labels);
-  sd_list_release(v.f_typeExprs);
-  sd_list_release(v.f_params);
-  sd_list_release(v.f_fns);
-  sd_list_release(v.f_typeDecls);
-  sd_list_release(v.f_enumCases);
-  sd_list_release(v.f_methodSigs);
-  sd_list_release(v.f_consts);
-  sd_list_release(v.f_tests);
-  sd_list_release(v.f_imports);
-  sd_list_release(v.f_pkgs);
-  sd_list_release(v.f_tops);
-  sd_list_release(v.f_comments);
-  sd_list_release(v.f_lists);
+static inline __attribute__((unused)) void sd_rl_S15json_JsonParser(sd_S_json_JsonParser v) {
+  sd_str_release(v.f_text);
+  sd_int_release(v.f_pos);
+  sd_int_release(v.f_depth);
+}
+static inline __attribute__((unused)) void sd_rl_S15json_JsonWriter(sd_S_json_JsonWriter v) {
+  sd_str_release(v.f_out);
+  sd_str_release(v.f_method);
 }
 static inline __attribute__((unused)) sd_S_Types sd_rt_S5Types(sd_S_Types v) {
   v.f_list = sd_list_retain(v.f_list);
@@ -11682,18 +12013,25 @@ static inline __attribute__((unused)) sd_S_Types sd_rt_S5Types(sd_S_Types v) {
   v.f_parts = sd_list_retain(v.f_parts);
   return v;
 }
-typedef struct { sd_str a0; sd_str a1; sd_str a2; sd_str a3; } sd_g1_args;
-static const sd_field sd_g1_fields[] = {SD_FIELD(sd_g1_args, a0, &sd_type_str), SD_FIELD(sd_g1_args, a1, &sd_type_str), SD_FIELD(sd_g1_args, a2, &sd_type_str), SD_FIELD(sd_g1_args, a3, &sd_type_str)};
-static const sd_type sd_g1_type = SD_STRUCT_TYPE("spawn compileObject()", sd_g1_args, sd_g1_fields);
+typedef struct { sd_S_LspJob a0; sd_chan * a1; } sd_g1_args;
+static const sd_field sd_g1_fields[] = {SD_FIELD(sd_g1_args, a0, &sd_D_LspJob), SD_FIELD(sd_g1_args, a1, &sd_type_chan)};
+static const sd_type sd_g1_type = SD_STRUCT_TYPE("spawn lspJobTask()", sd_g1_args, sd_g1_fields);
 static sd_err sd_g1(void *p) {
   sd_g1_args *a_ = p;
-  return sd_f_compileObject(a_->a0, a_->a1, a_->a2, a_->a3);
+  return sd_f_lspJobTask(a_->a0, a_->a1);
 }
-typedef struct { sd_str a0; sd_list * a1; sd_list * a2; sd_str a3; bool a4; } sd_g2_args;
-static const sd_field sd_g2_fields[] = {SD_FIELD(sd_g2_args, a0, &sd_type_str), SD_FIELD(sd_g2_args, a1, &sd_type_list), SD_FIELD(sd_g2_args, a2, &sd_type_list), SD_FIELD(sd_g2_args, a3, &sd_type_str), SD_FIELD(sd_g2_args, a4, &sd_type_bool)};
-static const sd_type sd_g2_type = SD_STRUCT_TYPE("spawn runCC()", sd_g2_args, sd_g2_fields);
+typedef struct { sd_str a0; sd_str a1; sd_str a2; sd_str a3; } sd_g2_args;
+static const sd_field sd_g2_fields[] = {SD_FIELD(sd_g2_args, a0, &sd_type_str), SD_FIELD(sd_g2_args, a1, &sd_type_str), SD_FIELD(sd_g2_args, a2, &sd_type_str), SD_FIELD(sd_g2_args, a3, &sd_type_str)};
+static const sd_type sd_g2_type = SD_STRUCT_TYPE("spawn compileObject()", sd_g2_args, sd_g2_fields);
 static sd_err sd_g2(void *p) {
   sd_g2_args *a_ = p;
+  return sd_f_compileObject(a_->a0, a_->a1, a_->a2, a_->a3);
+}
+typedef struct { sd_str a0; sd_list * a1; sd_list * a2; sd_str a3; bool a4; } sd_g3_args;
+static const sd_field sd_g3_fields[] = {SD_FIELD(sd_g3_args, a0, &sd_type_str), SD_FIELD(sd_g3_args, a1, &sd_type_list), SD_FIELD(sd_g3_args, a2, &sd_type_list), SD_FIELD(sd_g3_args, a3, &sd_type_str), SD_FIELD(sd_g3_args, a4, &sd_type_bool)};
+static const sd_type sd_g3_type = SD_STRUCT_TYPE("spawn runCC()", sd_g3_args, sd_g3_fields);
+static sd_err sd_g3(void *p) {
+  sd_g3_args *a_ = p;
   return sd_f_runCC(a_->a0, a_->a1, a_->a2, a_->a3, a_->a4);
 }
 typedef struct { sd_str a0; } sd_d1_env;
@@ -11806,6 +12144,73 @@ static sd_map * sd_c_keywords(void) {
   sd_goroutine_atexit(sd_cf_keywords);
   return sd_cc_->v;
 }
+static sd_str sd_c_lspPlaceholder(void) { return SD_STR_LIT("lspCompletionPlaceholder"); }
+typedef struct { sd_list * v; int s; } sd_ct_lspKeywords;
+static int sd_ck_lspKeywords;
+static void sd_cf_lspKeywords(void) { sd_ct_lspKeywords *sd_cc_ = sd_goroutine_local(&sd_ck_lspKeywords, sizeof(sd_ct_lspKeywords)); sd_list_release(sd_cc_->v); sd_cc_->s = 0; }
+static sd_list * sd_c_lspKeywords(void) {
+  sd_ct_lspKeywords *sd_cc_ = sd_goroutine_local(&sd_ck_lspKeywords, sizeof(sd_ct_lspKeywords));
+  if (sd_cc_->s == 2) return sd_cc_->v;
+  if (sd_cc_->s == 1) sd_crash("constant lspKeywords depends on itself");
+  sd_cc_->s = 1;
+  sd_list * _t1 = sd_list_new(&sd_type_str, 32);
+  SD_LIST_PUSH(&_t1, sd_str, SD_STR_LIT("assert"));
+  SD_LIST_PUSH(&_t1, sd_str, SD_STR_LIT("break"));
+  SD_LIST_PUSH(&_t1, sd_str, SD_STR_LIT("case"));
+  SD_LIST_PUSH(&_t1, sd_str, SD_STR_LIT("chan"));
+  SD_LIST_PUSH(&_t1, sd_str, SD_STR_LIT("const"));
+  SD_LIST_PUSH(&_t1, sd_str, SD_STR_LIT("continue"));
+  SD_LIST_PUSH(&_t1, sd_str, SD_STR_LIT("default"));
+  SD_LIST_PUSH(&_t1, sd_str, SD_STR_LIT("defer"));
+  SD_LIST_PUSH(&_t1, sd_str, SD_STR_LIT("else"));
+  SD_LIST_PUSH(&_t1, sd_str, SD_STR_LIT("enum"));
+  SD_LIST_PUSH(&_t1, sd_str, SD_STR_LIT("false"));
+  SD_LIST_PUSH(&_t1, sd_str, SD_STR_LIT("fn"));
+  SD_LIST_PUSH(&_t1, sd_str, SD_STR_LIT("for"));
+  SD_LIST_PUSH(&_t1, sd_str, SD_STR_LIT("group"));
+  SD_LIST_PUSH(&_t1, sd_str, SD_STR_LIT("if"));
+  SD_LIST_PUSH(&_t1, sd_str, SD_STR_LIT("implements"));
+  SD_LIST_PUSH(&_t1, sd_str, SD_STR_LIT("import"));
+  SD_LIST_PUSH(&_t1, sd_str, SD_STR_LIT("interface"));
+  SD_LIST_PUSH(&_t1, sd_str, SD_STR_LIT("map"));
+  SD_LIST_PUSH(&_t1, sd_str, SD_STR_LIT("mut"));
+  SD_LIST_PUSH(&_t1, sd_str, SD_STR_LIT("null"));
+  SD_LIST_PUSH(&_t1, sd_str, SD_STR_LIT("package"));
+  SD_LIST_PUSH(&_t1, sd_str, SD_STR_LIT("pub"));
+  SD_LIST_PUSH(&_t1, sd_str, SD_STR_LIT("return"));
+  SD_LIST_PUSH(&_t1, sd_str, SD_STR_LIT("select"));
+  SD_LIST_PUSH(&_t1, sd_str, SD_STR_LIT("spawn"));
+  SD_LIST_PUSH(&_t1, sd_str, SD_STR_LIT("struct"));
+  SD_LIST_PUSH(&_t1, sd_str, SD_STR_LIT("switch"));
+  SD_LIST_PUSH(&_t1, sd_str, SD_STR_LIT("test"));
+  SD_LIST_PUSH(&_t1, sd_str, SD_STR_LIT("true"));
+  SD_LIST_PUSH(&_t1, sd_str, SD_STR_LIT("try"));
+  SD_LIST_PUSH(&_t1, sd_str, SD_STR_LIT("type"));
+  sd_cc_->v = _t1;
+  sd_cc_->s = 2;
+  sd_goroutine_atexit(sd_cf_lspKeywords);
+  return sd_cc_->v;
+}
+typedef struct { sd_list * v; int s; } sd_ct_lspBuiltinTypes;
+static int sd_ck_lspBuiltinTypes;
+static void sd_cf_lspBuiltinTypes(void) { sd_ct_lspBuiltinTypes *sd_cc_ = sd_goroutine_local(&sd_ck_lspBuiltinTypes, sizeof(sd_ct_lspBuiltinTypes)); sd_list_release(sd_cc_->v); sd_cc_->s = 0; }
+static sd_list * sd_c_lspBuiltinTypes(void) {
+  sd_ct_lspBuiltinTypes *sd_cc_ = sd_goroutine_local(&sd_ck_lspBuiltinTypes, sizeof(sd_ct_lspBuiltinTypes));
+  if (sd_cc_->s == 2) return sd_cc_->v;
+  if (sd_cc_->s == 1) sd_crash("constant lspBuiltinTypes depends on itself");
+  sd_cc_->s = 1;
+  sd_list * _t1 = sd_list_new(&sd_type_str, 6);
+  SD_LIST_PUSH(&_t1, sd_str, SD_STR_LIT("bool"));
+  SD_LIST_PUSH(&_t1, sd_str, SD_STR_LIT("byte"));
+  SD_LIST_PUSH(&_t1, sd_str, SD_STR_LIT("error"));
+  SD_LIST_PUSH(&_t1, sd_str, SD_STR_LIT("float"));
+  SD_LIST_PUSH(&_t1, sd_str, SD_STR_LIT("int"));
+  SD_LIST_PUSH(&_t1, sd_str, SD_STR_LIT("string"));
+  sd_cc_->v = _t1;
+  sd_cc_->s = 2;
+  sd_goroutine_atexit(sd_cf_lspBuiltinTypes);
+  return sd_cc_->v;
+}
 static sd_str sd_c_cCompiler(void) { return SD_STR_LIT("cc"); }
 typedef struct { sd_list * v; int s; } sd_ct_cFlags;
 static int sd_ck_cFlags;
@@ -11841,7 +12246,7 @@ static sd_list * sd_c_cLibs(void) {
   sd_goroutine_atexit(sd_cf_cLibs);
   return sd_cc_->v;
 }
-static sd_str sd_c_usage(void) { return SD_STR_LIT("usage:\012  seed build [-o out] <dir | file.sd>\012  seed run <dir | file.sd> [args...]\012  seed test [-v] [--run text] [dir...]\012  seed fmt [--check] <file.sd>...\012  seed c <dir | file.sd...>\012  seed ast <file.sd>...\012"); }
+static sd_str sd_c_usage(void) { return SD_STR_LIT("usage:\012  seed build [-o out] <dir | file.sd>\012  seed run <dir | file.sd> [args...]\012  seed test [-v] [--run text] [dir...]\012  seed fmt [--check] <file.sd>...\012  seed c <dir | file.sd...>\012  seed ast <file.sd>...\012  seed lsp\012"); }
 static sd_int sd_c_maxNesting(void) { return SD_INT(256); }
 static sd_int sd_c_minInt(void) { return SD_INT_BIGLIT("-9223372036854775808"); }
 static sd_int sd_c_tyVoid(void) { return SD_INT(0); }
@@ -11853,6 +12258,7 @@ static sd_int sd_c_tyString(void) { return SD_INT(5); }
 static sd_int sd_c_tyError(void) { return SD_INT(6); }
 static sd_int sd_c_tyNull(void) { return SD_INT(7); }
 static sd_int sd_c_tyInvalid(void) { return SD_INT(8); }
+static sd_int sd_c_json_jsonMaxDepth(void) { return SD_INT(512); }
 static sd_str sd_c_encoding_hexDigits(void) { return SD_STR_LIT("0123456789abcdef"); }
 static sd_str sd_c_encoding_base64Std(void) { return SD_STR_LIT("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"); }
 static sd_str sd_c_encoding_base64Url(void) { return SD_STR_LIT("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"); }
@@ -11953,7 +12359,7 @@ static void sd_lr_sd_m_Ast__exprText(sd_lframe *p) {
   sd_str_release(L->_t18);
   sd_str_release(L->_t25);
 }
-static sd_str sd_m_Ast__exprText(sd_S_Ast l_a, sd_int l_e) {
+SD_NO_TCE static sd_str sd_m_Ast__exprText(sd_S_Ast l_a, sd_int l_e) {
   sd_L_sd_m_Ast__exprText L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Ast__exprText);
   if (sd_int_lt(l_e, SD_INT(0))) {
@@ -12069,7 +12475,7 @@ static void sd_lr_sd_m_Ast__fullText(sd_lframe *p) {
   sd_str_release(L->l_fb);
   sd_str_release(L->l_callee);
 }
-static sd_str sd_m_Ast__fullText(sd_S_Ast l_a, sd_int l_e) {
+SD_NO_TCE static sd_str sd_m_Ast__fullText(sd_S_Ast l_a, sd_int l_e) {
   sd_L_sd_m_Ast__fullText L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Ast__fullText);
   if (sd_int_lt(l_e, SD_INT(0))) {
@@ -12173,7 +12579,7 @@ static void sd_lr_sd_m_Ast__typeExprText(sd_lframe *p) {
   sd_str_release(L->_t37);
   sd_str_release(L->_t40);
 }
-static sd_str sd_m_Ast__typeExprText(sd_S_Ast l_a, sd_int l_t) {
+SD_NO_TCE static sd_str sd_m_Ast__typeExprText(sd_S_Ast l_a, sd_int l_t) {
   sd_L_sd_m_Ast__typeExprText L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Ast__typeExprText);
   if (sd_int_lt(l_t, SD_INT(0))) {
@@ -13211,7 +13617,7 @@ static void sd_lr_sd_m_Checker__checkStructCycles(sd_lframe *p) {
   sd_str_release(L->_t4);
   sd_list_release(L->l_next);
 }
-static void sd_m_Checker__checkStructCycles(sd_S_Checker * l_c, sd_int l_d, sd_list * l_path) {
+SD_NO_TCE static void sd_m_Checker__checkStructCycles(sd_S_Checker * l_c, sd_int l_d, sd_list * l_path) {
   sd_L_sd_m_Checker__checkStructCycles L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Checker__checkStructCycles);
   sd_S_TypeDecl l_td = SD_LIST_GET((((*l_c)).f_ast).f_typeDecls, sd_S_TypeDecl, l_d);
@@ -13784,7 +14190,7 @@ static sd_int sd_f_builtinType(sd_str l_n) {
   return sd_int_retain(sd_c_tyError());
 }
 
-static void sd_m_Checker__resolveType(sd_S_Checker * l_c, sd_int l_te) {
+SD_NO_TCE static void sd_m_Checker__resolveType(sd_S_Checker * l_c, sd_int l_te) {
   if ((sd_int_ge(l_te, SD_INT(0)) && sd_int_lt(SD_LIST_GET(((*l_c)).f_teType, sd_int, l_te), SD_INT(0)))) {
     SD_PREEMPT();
     sd_int _t1 = sd_m_Checker__resolveUncached(l_c, l_te);
@@ -13794,7 +14200,7 @@ static void sd_m_Checker__resolveType(sd_S_Checker * l_c, sd_int l_te) {
   }
 }
 
-static sd_int sd_m_Checker__resolve(sd_S_Checker * l_c, sd_int l_te) {
+SD_NO_TCE static sd_int sd_m_Checker__resolve(sd_S_Checker * l_c, sd_int l_te) {
   if (sd_int_lt(l_te, SD_INT(0))) {
     return sd_int_retain(sd_c_tyInvalid());
   }
@@ -13822,7 +14228,7 @@ static void sd_lr_sd_m_Checker__resolveUncached(sd_lframe *p) {
   sd_list_release(L->l_ps);
   sd_list_release(L->l_rs);
 }
-static sd_int sd_m_Checker__resolveUncached(sd_S_Checker * l_c, sd_int l_te) {
+SD_NO_TCE static sd_int sd_m_Checker__resolveUncached(sd_S_Checker * l_c, sd_int l_te) {
   sd_L_sd_m_Checker__resolveUncached L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Checker__resolveUncached);
   sd_S_TypeExpr l_x = SD_LIST_GET((((*l_c)).f_ast).f_typeExprs, sd_S_TypeExpr, l_te);
@@ -14169,7 +14575,7 @@ static void sd_lr_sd_m_Checker__checkConst(sd_lframe *p) {
   sd_list_release(L->l_savedScope);
   sd_str_release(L->_t21);
 }
-static void sd_m_Checker__checkConst(sd_S_Checker * l_c, sd_int l_i) {
+SD_NO_TCE static void sd_m_Checker__checkConst(sd_S_Checker * l_c, sd_int l_i) {
   sd_L_sd_m_Checker__checkConst L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Checker__checkConst);
   sd_int l_state = sd_int_retain(SD_LIST_GET(((*l_c)).f_constState, sd_int, l_i));
@@ -14315,7 +14721,7 @@ static void sd_m_Checker__requireConstant(sd_S_Checker * l_c, sd_int l_e, sd_str
   SD_LF_LEAVE(L);
 }
 
-static sd_int sd_m_Checker__nonConstant(sd_S_Checker l_c, sd_int l_e) {
+SD_NO_TCE static sd_int sd_m_Checker__nonConstant(sd_S_Checker l_c, sd_int l_e) {
   if (sd_int_lt(l_e, SD_INT(0))) {
     return SD_INT(-1);
   }
@@ -14772,7 +15178,7 @@ static void sd_lr_sd_m_Checker__pathKey(sd_lframe *p) {
   sd_L_sd_m_Checker__pathKey *L = (sd_L_sd_m_Checker__pathKey *)p;
   sd_str_release(L->l_base);
 }
-static sd_str sd_m_Checker__pathKey(sd_S_Checker l_c, sd_int l_e) {
+SD_NO_TCE static sd_str sd_m_Checker__pathKey(sd_S_Checker l_c, sd_int l_e) {
   sd_L_sd_m_Checker__pathKey L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Checker__pathKey);
   sd_S_Expr l_x = SD_LIST_GET(((l_c).f_ast).f_exprs, sd_S_Expr, l_e);
@@ -15343,7 +15749,7 @@ static void sd_lr_sd_m_Checker__condKeys(sd_lframe *p) {
   sd_L_sd_m_Checker__condKeys *L = (sd_L_sd_m_Checker__condKeys *)p;
   sd_list_release(L->l_keys);
 }
-static sd_list * sd_m_Checker__condKeys(sd_S_Checker l_c, sd_int l_cond, bool l_when, sd_list * l_out) {
+SD_NO_TCE static sd_list * sd_m_Checker__condKeys(sd_S_Checker l_c, sd_int l_cond, bool l_when, sd_list * l_out) {
   sd_L_sd_m_Checker__condKeys L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Checker__condKeys);
   L.l_keys = sd_list_retain(l_out);
@@ -15443,7 +15849,7 @@ static void sd_lr_sd_m_Checker__scanStmtKills(sd_lframe *p) {
   sd_str_release(L->_t5);
   sd_str_release(L->_t6);
 }
-static void sd_m_Checker__scanStmtKills(sd_S_Checker * l_c, sd_int l_s) {
+SD_NO_TCE static void sd_m_Checker__scanStmtKills(sd_S_Checker * l_c, sd_int l_s) {
   sd_L_sd_m_Checker__scanStmtKills L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Checker__scanStmtKills);
   if (sd_int_lt(l_s, SD_INT(0))) {
@@ -15569,7 +15975,7 @@ static void sd_m_Checker__scanStmtKills(sd_S_Checker * l_c, sd_int l_s) {
   SD_LF_LEAVE(L);
 }
 
-static void sd_m_Checker__scanBlockKills(sd_S_Checker * l_c, sd_int l_b) {
+SD_NO_TCE static void sd_m_Checker__scanBlockKills(sd_S_Checker * l_c, sd_int l_b) {
   if (sd_int_lt(l_b, SD_INT(0))) {
     return;
   }
@@ -15597,7 +16003,7 @@ static void sd_lr_sd_m_Checker__scanExprKills(sd_lframe *p) {
   sd_L_sd_m_Checker__scanExprKills *L = (sd_L_sd_m_Checker__scanExprKills *)p;
   sd_str_release(L->_t6);
 }
-static void sd_m_Checker__scanExprKills(sd_S_Checker * l_c, sd_int l_e) {
+SD_NO_TCE static void sd_m_Checker__scanExprKills(sd_S_Checker * l_c, sd_int l_e) {
   sd_L_sd_m_Checker__scanExprKills L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Checker__scanExprKills);
   if (sd_int_lt(l_e, SD_INT(0))) {
@@ -15651,7 +16057,7 @@ static void sd_m_Checker__scanExprKills(sd_S_Checker * l_c, sd_int l_e) {
   SD_LF_LEAVE(L);
 }
 
-static void sd_m_Checker__checkCall(sd_S_Checker * l_c, sd_int l_e) {
+SD_NO_TCE static void sd_m_Checker__checkCall(sd_S_Checker * l_c, sd_int l_e) {
   sd_S_Expr l_x = SD_LIST_GET((((*l_c)).f_ast).f_exprs, sd_S_Expr, l_e);
   sd_S_Expr l_callee = SD_LIST_GET((((*l_c)).f_ast).f_exprs, sd_S_Expr, (l_x).f_a);
   if ((SD_BOX_GET((l_callee).f_kind, sd_E_ExprKind).tag == 7)) {
@@ -15698,7 +16104,7 @@ static void sd_lr_sd_m_Checker__checkValueCall(sd_lframe *p) {
   sd_list_release(L->l_ps);
   sd_str_release(L->_t26);
 }
-static void sd_m_Checker__checkValueCall(sd_S_Checker * l_c, sd_int l_e) {
+SD_NO_TCE static void sd_m_Checker__checkValueCall(sd_S_Checker * l_c, sd_int l_e) {
   sd_L_sd_m_Checker__checkValueCall L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Checker__checkValueCall);
   sd_S_Expr l_x = SD_LIST_GET((((*l_c)).f_ast).f_exprs, sd_S_Expr, l_e);
@@ -15800,7 +16206,7 @@ static void sd_lr_sd_m_Checker__checkNamedCall(sd_lframe *p) {
   sd_str_release(L->l_hint);
   sd_str_release(L->_t23);
 }
-static void sd_m_Checker__checkNamedCall(sd_S_Checker * l_c, sd_int l_e, sd_str l_n) {
+SD_NO_TCE static void sd_m_Checker__checkNamedCall(sd_S_Checker * l_c, sd_int l_e, sd_str l_n) {
   sd_L_sd_m_Checker__checkNamedCall L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Checker__checkNamedCall);
   sd_S_Expr l_x = SD_LIST_GET((((*l_c)).f_ast).f_exprs, sd_S_Expr, l_e);
@@ -15956,7 +16362,7 @@ static void sd_lr_sd_m_Checker__checkGlobalCall(sd_lframe *p) {
   sd_str_release(L->_t23);
   sd_str_release(L->_t25);
 }
-static void sd_m_Checker__checkGlobalCall(sd_S_Checker * l_c, sd_int l_e, sd_int l_g, sd_str l_what) {
+SD_NO_TCE static void sd_m_Checker__checkGlobalCall(sd_S_Checker * l_c, sd_int l_e, sd_int l_g, sd_str l_what) {
   sd_L_sd_m_Checker__checkGlobalCall L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Checker__checkGlobalCall);
   sd_S_Pos l_cpos = (SD_LIST_GET((((*l_c)).f_ast).f_exprs, sd_S_Expr, (SD_LIST_GET((((*l_c)).f_ast).f_exprs, sd_S_Expr, l_e)).f_a)).f_pos;
@@ -16060,7 +16466,7 @@ static void sd_lr_sd_m_Checker__checkConversion(sd_lframe *p) {
   sd_str_release(L->_t24);
   sd_str_release(L->_t26);
 }
-static void sd_m_Checker__checkConversion(sd_S_Checker * l_c, sd_int l_e, sd_str l_n) {
+SD_NO_TCE static void sd_m_Checker__checkConversion(sd_S_Checker * l_c, sd_int l_e, sd_str l_n) {
   sd_L_sd_m_Checker__checkConversion L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Checker__checkConversion);
   sd_S_Expr l_x = SD_LIST_GET((((*l_c)).f_ast).f_exprs, sd_S_Expr, l_e);
@@ -16191,7 +16597,7 @@ static void sd_lr_sd_m_Checker__checkSelectorCall(sd_lframe *p) {
   sd_list_release(L->l_ps);
   sd_str_release(L->_t54);
 }
-static void sd_m_Checker__checkSelectorCall(sd_S_Checker * l_c, sd_int l_e) {
+SD_NO_TCE static void sd_m_Checker__checkSelectorCall(sd_S_Checker * l_c, sd_int l_e) {
   sd_L_sd_m_Checker__checkSelectorCall L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Checker__checkSelectorCall);
   sd_S_Expr l_x = SD_LIST_GET((((*l_c)).f_ast).f_exprs, sd_S_Expr, l_e);
@@ -16475,7 +16881,7 @@ static void sd_lr_sd_m_Checker__checkIfaceCall(sd_lframe *p) {
   sd_str_release(L->_t32);
   sd_str_release(L->_t34);
 }
-static void sd_m_Checker__checkIfaceCall(sd_S_Checker * l_c, sd_int l_e, sd_int l_base, sd_int l_it, sd_str l_name) {
+SD_NO_TCE static void sd_m_Checker__checkIfaceCall(sd_S_Checker * l_c, sd_int l_e, sd_int l_base, sd_int l_it, sd_str l_name) {
   sd_L_sd_m_Checker__checkIfaceCall L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Checker__checkIfaceCall);
   sd_S_Expr l_x = SD_LIST_GET((((*l_c)).f_ast).f_exprs, sd_S_Expr, l_e);
@@ -16596,7 +17002,7 @@ static void sd_m_Checker__checkIfaceCall(sd_S_Checker * l_c, sd_int l_e, sd_int 
   SD_LF_LEAVE(L);
 }
 
-static void sd_m_Checker__checkArgsLoosely(sd_S_Checker * l_c, sd_int l_e) {
+SD_NO_TCE static void sd_m_Checker__checkArgsLoosely(sd_S_Checker * l_c, sd_int l_e) {
   sd_S_Expr l_x = SD_LIST_GET((((*l_c)).f_ast).f_exprs, sd_S_Expr, l_e);
   {
     sd_int l_i = SD_INT(0);
@@ -16630,7 +17036,7 @@ static void sd_lr_sd_m_Checker__checkEnumNew(sd_lframe *p) {
   sd_list_release(L->l_ps);
   sd_str_release(L->_t24);
 }
-static void sd_m_Checker__checkEnumNew(sd_S_Checker * l_c, sd_int l_e, sd_int l_d, sd_str l_name) {
+SD_NO_TCE static void sd_m_Checker__checkEnumNew(sd_S_Checker * l_c, sd_int l_e, sd_int l_d, sd_str l_name) {
   sd_L_sd_m_Checker__checkEnumNew L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Checker__checkEnumNew);
   sd_S_Expr l_x = SD_LIST_GET((((*l_c)).f_ast).f_exprs, sd_S_Expr, l_e);
@@ -16759,7 +17165,7 @@ static void sd_lr_sd_m_Checker__checkBuiltin(sd_lframe *p) {
   sd_str_release(L->_t130);
   sd_str_release(L->_t137);
 }
-static void sd_m_Checker__checkBuiltin(sd_S_Checker * l_c, sd_int l_e, sd_int l_recv, sd_str l_name) {
+SD_NO_TCE static void sd_m_Checker__checkBuiltin(sd_S_Checker * l_c, sd_int l_e, sd_int l_recv, sd_str l_name) {
   sd_L_sd_m_Checker__checkBuiltin L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Checker__checkBuiltin);
   sd_S_Expr l_x = SD_LIST_GET((((*l_c)).f_ast).f_exprs, sd_S_Expr, l_e);
@@ -17688,7 +18094,7 @@ static void sd_m_Checker__coerce(sd_S_Checker * l_c, sd_int l_e, sd_int l_want, 
   SD_LF_LEAVE(L);
 }
 
-static void sd_m_Checker__checkValue(sd_S_Checker * l_c, sd_int l_e, sd_int l_want, sd_str l_context) {
+SD_NO_TCE static void sd_m_Checker__checkValue(sd_S_Checker * l_c, sd_int l_e, sd_int l_want, sd_str l_context) {
   SD_PREEMPT();
   sd_m_Checker__checkExpr(l_c, l_e);
   sd_m_Checker__coerce(l_c, l_e, l_want, l_context);
@@ -17702,7 +18108,7 @@ static void sd_lr_sd_m_Checker__checkArgs(sd_lframe *p) {
   sd_str_release(L->_t4);
   sd_str_release(L->_t13);
 }
-static void sd_m_Checker__checkArgs(sd_S_Checker * l_c, sd_int l_call, sd_list * l_params, sd_str l_what) {
+SD_NO_TCE static void sd_m_Checker__checkArgs(sd_S_Checker * l_c, sd_int l_call, sd_list * l_params, sd_str l_what) {
   sd_L_sd_m_Checker__checkArgs L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Checker__checkArgs);
   sd_S_Expr l_x = SD_LIST_GET((((*l_c)).f_ast).f_exprs, sd_S_Expr, l_call);
@@ -18019,7 +18425,7 @@ static void sd_lr_sd_m_Checker__checkLvalue(sd_lframe *p) {
   sd_str_release(L->_t71);
   sd_str_release(L->_t72);
 }
-static void sd_m_Checker__checkLvalue(sd_S_Checker * l_c, sd_int l_e) {
+SD_NO_TCE static void sd_m_Checker__checkLvalue(sd_S_Checker * l_c, sd_int l_e) {
   sd_L_sd_m_Checker__checkLvalue L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Checker__checkLvalue);
   sd_S_Expr l_x = SD_LIST_GET((((*l_c)).f_ast).f_exprs, sd_S_Expr, l_e);
@@ -18388,7 +18794,7 @@ static void sd_lr_sd_m_Checker__checkExpr(sd_lframe *p) {
   sd_str_release(L->_t16);
   sd_str_release(L->_t17);
 }
-static void sd_m_Checker__checkExpr(sd_S_Checker * l_c, sd_int l_e) {
+SD_NO_TCE static void sd_m_Checker__checkExpr(sd_S_Checker * l_c, sd_int l_e) {
   sd_L_sd_m_Checker__checkExpr L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Checker__checkExpr);
   sd_S_Expr l_x = SD_LIST_GET((((*l_c)).f_ast).f_exprs, sd_S_Expr, l_e);
@@ -18593,7 +18999,7 @@ static void sd_lr_sd_m_Checker__checkIdent(sd_lframe *p) {
   sd_str_release(L->_t22);
   sd_str_release(L->_t24);
 }
-static void sd_m_Checker__checkIdent(sd_S_Checker * l_c, sd_int l_e) {
+SD_NO_TCE static void sd_m_Checker__checkIdent(sd_S_Checker * l_c, sd_int l_e) {
   sd_L_sd_m_Checker__checkIdent L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Checker__checkIdent);
   sd_S_Expr l_x = SD_LIST_GET((((*l_c)).f_ast).f_exprs, sd_S_Expr, l_e);
@@ -18687,7 +19093,7 @@ static void sd_lr_sd_m_Checker__identGlobal(sd_lframe *p) {
   sd_L_sd_m_Checker__identGlobal *L = (sd_L_sd_m_Checker__identGlobal *)p;
   sd_str_release(L->_t18);
 }
-static void sd_m_Checker__identGlobal(sd_S_Checker * l_c, sd_int l_e, sd_int l_g) {
+SD_NO_TCE static void sd_m_Checker__identGlobal(sd_S_Checker * l_c, sd_int l_e, sd_int l_g) {
   sd_L_sd_m_Checker__identGlobal L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Checker__identGlobal);
   sd_S_Expr l_x = SD_LIST_GET((((*l_c)).f_ast).f_exprs, sd_S_Expr, l_e);
@@ -18767,7 +19173,7 @@ static void sd_lr_sd_m_Checker__checkField(sd_lframe *p) {
   sd_str_release(L->_t56);
   sd_str_release(L->_t58);
 }
-static void sd_m_Checker__checkField(sd_S_Checker * l_c, sd_int l_e) {
+SD_NO_TCE static void sd_m_Checker__checkField(sd_S_Checker * l_c, sd_int l_e) {
   sd_L_sd_m_Checker__checkField L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Checker__checkField);
   sd_S_Expr l_x = SD_LIST_GET((((*l_c)).f_ast).f_exprs, sd_S_Expr, l_e);
@@ -19012,7 +19418,7 @@ static void sd_lr_sd_m_Checker__checkIndex(sd_lframe *p) {
   sd_str_release(L->_t32);
   sd_str_release(L->_t33);
 }
-static void sd_m_Checker__checkIndex(sd_S_Checker * l_c, sd_int l_e) {
+SD_NO_TCE static void sd_m_Checker__checkIndex(sd_S_Checker * l_c, sd_int l_e) {
   sd_L_sd_m_Checker__checkIndex L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Checker__checkIndex);
   sd_S_Expr l_x = SD_LIST_GET((((*l_c)).f_ast).f_exprs, sd_S_Expr, l_e);
@@ -19168,7 +19574,7 @@ static void sd_lr_sd_m_Checker__checkBinary(sd_lframe *p) {
   sd_str_release(L->_t118);
   sd_str_release(L->_t120);
 }
-static void sd_m_Checker__checkBinary(sd_S_Checker * l_c, sd_int l_e) {
+SD_NO_TCE static void sd_m_Checker__checkBinary(sd_S_Checker * l_c, sd_int l_e) {
   sd_L_sd_m_Checker__checkBinary L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Checker__checkBinary);
   sd_S_Expr l_x = SD_LIST_GET((((*l_c)).f_ast).f_exprs, sd_S_Expr, l_e);
@@ -19570,7 +19976,7 @@ static void sd_lr_sd_m_Checker__checkTry(sd_lframe *p) {
   sd_str_release(L->_t12);
   sd_list_release(L->l_rest);
 }
-static void sd_m_Checker__checkTry(sd_S_Checker * l_c, sd_int l_e) {
+SD_NO_TCE static void sd_m_Checker__checkTry(sd_S_Checker * l_c, sd_int l_e) {
   sd_L_sd_m_Checker__checkTry L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Checker__checkTry);
   sd_S_Expr l_x = SD_LIST_GET((((*l_c)).f_ast).f_exprs, sd_S_Expr, l_e);
@@ -19692,7 +20098,7 @@ static void sd_lr_sd_m_Checker__checkMapLit(sd_lframe *p) {
   sd_str_release(L->_t18);
   sd_str_release(L->_t20);
 }
-static void sd_m_Checker__checkMapLit(sd_S_Checker * l_c, sd_int l_e) {
+SD_NO_TCE static void sd_m_Checker__checkMapLit(sd_S_Checker * l_c, sd_int l_e) {
   sd_L_sd_m_Checker__checkMapLit L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Checker__checkMapLit);
   sd_S_Expr l_x = SD_LIST_GET((((*l_c)).f_ast).f_exprs, sd_S_Expr, l_e);
@@ -19815,7 +20221,7 @@ static void sd_lr_sd_m_Checker__checkStructLit(sd_lframe *p) {
   sd_str_release(L->l_name);
   sd_str_release(L->_t57);
 }
-static void sd_m_Checker__checkStructLit(sd_S_Checker * l_c, sd_int l_e) {
+SD_NO_TCE static void sd_m_Checker__checkStructLit(sd_S_Checker * l_c, sd_int l_e) {
   sd_L_sd_m_Checker__checkStructLit L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Checker__checkStructLit);
   sd_S_Expr l_x = SD_LIST_GET((((*l_c)).f_ast).f_exprs, sd_S_Expr, l_e);
@@ -20077,7 +20483,7 @@ static void sd_m_Checker__checkStructLit(sd_S_Checker * l_c, sd_int l_e) {
   SD_LF_LEAVE(L);
 }
 
-static void sd_m_Checker__checkFieldValuesLoosely(sd_S_Checker * l_c, sd_int l_e) {
+SD_NO_TCE static void sd_m_Checker__checkFieldValuesLoosely(sd_S_Checker * l_c, sd_int l_e) {
   sd_S_Expr l_x = SD_LIST_GET((((*l_c)).f_ast).f_exprs, sd_S_Expr, l_e);
   {
     sd_int l_i = SD_INT(0);
@@ -20599,7 +21005,7 @@ static void sd_lr_sd_m_Checker__comparable(sd_lframe *p) {
   sd_list_release(L->l_next);
   sd_rl_S8EnumCase(L->l_ec);
 }
-static bool sd_m_Checker__comparable(sd_S_Checker l_c, sd_int l_t, sd_list * l_seen) {
+SD_NO_TCE static bool sd_m_Checker__comparable(sd_S_Checker l_c, sd_int l_t, sd_list * l_seen) {
   sd_L_sd_m_Checker__comparable L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Checker__comparable);
   sd_box * _t1 = sd_m_Checker__kindOf(l_c, l_t);
@@ -20722,7 +21128,7 @@ static void sd_lr_sd_m_Checker__hasChan(sd_lframe *p) {
   sd_list_release(L->l_next);
   sd_rl_S8EnumCase(L->l_ec);
 }
-static bool sd_m_Checker__hasChan(sd_S_Checker l_c, sd_int l_t, sd_list * l_seen) {
+SD_NO_TCE static bool sd_m_Checker__hasChan(sd_S_Checker l_c, sd_int l_t, sd_list * l_seen) {
   sd_L_sd_m_Checker__hasChan L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Checker__hasChan);
   sd_box * _t1 = sd_m_Checker__kindOf(l_c, l_t);
@@ -20839,7 +21245,7 @@ static bool sd_m_Checker__hasChan(sd_S_Checker l_c, sd_int l_t, sd_list * l_seen
   return _t23;
 }
 
-static void sd_m_Checker__checkBlock(sd_S_Checker * l_c, sd_int l_b) {
+SD_NO_TCE static void sd_m_Checker__checkBlock(sd_S_Checker * l_c, sd_int l_b) {
   SD_PREEMPT();
   sd_list * _t1 = sd_m_Checker__checkBlockLive(l_c, l_b);
   sd_list_release(_t1); 
@@ -20850,7 +21256,7 @@ static void sd_lr_sd_m_Checker__checkBlockLive(sd_lframe *p) {
   sd_L_sd_m_Checker__checkBlockLive *L = (sd_L_sd_m_Checker__checkBlockLive *)p;
   sd_list_release(L->l_live);
 }
-static sd_list * sd_m_Checker__checkBlockLive(sd_S_Checker * l_c, sd_int l_b) {
+SD_NO_TCE static sd_list * sd_m_Checker__checkBlockLive(sd_S_Checker * l_c, sd_int l_b) {
   sd_L_sd_m_Checker__checkBlockLive L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Checker__checkBlockLive);
   if (sd_int_lt(l_b, SD_INT(0))) {
@@ -20896,7 +21302,7 @@ static sd_list * sd_m_Checker__checkBlockLive(sd_S_Checker * l_c, sd_int l_b) {
   return L.l_live;
 }
 
-static bool sd_m_Checker__blockExits(sd_S_Checker l_c, sd_int l_b) {
+SD_NO_TCE static bool sd_m_Checker__blockExits(sd_S_Checker l_c, sd_int l_b) {
   if (sd_int_lt(l_b, SD_INT(0))) {
     return false;
   }
@@ -20926,7 +21332,7 @@ static bool sd_m_Checker__blockExits(sd_S_Checker l_c, sd_int l_b) {
   return false;
 }
 
-static bool sd_m_Checker__stmtExits(sd_S_Checker l_c, sd_int l_s) {
+SD_NO_TCE static bool sd_m_Checker__stmtExits(sd_S_Checker l_c, sd_int l_s) {
   if (sd_int_lt(l_s, SD_INT(0))) {
     return false;
   }
@@ -21053,7 +21459,7 @@ static bool sd_m_Checker__isExitCall(sd_S_Checker l_c, sd_int l_e) {
   return _t2;
 }
 
-static bool sd_m_Checker__hasBreak(sd_S_Checker l_c, sd_int l_b) {
+SD_NO_TCE static bool sd_m_Checker__hasBreak(sd_S_Checker l_c, sd_int l_b) {
   if (sd_int_lt(l_b, SD_INT(0))) {
     return false;
   }
@@ -21129,7 +21535,7 @@ static bool sd_m_Checker__hasBreak(sd_S_Checker l_c, sd_int l_b) {
   return false;
 }
 
-static bool sd_m_Checker__stmtHasBreak(sd_S_Checker l_c, sd_int l_s) {
+SD_NO_TCE static bool sd_m_Checker__stmtHasBreak(sd_S_Checker l_c, sd_int l_s) {
   if (sd_int_lt(l_s, SD_INT(0))) {
     return false;
   }
@@ -21160,7 +21566,7 @@ static void sd_lr_sd_m_Checker__checkStmt(sd_lframe *p) {
   sd_list_release(L->_t17);
   sd_list_release(L->_t20);
 }
-static void sd_m_Checker__checkStmt(sd_S_Checker * l_c, sd_int l_s) {
+SD_NO_TCE static void sd_m_Checker__checkStmt(sd_S_Checker * l_c, sd_int l_s) {
   sd_L_sd_m_Checker__checkStmt L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Checker__checkStmt);
   sd_S_Stmt l_st = SD_LIST_GET((((*l_c)).f_ast).f_stmts, sd_S_Stmt, l_s);
@@ -21274,7 +21680,7 @@ static void sd_m_Checker__checkStmt(sd_S_Checker * l_c, sd_int l_s) {
   SD_LF_LEAVE(L);
 }
 
-static void sd_m_Checker__checkAssert(sd_S_Checker * l_c, sd_S_Stmt l_st) {
+SD_NO_TCE static void sd_m_Checker__checkAssert(sd_S_Checker * l_c, sd_S_Stmt l_st) {
   sd_int _t1 = sd_int_retain(sd_c_tyBool());
   sd_str _t2 = SD_STR_LIT("as the condition of assert");
   SD_PREEMPT();
@@ -21310,7 +21716,7 @@ static void sd_lr_sd_m_Checker__checkIncDec(sd_lframe *p) {
   sd_str_release(L->_t15);
   sd_str_release(L->_t16);
 }
-static void sd_m_Checker__checkIncDec(sd_S_Checker * l_c, sd_S_Stmt l_st) {
+SD_NO_TCE static void sd_m_Checker__checkIncDec(sd_S_Checker * l_c, sd_S_Stmt l_st) {
   sd_L_sd_m_Checker__checkIncDec L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Checker__checkIncDec);
   SD_PREEMPT();
@@ -21383,7 +21789,7 @@ static void sd_lr_sd_m_Checker__checkExprStmt(sd_lframe *p) {
   sd_str_release(L->_t10);
   sd_str_release(L->_t12);
 }
-static void sd_m_Checker__checkExprStmt(sd_S_Checker * l_c, sd_S_Stmt l_st) {
+SD_NO_TCE static void sd_m_Checker__checkExprStmt(sd_S_Checker * l_c, sd_S_Stmt l_st) {
   sd_L_sd_m_Checker__checkExprStmt L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Checker__checkExprStmt);
   sd_int l_e = (l_st).f_expr;
@@ -21445,7 +21851,7 @@ static void sd_lr_sd_m_Checker__checkIf(sd_lframe *p) {
   sd_list_release(L->l_elseLive);
   sd_list_release(L->l_after);
 }
-static void sd_m_Checker__checkIf(sd_S_Checker * l_c, sd_S_Stmt l_st) {
+SD_NO_TCE static void sd_m_Checker__checkIf(sd_S_Checker * l_c, sd_S_Stmt l_st) {
   sd_L_sd_m_Checker__checkIf L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Checker__checkIf);
   sd_int _t1 = sd_int_retain(sd_c_tyBool());
@@ -21565,7 +21971,7 @@ static void sd_lr_sd_m_Checker__checkFor(sd_lframe *p) {
   sd_list_release(L->_t20);
   sd_list_release(L->_t38);
 }
-static void sd_m_Checker__checkFor(sd_S_Checker * l_c, sd_S_Stmt l_st) {
+SD_NO_TCE static void sd_m_Checker__checkFor(sd_S_Checker * l_c, sd_S_Stmt l_st) {
   sd_L_sd_m_Checker__checkFor L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Checker__checkFor);
   sd_m_Checker__pushScope(l_c);
@@ -21815,7 +22221,7 @@ static bool sd_m_Checker__isVarRef(sd_S_Checker l_c, sd_int l_e, sd_int l_v) {
   return (((sd_int_ge(l_e, SD_INT(0)) && (SD_BOX_GET((SD_LIST_GET(((l_c).f_ast).f_exprs, sd_S_Expr, l_e)).f_kind, sd_E_ExprKind).tag == 7)) && (SD_BOX_GET((SD_LIST_GET((l_c).f_info, sd_S_ExprInfo, l_e)).f_res, sd_E_Res).tag == 1)) && sd_int_eq((SD_LIST_GET((l_c).f_info, sd_S_ExprInfo, l_e)).f_ref, l_v));
 }
 
-static bool sd_m_Checker__exprReads(sd_S_Checker l_c, sd_int l_e, sd_int l_v) {
+SD_NO_TCE static bool sd_m_Checker__exprReads(sd_S_Checker l_c, sd_int l_e, sd_int l_v) {
   if (sd_int_lt(l_e, SD_INT(0))) {
     return false;
   }
@@ -21865,7 +22271,7 @@ static bool sd_m_Checker__exprReads(sd_S_Checker l_c, sd_int l_e, sd_int l_v) {
   return false;
 }
 
-static bool sd_m_Checker__blockReads(sd_S_Checker l_c, sd_int l_b, sd_int l_v) {
+SD_NO_TCE static bool sd_m_Checker__blockReads(sd_S_Checker l_c, sd_int l_b, sd_int l_v) {
   if (sd_int_lt(l_b, SD_INT(0))) {
     return false;
   }
@@ -21895,7 +22301,7 @@ static bool sd_m_Checker__blockReads(sd_S_Checker l_c, sd_int l_b, sd_int l_v) {
   return false;
 }
 
-static bool sd_m_Checker__stmtReads(sd_S_Checker l_c, sd_int l_s, sd_int l_v) {
+SD_NO_TCE static bool sd_m_Checker__stmtReads(sd_S_Checker l_c, sd_int l_s, sd_int l_v) {
   if (sd_int_lt(l_s, SD_INT(0))) {
     return false;
   }
@@ -22096,7 +22502,7 @@ static void sd_lr_sd_m_Checker__checkReturn(sd_lframe *p) {
   sd_str_release(L->_t44);
   sd_str_release(L->l_context);
 }
-static void sd_m_Checker__checkReturn(sd_S_Checker * l_c, sd_S_Stmt l_st) {
+SD_NO_TCE static void sd_m_Checker__checkReturn(sd_S_Checker * l_c, sd_S_Stmt l_st) {
   sd_L_sd_m_Checker__checkReturn L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Checker__checkReturn);
   if (sd_int_lt(((*l_c)).f_curFn, SD_INT(0))) {
@@ -22334,7 +22740,7 @@ static void sd_lr_sd_m_Checker__checkAssign(sd_lframe *p) {
   sd_str_release(L->_t83);
   sd_str_release(L->_t88);
 }
-static void sd_m_Checker__checkAssign(sd_S_Checker * l_c, sd_int l_s) {
+SD_NO_TCE static void sd_m_Checker__checkAssign(sd_S_Checker * l_c, sd_int l_s) {
   sd_L_sd_m_Checker__checkAssign L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Checker__checkAssign);
   sd_S_Stmt l_st = SD_LIST_GET((((*l_c)).f_ast).f_stmts, sd_S_Stmt, l_s);
@@ -22824,7 +23230,7 @@ static void sd_lr_sd_m_Checker__checkSwitch(sd_lframe *p) {
   sd_L_sd_m_Checker__checkSwitch *L = (sd_L_sd_m_Checker__checkSwitch *)p;
   sd_list_release(L->l_saved);
 }
-static void sd_m_Checker__checkSwitch(sd_S_Checker * l_c, sd_S_Stmt l_st) {
+SD_NO_TCE static void sd_m_Checker__checkSwitch(sd_S_Checker * l_c, sd_S_Stmt l_st) {
   sd_L_sd_m_Checker__checkSwitch L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Checker__checkSwitch);
   SD_PREEMPT();
@@ -22879,7 +23285,7 @@ static void sd_lr_sd_m_Checker__checkSwitchCases(sd_lframe *p) {
   sd_str_release(L->_t32);
   sd_str_release(L->_t34);
 }
-static void sd_m_Checker__checkSwitchCases(sd_S_Checker * l_c, sd_S_Stmt l_st) {
+SD_NO_TCE static void sd_m_Checker__checkSwitchCases(sd_S_Checker * l_c, sd_S_Stmt l_st) {
   sd_L_sd_m_Checker__checkSwitchCases L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Checker__checkSwitchCases);
   L.l_before = sd_list_retain(((*l_c)).f_guards);
@@ -23048,7 +23454,7 @@ static void sd_lr_sd_m_Checker__checkEnumSwitch(sd_lframe *p) {
   sd_rl_S8EnumCase(L->_t30);
   sd_str_release(L->_t32);
 }
-static void sd_m_Checker__checkEnumSwitch(sd_S_Checker * l_c, sd_S_Stmt l_st, sd_int l_t) {
+SD_NO_TCE static void sd_m_Checker__checkEnumSwitch(sd_S_Checker * l_c, sd_S_Stmt l_st, sd_int l_t) {
   sd_L_sd_m_Checker__checkEnumSwitch L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Checker__checkEnumSwitch);
   L.l_before = sd_list_retain(((*l_c)).f_guards);
@@ -23498,7 +23904,7 @@ static void sd_lr_sd_m_Checker__checkDefer(sd_lframe *p) {
   sd_str_release(L->_t21);
   sd_str_release(L->_t22);
 }
-static void sd_m_Checker__checkDefer(sd_S_Checker * l_c, sd_S_Stmt l_st) {
+SD_NO_TCE static void sd_m_Checker__checkDefer(sd_S_Checker * l_c, sd_S_Stmt l_st) {
   sd_L_sd_m_Checker__checkDefer L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Checker__checkDefer);
   sd_int l_e = (l_st).f_expr;
@@ -23606,7 +24012,7 @@ static void sd_lr_sd_m_Checker__checkSelect(sd_lframe *p) {
   sd_list_release(L->l_before);
   sd_list_release(L->l_saved);
 }
-static void sd_m_Checker__checkSelect(sd_S_Checker * l_c, sd_S_Stmt l_st) {
+SD_NO_TCE static void sd_m_Checker__checkSelect(sd_S_Checker * l_c, sd_S_Stmt l_st) {
   sd_L_sd_m_Checker__checkSelect L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Checker__checkSelect);
   if (sd_int_eq((l_st).f_count, SD_INT(0))) {
@@ -23670,7 +24076,7 @@ static void sd_lr_sd_m_Checker__checkSelectComm(sd_lframe *p) {
   sd_str_release(L->_t33);
   sd_str_release(L->_t35);
 }
-static void sd_m_Checker__checkSelectComm(sd_S_Checker * l_c, sd_int l_s) {
+SD_NO_TCE static void sd_m_Checker__checkSelectComm(sd_S_Checker * l_c, sd_int l_s) {
   sd_L_sd_m_Checker__checkSelectComm L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Checker__checkSelectComm);
   if (sd_int_lt(l_s, SD_INT(0))) {
@@ -23802,7 +24208,7 @@ static void sd_m_Checker__checkSelectComm(sd_S_Checker * l_c, sd_int l_s) {
   SD_LF_LEAVE(L);
 }
 
-static void sd_m_Checker__checkGroup(sd_S_Checker * l_c, sd_int l_e) {
+SD_NO_TCE static void sd_m_Checker__checkGroup(sd_S_Checker * l_c, sd_int l_e) {
   sd_S_Expr l_x = SD_LIST_GET((((*l_c)).f_ast).f_exprs, sd_S_Expr, l_e);
   bool l_allowed = (sd_int_eq(((*l_c)).f_allowGroup, l_e) && sd_int_ge(((*l_c)).f_curFn, SD_INT(0)));
   sd_int _t1 = SD_INT(-1);
@@ -23854,7 +24260,7 @@ static void sd_lr_sd_m_Checker__checkSpawn(sd_lframe *p) {
   sd_str_release(L->_t18);
   sd_str_release(L->_t20);
 }
-static void sd_m_Checker__checkSpawn(sd_S_Checker * l_c, sd_S_Stmt l_st) {
+SD_NO_TCE static void sd_m_Checker__checkSpawn(sd_S_Checker * l_c, sd_S_Stmt l_st) {
   sd_L_sd_m_Checker__checkSpawn L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Checker__checkSpawn);
   sd_int l_e = (l_st).f_expr;
@@ -24393,7 +24799,7 @@ static void sd_lr_sd_m_Ast__dumpType(sd_lframe *p) {
   sd_str_release(L->_t27);
   sd_str_release(L->_t31);
 }
-static sd_str sd_m_Ast__dumpType(sd_S_Ast l_a, sd_int l_t) {
+SD_NO_TCE static sd_str sd_m_Ast__dumpType(sd_S_Ast l_a, sd_int l_t) {
   sd_L_sd_m_Ast__dumpType L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Ast__dumpType);
   if (sd_int_lt(l_t, SD_INT(0))) {
@@ -24603,7 +25009,7 @@ static void sd_lr_sd_m_Ast__dumpExprs(sd_lframe *p) {
   sd_L_sd_m_Ast__dumpExprs *L = (sd_L_sd_m_Ast__dumpExprs *)p;
   sd_list_release(L->l_es);
 }
-static sd_str sd_m_Ast__dumpExprs(sd_S_Ast l_a, sd_int l_start, sd_int l_count) {
+SD_NO_TCE static sd_str sd_m_Ast__dumpExprs(sd_S_Ast l_a, sd_int l_start, sd_int l_count) {
   sd_L_sd_m_Ast__dumpExprs L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Ast__dumpExprs);
   sd_list * _t1 = sd_list_new(&sd_type_str, 0);
@@ -24659,7 +25065,7 @@ static void sd_lr_sd_m_Ast__dumpExpr(sd_lframe *p) {
   sd_str_release(L->_t59);
   sd_str_release(L->_t63);
 }
-static sd_str sd_m_Ast__dumpExpr(sd_S_Ast l_a, sd_int l_e) {
+SD_NO_TCE static sd_str sd_m_Ast__dumpExpr(sd_S_Ast l_a, sd_int l_e) {
   sd_L_sd_m_Ast__dumpExpr L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Ast__dumpExpr);
   if (sd_int_lt(l_e, SD_INT(0))) {
@@ -24847,7 +25253,7 @@ static void sd_lr_sd_m_Ast__dumpBlock(sd_lframe *p) {
   sd_list_release(L->l_ss);
   sd_str_release(L->_t4);
 }
-static sd_str sd_m_Ast__dumpBlock(sd_S_Ast l_a, sd_int l_b, sd_str l_indent) {
+SD_NO_TCE static sd_str sd_m_Ast__dumpBlock(sd_S_Ast l_a, sd_int l_b, sd_str l_indent) {
   sd_L_sd_m_Ast__dumpBlock L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Ast__dumpBlock);
   if (sd_int_lt(l_b, SD_INT(0))) {
@@ -24894,7 +25300,7 @@ static void sd_lr_sd_m_Ast__dumpTarget(sd_lframe *p) {
   sd_L_sd_m_Ast__dumpTarget *L = (sd_L_sd_m_Ast__dumpTarget *)p;
   sd_str_release(L->_t3);
 }
-static sd_str sd_m_Ast__dumpTarget(sd_S_Ast l_a, sd_int l_t) {
+SD_NO_TCE static sd_str sd_m_Ast__dumpTarget(sd_S_Ast l_a, sd_int l_t) {
   sd_L_sd_m_Ast__dumpTarget L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Ast__dumpTarget);
   sd_S_Target l_tg = SD_LIST_GET((l_a).f_targets, sd_S_Target, l_t);
@@ -24929,7 +25335,7 @@ static void sd_lr_sd_m_Ast__dumpCase(sd_lframe *p) {
   sd_str_release(L->l_head);
   sd_str_release(L->_t16);
 }
-static sd_str sd_m_Ast__dumpCase(sd_S_Ast l_a, sd_int l_c, sd_str l_indent) {
+SD_NO_TCE static sd_str sd_m_Ast__dumpCase(sd_S_Ast l_a, sd_int l_c, sd_str l_indent) {
   sd_L_sd_m_Ast__dumpCase L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Ast__dumpCase);
   sd_S_Case l_cs = SD_LIST_GET((l_a).f_cases, sd_S_Case, l_c);
@@ -25024,7 +25430,7 @@ static void sd_lr_sd_m_Ast__dumpStmt(sd_lframe *p) {
   sd_str_release(L->_t74);
   sd_str_release(L->_t75);
 }
-static sd_str sd_m_Ast__dumpStmt(sd_S_Ast l_a, sd_int l_s, sd_str l_indent) {
+SD_NO_TCE static sd_str sd_m_Ast__dumpStmt(sd_S_Ast l_a, sd_int l_s, sd_str l_indent) {
   sd_L_sd_m_Ast__dumpStmt L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Ast__dumpStmt);
   sd_S_Stmt l_st = SD_LIST_GET((l_a).f_stmts, sd_S_Stmt, l_s);
@@ -27296,7 +27702,7 @@ static void sd_m_Formatter__markInterface(sd_S_Formatter * l_f, sd_int l_open) {
   sd_int_release(l_depth);
 }
 
-static sd_int sd_m_Formatter__skipBaseType(sd_S_Formatter l_f, sd_int l_i) {
+SD_NO_TCE static sd_int sd_m_Formatter__skipBaseType(sd_S_Formatter l_f, sd_int l_i) {
   sd_box * _t1 = sd_m_Formatter__kindAt(l_f, l_i);
   sd_box * l_k = _t1;
   if ((SD_BOX_GET(l_k, sd_E_Tok).tag == 2)) {
@@ -28835,7 +29241,7 @@ static void sd_lr_sd_m_Gen__ctype(sd_lframe *p) {
   sd_str_release(L->_t19);
   sd_str_release(L->_t22);
 }
-static sd_str sd_m_Gen__ctype(sd_S_Gen l_g, sd_int l_t) {
+SD_NO_TCE static sd_str sd_m_Gen__ctype(sd_S_Gen l_g, sd_int l_t) {
   sd_L_sd_m_Gen__ctype L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__ctype);
   {
@@ -29008,7 +29414,7 @@ static bool sd_m_Gen__isBoxOpt(sd_S_Gen l_g, sd_int l_t) {
   return _t4;
 }
 
-static bool sd_m_Gen__counted(sd_S_Gen * l_g, sd_int l_t) {
+SD_NO_TCE static bool sd_m_Gen__counted(sd_S_Gen * l_g, sd_int l_t) {
   {
     sd_box * _t1 = sd_m_Gen__kindOf((*l_g), l_t);
     int32_t _t2 = SD_BOX_GET(_t1, sd_E_Kind).tag;
@@ -29127,7 +29533,7 @@ static void sd_lr_sd_m_Gen__frameCounted(sd_lframe *p) {
   sd_L_sd_m_Gen__frameCounted *L = (sd_L_sd_m_Gen__frameCounted *)p;
   sd_list_release(L->l_parts);
 }
-static bool sd_m_Gen__frameCounted(sd_S_Gen * l_g, sd_int l_t) {
+SD_NO_TCE static bool sd_m_Gen__frameCounted(sd_S_Gen * l_g, sd_int l_t) {
   sd_L_sd_m_Gen__frameCounted L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__frameCounted);
   {
@@ -29421,7 +29827,7 @@ static void sd_lr_sd_m_Gen__retainExpr(sd_lframe *p) {
   sd_L_sd_m_Gen__retainExpr *L = (sd_L_sd_m_Gen__retainExpr *)p;
   sd_str_release(L->_t27);
 }
-static sd_str sd_m_Gen__retainExpr(sd_S_Gen * l_g, sd_int l_t, sd_str l_v) {
+SD_NO_TCE static sd_str sd_m_Gen__retainExpr(sd_S_Gen * l_g, sd_int l_t, sd_str l_v) {
   sd_L_sd_m_Gen__retainExpr L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__retainExpr);
   bool _t1 = sd_m_Gen__counted(l_g, l_t);
@@ -29527,7 +29933,7 @@ static void sd_lr_sd_m_Gen__releaseCall(sd_lframe *p) {
   sd_L_sd_m_Gen__releaseCall *L = (sd_L_sd_m_Gen__releaseCall *)p;
   sd_str_release(L->_t27);
 }
-static sd_str sd_m_Gen__releaseCall(sd_S_Gen * l_g, sd_int l_t, sd_str l_v) {
+SD_NO_TCE static sd_str sd_m_Gen__releaseCall(sd_S_Gen * l_g, sd_int l_t, sd_str l_v) {
   sd_L_sd_m_Gen__releaseCall L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__releaseCall);
   bool _t1 = sd_m_Gen__counted(l_g, l_t);
@@ -29633,7 +30039,7 @@ static void sd_lr_sd_m_Gen__desc(sd_lframe *p) {
   sd_L_sd_m_Gen__desc *L = (sd_L_sd_m_Gen__desc *)p;
   sd_str_release(L->_t12);
 }
-static sd_str sd_m_Gen__desc(sd_S_Gen l_g, sd_int l_t) {
+SD_NO_TCE static sd_str sd_m_Gen__desc(sd_S_Gen l_g, sd_int l_t) {
   sd_L_sd_m_Gen__desc L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__desc);
   {
@@ -29909,7 +30315,7 @@ static void sd_lr_sd_m_Gen__eqExpr(sd_lframe *p) {
   sd_L_sd_m_Gen__eqExpr *L = (sd_L_sd_m_Gen__eqExpr *)p;
   sd_str_release(L->_t29);
 }
-static sd_str sd_m_Gen__eqExpr(sd_S_Gen * l_g, sd_int l_t, sd_str l_a, sd_str l_b) {
+SD_NO_TCE static sd_str sd_m_Gen__eqExpr(sd_S_Gen * l_g, sd_int l_t, sd_str l_a, sd_str l_b) {
   sd_L_sd_m_Gen__eqExpr L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__eqExpr);
   {
@@ -31006,7 +31412,7 @@ static void sd_m_Gen__genTypes(sd_S_Gen * l_g) {
   SD_LF_LEAVE(L);
 }
 
-static sd_int sd_m_Gen__funcRank(sd_S_Gen l_g, sd_int l_f) {
+SD_NO_TCE static sd_int sd_m_Gen__funcRank(sd_S_Gen l_g, sd_int l_f) {
   sd_int _t1 = sd_m_Gen__elemOf(l_g, l_f);
   SD_PREEMPT();
   sd_int _t2 = sd_m_Gen__funcDepth(l_g, _t1);
@@ -31040,7 +31446,7 @@ static sd_int sd_m_Gen__funcRank(sd_S_Gen l_g, sd_int l_f) {
   return _t10;
 }
 
-static sd_int sd_m_Gen__funcDepth(sd_S_Gen l_g, sd_int l_t) {
+SD_NO_TCE static sd_int sd_m_Gen__funcDepth(sd_S_Gen l_g, sd_int l_t) {
   sd_box * _t1 = sd_m_Gen__kindOf(l_g, l_t);
   sd_box * l_k = _t1;
   if ((SD_BOX_GET(l_k, sd_E_Kind).tag == 16)) {
@@ -31072,7 +31478,7 @@ static sd_int sd_m_Gen__funcDepth(sd_S_Gen l_g, sd_int l_t) {
   return _t10;
 }
 
-static sd_int sd_m_Gen__structRank(sd_S_Gen l_g, sd_int l_d) {
+SD_NO_TCE static sd_int sd_m_Gen__structRank(sd_S_Gen l_g, sd_int l_d) {
   sd_int l_r = SD_INT(0);
   sd_S_TypeDecl l_td = SD_LIST_GET((((l_g).f_c).f_ast).f_typeDecls, sd_S_TypeDecl, l_d);
   {
@@ -31933,7 +32339,7 @@ static void sd_m_Gen__genConsts(sd_S_Gen * l_g, sd_int l_unit) {
   SD_LF_LEAVE(L);
 }
 
-typedef struct { sd_lframe h; sd_list * l_ps; sd_str l_star; sd_str _t14; sd_str _t15; sd_str _t16; } sd_L_sd_m_Gen__fnSig;
+typedef struct { sd_lframe h; sd_list * l_ps; sd_str l_star; sd_str _t14; sd_str _t15; sd_str _t16; sd_str _t17; } sd_L_sd_m_Gen__fnSig;
 static void sd_lr_sd_m_Gen__fnSig(sd_lframe *p) {
   sd_L_sd_m_Gen__fnSig *L = (sd_L_sd_m_Gen__fnSig *)p;
   sd_list_release(L->l_ps);
@@ -31941,6 +32347,7 @@ static void sd_lr_sd_m_Gen__fnSig(sd_lframe *p) {
   sd_str_release(L->_t14);
   sd_str_release(L->_t15);
   sd_str_release(L->_t16);
+  sd_str_release(L->_t17);
 }
 static sd_str sd_m_Gen__fnSig(sd_S_Gen * l_g, sd_int l_f) {
   sd_L_sd_m_Gen__fnSig L = {{0}};
@@ -31993,18 +32400,20 @@ static sd_str sd_m_Gen__fnSig(sd_S_Gen * l_g, sd_int l_f) {
     sd_str _t13 = SD_STR_LIT("void");
     SD_LIST_PUSH((&L.l_ps), sd_str, _t13);
   }
-  L._t14 = sd_m_Gen__linkage((*l_g));
-  L._t15 = sd_m_Gen__ctype((*l_g), SD_LIST_GET((((*l_g)).f_c).f_fnRet, sd_int, l_f));
-  L._t16 = sd_list_join(L.l_ps, SD_STR_LIT(", "));
-  sd_str _t17[] = {L._t14, L._t15, SD_STR_LIT(" "), SD_LIST_GET((((*l_g)).f_c).f_fnCName, sd_str, l_f), SD_STR_LIT("("), L._t16, SD_STR_LIT(")")};
-  sd_str _t18 = sd_str_concat_n(_t17, 7);
-  sd_str _t19 = _t18;
+  L._t14 = sd_m_Gen__noTailCalls((*l_g), l_f);
+  L._t15 = sd_m_Gen__linkage((*l_g));
+  L._t16 = sd_m_Gen__ctype((*l_g), SD_LIST_GET((((*l_g)).f_c).f_fnRet, sd_int, l_f));
+  L._t17 = sd_list_join(L.l_ps, SD_STR_LIT(", "));
+  sd_str _t18[] = {L._t14, L._t15, L._t16, SD_STR_LIT(" "), SD_LIST_GET((((*l_g)).f_c).f_fnCName, sd_str, l_f), SD_STR_LIT("("), L._t17, SD_STR_LIT(")")};
+  sd_str _t19 = sd_str_concat_n(_t18, 8);
+  sd_str _t20 = _t19;
   SD_LF_LEAVE(L);
+  sd_str_release(L._t17);
   sd_str_release(L._t16);
   sd_str_release(L._t15);
   sd_str_release(L._t14);
   sd_list_release(L.l_ps);
-  return _t19;
+  return _t20;
 }
 
 typedef struct { sd_lframe h; sd_map * l_ps; sd_str l_cn; sd_str _t4; sd_str _t5; sd_S_CDecl _t8; sd_str _t9; sd_str l_sig; sd_S_CDecl _t13; sd_str _t14; sd_str l_gn; sd_str _t19; sd_str _t21; sd_str _t22; sd_S_CDecl _t24; sd_str _t25; sd_str _t26; sd_str _t27; sd_S_CDecl _t29; sd_str _t30; sd_str l_vt; sd_str _t33; sd_S_CDecl _t36; sd_str _t37; sd_list * l_saved; } sd_L_sd_m_Gen__genProtos;
@@ -33375,7 +33784,7 @@ static bool sd_m_Gen__declaredIn(sd_S_Gen l_g, sd_int l_v, sd_S_Stmt l_st) {
   return (l_after && l_before);
 }
 
-static sd_list * sd_m_Gen__accTail(sd_S_Gen l_g, sd_int l_b, sd_list * l_acc) {
+SD_NO_TCE static sd_list * sd_m_Gen__accTail(sd_S_Gen l_g, sd_int l_b, sd_list * l_acc) {
   sd_list * l_out = l_acc;
   if (sd_int_lt(l_b, SD_INT(0))) {
     return sd_list_retain(l_out);
@@ -33399,7 +33808,7 @@ static void sd_lr_sd_m_Gen__accTailStmt(sd_lframe *p) {
   sd_L_sd_m_Gen__accTailStmt *L = (sd_L_sd_m_Gen__accTailStmt *)p;
   sd_list_release(L->l_out);
 }
-static sd_list * sd_m_Gen__accTailStmt(sd_S_Gen l_g, sd_int l_s, sd_list * l_acc) {
+SD_NO_TCE static sd_list * sd_m_Gen__accTailStmt(sd_S_Gen l_g, sd_int l_s, sd_list * l_acc) {
   sd_L_sd_m_Gen__accTailStmt L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__accTailStmt);
   L.l_out = sd_list_retain(l_acc);
@@ -33463,7 +33872,7 @@ static sd_list * sd_m_Gen__accTailStmt(sd_S_Gen l_g, sd_int l_s, sd_list * l_acc
   sd_crash("internal error: accTailStmt reached its end without returning");
 }
 
-static sd_int sd_m_Gen__accSize(sd_S_Gen l_g, sd_int l_b) {
+SD_NO_TCE static sd_int sd_m_Gen__accSize(sd_S_Gen l_g, sd_int l_b) {
   if (sd_int_lt(l_b, SD_INT(0))) {
     return SD_INT(0);
   }
@@ -33518,7 +33927,7 @@ static sd_int sd_m_Gen__accSize(sd_S_Gen l_g, sd_int l_b) {
   return l_n;
 }
 
-static sd_int sd_m_Gen__accSizeStmt(sd_S_Gen l_g, sd_int l_s) {
+SD_NO_TCE static sd_int sd_m_Gen__accSizeStmt(sd_S_Gen l_g, sd_int l_s) {
   if (sd_int_lt(l_s, SD_INT(0))) {
     return SD_INT(0);
   }
@@ -33613,7 +34022,7 @@ static sd_int sd_m_Gen__accSizeStmt(sd_S_Gen l_g, sd_int l_s) {
   return l_n;
 }
 
-static bool sd_m_Gen__accBodyOk(sd_S_Gen l_g, sd_int l_b) {
+SD_NO_TCE static bool sd_m_Gen__accBodyOk(sd_S_Gen l_g, sd_int l_b) {
   if (sd_int_lt(l_b, SD_INT(0))) {
     return true;
   }
@@ -33643,7 +34052,7 @@ static bool sd_m_Gen__accBodyOk(sd_S_Gen l_g, sd_int l_b) {
   return true;
 }
 
-static bool sd_m_Gen__accStmtOk(sd_S_Gen l_g, sd_int l_s) {
+SD_NO_TCE static bool sd_m_Gen__accStmtOk(sd_S_Gen l_g, sd_int l_s) {
   if (sd_int_lt(l_s, SD_INT(0))) {
     return true;
   }
@@ -33743,7 +34152,7 @@ static bool sd_m_Gen__accStmtOk(sd_S_Gen l_g, sd_int l_s) {
   sd_crash("internal error: accStmtOk reached its end without returning");
 }
 
-static bool sd_m_Gen__hasGroup(sd_S_Gen l_g, sd_int l_e) {
+SD_NO_TCE static bool sd_m_Gen__hasGroup(sd_S_Gen l_g, sd_int l_e) {
   if (sd_int_lt(l_e, SD_INT(0))) {
     return false;
   }
@@ -33787,7 +34196,7 @@ static bool sd_m_Gen__hasGroup(sd_S_Gen l_g, sd_int l_e) {
   return false;
 }
 
-static sd_int sd_m_Gen__countVarExpr(sd_S_Gen l_g, sd_int l_e, sd_int l_v) {
+SD_NO_TCE static sd_int sd_m_Gen__countVarExpr(sd_S_Gen l_g, sd_int l_e, sd_int l_v) {
   if (sd_int_lt(l_e, SD_INT(0))) {
     return SD_INT(0);
   }
@@ -33862,7 +34271,7 @@ static sd_int sd_m_Gen__countVarExpr(sd_S_Gen l_g, sd_int l_e, sd_int l_v) {
   return l_n;
 }
 
-static sd_int sd_m_Gen__countVarBlock(sd_S_Gen l_g, sd_int l_b, sd_int l_v) {
+SD_NO_TCE static sd_int sd_m_Gen__countVarBlock(sd_S_Gen l_g, sd_int l_b, sd_int l_v) {
   if (sd_int_lt(l_b, SD_INT(0))) {
     return SD_INT(0);
   }
@@ -33917,7 +34326,7 @@ static sd_int sd_m_Gen__countVarBlock(sd_S_Gen l_g, sd_int l_b, sd_int l_v) {
   return l_n;
 }
 
-static sd_int sd_m_Gen__countVarStmt(sd_S_Gen l_g, sd_int l_s, sd_int l_v) {
+SD_NO_TCE static sd_int sd_m_Gen__countVarStmt(sd_S_Gen l_g, sd_int l_s, sd_int l_v) {
   if (sd_int_lt(l_s, SD_INT(0))) {
     return SD_INT(0);
   }
@@ -34136,7 +34545,7 @@ static void sd_lr_sd_m_Gen__genAccLoop(sd_lframe *p) {
   sd_list_release(L->_t16);
   sd_str_release(L->_t20);
 }
-static void sd_m_Gen__genAccLoop(sd_S_Gen * l_g, sd_S_Stmt l_st, sd_list * l_acc, sd_int l_general, sd_int l_done) {
+SD_NO_TCE static void sd_m_Gen__genAccLoop(sd_S_Gen * l_g, sd_S_Stmt l_st, sd_list * l_acc, sd_int l_general, sd_int l_done) {
   sd_L_sd_m_Gen__genAccLoop L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__genAccLoop);
   sd_list * _t1 = sd_list_new(&sd_type_str, 0);
@@ -34409,7 +34818,7 @@ static void sd_lr_sd_m_Gen__genAccUpdate(sd_lframe *p) {
   sd_str_release(L->_t57);
   sd_str_release(L->_t61);
 }
-static bool sd_m_Gen__genAccUpdate(sd_S_Gen * l_g, sd_int l_s) {
+SD_NO_TCE static bool sd_m_Gen__genAccUpdate(sd_S_Gen * l_g, sd_int l_s) {
   sd_L_sd_m_Gen__genAccUpdate L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__genAccUpdate);
   if ((SD_SMALL(sd_list_len(((*l_g)).f_loops)) == ((int64_t)0))) {
@@ -34723,7 +35132,7 @@ static sd_int sd_m_Gen__countedVar(sd_S_Gen l_g, sd_S_Stmt l_st) {
   return l_v;
 }
 
-static bool sd_m_Gen__blockAssigns(sd_S_Gen l_g, sd_int l_b, sd_int l_v) {
+SD_NO_TCE static bool sd_m_Gen__blockAssigns(sd_S_Gen l_g, sd_int l_b, sd_int l_v) {
   if (sd_int_lt(l_b, SD_INT(0))) {
     return false;
   }
@@ -34753,7 +35162,7 @@ static bool sd_m_Gen__blockAssigns(sd_S_Gen l_g, sd_int l_b, sd_int l_v) {
   return false;
 }
 
-static bool sd_m_Gen__stmtAssigns(sd_S_Gen l_g, sd_int l_s, sd_int l_v) {
+SD_NO_TCE static bool sd_m_Gen__stmtAssigns(sd_S_Gen l_g, sd_int l_s, sd_int l_v) {
   if (sd_int_lt(l_s, SD_INT(0))) {
     return false;
   }
@@ -34892,7 +35301,7 @@ static bool sd_m_Gen__stmtAssigns(sd_S_Gen l_g, sd_int l_s, sd_int l_v) {
   sd_crash("internal error: stmtAssigns reached its end without returning");
 }
 
-static bool sd_m_Gen__pureBlock(sd_S_Gen l_g, sd_int l_b, sd_list * l_acc) {
+SD_NO_TCE static bool sd_m_Gen__pureBlock(sd_S_Gen l_g, sd_int l_b, sd_list * l_acc) {
   if (sd_int_lt(l_b, SD_INT(0))) {
     return true;
   }
@@ -34927,7 +35336,7 @@ static void sd_lr_sd_m_Gen__pureStmt(sd_lframe *p) {
   sd_L_sd_m_Gen__pureStmt *L = (sd_L_sd_m_Gen__pureStmt *)p;
   sd_rl_S9AccUpdate(L->l_u);
 }
-static bool sd_m_Gen__pureStmt(sd_S_Gen l_g, sd_int l_s, sd_list * l_acc) {
+SD_NO_TCE static bool sd_m_Gen__pureStmt(sd_S_Gen l_g, sd_int l_s, sd_list * l_acc) {
   sd_L_sd_m_Gen__pureStmt L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__pureStmt);
   if (sd_int_lt(l_s, SD_INT(0))) {
@@ -35083,7 +35492,7 @@ static bool sd_m_Gen__pureStmt(sd_S_Gen l_g, sd_int l_s, sd_list * l_acc) {
   sd_crash("internal error: pureStmt reached its end without returning");
 }
 
-static bool sd_m_Gen__pureCond(sd_S_Gen l_g, sd_int l_e) {
+SD_NO_TCE static bool sd_m_Gen__pureCond(sd_S_Gen l_g, sd_int l_e) {
   sd_S_Expr l_x = SD_LIST_GET((((l_g).f_c).f_ast).f_exprs, sd_S_Expr, l_e);
   sd_S_ExprInfo l_i = SD_LIST_GET(((l_g).f_c).f_info, sd_S_ExprInfo, l_e);
   if ((((!sd_int_eq((l_i).f_ty, sd_c_tyBool())) || (l_i).f_wrap) || (l_i).f_narrowed)) {
@@ -35135,7 +35544,7 @@ static bool sd_m_Gen__pureCond(sd_S_Gen l_g, sd_int l_e) {
   return _t12;
 }
 
-static sd_str sd_m_Gen__gcall(sd_S_Gen * l_g, sd_int l_e) {
+SD_NO_TCE static sd_str sd_m_Gen__gcall(sd_S_Gen * l_g, sd_int l_e) {
   sd_S_ExprInfo l_i = sd_rt_S8ExprInfo(SD_LIST_GET((((*l_g)).f_c).f_info, sd_S_ExprInfo, l_e));
   {
     sd_box * _t1 = (l_i).f_res;
@@ -35209,7 +35618,7 @@ static void sd_lr_sd_m_Gen__plainCall(sd_lframe *p) {
   sd_list_release(L->_t3);
   sd_str_release(L->l_call);
 }
-static sd_str sd_m_Gen__plainCall(sd_S_Gen * l_g, sd_int l_e) {
+SD_NO_TCE static sd_str sd_m_Gen__plainCall(sd_S_Gen * l_g, sd_int l_e) {
   sd_L_sd_m_Gen__plainCall L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__plainCall);
   sd_int _t1 = sd_int_retain(l_e);
@@ -35423,7 +35832,7 @@ static void sd_lr_sd_m_Gen__gmutCall(sd_lframe *p) {
   sd_str_release(L->_t26);
   sd_str_release(L->_t28);
 }
-static sd_str sd_m_Gen__gmutCall(sd_S_Gen * l_g, sd_int l_e) {
+SD_NO_TCE static sd_str sd_m_Gen__gmutCall(sd_S_Gen * l_g, sd_int l_e) {
   sd_L_sd_m_Gen__gmutCall L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__gmutCall);
   sd_S_ExprInfo l_i = sd_rt_S8ExprInfo(SD_LIST_GET((((*l_g)).f_c).f_info, sd_S_ExprInfo, l_e));
@@ -35527,7 +35936,7 @@ static void sd_lr_sd_m_Gen__gplace(sd_lframe *p) {
   sd_str_release(L->l_idx);
   sd_str_release(L->_t11);
 }
-static sd_str sd_m_Gen__gplace(sd_S_Gen * l_g, sd_int l_e) {
+SD_NO_TCE static sd_str sd_m_Gen__gplace(sd_S_Gen * l_g, sd_int l_e) {
   sd_L_sd_m_Gen__gplace L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__gplace);
   L.l_x = sd_rt_S4Expr(SD_LIST_GET(((((*l_g)).f_c).f_ast).f_exprs, sd_S_Expr, l_e));
@@ -35679,7 +36088,7 @@ static void sd_lr_sd_m_Gen__genumNew(sd_lframe *p) {
   sd_str_release(L->l_payload);
   sd_str_release(L->_t15);
 }
-static sd_str sd_m_Gen__genumNew(sd_S_Gen * l_g, sd_int l_e) {
+SD_NO_TCE static sd_str sd_m_Gen__genumNew(sd_S_Gen * l_g, sd_int l_e) {
   sd_L_sd_m_Gen__genumNew L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__genumNew);
   sd_S_ExprInfo l_i = sd_rt_S8ExprInfo(SD_LIST_GET((((*l_g)).f_c).f_info, sd_S_ExprInfo, l_e));
@@ -35742,7 +36151,7 @@ static void sd_lr_sd_m_Gen__gconv(sd_lframe *p) {
   sd_str_release(L->_t8);
   sd_str_release(L->_t22);
 }
-static sd_str sd_m_Gen__gconv(sd_S_Gen * l_g, sd_int l_e) {
+SD_NO_TCE static sd_str sd_m_Gen__gconv(sd_S_Gen * l_g, sd_int l_e) {
   sd_L_sd_m_Gen__gconv L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__gconv);
   sd_int _t1 = sd_m_Gen__arg((*l_g), l_e, SD_INT(0));
@@ -35870,7 +36279,7 @@ static void sd_lr_sd_m_Gen__gbuiltin(sd_lframe *p) {
   sd_str_release(L->_t105);
   sd_str_release(L->_t109);
 }
-static sd_str sd_m_Gen__gbuiltin(sd_S_Gen * l_g, sd_int l_e) {
+SD_NO_TCE static sd_str sd_m_Gen__gbuiltin(sd_S_Gen * l_g, sd_int l_e) {
   sd_L_sd_m_Gen__gbuiltin L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__gbuiltin);
   sd_int _t1 = sd_m_Gen__recvOf((*l_g), l_e);
@@ -36395,7 +36804,7 @@ static void sd_lr_sd_m_Gen__gmutBuiltin(sd_lframe *p) {
   sd_str_release(L->_t53);
   sd_str_release(L->_t55);
 }
-static sd_str sd_m_Gen__gmutBuiltin(sd_S_Gen * l_g, sd_int l_e, sd_box * l_b, sd_int l_r, sd_int l_rt, sd_list * l_args) {
+SD_NO_TCE static sd_str sd_m_Gen__gmutBuiltin(sd_S_Gen * l_g, sd_int l_e, sd_box * l_b, sd_int l_r, sd_int l_rt, sd_list * l_args) {
   sd_L_sd_m_Gen__gmutBuiltin L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__gmutBuiltin);
   sd_list * _t1 = sd_list_new(&sd_type_str, 0);
@@ -36889,7 +37298,7 @@ static void sd_lr_sd_m_Gen__ownedTemp(sd_lframe *p) {
   sd_str_release(L->l_v);
   sd_str_release(L->_t12);
 }
-static sd_str sd_m_Gen__ownedTemp(sd_S_Gen * l_g, sd_int l_e) {
+SD_NO_TCE static sd_str sd_m_Gen__ownedTemp(sd_S_Gen * l_g, sd_int l_e) {
   sd_L_sd_m_Gen__ownedTemp L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__ownedTemp);
   sd_int _t1 = sd_m_Gen__typeOf((*l_g), l_e);
@@ -36932,7 +37341,7 @@ static sd_str sd_m_Gen__ownedTemp(sd_S_Gen * l_g, sd_int l_e) {
   return _t14;
 }
 
-static sd_int sd_m_Gen__rootVar(sd_S_Gen l_g, sd_int l_e) {
+SD_NO_TCE static sd_int sd_m_Gen__rootVar(sd_S_Gen l_g, sd_int l_e) {
   sd_S_Expr l_x = SD_LIST_GET((((l_g).f_c).f_ast).f_exprs, sd_S_Expr, l_e);
   sd_S_ExprInfo l_i = SD_LIST_GET(((l_g).f_c).f_info, sd_S_ExprInfo, l_e);
   if ((SD_BOX_GET((l_x).f_kind, sd_E_ExprKind).tag == 7)) {
@@ -36949,7 +37358,7 @@ static sd_int sd_m_Gen__rootVar(sd_S_Gen l_g, sd_int l_e) {
   return SD_INT(-1);
 }
 
-static bool sd_m_Gen__isFieldRead(sd_S_Gen l_g, sd_int l_e) {
+SD_NO_TCE static bool sd_m_Gen__isFieldRead(sd_S_Gen l_g, sd_int l_e) {
   sd_S_Expr l_x = SD_LIST_GET((((l_g).f_c).f_ast).f_exprs, sd_S_Expr, l_e);
   sd_S_ExprInfo l_i = SD_LIST_GET(((l_g).f_c).f_info, sd_S_ExprInfo, l_e);
   bool _t3 = sd_int_ge((l_i).f_ifaceFrom, SD_INT(0));
@@ -36982,7 +37391,7 @@ static void sd_lr_sd_m_Gen__mutArgs(sd_lframe *p) {
   sd_list_release(L->l_laterMut);
   sd_list_release(L->l_vals);
 }
-static sd_list * sd_m_Gen__mutArgs(sd_S_Gen * l_g, sd_int l_recv, sd_list * l_args) {
+SD_NO_TCE static sd_list * sd_m_Gen__mutArgs(sd_S_Gen * l_g, sd_int l_recv, sd_list * l_args) {
   sd_L_sd_m_Gen__mutArgs L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__mutArgs);
   sd_int _t1 = sd_m_Gen__rootVar((*l_g), l_recv);
@@ -37252,7 +37661,7 @@ static bool sd_f_isChanBuiltin(sd_box * l_b) {
   return (((SD_BOX_GET(l_b, sd_E_Builtin).tag == 31) || (SD_BOX_GET(l_b, sd_E_Builtin).tag == 32)) || (SD_BOX_GET(l_b, sd_E_Builtin).tag == 33));
 }
 
-static bool sd_m_Gen__hasEffects(sd_S_Gen l_g, sd_int l_e) {
+SD_NO_TCE static bool sd_m_Gen__hasEffects(sd_S_Gen l_g, sd_int l_e) {
   if (sd_int_lt(l_e, SD_INT(0))) {
     return false;
   }
@@ -37325,7 +37734,7 @@ static bool sd_m_Gen__hasEffects(sd_S_Gen l_g, sd_int l_e) {
   return false;
 }
 
-static bool sd_m_Gen__hasMutEffects(sd_S_Gen l_g, sd_int l_e) {
+SD_NO_TCE static bool sd_m_Gen__hasMutEffects(sd_S_Gen l_g, sd_int l_e) {
   if (sd_int_lt(l_e, SD_INT(0))) {
     return false;
   }
@@ -37392,7 +37801,7 @@ static bool sd_m_Gen__hasMutEffects(sd_S_Gen l_g, sd_int l_e) {
   return false;
 }
 
-static bool sd_m_Gen__mayCrash(sd_S_Gen l_g, sd_int l_e) {
+SD_NO_TCE static bool sd_m_Gen__mayCrash(sd_S_Gen l_g, sd_int l_e) {
   if (sd_int_lt(l_e, SD_INT(0))) {
     return false;
   }
@@ -37458,7 +37867,7 @@ static void sd_lr_sd_m_Gen__operands(sd_lframe *p) {
   sd_str_release(L->l_v);
   sd_str_release(L->_t28);
 }
-static sd_list * sd_m_Gen__operands(sd_S_Gen * l_g, sd_list * l_es) {
+SD_NO_TCE static sd_list * sd_m_Gen__operands(sd_S_Gen * l_g, sd_list * l_es) {
   sd_L_sd_m_Gen__operands L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__operands);
   sd_list * _t1 = sd_list_new(&sd_type_bool, 0);
@@ -37578,7 +37987,7 @@ static void sd_lr_sd_m_Gen__ownedOperands(sd_lframe *p) {
   sd_str_release(L->_t11);
   sd_str_release(L->_t12);
 }
-static sd_list * sd_m_Gen__ownedOperands(sd_S_Gen * l_g, sd_list * l_es) {
+SD_NO_TCE static sd_list * sd_m_Gen__ownedOperands(sd_S_Gen * l_g, sd_list * l_es) {
   sd_L_sd_m_Gen__ownedOperands L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__ownedOperands);
   SD_PREEMPT();
@@ -37635,7 +38044,7 @@ static void sd_lr_sd_m_Gen__gexpr(sd_lframe *p) {
   sd_L_sd_m_Gen__gexpr *L = (sd_L_sd_m_Gen__gexpr *)p;
   sd_str_release(L->l_v);
 }
-static sd_str sd_m_Gen__gexpr(sd_S_Gen * l_g, sd_int l_e) {
+SD_NO_TCE static sd_str sd_m_Gen__gexpr(sd_S_Gen * l_g, sd_int l_e) {
   sd_L_sd_m_Gen__gexpr L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__gexpr);
   sd_S_ExprInfo l_i = sd_rt_S8ExprInfo(SD_LIST_GET((((*l_g)).f_c).f_info, sd_S_ExprInfo, l_e));
@@ -37868,7 +38277,7 @@ static void sd_lr_sd_m_Gen__gcore(sd_lframe *p) {
   sd_str_release(L->_t76);
   sd_str_release(L->_t78);
 }
-static sd_str sd_m_Gen__gcore(sd_S_Gen * l_g, sd_int l_e) {
+SD_NO_TCE static sd_str sd_m_Gen__gcore(sd_S_Gen * l_g, sd_int l_e) {
   sd_L_sd_m_Gen__gcore L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__gcore);
   L.l_x = sd_rt_S4Expr(SD_LIST_GET(((((*l_g)).f_c).f_ast).f_exprs, sd_S_Expr, l_e));
@@ -38165,7 +38574,7 @@ static void sd_lr_sd_m_Gen__glist(sd_lframe *p) {
   sd_str_release(L->_t18);
   sd_str_release(L->_t20);
 }
-static sd_str sd_m_Gen__glist(sd_S_Gen * l_g, sd_int l_e) {
+SD_NO_TCE static sd_str sd_m_Gen__glist(sd_S_Gen * l_g, sd_int l_e) {
   sd_L_sd_m_Gen__glist L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__glist);
   sd_int _t1 = sd_m_Gen__coreType((*l_g), l_e);
@@ -38245,7 +38654,7 @@ static void sd_lr_sd_m_Gen__gmap(sd_lframe *p) {
   sd_str_release(L->_t26);
   sd_str_release(L->_t28);
 }
-static sd_str sd_m_Gen__gmap(sd_S_Gen * l_g, sd_int l_e) {
+SD_NO_TCE static sd_str sd_m_Gen__gmap(sd_S_Gen * l_g, sd_int l_e) {
   sd_L_sd_m_Gen__gmap L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__gmap);
   sd_int _t1 = sd_m_Gen__coreType((*l_g), l_e);
@@ -38354,7 +38763,7 @@ static void sd_lr_sd_m_Gen__gstruct(sd_lframe *p) {
   sd_str_release(L->_t20);
   sd_str_release(L->_t22);
 }
-static sd_str sd_m_Gen__gstruct(sd_S_Gen * l_g, sd_int l_e) {
+SD_NO_TCE static sd_str sd_m_Gen__gstruct(sd_S_Gen * l_g, sd_int l_e) {
   sd_L_sd_m_Gen__gstruct L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__gstruct);
   sd_int _t1 = sd_m_Gen__coreType((*l_g), l_e);
@@ -38454,7 +38863,7 @@ static void sd_lr_sd_m_Gen__gindex(sd_lframe *p) {
   sd_str_release(L->_t20);
   sd_str_release(L->_t22);
 }
-static sd_str sd_m_Gen__gindex(sd_S_Gen * l_g, sd_int l_e) {
+SD_NO_TCE static sd_str sd_m_Gen__gindex(sd_S_Gen * l_g, sd_int l_e) {
   sd_L_sd_m_Gen__gindex L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__gindex);
   L.l_x = sd_rt_S4Expr(SD_LIST_GET(((((*l_g)).f_c).f_ast).f_exprs, sd_S_Expr, l_e));
@@ -38623,7 +39032,7 @@ static void sd_lr_sd_m_Gen__gbinary(sd_lframe *p) {
   sd_str_release(L->_t23);
   sd_str_release(L->_t24);
 }
-static sd_str sd_m_Gen__gbinary(sd_S_Gen * l_g, sd_int l_e) {
+SD_NO_TCE static sd_str sd_m_Gen__gbinary(sd_S_Gen * l_g, sd_int l_e) {
   sd_L_sd_m_Gen__gbinary L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__gbinary);
   L.l_x = sd_rt_S4Expr(SD_LIST_GET(((((*l_g)).f_c).f_ast).f_exprs, sd_S_Expr, l_e));
@@ -38747,7 +39156,7 @@ static void sd_lr_sd_m_Gen__genumIs(sd_lframe *p) {
   sd_str_release(L->l_v);
   sd_str_release(L->l_c);
 }
-static sd_str sd_m_Gen__genumIs(sd_S_Gen * l_g, sd_int l_e) {
+SD_NO_TCE static sd_str sd_m_Gen__genumIs(sd_S_Gen * l_g, sd_int l_e) {
   sd_L_sd_m_Gen__genumIs L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__genumIs);
   L.l_x = sd_rt_S4Expr(SD_LIST_GET(((((*l_g)).f_c).f_ast).f_exprs, sd_S_Expr, l_e));
@@ -38979,7 +39388,7 @@ static void sd_lr_sd_m_Gen__gshort(sd_lframe *p) {
   sd_str_release(L->_t19);
   sd_str_release(L->_t25);
 }
-static sd_str sd_m_Gen__gshort(sd_S_Gen * l_g, sd_int l_e) {
+SD_NO_TCE static sd_str sd_m_Gen__gshort(sd_S_Gen * l_g, sd_int l_e) {
   sd_L_sd_m_Gen__gshort L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__gshort);
   L.l_x = sd_rt_S4Expr(SD_LIST_GET(((((*l_g)).f_c).f_ast).f_exprs, sd_S_Expr, l_e));
@@ -39079,7 +39488,7 @@ static void sd_lr_sd_m_Gen__concatLeaves(sd_lframe *p) {
   sd_L_sd_m_Gen__concatLeaves *L = (sd_L_sd_m_Gen__concatLeaves *)p;
   sd_list_release(L->l_out);
 }
-static sd_list * sd_m_Gen__concatLeaves(sd_S_Gen l_g, sd_int l_e, sd_list * l_acc) {
+SD_NO_TCE static sd_list * sd_m_Gen__concatLeaves(sd_S_Gen l_g, sd_int l_e, sd_list * l_acc) {
   sd_L_sd_m_Gen__concatLeaves L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__concatLeaves);
   L.l_out = sd_list_retain(l_acc);
@@ -39110,7 +39519,7 @@ static void sd_lr_sd_m_Gen__gconcat(sd_lframe *p) {
   sd_list_release(L->_t1);
   sd_list_release(L->l_leaves);
 }
-static sd_str sd_m_Gen__gconcat(sd_S_Gen * l_g, sd_int l_e) {
+SD_NO_TCE static sd_str sd_m_Gen__gconcat(sd_S_Gen * l_g, sd_int l_e) {
   sd_L_sd_m_Gen__gconcat L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__gconcat);
   L.l_x = sd_rt_S4Expr(SD_LIST_GET(((((*l_g)).f_c).f_ast).f_exprs, sd_S_Expr, l_e));
@@ -39156,7 +39565,7 @@ static void sd_lr_sd_m_Gen__concatOf(sd_lframe *p) {
   sd_str_release(L->_t22);
   sd_str_release(L->_t25);
 }
-static sd_str sd_m_Gen__concatOf(sd_S_Gen * l_g, sd_list * l_leaves) {
+SD_NO_TCE static sd_str sd_m_Gen__concatOf(sd_S_Gen * l_g, sd_list * l_leaves) {
   sd_L_sd_m_Gen__concatOf L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__concatOf);
   sd_list * _t1 = sd_list_new(&sd_type_int, 0);
@@ -39341,7 +39750,7 @@ static void sd_lr_sd_m_Gen__gtry(sd_lframe *p) {
   sd_str_release(L->_t41);
   sd_str_release(L->_t43);
 }
-static sd_str sd_m_Gen__gtry(sd_S_Gen * l_g, sd_int l_e) {
+SD_NO_TCE static sd_str sd_m_Gen__gtry(sd_S_Gen * l_g, sd_int l_e) {
   sd_L_sd_m_Gen__gtry L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__gtry);
   L.l_x = sd_rt_S4Expr(SD_LIST_GET(((((*l_g)).f_c).f_ast).f_exprs, sd_S_Expr, l_e));
@@ -39494,7 +39903,7 @@ static void sd_lr_sd_m_Gen__ggroup(sd_lframe *p) {
   sd_str_release(L->_t9);
   sd_str_release(L->_t15);
 }
-static sd_str sd_m_Gen__ggroup(sd_S_Gen * l_g, sd_int l_e) {
+SD_NO_TCE static sd_str sd_m_Gen__ggroup(sd_S_Gen * l_g, sd_int l_e) {
   sd_L_sd_m_Gen__ggroup L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__ggroup);
   L.l_x = sd_rt_S4Expr(SD_LIST_GET(((((*l_g)).f_c).f_ast).f_exprs, sd_S_Expr, l_e));
@@ -39709,7 +40118,7 @@ static bool sd_f_isIntOrBool(sd_int l_t) {
   return sd_fg_isIntOrBool(l_t);
 }
 
-static bool sd_m_Gen__fastBlockOk(sd_S_Gen * l_g, sd_int l_b) {
+SD_NO_TCE static bool sd_m_Gen__fastBlockOk(sd_S_Gen * l_g, sd_int l_b) {
   if (sd_int_lt(l_b, SD_INT(0))) {
     return true;
   }
@@ -39739,7 +40148,7 @@ static bool sd_m_Gen__fastBlockOk(sd_S_Gen * l_g, sd_int l_b) {
   return true;
 }
 
-static bool sd_m_Gen__fastStmtOk(sd_S_Gen * l_g, sd_int l_s) {
+SD_NO_TCE static bool sd_m_Gen__fastStmtOk(sd_S_Gen * l_g, sd_int l_s) {
   if (sd_int_lt(l_s, SD_INT(0))) {
     return true;
   }
@@ -39904,7 +40313,7 @@ static sd_str sd_m_Gen__fastConst(sd_S_Gen l_g, sd_int l_ci) {
   return SD_STR_LIT("");
 }
 
-static bool sd_m_Gen__fastExprOk(sd_S_Gen * l_g, sd_int l_e) {
+SD_NO_TCE static bool sd_m_Gen__fastExprOk(sd_S_Gen * l_g, sd_int l_e) {
   if (sd_int_lt(l_e, SD_INT(0))) {
     return false;
   }
@@ -40099,7 +40508,7 @@ static sd_int sd_m_Gen__paramType(sd_S_Gen l_g, sd_int l_f, sd_int l_i) {
   return _t2;
 }
 
-typedef struct { sd_lframe h; sd_list * l_names; sd_list * l_ps; sd_str _t8; sd_str _t9; sd_str _t10; } sd_L_sd_m_Gen__fastHead;
+typedef struct { sd_lframe h; sd_list * l_names; sd_list * l_ps; sd_str _t8; sd_str _t9; sd_str _t10; sd_str _t11; } sd_L_sd_m_Gen__fastHead;
 static void sd_lr_sd_m_Gen__fastHead(sd_lframe *p) {
   sd_L_sd_m_Gen__fastHead *L = (sd_L_sd_m_Gen__fastHead *)p;
   sd_list_release(L->l_names);
@@ -40107,6 +40516,7 @@ static void sd_lr_sd_m_Gen__fastHead(sd_lframe *p) {
   sd_str_release(L->_t8);
   sd_str_release(L->_t9);
   sd_str_release(L->_t10);
+  sd_str_release(L->_t11);
 }
 static sd_str sd_m_Gen__fastHead(sd_S_Gen l_g, sd_int l_f) {
   sd_L_sd_m_Gen__fastHead L = {{0}};
@@ -40136,19 +40546,21 @@ static sd_str sd_m_Gen__fastHead(sd_S_Gen l_g, sd_int l_f) {
       l_i++;
     }
   }
-  L._t8 = sd_m_Gen__linkage(l_g);
-  L._t9 = sd_m_Gen__fastName(l_g, l_f);
-  L._t10 = sd_list_join(L.l_ps, SD_STR_LIT(", "));
-  sd_str _t11[] = {L._t8, SD_STR_LIT("int64_t "), L._t9, SD_STR_LIT("("), L._t10, SD_STR_LIT(")")};
-  sd_str _t12 = sd_str_concat_n(_t11, 6);
-  sd_str _t13 = _t12;
+  L._t8 = sd_m_Gen__noTailCalls(l_g, l_f);
+  L._t9 = sd_m_Gen__linkage(l_g);
+  L._t10 = sd_m_Gen__fastName(l_g, l_f);
+  L._t11 = sd_list_join(L.l_ps, SD_STR_LIT(", "));
+  sd_str _t12[] = {L._t8, L._t9, SD_STR_LIT("int64_t "), L._t10, SD_STR_LIT("("), L._t11, SD_STR_LIT(")")};
+  sd_str _t13 = sd_str_concat_n(_t12, 7);
+  sd_str _t14 = _t13;
   SD_LF_LEAVE(L);
+  sd_str_release(L._t11);
   sd_str_release(L._t10);
   sd_str_release(L._t9);
   sd_str_release(L._t8);
   sd_list_release(L.l_ps);
   sd_list_release(L.l_names);
-  return _t13;
+  return _t14;
 }
 
 typedef struct { sd_lframe h; sd_list * l_names; sd_list * l_fastArgs; sd_list * l_ints; sd_str l_head; sd_str l_sig; sd_str _t24; sd_str l_value; sd_str _t31; sd_str _t33; sd_str l_call; sd_str l_take; sd_str _t40; sd_str _t41; sd_str _t43; sd_list * l_args; sd_str _t47; sd_str _t48; sd_str _t50; } sd_L_sd_m_Gen__genFast;
@@ -40326,7 +40738,7 @@ static void sd_m_Gen__genFast(sd_S_Gen * l_g, sd_int l_f) {
   SD_LF_LEAVE(L);
 }
 
-static void sd_m_Gen__fastBlock(sd_S_Gen * l_g, sd_int l_b) {
+SD_NO_TCE static void sd_m_Gen__fastBlock(sd_S_Gen * l_g, sd_int l_b) {
   if (sd_int_lt(l_b, SD_INT(0))) {
     return;
   }
@@ -40387,7 +40799,7 @@ static void sd_lr_sd_m_Gen__fastStmt(sd_lframe *p) {
   sd_str_release(L->_t63);
   sd_str_release(L->_t66);
 }
-static void sd_m_Gen__fastStmt(sd_S_Gen * l_g, sd_int l_s) {
+SD_NO_TCE static void sd_m_Gen__fastStmt(sd_S_Gen * l_g, sd_int l_s) {
   sd_L_sd_m_Gen__fastStmt L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__fastStmt);
   sd_S_Stmt l_st = SD_LIST_GET(((((*l_g)).f_c).f_ast).f_stmts, sd_S_Stmt, l_s);
@@ -40624,7 +41036,7 @@ static void sd_lr_sd_m_Gen__fastExpr(sd_lframe *p) {
   sd_str_release(L->_t24);
   sd_str_release(L->_t26);
 }
-static sd_str sd_m_Gen__fastExpr(sd_S_Gen * l_g, sd_int l_e) {
+SD_NO_TCE static sd_str sd_m_Gen__fastExpr(sd_S_Gen * l_g, sd_int l_e) {
   sd_L_sd_m_Gen__fastExpr L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__fastExpr);
   sd_S_Expr l_x = SD_LIST_GET(((((*l_g)).f_c).f_ast).f_exprs, sd_S_Expr, l_e);
@@ -40767,7 +41179,7 @@ static void sd_lr_sd_m_Gen__fastBinary(sd_lframe *p) {
   sd_str_release(L->_t49);
   sd_str_release(L->_t51);
 }
-static sd_str sd_m_Gen__fastBinary(sd_S_Gen * l_g, sd_int l_e) {
+SD_NO_TCE static sd_str sd_m_Gen__fastBinary(sd_S_Gen * l_g, sd_int l_e) {
   sd_L_sd_m_Gen__fastBinary L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__fastBinary);
   sd_S_Expr l_x = SD_LIST_GET(((((*l_g)).f_c).f_ast).f_exprs, sd_S_Expr, l_e);
@@ -41337,7 +41749,7 @@ static void sd_lr_sd_m_Gen__rangeIn(sd_lframe *p) {
   sd_L_sd_m_Gen__rangeIn *L = (sd_L_sd_m_Gen__rangeIn *)p;
   sd_box_release(L->l_r);
 }
-static sd_S_IntRange sd_m_Gen__rangeIn(sd_S_Gen l_g, sd_int l_e, sd_map * l_vars) {
+SD_NO_TCE static sd_S_IntRange sd_m_Gen__rangeIn(sd_S_Gen l_g, sd_int l_e, sd_map * l_vars) {
   sd_L_sd_m_Gen__rangeIn L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__rangeIn);
   if (sd_int_lt(l_e, SD_INT(0))) {
@@ -41640,7 +42052,7 @@ static sd_int sd_m_Gen__intLocal(sd_S_Gen l_g, sd_int l_e) {
   return sd_int_retain((l_i).f_ref);
 }
 
-static void sd_m_Gen__intWalkBlock(sd_S_Gen * l_g, sd_int l_b) {
+SD_NO_TCE static void sd_m_Gen__intWalkBlock(sd_S_Gen * l_g, sd_int l_b) {
   if (sd_int_lt(l_b, SD_INT(0))) {
     return;
   }
@@ -41663,7 +42075,7 @@ static void sd_m_Gen__intWalkBlock(sd_S_Gen * l_g, sd_int l_b) {
   }
 }
 
-static void sd_m_Gen__intWalkExpr(sd_S_Gen * l_g, sd_int l_e) {
+SD_NO_TCE static void sd_m_Gen__intWalkExpr(sd_S_Gen * l_g, sd_int l_e) {
   if (sd_int_lt(l_e, SD_INT(0))) {
     return;
   }
@@ -41693,7 +42105,7 @@ static void sd_m_Gen__intWalkExpr(sd_S_Gen * l_g, sd_int l_e) {
   }
 }
 
-static void sd_m_Gen__intWalkStmt(sd_S_Gen * l_g, sd_int l_s) {
+SD_NO_TCE static void sd_m_Gen__intWalkStmt(sd_S_Gen * l_g, sd_int l_s) {
   if (sd_int_lt(l_s, SD_INT(0))) {
     return;
   }
@@ -41862,7 +42274,7 @@ static void sd_lr_sd_m_Gen__intWalkPost(sd_lframe *p) {
   sd_list_release(L->_t5);
   sd_list_release(L->l_conj);
 }
-static void sd_m_Gen__intWalkPost(sd_S_Gen * l_g, sd_S_Stmt l_loop, sd_int l_first, sd_int l_end) {
+SD_NO_TCE static void sd_m_Gen__intWalkPost(sd_S_Gen * l_g, sd_S_Stmt l_loop, sd_int l_first, sd_int l_end) {
   sd_L_sd_m_Gen__intWalkPost L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__intWalkPost);
   if (sd_int_lt((l_loop).f_post, SD_INT(0))) {
@@ -41990,7 +42402,7 @@ static void sd_lr_sd_m_Gen__conjuncts(sd_lframe *p) {
   sd_L_sd_m_Gen__conjuncts *L = (sd_L_sd_m_Gen__conjuncts *)p;
   sd_list_release(L->l_out);
 }
-static sd_list * sd_m_Gen__conjuncts(sd_S_Gen l_g, sd_int l_e, sd_list * l_acc) {
+SD_NO_TCE static sd_list * sd_m_Gen__conjuncts(sd_S_Gen l_g, sd_int l_e, sd_list * l_acc) {
   sd_L_sd_m_Gen__conjuncts L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__conjuncts);
   L.l_out = sd_list_retain(l_acc);
@@ -42424,7 +42836,7 @@ static sd_S_MagicDiv sd_f_magicDiv(sd_int l_c, sd_int l_max) {
   sd_crash("internal error: magicDiv reached its end without returning");
 }
 
-static bool sd_m_Gen__isSimpleSmall(sd_S_Gen l_g, sd_int l_e) {
+SD_NO_TCE static bool sd_m_Gen__isSimpleSmall(sd_S_Gen l_g, sd_int l_e) {
   bool _t1 = sd_m_Gen__isSmallInt(l_g, l_e);
   if ((!_t1)) {
     return false;
@@ -42471,7 +42883,7 @@ static void sd_lr_sd_m_Gen__plusLeaves(sd_lframe *p) {
   sd_L_sd_m_Gen__plusLeaves *L = (sd_L_sd_m_Gen__plusLeaves *)p;
   sd_list_release(L->l_out);
 }
-static sd_list * sd_m_Gen__plusLeaves(sd_S_Gen l_g, sd_int l_e, sd_list * l_acc) {
+SD_NO_TCE static sd_list * sd_m_Gen__plusLeaves(sd_S_Gen l_g, sd_int l_e, sd_list * l_acc) {
   sd_L_sd_m_Gen__plusLeaves L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__plusLeaves);
   L.l_out = sd_list_retain(l_acc);
@@ -42526,7 +42938,7 @@ static void sd_lr_sd_m_Gen__genIntUpdate(sd_lframe *p) {
   sd_str_release(L->_t26);
   sd_str_release(L->_t27);
 }
-static bool sd_m_Gen__genIntUpdate(sd_S_Gen * l_g, sd_S_Stmt l_st, sd_S_Target l_tg) {
+SD_NO_TCE static bool sd_m_Gen__genIntUpdate(sd_S_Gen * l_g, sd_S_Stmt l_st, sd_S_Target l_tg) {
   sd_L_sd_m_Gen__genIntUpdate L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__genIntUpdate);
   sd_int _t1 = sd_m_Gen__intLocal((*l_g), (l_tg).f_expr);
@@ -42673,7 +43085,7 @@ static void sd_lr_sd_m_Gen__sumOf(sd_lframe *p) {
   sd_str_release(L->l_s);
   sd_str_release(L->_t32);
 }
-static sd_str sd_m_Gen__sumOf(sd_S_Gen * l_g, sd_list * l_leaves) {
+SD_NO_TCE static sd_str sd_m_Gen__sumOf(sd_S_Gen * l_g, sd_list * l_leaves) {
   sd_L_sd_m_Gen__sumOf L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__sumOf);
   sd_list * _t1 = sd_list_new(&sd_type_int, 0);
@@ -42819,7 +43231,7 @@ static void sd_lr_sd_m_Gen__gsumSmall(sd_lframe *p) {
   sd_str_release(L->_t27);
   sd_str_release(L->_t29);
 }
-static sd_str sd_m_Gen__gsumSmall(sd_S_Gen * l_g, sd_int l_e) {
+SD_NO_TCE static sd_str sd_m_Gen__gsumSmall(sd_S_Gen * l_g, sd_int l_e) {
   sd_L_sd_m_Gen__gsumSmall L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__gsumSmall);
   L._t1 = sd_list_new(&sd_type_int, 0);
@@ -43107,7 +43519,7 @@ static sd_map * sd_m_Gen__movesAt(sd_S_Gen l_g, sd_int l_s) {
   return _t7;
 }
 
-static void sd_m_Gen__mvBlock(sd_S_Gen * l_g, sd_int l_b) {
+SD_NO_TCE static void sd_m_Gen__mvBlock(sd_S_Gen * l_g, sd_int l_b) {
   if (sd_int_lt(l_b, SD_INT(0))) {
     return;
   }
@@ -43142,7 +43554,7 @@ static void sd_m_Gen__mvBlock(sd_S_Gen * l_g, sd_int l_b) {
   *_t8 = _t7;
 }
 
-static void sd_m_Gen__mvNested(sd_S_Gen * l_g, sd_int l_s) {
+SD_NO_TCE static void sd_m_Gen__mvNested(sd_S_Gen * l_g, sd_int l_s) {
   if (sd_int_lt(l_s, SD_INT(0))) {
     return;
   }
@@ -43170,7 +43582,7 @@ static void sd_m_Gen__mvDeclare(sd_S_Gen * l_g, sd_int l_v, sd_int l_s) {
   }
 }
 
-static void sd_m_Gen__mvStmt(sd_S_Gen * l_g, sd_int l_s) {
+SD_NO_TCE static void sd_m_Gen__mvStmt(sd_S_Gen * l_g, sd_int l_s) {
   sd_S_Stmt l_st = SD_LIST_GET(((((*l_g)).f_c).f_ast).f_stmts, sd_S_Stmt, l_s);
   {
     sd_box * _t1 = (l_st).f_kind;
@@ -43315,7 +43727,7 @@ static void sd_m_Gen__mvStmt(sd_S_Gen * l_g, sd_int l_s) {
   }
 }
 
-static void sd_m_Gen__mvExpr(sd_S_Gen * l_g, sd_int l_e, bool l_cond) {
+SD_NO_TCE static void sd_m_Gen__mvExpr(sd_S_Gen * l_g, sd_int l_e, bool l_cond) {
   if (sd_int_lt(l_e, SD_INT(0))) {
     return;
   }
@@ -43451,7 +43863,7 @@ static void sd_lr_sd_m_Gen__rawPath(sd_lframe *p) {
   sd_str_release(L->_t1);
   sd_str_release(L->_t4);
 }
-static sd_str sd_m_Gen__rawPath(sd_S_Gen l_g, sd_int l_e) {
+SD_NO_TCE static sd_str sd_m_Gen__rawPath(sd_S_Gen l_g, sd_int l_e) {
   sd_L_sd_m_Gen__rawPath L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__rawPath);
   sd_S_Expr l_x = SD_LIST_GET((((l_g).f_c).f_ast).f_exprs, sd_S_Expr, l_e);
@@ -43549,7 +43961,7 @@ static bool sd_m_Gen__eventHits(sd_S_Gen l_g, sd_S_MutEvent l_ev, sd_str l_p) {
   return _t13;
 }
 
-static bool sd_m_Gen__isPlaceRead(sd_S_Gen l_g, sd_int l_e) {
+SD_NO_TCE static bool sd_m_Gen__isPlaceRead(sd_S_Gen l_g, sd_int l_e) {
   sd_S_Expr l_x = SD_LIST_GET((((l_g).f_c).f_ast).f_exprs, sd_S_Expr, l_e);
   sd_S_ExprInfo l_i = SD_LIST_GET(((l_g).f_c).f_info, sd_S_ExprInfo, l_e);
   bool _t3 = sd_int_ge((l_i).f_ifaceFrom, SD_INT(0));
@@ -43913,7 +44325,7 @@ static bool sd_m_Gen__isBorrowed(sd_S_Gen l_g, sd_int l_v) {
   return (!(!((_t1 ? (sd_opt_bool){true, *_t1} : (sd_opt_bool){false, 0})).has));
 }
 
-static void sd_m_Gen__bwBlock(sd_S_Gen * l_g, sd_int l_b) {
+SD_NO_TCE static void sd_m_Gen__bwBlock(sd_S_Gen * l_g, sd_int l_b) {
   if (sd_int_lt(l_b, SD_INT(0))) {
     return;
   }
@@ -44047,7 +44459,7 @@ static void sd_lr_sd_m_Gen__bwStmt(sd_lframe *p) {
   sd_rl_S4Stmt(L->l_st);
   sd_rl_S6Target(L->l_tg);
 }
-static void sd_m_Gen__bwStmt(sd_S_Gen * l_g, sd_int l_s) {
+SD_NO_TCE static void sd_m_Gen__bwStmt(sd_S_Gen * l_g, sd_int l_s) {
   sd_L_sd_m_Gen__bwStmt L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__bwStmt);
   if (sd_int_lt(l_s, SD_INT(0))) {
@@ -44164,7 +44576,7 @@ static void sd_lr_sd_m_Gen__bwExpr(sd_lframe *p) {
   sd_L_sd_m_Gen__bwExpr *L = (sd_L_sd_m_Gen__bwExpr *)p;
   sd_rl_S4Expr(L->l_x);
 }
-static void sd_m_Gen__bwExpr(sd_S_Gen * l_g, sd_int l_e) {
+SD_NO_TCE static void sd_m_Gen__bwExpr(sd_S_Gen * l_g, sd_int l_e) {
   sd_L_sd_m_Gen__bwExpr L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__bwExpr);
   if (sd_int_lt(l_e, SD_INT(0))) {
@@ -44368,6 +44780,13 @@ static bool sd_m_Gen__preemptsOnEntry(sd_S_Gen l_g, sd_int l_f) {
   return (!(!((_t1 ? (sd_opt_bool){true, *_t1} : (sd_opt_bool){false, 0})).has));
 }
 
+static sd_str sd_m_Gen__noTailCalls(sd_S_Gen l_g, sd_int l_f) {
+  if (((sd_int_ge(l_f, SD_INT(0)) && sd_int_lt(l_f, sd_list_len((l_g).f_pcCyclic))) && SD_LIST_GET((l_g).f_pcCyclic, bool, l_f))) {
+    return SD_STR_LIT("SD_NO_TCE ");
+  }
+  return SD_STR_LIT("");
+}
+
 static bool sd_m_Gen__callMayRecurse(sd_S_Gen l_g, sd_int l_callee) {
   sd_int l_f = (l_g).f_curFn;
   return (((sd_int_ge(l_f, SD_INT(0)) && sd_int_ge(l_callee, SD_INT(0))) && SD_LIST_GET((l_g).f_pcCyclic, bool, l_f)) && sd_int_eq(SD_LIST_GET((l_g).f_pcComp, sd_int, l_f), SD_LIST_GET((l_g).f_pcComp, sd_int, l_callee)));
@@ -44457,7 +44876,7 @@ static bool sd_m_Gen__pcEnter(sd_S_Gen * l_g, sd_int l_b, sd_int l_s) {
   return l_prev;
 }
 
-static void sd_m_CallGraph__strong(sd_S_CallGraph * l_cg, sd_int l_v) {
+SD_NO_TCE static void sd_m_CallGraph__strong(sd_S_CallGraph * l_cg, sd_int l_v) {
   sd_int _t1 = sd_int_retain(((*l_cg)).f_next);
   sd_int _t2 = sd_int_retain(l_v);
   sd_list_set((&(l_cg)->f_index), _t2, &_t1);
@@ -44561,7 +44980,7 @@ static void sd_m_CallGraph__strong(sd_S_CallGraph * l_cg, sd_int l_v) {
   sd_int_release(l_first);
 }
 
-static void sd_m_Gen__pcBlock(sd_S_Gen * l_g, sd_int l_b) {
+SD_NO_TCE static void sd_m_Gen__pcBlock(sd_S_Gen * l_g, sd_int l_b) {
   if (sd_int_lt(l_b, SD_INT(0))) {
     return;
   }
@@ -44584,7 +45003,7 @@ static void sd_m_Gen__pcBlock(sd_S_Gen * l_g, sd_int l_b) {
   }
 }
 
-static void sd_m_Gen__pcStmt(sd_S_Gen * l_g, sd_int l_s) {
+SD_NO_TCE static void sd_m_Gen__pcStmt(sd_S_Gen * l_g, sd_int l_s) {
   if (sd_int_lt(l_s, SD_INT(0))) {
     return;
   }
@@ -44679,7 +45098,7 @@ static void sd_m_Gen__pcStmt(sd_S_Gen * l_g, sd_int l_s) {
   }
 }
 
-static void sd_m_Gen__pcExpr(sd_S_Gen * l_g, sd_int l_e) {
+SD_NO_TCE static void sd_m_Gen__pcExpr(sd_S_Gen * l_g, sd_int l_e) {
   if (sd_int_lt(l_e, SD_INT(0))) {
     return;
   }
@@ -44757,7 +45176,7 @@ static void sd_lr_sd_m_Gen__genStmts(sd_lframe *p) {
   sd_L_sd_m_Gen__genStmts *L = (sd_L_sd_m_Gen__genStmts *)p;
   sd_map_release(L->l_saved);
 }
-static void sd_m_Gen__genStmts(sd_S_Gen * l_g, sd_int l_b) {
+SD_NO_TCE static void sd_m_Gen__genStmts(sd_S_Gen * l_g, sd_int l_b) {
   sd_L_sd_m_Gen__genStmts L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__genStmts);
   if (sd_int_lt(l_b, SD_INT(0))) {
@@ -44801,7 +45220,7 @@ static void sd_m_Gen__genStmts(sd_S_Gen * l_g, sd_int l_b) {
   SD_LF_LEAVE(L);
 }
 
-static void sd_m_Gen__genBody(sd_S_Gen * l_g, sd_int l_b) {
+SD_NO_TCE static void sd_m_Gen__genBody(sd_S_Gen * l_g, sd_int l_b) {
   sd_m_Gen__pushScope(l_g);
   SD_PREEMPT();
   sd_m_Gen__genStmts(l_g, l_b);
@@ -44894,7 +45313,7 @@ static void sd_lr_sd_m_Gen__genStmt(sd_lframe *p) {
   sd_list_release(L->_t21);
   sd_str_release(L->_t23);
 }
-static void sd_m_Gen__genStmt(sd_S_Gen * l_g, sd_int l_s) {
+SD_NO_TCE static void sd_m_Gen__genStmt(sd_S_Gen * l_g, sd_int l_s) {
   sd_L_sd_m_Gen__genStmt L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__genStmt);
   L.l_st = sd_rt_S4Stmt(SD_LIST_GET(((((*l_g)).f_c).f_ast).f_stmts, sd_S_Stmt, l_s));
@@ -45040,7 +45459,7 @@ static void sd_lr_sd_m_Gen__genAssert(sd_lframe *p) {
   sd_str_release(L->_t54);
   sd_list_release(L->_t55);
 }
-static void sd_m_Gen__genAssert(sd_S_Gen * l_g, sd_S_Stmt l_st) {
+SD_NO_TCE static void sd_m_Gen__genAssert(sd_S_Gen * l_g, sd_S_Stmt l_st) {
   sd_L_sd_m_Gen__genAssert L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__genAssert);
   sd_int l_e = (l_st).f_expr;
@@ -45229,7 +45648,7 @@ static void sd_lr_sd_m_Gen__showVal(sd_lframe *p) {
   sd_str_release(L->l_inner);
   sd_str_release(L->_t28);
 }
-static sd_str sd_m_Gen__showVal(sd_S_Gen l_g, sd_int l_t, sd_str l_v) {
+SD_NO_TCE static sd_str sd_m_Gen__showVal(sd_S_Gen l_g, sd_int l_t, sd_str l_v) {
   sd_L_sd_m_Gen__showVal L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__showVal);
   {
@@ -45353,7 +45772,7 @@ static void sd_lr_sd_m_Gen__genAssign(sd_lframe *p) {
   sd_str_release(L->_t42);
   sd_str_release(L->_t47);
 }
-static void sd_m_Gen__genAssign(sd_S_Gen * l_g, sd_int l_s) {
+SD_NO_TCE static void sd_m_Gen__genAssign(sd_S_Gen * l_g, sd_int l_s) {
   sd_L_sd_m_Gen__genAssign L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__genAssign);
   L.l_st = sd_rt_S4Stmt(SD_LIST_GET(((((*l_g)).f_c).f_ast).f_stmts, sd_S_Stmt, l_s));
@@ -45563,7 +45982,7 @@ static void sd_lr_sd_m_Gen__gstore(sd_lframe *p) {
   sd_str_release(L->_t27);
   sd_str_release(L->_t29);
 }
-static void sd_m_Gen__gstore(sd_S_Gen * l_g, sd_int l_lv, sd_str l_v) {
+SD_NO_TCE static void sd_m_Gen__gstore(sd_S_Gen * l_g, sd_int l_lv, sd_str l_v) {
   sd_L_sd_m_Gen__gstore L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__gstore);
   L.l_x = sd_rt_S4Expr(SD_LIST_GET(((((*l_g)).f_c).f_ast).f_exprs, sd_S_Expr, l_lv));
@@ -45683,7 +46102,7 @@ static void sd_m_Gen__gstore(sd_S_Gen * l_g, sd_int l_lv, sd_str l_v) {
   SD_LF_LEAVE(L);
 }
 
-static bool sd_m_Gen__mentionsVar(sd_S_Gen l_g, sd_int l_e, sd_int l_v) {
+SD_NO_TCE static bool sd_m_Gen__mentionsVar(sd_S_Gen l_g, sd_int l_e, sd_int l_v) {
   if (sd_int_lt(l_e, SD_INT(0))) {
     return false;
   }
@@ -45750,7 +46169,7 @@ static void sd_lr_sd_m_Gen__genAppend(sd_lframe *p) {
   sd_str_release(L->_t42);
   sd_str_release(L->_t44);
 }
-static bool sd_m_Gen__genAppend(sd_S_Gen * l_g, sd_S_Stmt l_st, sd_S_Target l_tg) {
+SD_NO_TCE static bool sd_m_Gen__genAppend(sd_S_Gen * l_g, sd_S_Stmt l_st, sd_S_Target l_tg) {
   sd_L_sd_m_Gen__genAppend L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__genAppend);
   L.l_lx = sd_rt_S4Expr(SD_LIST_GET(((((*l_g)).f_c).f_ast).f_exprs, sd_S_Expr, (l_tg).f_expr));
@@ -45949,7 +46368,7 @@ static bool sd_m_Gen__genAppend(sd_S_Gen * l_g, sd_S_Stmt l_st, sd_S_Target l_tg
   return _t45;
 }
 
-static sd_int sd_m_Gen__appendRoot(sd_S_Gen l_g, sd_int l_e) {
+SD_NO_TCE static sd_int sd_m_Gen__appendRoot(sd_S_Gen l_g, sd_int l_e) {
   sd_S_Expr l_x = SD_LIST_GET((((l_g).f_c).f_ast).f_exprs, sd_S_Expr, l_e);
   sd_S_ExprInfo l_i = SD_LIST_GET(((l_g).f_c).f_info, sd_S_ExprInfo, l_e);
   if ((((l_i).f_narrowed || (l_i).f_wrap) || sd_int_ge((l_i).f_ifaceFrom, SD_INT(0)))) {
@@ -45986,7 +46405,7 @@ static sd_int sd_m_Gen__appendRoot(sd_S_Gen l_g, sd_int l_e) {
   return SD_INT(-1);
 }
 
-static bool sd_m_Gen__samePlace(sd_S_Gen l_g, sd_int l_a, sd_int l_b) {
+SD_NO_TCE static bool sd_m_Gen__samePlace(sd_S_Gen l_g, sd_int l_a, sd_int l_b) {
   sd_S_Expr l_xa = SD_LIST_GET((((l_g).f_c).f_ast).f_exprs, sd_S_Expr, l_a);
   sd_S_Expr l_xb = SD_LIST_GET((((l_g).f_c).f_ast).f_exprs, sd_S_Expr, l_b);
   sd_S_ExprInfo l_ia = SD_LIST_GET(((l_g).f_c).f_info, sd_S_ExprInfo, l_a);
@@ -46034,7 +46453,7 @@ static void sd_lr_sd_m_Gen__genMultiAssign(sd_lframe *p) {
   sd_str_release(L->_t58);
   sd_rl_S4Slot(L->_t63);
 }
-static void sd_m_Gen__genMultiAssign(sd_S_Gen * l_g, sd_int l_s) {
+SD_NO_TCE static void sd_m_Gen__genMultiAssign(sd_S_Gen * l_g, sd_int l_s) {
   sd_L_sd_m_Gen__genMultiAssign L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__genMultiAssign);
   L.l_st = sd_rt_S4Stmt(SD_LIST_GET(((((*l_g)).f_c).f_ast).f_stmts, sd_S_Stmt, l_s));
@@ -46352,7 +46771,7 @@ static void sd_lr_sd_m_Gen__genIncDec(sd_lframe *p) {
   sd_str_release(L->_t16);
   sd_str_release(L->_t19);
 }
-static void sd_m_Gen__genIncDec(sd_S_Gen * l_g, sd_int l_s) {
+SD_NO_TCE static void sd_m_Gen__genIncDec(sd_S_Gen * l_g, sd_int l_s) {
   sd_L_sd_m_Gen__genIncDec L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__genIncDec);
   L.l_st = sd_rt_S4Stmt(SD_LIST_GET(((((*l_g)).f_c).f_ast).f_stmts, sd_S_Stmt, l_s));
@@ -46457,7 +46876,7 @@ static void sd_lr_sd_m_Gen__genIf(sd_lframe *p) {
   sd_str_release(L->l_c);
   sd_str_release(L->_t4);
 }
-static void sd_m_Gen__genIf(sd_S_Gen * l_g, sd_S_Stmt l_st) {
+SD_NO_TCE static void sd_m_Gen__genIf(sd_S_Gen * l_g, sd_S_Stmt l_st) {
   sd_L_sd_m_Gen__genIf L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__genIf);
   int64_t l_mark = SD_SMALL(sd_list_len(((*l_g)).f_slots));
@@ -46508,7 +46927,7 @@ static void sd_lr_sd_m_Gen__genFor(sd_lframe *p) {
   sd_list_release(L->_t11);
   sd_str_release(L->_t15);
 }
-static void sd_m_Gen__genFor(sd_S_Gen * l_g, sd_S_Stmt l_st) {
+SD_NO_TCE static void sd_m_Gen__genFor(sd_S_Gen * l_g, sd_S_Stmt l_st) {
   sd_L_sd_m_Gen__genFor L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__genFor);
   sd_str _t1 = SD_STR_LIT("{");
@@ -46582,7 +47001,7 @@ static void sd_lr_sd_m_Gen__genLoopCopy(sd_lframe *p) {
   sd_str_release(L->_t17);
   sd_str_release(L->_t20);
 }
-static void sd_m_Gen__genLoopCopy(sd_S_Gen * l_g, sd_S_Stmt l_st, sd_int l_label, sd_list * l_acc, sd_list * l_bounded, sd_int l_accTo, bool l_spills) {
+SD_NO_TCE static void sd_m_Gen__genLoopCopy(sd_S_Gen * l_g, sd_S_Stmt l_st, sd_int l_label, sd_list * l_acc, sd_list * l_bounded, sd_int l_accTo, bool l_spills) {
   sd_L_sd_m_Gen__genLoopCopy L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__genLoopCopy);
   sd_str _t1 = SD_STR_LIT("for (;;) {");
@@ -46678,7 +47097,7 @@ static void sd_lr_sd_m_Gen__genSwitch(sd_lframe *p) {
   sd_str_release(L->_t77);
   sd_str_release(L->_t83);
 }
-static void sd_m_Gen__genSwitch(sd_S_Gen * l_g, sd_S_Stmt l_st) {
+SD_NO_TCE static void sd_m_Gen__genSwitch(sd_S_Gen * l_g, sd_S_Stmt l_st) {
   sd_L_sd_m_Gen__genSwitch L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__genSwitch);
   sd_int _t1 = sd_m_Gen__typeOf((*l_g), (l_st).f_expr);
@@ -47300,7 +47719,7 @@ static void sd_lr_sd_m_Gen__genReturn(sd_lframe *p) {
   sd_str_release(L->_t38);
   sd_str_release(L->_t40);
 }
-static void sd_m_Gen__genReturn(sd_S_Gen * l_g, sd_S_Stmt l_st) {
+SD_NO_TCE static void sd_m_Gen__genReturn(sd_S_Gen * l_g, sd_S_Stmt l_st) {
   sd_L_sd_m_Gen__genReturn L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__genReturn);
   sd_int l_n = sd_int_retain((SD_LIST_GET(((((*l_g)).f_c).f_ast).f_fns, sd_S_FnDecl, ((*l_g)).f_curFn)).f_resultCount);
@@ -47457,7 +47876,7 @@ static void sd_m_Gen__genReturn(sd_S_Gen * l_g, sd_S_Stmt l_st) {
   SD_LF_LEAVE(L);
 }
 
-static bool sd_m_Gen__blockHasDefer(sd_S_Gen l_g, sd_int l_b) {
+SD_NO_TCE static bool sd_m_Gen__blockHasDefer(sd_S_Gen l_g, sd_int l_b) {
   if (sd_int_lt(l_b, SD_INT(0))) {
     return false;
   }
@@ -47487,7 +47906,7 @@ static bool sd_m_Gen__blockHasDefer(sd_S_Gen l_g, sd_int l_b) {
   return false;
 }
 
-static bool sd_m_Gen__stmtHasDefer(sd_S_Gen l_g, sd_int l_s) {
+SD_NO_TCE static bool sd_m_Gen__stmtHasDefer(sd_S_Gen l_g, sd_int l_s) {
   if (sd_int_lt(l_s, SD_INT(0))) {
     return false;
   }
@@ -47582,7 +48001,7 @@ static void sd_lr_sd_m_Gen__genDefer(sd_lframe *p) {
   sd_str_release(L->_t48);
   sd_str_release(L->l_body);
 }
-static void sd_m_Gen__genDefer(sd_S_Gen * l_g, sd_S_Stmt l_st) {
+SD_NO_TCE static void sd_m_Gen__genDefer(sd_S_Gen * l_g, sd_S_Stmt l_st) {
   sd_L_sd_m_Gen__genDefer L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__genDefer);
   int64_t l_mark = SD_SMALL(sd_list_len(((*l_g)).f_slots));
@@ -47762,7 +48181,7 @@ static void sd_m_Gen__genDefer(sd_S_Gen * l_g, sd_S_Stmt l_st) {
   SD_LF_LEAVE(L);
 }
 
-static bool sd_m_Gen__groupHasDefer(sd_S_Gen l_g, sd_int l_e) {
+SD_NO_TCE static bool sd_m_Gen__groupHasDefer(sd_S_Gen l_g, sd_int l_e) {
   if (sd_int_lt(l_e, SD_INT(0))) {
     return false;
   }
@@ -47806,7 +48225,7 @@ static void sd_lr_sd_m_Gen__genSpawn(sd_lframe *p) {
   sd_str_release(L->_t55);
   sd_str_release(L->_t56);
 }
-static void sd_m_Gen__genSpawn(sd_S_Gen * l_g, sd_S_Stmt l_st) {
+SD_NO_TCE static void sd_m_Gen__genSpawn(sd_S_Gen * l_g, sd_S_Stmt l_st) {
   sd_L_sd_m_Gen__genSpawn L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__genSpawn);
   int64_t l_mark = SD_SMALL(sd_list_len(((*l_g)).f_slots));
@@ -48008,7 +48427,7 @@ static void sd_lr_sd_m_Gen__genSelect(sd_lframe *p) {
   sd_str_release(L->_t50);
   sd_str_release(L->_t51);
 }
-static void sd_m_Gen__genSelect(sd_S_Gen * l_g, sd_S_Stmt l_st) {
+SD_NO_TCE static void sd_m_Gen__genSelect(sd_S_Gen * l_g, sd_S_Stmt l_st) {
   sd_L_sd_m_Gen__genSelect L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__genSelect);
   int64_t l_mark = SD_SMALL(sd_list_len(((*l_g)).f_slots));
@@ -49040,7 +49459,7 @@ static void sd_m_Lexer__lexNumber(sd_S_Lexer * l_lx) {
     sd_int l_digits = SD_INT(0);
     {
       if (SD_LIKELY(((l_digits.w) & 1) == 0)) {
-        int64_t r_digits_3418 = SD_SMALL(l_digits);
+        int64_t r_digits_3420 = SD_SMALL(l_digits);
         for (;;) {
           SD_PREEMPT();
           bool _t12 = sd_int_lt(((*l_lx)).f_i, SD_INT_S(l_n));
@@ -49053,8 +49472,8 @@ static void sd_m_Lexer__lexNumber(sd_S_Lexer * l_lx) {
           {
             sd_int *_t13 = (&(l_lx)->f_i);
             { int64_t r_; if (SD_LIKELY((((*_t13).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((*_t13).w, SD_INT(1).w, &r_))) (*_t13).w = r_; else { sd_int s_ = sd_int_add_slow((*_t13), SD_INT(1)); sd_int_release((*_t13)); (*_t13) = s_; } }
-            if (SD_UNLIKELY(__builtin_add_overflow(r_digits_3418, ((int64_t)1), &r_digits_3418))) {
-              sd_int _t14 = sd_int_from_i64((int64_t)((uint64_t)r_digits_3418 - (uint64_t)((int64_t)1)));
+            if (SD_UNLIKELY(__builtin_add_overflow(r_digits_3420, ((int64_t)1), &r_digits_3420))) {
+              sd_int _t14 = sd_int_from_i64((int64_t)((uint64_t)r_digits_3420 - (uint64_t)((int64_t)1)));
               l_digits = sd_int_add(_t14, SD_INT_S(((int64_t)1)));
               sd_int_release(_t14);
               goto _c9;
@@ -49062,7 +49481,7 @@ static void sd_m_Lexer__lexNumber(sd_S_Lexer * l_lx) {
           }
           _c10:;
         }
-        l_digits = sd_int_from_i64(r_digits_3418);
+        l_digits = sd_int_from_i64(r_digits_3420);
         goto _d8;
       }
       for (;;) {
@@ -49734,12 +50153,13 @@ static sd_S_Loader sd_f_newLoader(sd_str l_seedRoot, sd_str l_projectRoot) {
   sd_S_Parser _t4 = sd_f_newParser(L._t3);
   sd_map * _t5 = sd_map_new(&sd_type_str, &sd_type_int);
   sd_list * _t6 = sd_list_new(&sd_D_Diag, 0);
-  sd_S_Loader _t7 = (sd_S_Loader){.f_p = _t4, .f_seedRoot = sd_str_retain(l_seedRoot), .f_projectRoot = sd_str_retain(l_projectRoot), .f_libDir = L.l_lib, .f_byDir = _t5, .f_unformatted = _t6};
+  sd_map * _t7 = sd_map_new(&sd_type_str, &sd_type_str);
+  sd_S_Loader _t8 = (sd_S_Loader){.f_p = _t4, .f_seedRoot = sd_str_retain(l_seedRoot), .f_projectRoot = sd_str_retain(l_projectRoot), .f_libDir = L.l_lib, .f_byDir = _t5, .f_unformatted = _t6, .f_overlay = _t7};
   L.l_lib = NULL;
-  sd_S_Loader _t8 = _t7;
+  sd_S_Loader _t9 = _t8;
   SD_LF_LEAVE(L);
   sd_rl_S5Diags(L._t3);
-  return _t8;
+  return _t9;
 }
 
 typedef struct { sd_lframe h; sd_str _t4; } sd_L_sd_m_Loader__addPackage;
@@ -49762,14 +50182,15 @@ static sd_int sd_m_Loader__addPackage(sd_S_Loader * l_l, sd_str l_path, sd_str l
   return SD_INT_S(l_n);
 }
 
-typedef struct { sd_lframe h; sd_T_T2se _t2; sd_str l_src; sd_str _t4; sd_str l_formatted; sd_str _t18; } sd_L_sd_m_Loader__addFiles;
+typedef struct { sd_lframe h; sd_str l_text; sd_str l_src; sd_T_T2se _t5; sd_str _t8; sd_str l_formatted; sd_str _t22; } sd_L_sd_m_Loader__addFiles;
 static void sd_lr_sd_m_Loader__addFiles(sd_lframe *p) {
   sd_L_sd_m_Loader__addFiles *L = (sd_L_sd_m_Loader__addFiles *)p;
-  sd_rl_T2se(L->_t2);
+  sd_str_release(L->l_text);
   sd_str_release(L->l_src);
-  sd_str_release(L->_t4);
+  sd_rl_T2se(L->_t5);
+  sd_str_release(L->_t8);
   sd_str_release(L->l_formatted);
-  sd_str_release(L->_t18);
+  sd_str_release(L->_t22);
 }
 static sd_err sd_m_Loader__addFiles(sd_S_Loader * l_l, sd_int l_pkg, sd_list * l_files, bool l_isTest) {
   sd_L_sd_m_Loader__addFiles L = {{0}};
@@ -49780,55 +50201,70 @@ static sd_err sd_m_Loader__addFiles(sd_S_Loader * l_l, sd_int l_pkg, sd_list * l
       SD_PREEMPT();
       if (!((l_i < SD_SMALL(sd_list_len(l_files))))) break;
       {
-        L._t2 = sd_f_fs_read(SD_LIST_GET(l_files, sd_str, SD_INT_S(l_i)));
-        if (!sd_err_is_null(L._t2.r1)) {
-          sd_str_release(L._t2.r0);
-          SD_LF_LEAVE(L);
-          return L._t2.r1;
+        sd_str _t2 = SD_LIST_GET(l_files, sd_str, SD_INT_S(l_i));
+        sd_str *_t3 = sd_map_get(((*l_l)).f_overlay, &_t2);
+        L.l_text = sd_str_retain((_t3 ? *_t3 : NULL));
+        L.l_src = SD_STR_LIT("");
+        if ((!((L.l_text) == NULL))) {
+          sd_str _t4 = sd_str_retain(L.l_text);
+          sd_str_release(L.l_src);
+          L.l_src = _t4;
+        } else {
+          L._t5 = sd_f_fs_read(SD_LIST_GET(l_files, sd_str, SD_INT_S(l_i)));
+          if (!sd_err_is_null(L._t5.r1)) {
+            sd_str_release(L._t5.r0);
+            sd_err _t6 = L._t5.r1;
+            SD_LF_LEAVE(L);
+            sd_str_release(L.l_src);
+            sd_str_release(L.l_text);
+            return _t6;
+          }
+          sd_str _t7 = L._t5.r0;
+          L._t5 = ((sd_T_T2se){0});
+          sd_str_release(L.l_src);
+          L.l_src = _t7;
         }
-        sd_str _t3 = L._t2.r0;
-        L._t2 = ((sd_T_T2se){0});
-        L.l_src = _t3;
-        L._t4 = sd_str_retain(SD_LIST_GET(l_files, sd_str, SD_INT_S(l_i)));
-        sd_int _t5 = sd_m_Diags__addFile((&((&(l_l)->f_p))->f_diags), L._t4, L.l_src);
-        sd_int l_file = _t5;
-        sd_str_release(L._t4); L._t4 = NULL;
-        sd_int _t6 = sd_m_Diags__count((((*l_l)).f_p).f_diags);
-        sd_int l_before = _t6;
+        L._t8 = sd_str_retain(SD_LIST_GET(l_files, sd_str, SD_INT_S(l_i)));
+        sd_int _t9 = sd_m_Diags__addFile((&((&(l_l)->f_p))->f_diags), L._t8, L.l_src);
+        sd_int l_file = _t9;
+        sd_str_release(L._t8); L._t8 = NULL;
+        sd_int _t10 = sd_m_Diags__count((((*l_l)).f_p).f_diags);
+        sd_int l_before = _t10;
         sd_m_Parser__parseFile((&(l_l)->f_p), l_file);
-        sd_int _t7 = sd_int_retain(l_pkg);
-        sd_int _t8 = sd_int_retain(l_file);
-        sd_int *_t9 = (&(((sd_S_SourceFile *)sd_list_at_mut((&((&((&(l_l)->f_p))->f_ast))->f_files), _t8)))->f_pkgIndex);
-        sd_int_release(*_t9);
-        *_t9 = _t7;
-        sd_int_release(_t8);
-        bool _t10 = l_isTest;
-        sd_int _t11 = sd_int_retain(l_file);
-        bool *_t12 = (&(((sd_S_SourceFile *)sd_list_at_mut((&((&((&(l_l)->f_p))->f_ast))->f_files), _t11)))->f_isTest);
-        *_t12 = _t10;
-        sd_int_release(_t11);
-        sd_int _t13 = sd_m_Diags__count((((*l_l)).f_p).f_diags);
-        bool _t14 = sd_int_eq(_t13, l_before);
-        sd_int_release(_t13);
-        if (_t14) {
-          sd_str _t15 = sd_f_formatSource(L.l_src);
-          L.l_formatted = _t15;
+        sd_int _t11 = sd_int_retain(l_pkg);
+        sd_int _t12 = sd_int_retain(l_file);
+        sd_int *_t13 = (&(((sd_S_SourceFile *)sd_list_at_mut((&((&((&(l_l)->f_p))->f_ast))->f_files), _t12)))->f_pkgIndex);
+        sd_int_release(*_t13);
+        *_t13 = _t11;
+        sd_int_release(_t12);
+        bool _t14 = l_isTest;
+        sd_int _t15 = sd_int_retain(l_file);
+        bool *_t16 = (&(((sd_S_SourceFile *)sd_list_at_mut((&((&((&(l_l)->f_p))->f_ast))->f_files), _t15)))->f_isTest);
+        *_t16 = _t14;
+        sd_int_release(_t15);
+        sd_int _t17 = sd_m_Diags__count((((*l_l)).f_p).f_diags);
+        bool _t18 = sd_int_eq(_t17, l_before);
+        sd_int_release(_t17);
+        if (_t18) {
+          sd_str _t19 = sd_f_formatSource(L.l_src);
+          L.l_formatted = _t19;
           if ((!sd_str_eq(L.l_formatted, L.l_src))) {
-            sd_int _t16 = sd_f_firstDiffLine(L.l_src, L.l_formatted);
-            sd_S_Pos _t17 = (sd_S_Pos){.f_file = sd_int_retain(l_file), .f_line = _t16, .f_col = SD_INT(1)};
-            sd_S_Pos l_pos = _t17;
-            L._t18 = sd_str_concat(SD_LIST_GET(l_files, sd_str, SD_INT_S(l_i)), SD_STR_LIT(" is not formatted"));
-            sd_str _t19 = sd_str_concat(SD_STR_LIT("run: seed fmt "), SD_LIST_GET(l_files, sd_str, SD_INT_S(l_i)));
-            sd_S_Diag _t20 = (sd_S_Diag){.f_pos = l_pos, .f_message = L._t18, .f_hint = _t19};
-            L._t18 = NULL;
-            sd_list ** _t21 = (&(l_l)->f_unformatted);
-            SD_LIST_PUSH(_t21, sd_S_Diag, _t20);
+            sd_int _t20 = sd_f_firstDiffLine(L.l_src, L.l_formatted);
+            sd_S_Pos _t21 = (sd_S_Pos){.f_file = sd_int_retain(l_file), .f_line = _t20, .f_col = SD_INT(1)};
+            sd_S_Pos l_pos = _t21;
+            L._t22 = sd_str_concat(SD_LIST_GET(l_files, sd_str, SD_INT_S(l_i)), SD_STR_LIT(" is not formatted"));
+            sd_str _t23 = sd_str_concat(SD_STR_LIT("run: seed fmt "), SD_LIST_GET(l_files, sd_str, SD_INT_S(l_i)));
+            sd_S_Diag _t24 = (sd_S_Diag){.f_pos = l_pos, .f_message = L._t22, .f_hint = _t23};
+            L._t22 = NULL;
+            sd_list ** _t25 = (&(l_l)->f_unformatted);
+            SD_LIST_PUSH(_t25, sd_S_Diag, _t24);
           }
           sd_str_release(L.l_formatted); L.l_formatted = NULL;
         }
         sd_int_release(l_before);
         sd_int_release(l_file);
         sd_str_release(L.l_src); L.l_src = NULL;
+        sd_str_release(L.l_text); L.l_text = NULL;
       }
       _c1:;
       l_i++;
@@ -50424,7 +50860,7 @@ static void sd_lr_sd_m_Loader__visit(sd_lframe *p) {
   sd_str_release(L->_t13);
   sd_str_release(L->_t14);
 }
-static sd_list * sd_m_Loader__visit(sd_S_Loader * l_l, sd_int l_pkg, sd_list * l_state, sd_list * l_path) {
+SD_NO_TCE static sd_list * sd_m_Loader__visit(sd_S_Loader * l_l, sd_int l_pkg, sd_list * l_state, sd_list * l_path) {
   sd_L_sd_m_Loader__visit L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Loader__visit);
   L.l_st = sd_list_retain(l_state);
@@ -50634,7 +51070,6438 @@ static sd_str sd_f_cleanPath(sd_str l_path) {
   return _t10;
 }
 
-typedef struct { sd_lframe h; sd_list * l_rest; sd_str l_root; sd_T_T2S5Builde _t3; sd_S_Build l_t; sd_T_T2Ose _t6; sd_str l_program; sd_T_T2se _t9; sd_str l_runtime; sd_str _t12; sd_T_T2S6Parsere _t14; sd_S_Parser l_p; sd_str _t17; sd_T_T2ie _t19; sd_str l_out; sd_T_T2S5Builde _t31; sd_S_Build l_bt; sd_T_T2be _t35; sd_list * l_progArgs; sd_list * _t41; sd_T_T2S5Builde _t42; sd_S_Build l_rt; sd_T_T2ie _t45; sd_T_T2ie _t48; sd_str _t52; } sd_L_sd_f_main;
+typedef struct { sd_lframe h; sd_S_LspServer l_s; sd_T_T2Ose _t3; sd_str l_body; sd_box * l_msg; sd_err l_perr; sd_str _t8; sd_box * _t9; } sd_L_sd_f_lspCommand;
+static void sd_lr_sd_f_lspCommand(sd_lframe *p) {
+  sd_L_sd_f_lspCommand *L = (sd_L_sd_f_lspCommand *)p;
+  sd_rl_S9LspServer(L->l_s);
+  sd_rl_T2Ose(L->_t3);
+  sd_str_release(L->l_body);
+  sd_box_release(L->l_msg);
+  sd_iface_release(L->l_perr);
+  sd_str_release(L->_t8);
+  sd_box_release(L->_t9);
+}
+static sd_err sd_f_lspCommand(sd_str l_seedRoot) {
+  sd_L_sd_f_lspCommand L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_lspCommand);
+  sd_map * _t1 = sd_map_new(&sd_type_str, &sd_D_LspDoc);
+  sd_S_LspServer _t2 = (sd_S_LspServer){.f_seedRoot = sd_str_retain(l_seedRoot), .f_docs = _t1, .f_shutdown = false};
+  L.l_s = _t2;
+  {
+    for (;;) {
+      SD_PREEMPT();
+      {
+        L._t3 = sd_f_lspReadMessage();
+        if (!sd_err_is_null(L._t3.r1)) {
+          sd_str_release(L._t3.r0);
+          sd_err _t4 = L._t3.r1;
+          SD_LF_LEAVE(L);
+          sd_rl_S9LspServer(L.l_s);
+          return _t4;
+        }
+        sd_str _t5 = L._t3.r0;
+        L._t3 = ((sd_T_T2Ose){0});
+        L.l_body = _t5;
+        if (((L.l_body) == NULL)) {
+          sd_err _t6 = SD_IFACE_NULL;
+          SD_LF_LEAVE(L);
+          sd_str_release(L.l_body);
+          sd_rl_S9LspServer(L.l_s);
+          return _t6;
+        }
+        sd_T_T2E10json_Valuee _t7 = sd_f_json_parse(L.l_body);
+        L.l_msg = _t7.r0;
+        _t7.r0 = NULL;
+        L.l_perr = _t7.r1;
+        _t7.r1 = SD_IFACE_NULL;
+        if ((!sd_iface_is_null(L.l_perr))) {
+          SD_PREEMPT();
+          L._t8 = sd_err_message(L.l_perr);
+          L._t9 = sd_f_lspErrorResponse(SD_BOX_REF(sd_k_json_Value__Null), SD_INT(-32700), L._t8);
+          sd_f_lspSend(L._t9);
+          sd_box_release(L._t9); L._t9 = NULL;
+          sd_str_release(L._t8); L._t8 = NULL;
+          sd_iface_release(L.l_perr); L.l_perr = SD_IFACE_NULL;
+          sd_box_release(L.l_msg); L.l_msg = NULL;
+          sd_str_release(L.l_body); L.l_body = NULL;
+          continue;
+        }
+        sd_m_LspServer__handle((&L.l_s), L.l_msg);
+        sd_iface_release(L.l_perr); L.l_perr = SD_IFACE_NULL;
+        sd_box_release(L.l_msg); L.l_msg = NULL;
+        sd_str_release(L.l_body); L.l_body = NULL;
+      }
+    }
+  }
+  sd_crash("internal error: lspCommand reached its end without returning");
+}
+
+typedef struct { sd_lframe h; sd_T_T2Ose _t1; sd_str l_line; sd_str _t6; sd_str _t7; sd_str _t11; sd_str _t12; sd_list * l_parts; sd_T_T2Ose _t17; sd_str l_chunk; } sd_L_sd_f_lspReadMessage;
+static void sd_lr_sd_f_lspReadMessage(sd_lframe *p) {
+  sd_L_sd_f_lspReadMessage *L = (sd_L_sd_f_lspReadMessage *)p;
+  sd_rl_T2Ose(L->_t1);
+  sd_str_release(L->l_line);
+  sd_str_release(L->_t6);
+  sd_str_release(L->_t7);
+  sd_str_release(L->_t11);
+  sd_str_release(L->_t12);
+  sd_list_release(L->l_parts);
+  sd_rl_T2Ose(L->_t17);
+  sd_str_release(L->l_chunk);
+}
+static sd_T_T2Ose sd_f_lspReadMessage(void) {
+  sd_L_sd_f_lspReadMessage L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_lspReadMessage);
+  sd_int l_length = SD_INT(-1);
+  {
+    for (;;) {
+      SD_PREEMPT();
+      {
+        L._t1 = sd_f_io_readLine();
+        if (!sd_err_is_null(L._t1.r1)) {
+          sd_str_release(L._t1.r0);
+          sd_T_T2Ose _t2 = (sd_T_T2Ose){.r1 = L._t1.r1};
+          SD_LF_LEAVE(L);
+          sd_int_release(l_length);
+          return _t2;
+        }
+        sd_str _t3 = L._t1.r0;
+        L._t1 = ((sd_T_T2Ose){0});
+        L.l_line = _t3;
+        if (((L.l_line) == NULL)) {
+          sd_T_T2Ose _t4 = (sd_T_T2Ose){NULL, SD_IFACE_NULL};
+          SD_LF_LEAVE(L);
+          sd_str_release(L.l_line);
+          sd_int_release(l_length);
+          return _t4;
+        }
+        if (sd_str_eq(L.l_line, SD_STR_LIT(""))) {
+          if (sd_int_ge(l_length, SD_INT(0))) {
+            sd_str_release(L.l_line); L.l_line = NULL;
+            break;
+          }
+          sd_str_release(L.l_line); L.l_line = NULL;
+          continue;
+        }
+        sd_int _t5 = sd_str_index(L.l_line, SD_STR_LIT(":"));
+        sd_int l_colon = _t5;
+        bool _t9 = (!sd_int_is_null(l_colon));
+        if (_t9) {
+          L._t6 = sd_str_slice(L.l_line, SD_INT(0), l_colon);
+          L._t7 = sd_str_trim(L._t6);
+          sd_str _t8 = sd_str_to_lower(L._t7);
+          _t9 = sd_str_eq(_t8, SD_STR_LIT("content-length"));
+          sd_str_release(_t8); 
+          sd_str_release(L._t7); L._t7 = NULL;
+          sd_str_release(L._t6); L._t6 = NULL;
+        }
+        if (_t9) {
+          sd_int _t10 = sd_int_add(l_colon, SD_INT(1));
+          L._t11 = sd_str_slice(L.l_line, _t10, sd_str_len(L.l_line));
+          L._t12 = sd_str_trim(L._t11);
+          sd_T_T2ie _t13 = ({ sd_int o_; sd_err e_ = sd_str_to_int(L._t12, &o_); (sd_T_T2ie){o_, e_}; });
+          sd_int l_n = _t13.r0;
+          _t13.r0 = SD_INT(0);
+          sd_err l_err = _t13.r1;
+          _t13.r1 = SD_IFACE_NULL;
+          sd_str_release(L._t12); L._t12 = NULL;
+          sd_str_release(L._t11); L._t11 = NULL;
+          sd_int_release(_t10);
+          if ((sd_iface_is_null(l_err) && sd_int_ge(l_n, SD_INT(0)))) {
+            sd_int _t14 = sd_int_retain(l_n);
+            sd_int_release(l_length);
+            l_length = _t14;
+          }
+          sd_iface_release(l_err); 
+          sd_int_release(l_n);
+        }
+        sd_int_release(l_colon);
+        sd_str_release(L.l_line); L.l_line = NULL;
+      }
+    }
+  }
+  sd_list * _t15 = sd_list_new(&sd_type_str, 0);
+  L.l_parts = _t15;
+  sd_int l_got = SD_INT(0);
+  {
+    for (;;) {
+      SD_PREEMPT();
+      if (!(sd_int_lt(l_got, l_length))) break;
+      {
+        sd_int _t16 = sd_int_sub(l_length, l_got);
+        L._t17 = sd_f_io_read(_t16);
+        if (!sd_err_is_null(L._t17.r1)) {
+          sd_str_release(L._t17.r0);
+          sd_T_T2Ose _t18 = (sd_T_T2Ose){.r1 = L._t17.r1};
+          SD_LF_LEAVE(L);
+          sd_int_release(_t16);
+          sd_int_release(l_got);
+          sd_list_release(L.l_parts);
+          sd_int_release(l_length);
+          return _t18;
+        }
+        sd_str _t19 = L._t17.r0;
+        L._t17 = ((sd_T_T2Ose){0});
+        L.l_chunk = _t19;
+        sd_int_release(_t16);
+        if (((L.l_chunk) == NULL)) {
+          sd_err _t20 = sd_f_errors_new(SD_STR_LIT("seed lsp: the input ended inside a message"));
+          sd_T_T2Ose _t21 = (sd_T_T2Ose){NULL, _t20};
+          SD_LF_LEAVE(L);
+          sd_str_release(L.l_chunk);
+          sd_int_release(l_got);
+          sd_list_release(L.l_parts);
+          sd_int_release(l_length);
+          return _t21;
+        }
+        sd_str _t22 = sd_str_retain(L.l_chunk);
+        SD_LIST_PUSH((&L.l_parts), sd_str, _t22);
+        sd_int _t23 = sd_str_len(L.l_chunk);
+        { int64_t r_; if (SD_LIKELY((((l_got).w | _t23.w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_got).w, _t23.w, &r_))) (l_got).w = r_; else { sd_int s_ = sd_int_add_slow((l_got), _t23); sd_int_release((l_got)); (l_got) = s_; } }
+        sd_str_release(L.l_chunk); L.l_chunk = NULL;
+      }
+    }
+  }
+  sd_str _t24 = sd_list_join(L.l_parts, SD_STR_LIT(""));
+  sd_T_T2Ose _t25 = (sd_T_T2Ose){_t24, SD_IFACE_NULL};
+  SD_LF_LEAVE(L);
+  sd_int_release(l_got);
+  sd_list_release(L.l_parts);
+  sd_int_release(l_length);
+  return _t25;
+}
+
+typedef struct { sd_lframe h; sd_str l_body; sd_str _t3; } sd_L_sd_f_lspSend;
+static void sd_lr_sd_f_lspSend(sd_lframe *p) {
+  sd_L_sd_f_lspSend *L = (sd_L_sd_f_lspSend *)p;
+  sd_str_release(L->l_body);
+  sd_str_release(L->_t3);
+}
+static void sd_f_lspSend(sd_box * l_msg) {
+  sd_L_sd_f_lspSend L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_lspSend);
+  sd_str _t1 = sd_m_json_Value__string(l_msg);
+  L.l_body = _t1;
+  sd_str_part _t2[] = {{SD_STR_LIT("Content-Length: ")}, {NULL, sd_str_len(L.l_body)}, {SD_STR_LIT("\015\012\015\012")}, {L.l_body}};
+  L._t3 = sd_str_concat_parts(_t2, 4);
+  sd_f_fmt_print(L._t3);
+  sd_str_release(L._t3); L._t3 = NULL;
+  sd_str_release(L.l_body); L.l_body = NULL;
+  SD_LF_LEAVE(L);
+}
+
+typedef struct { sd_lframe h; sd_map * l_m; sd_box * _t2; sd_box * _t4; sd_box * _t6; } sd_L_sd_f_lspResponse;
+static void sd_lr_sd_f_lspResponse(sd_lframe *p) {
+  sd_L_sd_f_lspResponse *L = (sd_L_sd_f_lspResponse *)p;
+  sd_map_release(L->l_m);
+  sd_box_release(L->_t2);
+  sd_box_release(L->_t4);
+  sd_box_release(L->_t6);
+}
+static sd_box * sd_f_lspResponse(sd_box * l_id, sd_box * l_result) {
+  sd_L_sd_f_lspResponse L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_lspResponse);
+  sd_map * _t1 = sd_map_new(&sd_type_str, &sd_type_box);
+  L.l_m = _t1;
+  L._t2 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 3, .u.c_String = {SD_STR_LIT("2.0")}});
+  sd_str _t3 = SD_STR_LIT("jsonrpc");
+  sd_map_set((&L.l_m), &_t3, &L._t2);
+  L._t2 = NULL;
+  L._t4 = sd_box_retain(l_id);
+  sd_str _t5 = SD_STR_LIT("id");
+  sd_map_set((&L.l_m), &_t5, &L._t4);
+  L._t4 = NULL;
+  L._t6 = sd_box_retain(l_result);
+  sd_str _t7 = SD_STR_LIT("result");
+  sd_map_set((&L.l_m), &_t7, &L._t6);
+  L._t6 = NULL;
+  sd_box * _t8 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 5, .u.c_Object = {L.l_m}});
+  L.l_m = NULL;
+  SD_LF_LEAVE(L);
+  return _t8;
+}
+
+typedef struct { sd_lframe h; sd_map * l_e; sd_box * _t2; sd_box * _t4; sd_map * l_m; sd_box * _t7; sd_box * _t9; sd_box * _t11; } sd_L_sd_f_lspErrorResponse;
+static void sd_lr_sd_f_lspErrorResponse(sd_lframe *p) {
+  sd_L_sd_f_lspErrorResponse *L = (sd_L_sd_f_lspErrorResponse *)p;
+  sd_map_release(L->l_e);
+  sd_box_release(L->_t2);
+  sd_box_release(L->_t4);
+  sd_map_release(L->l_m);
+  sd_box_release(L->_t7);
+  sd_box_release(L->_t9);
+  sd_box_release(L->_t11);
+}
+static sd_box * sd_f_lspErrorResponse(sd_box * l_id, sd_int l_code, sd_str l_message) {
+  sd_L_sd_f_lspErrorResponse L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_lspErrorResponse);
+  sd_map * _t1 = sd_map_new(&sd_type_str, &sd_type_box);
+  L.l_e = _t1;
+  L._t2 = sd_f_lspNum(l_code);
+  sd_str _t3 = SD_STR_LIT("code");
+  sd_map_set((&L.l_e), &_t3, &L._t2);
+  L._t2 = NULL;
+  L._t4 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 3, .u.c_String = {sd_str_retain(l_message)}});
+  sd_str _t5 = SD_STR_LIT("message");
+  sd_map_set((&L.l_e), &_t5, &L._t4);
+  L._t4 = NULL;
+  sd_map * _t6 = sd_map_new(&sd_type_str, &sd_type_box);
+  L.l_m = _t6;
+  L._t7 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 3, .u.c_String = {SD_STR_LIT("2.0")}});
+  sd_str _t8 = SD_STR_LIT("jsonrpc");
+  sd_map_set((&L.l_m), &_t8, &L._t7);
+  L._t7 = NULL;
+  L._t9 = sd_box_retain(l_id);
+  sd_str _t10 = SD_STR_LIT("id");
+  sd_map_set((&L.l_m), &_t10, &L._t9);
+  L._t9 = NULL;
+  L._t11 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 5, .u.c_Object = {L.l_e}});
+  L.l_e = NULL;
+  sd_str _t12 = SD_STR_LIT("error");
+  sd_map_set((&L.l_m), &_t12, &L._t11);
+  L._t11 = NULL;
+  sd_box * _t13 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 5, .u.c_Object = {L.l_m}});
+  L.l_m = NULL;
+  SD_LF_LEAVE(L);
+  return _t13;
+}
+
+typedef struct { sd_lframe h; sd_map * l_m; sd_box * _t2; sd_box * _t4; sd_box * _t6; } sd_L_sd_f_lspNotification;
+static void sd_lr_sd_f_lspNotification(sd_lframe *p) {
+  sd_L_sd_f_lspNotification *L = (sd_L_sd_f_lspNotification *)p;
+  sd_map_release(L->l_m);
+  sd_box_release(L->_t2);
+  sd_box_release(L->_t4);
+  sd_box_release(L->_t6);
+}
+static sd_box * sd_f_lspNotification(sd_str l_method, sd_box * l_params) {
+  sd_L_sd_f_lspNotification L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_lspNotification);
+  sd_map * _t1 = sd_map_new(&sd_type_str, &sd_type_box);
+  L.l_m = _t1;
+  L._t2 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 3, .u.c_String = {SD_STR_LIT("2.0")}});
+  sd_str _t3 = SD_STR_LIT("jsonrpc");
+  sd_map_set((&L.l_m), &_t3, &L._t2);
+  L._t2 = NULL;
+  L._t4 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 3, .u.c_String = {sd_str_retain(l_method)}});
+  sd_str _t5 = SD_STR_LIT("method");
+  sd_map_set((&L.l_m), &_t5, &L._t4);
+  L._t4 = NULL;
+  L._t6 = sd_box_retain(l_params);
+  sd_str _t7 = SD_STR_LIT("params");
+  sd_map_set((&L.l_m), &_t7, &L._t6);
+  L._t6 = NULL;
+  sd_box * _t8 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 5, .u.c_Object = {L.l_m}});
+  L.l_m = NULL;
+  SD_LF_LEAVE(L);
+  return _t8;
+}
+
+static sd_box * sd_f_lspNum(sd_int l_n) {
+  sd_box * _t1 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 2, .u.c_Number = {sd_int_to_float(l_n)}});
+  return _t1;
+}
+
+typedef struct { sd_lframe h; sd_box * _t1; sd_str l_method; sd_box * l_id; sd_box * l_params; sd_box * _t6; sd_box * _t7; sd_box * _t8; sd_box * _t11; sd_box * l_td; sd_box * _t13; sd_str l_uri; sd_box * _t15; sd_str l_text; sd_S_LspDoc _t18; sd_str _t19; sd_box * _t20; sd_box * _t21; sd_str l_curi; sd_box * l_doc; sd_str l_changed; sd_box * _t25; sd_list * l_changes; sd_S_LspDoc _t29; sd_str _t30; sd_box * _t31; sd_box * _t32; sd_str l_xuri; sd_list * _t38; sd_box * _t39; sd_box * _t40; sd_str l_kind; sd_str _t47; sd_box * _t48; sd_box * _t49; sd_box * _t50; sd_str l_quri; sd_str _t52; sd_box * _t53; sd_box * _t54; sd_box * _t55; sd_box * _t57; sd_box * _t58; sd_str _t62; sd_box * l_result; sd_box * _t67; } sd_L_sd_m_LspServer__handle;
+static void sd_lr_sd_m_LspServer__handle(sd_lframe *p) {
+  sd_L_sd_m_LspServer__handle *L = (sd_L_sd_m_LspServer__handle *)p;
+  sd_box_release(L->_t1);
+  sd_str_release(L->l_method);
+  sd_box_release(L->l_id);
+  sd_box_release(L->l_params);
+  sd_box_release(L->_t6);
+  sd_box_release(L->_t7);
+  sd_box_release(L->_t8);
+  sd_box_release(L->_t11);
+  sd_box_release(L->l_td);
+  sd_box_release(L->_t13);
+  sd_str_release(L->l_uri);
+  sd_box_release(L->_t15);
+  sd_str_release(L->l_text);
+  sd_rl_S6LspDoc(L->_t18);
+  sd_str_release(L->_t19);
+  sd_box_release(L->_t20);
+  sd_box_release(L->_t21);
+  sd_str_release(L->l_curi);
+  sd_box_release(L->l_doc);
+  sd_str_release(L->l_changed);
+  sd_box_release(L->_t25);
+  sd_list_release(L->l_changes);
+  sd_rl_S6LspDoc(L->_t29);
+  sd_str_release(L->_t30);
+  sd_box_release(L->_t31);
+  sd_box_release(L->_t32);
+  sd_str_release(L->l_xuri);
+  sd_list_release(L->_t38);
+  sd_box_release(L->_t39);
+  sd_box_release(L->_t40);
+  sd_str_release(L->l_kind);
+  sd_str_release(L->_t47);
+  sd_box_release(L->_t48);
+  sd_box_release(L->_t49);
+  sd_box_release(L->_t50);
+  sd_str_release(L->l_quri);
+  sd_str_release(L->_t52);
+  sd_box_release(L->_t53);
+  sd_box_release(L->_t54);
+  sd_box_release(L->_t55);
+  sd_box_release(L->_t57);
+  sd_box_release(L->_t58);
+  sd_str_release(L->_t62);
+  sd_box_release(L->l_result);
+  sd_box_release(L->_t67);
+}
+static void sd_m_LspServer__handle(sd_S_LspServer * l_s, sd_box * l_msg) {
+  sd_L_sd_m_LspServer__handle L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_m_LspServer__handle);
+  L._t1 = sd_m_json_Value__get(l_msg, SD_STR_LIT("method"));
+  sd_str _t2 = sd_m_json_Value__asString(L._t1);
+  L.l_method = _t2;
+  sd_box_release(L._t1); L._t1 = NULL;
+  if (((L.l_method) == NULL)) {
+    SD_LF_LEAVE(L);
+    sd_str_release(L.l_method);
+    return;
+  }
+  sd_box * _t3 = sd_m_json_Value__get(l_msg, SD_STR_LIT("id"));
+  L.l_id = _t3;
+  bool _t4 = sd_m_json_Value__isNull(L.l_id);
+  bool l_isRequest = (!_t4);
+  sd_box * _t5 = sd_m_json_Value__get(l_msg, SD_STR_LIT("params"));
+  L.l_params = _t5;
+  if (sd_str_eq(L.l_method, SD_STR_LIT("initialize"))) {
+    L._t6 = sd_f_lspCapabilities();
+    L._t7 = sd_f_lspResponse(L.l_id, L._t6);
+    sd_f_lspSend(L._t7);
+    sd_box_release(L._t7); L._t7 = NULL;
+    sd_box_release(L._t6); L._t6 = NULL;
+    SD_LF_LEAVE(L);
+    sd_box_release(L.l_params);
+    sd_box_release(L.l_id);
+    sd_str_release(L.l_method);
+    return;
+  }
+  if ((((sd_str_eq(L.l_method, SD_STR_LIT("initialized")) || sd_str_eq(L.l_method, SD_STR_LIT("$/cancelRequest"))) || sd_str_eq(L.l_method, SD_STR_LIT("$/setTrace"))) || sd_str_eq(L.l_method, SD_STR_LIT("workspace/didChangeConfiguration")))) {
+    SD_LF_LEAVE(L);
+    sd_box_release(L.l_params);
+    sd_box_release(L.l_id);
+    sd_str_release(L.l_method);
+    return;
+  }
+  if ((((*l_s)).f_shutdown && (!sd_str_eq(L.l_method, SD_STR_LIT("exit"))))) {
+    if (l_isRequest) {
+      L._t8 = sd_f_lspErrorResponse(L.l_id, SD_INT(-32600), SD_STR_LIT("seed lsp is shutting down"));
+      sd_f_lspSend(L._t8);
+      sd_box_release(L._t8); L._t8 = NULL;
+    }
+    SD_LF_LEAVE(L);
+    sd_box_release(L.l_params);
+    sd_box_release(L.l_id);
+    sd_str_release(L.l_method);
+    return;
+  }
+  if (sd_str_eq(L.l_method, SD_STR_LIT("shutdown"))) {
+    bool _t9 = true;
+    bool *_t10 = (&(l_s)->f_shutdown);
+    *_t10 = _t9;
+    L._t11 = sd_f_lspResponse(L.l_id, SD_BOX_REF(sd_k_json_Value__Null));
+    sd_f_lspSend(L._t11);
+    sd_box_release(L._t11); L._t11 = NULL;
+    SD_LF_LEAVE(L);
+    sd_box_release(L.l_params);
+    sd_box_release(L.l_id);
+    sd_str_release(L.l_method);
+    return;
+  }
+  if (sd_str_eq(L.l_method, SD_STR_LIT("exit"))) {
+    if (((*l_s)).f_shutdown) {
+      sd_f_os_exit(SD_INT(0));
+    }
+    sd_f_os_exit(SD_INT(1));
+  }
+  if (sd_str_eq(L.l_method, SD_STR_LIT("textDocument/didOpen"))) {
+    sd_box * _t12 = sd_m_json_Value__get(L.l_params, SD_STR_LIT("textDocument"));
+    L.l_td = _t12;
+    L._t13 = sd_m_json_Value__get(L.l_td, SD_STR_LIT("uri"));
+    sd_str _t14 = sd_m_json_Value__asString(L._t13);
+    L.l_uri = _t14;
+    sd_box_release(L._t13); L._t13 = NULL;
+    L._t15 = sd_m_json_Value__get(L.l_td, SD_STR_LIT("text"));
+    sd_str _t16 = sd_m_json_Value__asString(L._t15);
+    L.l_text = _t16;
+    sd_box_release(L._t15); L._t15 = NULL;
+    if (((!((L.l_uri) == NULL)) && (!((L.l_text) == NULL)))) {
+      sd_str _t17 = sd_f_lspUriToPath(L.l_uri);
+      L._t18 = (sd_S_LspDoc){.f_uri = sd_str_retain(L.l_uri), .f_path = _t17, .f_text = sd_str_retain(L.l_text)};
+      L._t19 = sd_str_retain(L.l_uri);
+      sd_map_set((&(l_s)->f_docs), &L._t19, &L._t18);
+      L._t19 = NULL;
+      L._t18 = ((sd_S_LspDoc){0});
+      sd_m_LspServer__publishAll(l_s);
+    }
+    SD_LF_LEAVE(L);
+    sd_str_release(L.l_text);
+    sd_str_release(L.l_uri);
+    sd_box_release(L.l_td);
+    sd_box_release(L.l_params);
+    sd_box_release(L.l_id);
+    sd_str_release(L.l_method);
+    return;
+  }
+  if (sd_str_eq(L.l_method, SD_STR_LIT("textDocument/didChange"))) {
+    L._t20 = sd_m_json_Value__get(L.l_params, SD_STR_LIT("textDocument"));
+    L._t21 = sd_m_json_Value__get(L._t20, SD_STR_LIT("uri"));
+    sd_str _t22 = sd_m_json_Value__asString(L._t21);
+    L.l_curi = _t22;
+    sd_box_release(L._t21); L._t21 = NULL;
+    sd_box_release(L._t20); L._t20 = NULL;
+    if (((L.l_curi) == NULL)) {
+      SD_LF_LEAVE(L);
+      sd_str_release(L.l_curi);
+      sd_box_release(L.l_params);
+      sd_box_release(L.l_id);
+      sd_str_release(L.l_method);
+      return;
+    }
+    sd_S_LspDoc *_t23 = sd_map_get(((*l_s)).f_docs, &L.l_curi);
+    sd_box * _t24 = _t23 ? ({ sd_S_LspDoc c_ = sd_rt_S6LspDoc(*_t23); sd_box_new(&sd_D_LspDoc, &c_); }) : NULL;
+    L.l_doc = _t24;
+    if (((L.l_doc) == NULL)) {
+      SD_LF_LEAVE(L);
+      sd_box_release(L.l_doc);
+      sd_str_release(L.l_curi);
+      sd_box_release(L.l_params);
+      sd_box_release(L.l_id);
+      sd_str_release(L.l_method);
+      return;
+    }
+    L.l_changed = sd_str_retain((SD_BOX_GET(L.l_doc, sd_S_LspDoc)).f_text);
+    L._t25 = sd_m_json_Value__get(L.l_params, SD_STR_LIT("contentChanges"));
+    sd_list * _t26 = sd_m_json_Value__asArray(L._t25);
+    L.l_changes = _t26;
+    sd_box_release(L._t25); L._t25 = NULL;
+    if ((!((L.l_changes) == NULL))) {
+      {
+        int64_t l_i = ((int64_t)0);
+        for (;;) {
+          SD_PREEMPT();
+          if (!((l_i < SD_SMALL(sd_list_len(L.l_changes))))) break;
+          {
+            sd_str _t28 = sd_f_lspApplyChange(L.l_changed, SD_LIST_GET(L.l_changes, sd_box *, SD_INT_S(l_i)));
+            sd_str_release(L.l_changed);
+            L.l_changed = _t28;
+          }
+          _c27:;
+          l_i++;
+        }
+      }
+    }
+    L._t29 = (sd_S_LspDoc){.f_uri = sd_str_retain(L.l_curi), .f_path = sd_str_retain((SD_BOX_GET(L.l_doc, sd_S_LspDoc)).f_path), .f_text = L.l_changed};
+    L.l_changed = NULL;
+    L._t30 = sd_str_retain(L.l_curi);
+    sd_map_set((&(l_s)->f_docs), &L._t30, &L._t29);
+    L._t30 = NULL;
+    L._t29 = ((sd_S_LspDoc){0});
+    sd_m_LspServer__publishAll(l_s);
+    SD_LF_LEAVE(L);
+    sd_list_release(L.l_changes);
+    sd_box_release(L.l_doc);
+    sd_str_release(L.l_curi);
+    sd_box_release(L.l_params);
+    sd_box_release(L.l_id);
+    sd_str_release(L.l_method);
+    return;
+  }
+  if (sd_str_eq(L.l_method, SD_STR_LIT("textDocument/didClose"))) {
+    L._t31 = sd_m_json_Value__get(L.l_params, SD_STR_LIT("textDocument"));
+    L._t32 = sd_m_json_Value__get(L._t31, SD_STR_LIT("uri"));
+    sd_str _t33 = sd_m_json_Value__asString(L._t32);
+    L.l_xuri = _t33;
+    sd_box_release(L._t32); L._t32 = NULL;
+    sd_box_release(L._t31); L._t31 = NULL;
+    bool _t36 = (!((L.l_xuri) == NULL));
+    if (_t36) {
+      sd_S_LspDoc *_t34 = sd_map_get(((*l_s)).f_docs, &L.l_xuri);
+      sd_box * _t35 = _t34 ? ({ sd_S_LspDoc c_ = sd_rt_S6LspDoc(*_t34); sd_box_new(&sd_D_LspDoc, &c_); }) : NULL;
+      _t36 = (!((_t35) == NULL));
+      sd_box_release(_t35); 
+    }
+    if (_t36) {
+      sd_map ** _t37 = (&(l_s)->f_docs);
+      sd_map_delete(_t37, &L.l_xuri);
+      L._t38 = sd_list_new(&sd_type_box, 0);
+      L._t39 = sd_f_lspDiagParams(L.l_xuri, L._t38);
+      L._t40 = sd_f_lspNotification(SD_STR_LIT("textDocument/publishDiagnostics"), L._t39);
+      sd_f_lspSend(L._t40);
+      sd_box_release(L._t40); L._t40 = NULL;
+      sd_box_release(L._t39); L._t39 = NULL;
+      sd_list_release(L._t38); L._t38 = NULL;
+      sd_m_LspServer__publishAll(l_s);
+    }
+    SD_LF_LEAVE(L);
+    sd_str_release(L.l_xuri);
+    sd_box_release(L.l_params);
+    sd_box_release(L.l_id);
+    sd_str_release(L.l_method);
+    return;
+  }
+  if (sd_str_eq(L.l_method, SD_STR_LIT("textDocument/didSave"))) {
+    sd_m_LspServer__publishAll(l_s);
+    SD_LF_LEAVE(L);
+    sd_box_release(L.l_params);
+    sd_box_release(L.l_id);
+    sd_str_release(L.l_method);
+    return;
+  }
+  L.l_kind = SD_STR_LIT("");
+  if (sd_str_eq(L.l_method, SD_STR_LIT("textDocument/formatting"))) {
+    sd_str _t41 = SD_STR_LIT("format");
+    sd_str_release(L.l_kind);
+    L.l_kind = _t41;
+  } else {
+    if (sd_str_eq(L.l_method, SD_STR_LIT("textDocument/definition"))) {
+      sd_str _t42 = SD_STR_LIT("definition");
+      sd_str_release(L.l_kind);
+      L.l_kind = _t42;
+    } else {
+      if (sd_str_eq(L.l_method, SD_STR_LIT("textDocument/hover"))) {
+        sd_str _t43 = SD_STR_LIT("hover");
+        sd_str_release(L.l_kind);
+        L.l_kind = _t43;
+      } else {
+        if (sd_str_eq(L.l_method, SD_STR_LIT("textDocument/completion"))) {
+          sd_str _t44 = SD_STR_LIT("completion");
+          sd_str_release(L.l_kind);
+          L.l_kind = _t44;
+        } else {
+          if (sd_str_eq(L.l_method, SD_STR_LIT("textDocument/documentSymbol"))) {
+            sd_str _t45 = SD_STR_LIT("symbols");
+            sd_str_release(L.l_kind);
+            L.l_kind = _t45;
+          } else {
+            if (sd_str_eq(L.l_method, SD_STR_LIT("seed/crash"))) {
+              sd_str _t46 = SD_STR_LIT("crash");
+              sd_str_release(L.l_kind);
+              L.l_kind = _t46;
+            }
+          }
+        }
+      }
+    }
+  }
+  if (sd_str_eq(L.l_kind, SD_STR_LIT(""))) {
+    if (l_isRequest) {
+      L._t47 = sd_str_concat(SD_STR_LIT("seed lsp does not support "), L.l_method);
+      L._t48 = sd_f_lspErrorResponse(L.l_id, SD_INT(-32601), L._t47);
+      sd_f_lspSend(L._t48);
+      sd_box_release(L._t48); L._t48 = NULL;
+      sd_str_release(L._t47); L._t47 = NULL;
+    }
+    SD_LF_LEAVE(L);
+    sd_str_release(L.l_kind);
+    sd_box_release(L.l_params);
+    sd_box_release(L.l_id);
+    sd_str_release(L.l_method);
+    return;
+  }
+  L._t49 = sd_m_json_Value__get(L.l_params, SD_STR_LIT("textDocument"));
+  L._t50 = sd_m_json_Value__get(L._t49, SD_STR_LIT("uri"));
+  sd_str _t51 = sd_m_json_Value__asString(L._t50);
+  L.l_quri = _t51;
+  sd_box_release(L._t50); L._t50 = NULL;
+  sd_box_release(L._t49); L._t49 = NULL;
+  if (((L.l_quri) == NULL)) {
+    L._t52 = sd_str_concat(L.l_method, SD_STR_LIT(" needs textDocument.uri"));
+    L._t53 = sd_f_lspErrorResponse(L.l_id, SD_INT(-32602), L._t52);
+    sd_f_lspSend(L._t53);
+    sd_box_release(L._t53); L._t53 = NULL;
+    sd_str_release(L._t52); L._t52 = NULL;
+    SD_LF_LEAVE(L);
+    sd_str_release(L.l_quri);
+    sd_str_release(L.l_kind);
+    sd_box_release(L.l_params);
+    sd_box_release(L.l_id);
+    sd_str_release(L.l_method);
+    return;
+  }
+  sd_int l_line = SD_INT(0);
+  sd_int l_character = SD_INT(0);
+  L._t54 = sd_m_json_Value__get(L.l_params, SD_STR_LIT("position"));
+  L._t55 = sd_m_json_Value__get(L._t54, SD_STR_LIT("line"));
+  sd_int _t56 = sd_m_json_Value__asInt(L._t55);
+  sd_int l_l = _t56;
+  sd_box_release(L._t55); L._t55 = NULL;
+  sd_box_release(L._t54); L._t54 = NULL;
+  L._t57 = sd_m_json_Value__get(L.l_params, SD_STR_LIT("position"));
+  L._t58 = sd_m_json_Value__get(L._t57, SD_STR_LIT("character"));
+  sd_int _t59 = sd_m_json_Value__asInt(L._t58);
+  sd_int l_ch = _t59;
+  sd_box_release(L._t58); L._t58 = NULL;
+  sd_box_release(L._t57); L._t57 = NULL;
+  if (((!sd_int_is_null(l_l)) && (!sd_int_is_null(l_ch)))) {
+    sd_int _t60 = sd_int_retain(l_l);
+    sd_int_release(l_line);
+    l_line = _t60;
+    sd_int _t61 = sd_int_retain(l_ch);
+    sd_int_release(l_character);
+    l_character = _t61;
+  }
+  L._t62 = sd_f_lspUriToPath(L.l_quri);
+  sd_box * _t63 = sd_m_LspServer__runJob((*l_s), L.l_kind, L._t62, l_line, l_character);
+  L.l_result = _t63;
+  sd_str_release(L._t62); L._t62 = NULL;
+  bool _t64 = sd_m_json_Value__isNull(L.l_result);
+  if ((_t64 && (sd_str_eq(L.l_kind, SD_STR_LIT("format")) || sd_str_eq(L.l_kind, SD_STR_LIT("symbols"))))) {
+    sd_list * _t65 = sd_list_new(&sd_type_box, 0);
+    sd_box * _t66 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 4, .u.c_Array = {_t65}});
+    sd_box_release(L.l_result);
+    L.l_result = _t66;
+  }
+  L._t67 = sd_f_lspResponse(L.l_id, L.l_result);
+  sd_f_lspSend(L._t67);
+  sd_box_release(L._t67); L._t67 = NULL;
+  sd_box_release(L.l_result); L.l_result = NULL;
+  sd_int_release(l_ch);
+  sd_int_release(l_l);
+  sd_int_release(l_character);
+  sd_int_release(l_line);
+  sd_str_release(L.l_quri); L.l_quri = NULL;
+  sd_str_release(L.l_kind); L.l_kind = NULL;
+  sd_box_release(L.l_params); L.l_params = NULL;
+  sd_box_release(L.l_id); L.l_id = NULL;
+  sd_str_release(L.l_method); L.l_method = NULL;
+  SD_LF_LEAVE(L);
+}
+
+typedef struct { sd_lframe h; sd_map * l_sync; sd_box * _t2; sd_box * _t4; sd_map * l_save; sd_box * _t7; sd_box * _t9; sd_map * l_completion; sd_box * _t14; sd_map * l_caps; sd_box * _t17; sd_box * _t19; sd_box * _t21; sd_box * _t23; sd_box * _t25; sd_box * _t27; sd_box * _t29; sd_map * l_info; sd_box * _t32; sd_map * l_result; sd_box * _t35; sd_box * _t37; } sd_L_sd_f_lspCapabilities;
+static void sd_lr_sd_f_lspCapabilities(sd_lframe *p) {
+  sd_L_sd_f_lspCapabilities *L = (sd_L_sd_f_lspCapabilities *)p;
+  sd_map_release(L->l_sync);
+  sd_box_release(L->_t2);
+  sd_box_release(L->_t4);
+  sd_map_release(L->l_save);
+  sd_box_release(L->_t7);
+  sd_box_release(L->_t9);
+  sd_map_release(L->l_completion);
+  sd_box_release(L->_t14);
+  sd_map_release(L->l_caps);
+  sd_box_release(L->_t17);
+  sd_box_release(L->_t19);
+  sd_box_release(L->_t21);
+  sd_box_release(L->_t23);
+  sd_box_release(L->_t25);
+  sd_box_release(L->_t27);
+  sd_box_release(L->_t29);
+  sd_map_release(L->l_info);
+  sd_box_release(L->_t32);
+  sd_map_release(L->l_result);
+  sd_box_release(L->_t35);
+  sd_box_release(L->_t37);
+}
+static sd_box * sd_f_lspCapabilities(void) {
+  sd_L_sd_f_lspCapabilities L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_lspCapabilities);
+  sd_map * _t1 = sd_map_new(&sd_type_str, &sd_type_box);
+  L.l_sync = _t1;
+  L._t2 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 1, .u.c_Bool = {true}});
+  sd_str _t3 = SD_STR_LIT("openClose");
+  sd_map_set((&L.l_sync), &_t3, &L._t2);
+  L._t2 = NULL;
+  L._t4 = sd_f_lspNum(SD_INT(1));
+  sd_str _t5 = SD_STR_LIT("change");
+  sd_map_set((&L.l_sync), &_t5, &L._t4);
+  L._t4 = NULL;
+  sd_map * _t6 = sd_map_new(&sd_type_str, &sd_type_box);
+  L.l_save = _t6;
+  L._t7 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 1, .u.c_Bool = {false}});
+  sd_str _t8 = SD_STR_LIT("includeText");
+  sd_map_set((&L.l_save), &_t8, &L._t7);
+  L._t7 = NULL;
+  L._t9 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 5, .u.c_Object = {L.l_save}});
+  L.l_save = NULL;
+  sd_str _t10 = SD_STR_LIT("save");
+  sd_map_set((&L.l_sync), &_t10, &L._t9);
+  L._t9 = NULL;
+  sd_map * _t11 = sd_map_new(&sd_type_str, &sd_type_box);
+  L.l_completion = _t11;
+  sd_box * _t12 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 3, .u.c_String = {SD_STR_LIT(".")}});
+  sd_list * _t13 = sd_list_new(&sd_type_box, 1);
+  SD_LIST_PUSH(&_t13, sd_box *, _t12);
+  L._t14 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 4, .u.c_Array = {_t13}});
+  sd_str _t15 = SD_STR_LIT("triggerCharacters");
+  sd_map_set((&L.l_completion), &_t15, &L._t14);
+  L._t14 = NULL;
+  sd_map * _t16 = sd_map_new(&sd_type_str, &sd_type_box);
+  L.l_caps = _t16;
+  L._t17 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 3, .u.c_String = {SD_STR_LIT("utf-16")}});
+  sd_str _t18 = SD_STR_LIT("positionEncoding");
+  sd_map_set((&L.l_caps), &_t18, &L._t17);
+  L._t17 = NULL;
+  L._t19 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 5, .u.c_Object = {L.l_sync}});
+  L.l_sync = NULL;
+  sd_str _t20 = SD_STR_LIT("textDocumentSync");
+  sd_map_set((&L.l_caps), &_t20, &L._t19);
+  L._t19 = NULL;
+  L._t21 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 1, .u.c_Bool = {true}});
+  sd_str _t22 = SD_STR_LIT("documentFormattingProvider");
+  sd_map_set((&L.l_caps), &_t22, &L._t21);
+  L._t21 = NULL;
+  L._t23 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 1, .u.c_Bool = {true}});
+  sd_str _t24 = SD_STR_LIT("definitionProvider");
+  sd_map_set((&L.l_caps), &_t24, &L._t23);
+  L._t23 = NULL;
+  L._t25 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 1, .u.c_Bool = {true}});
+  sd_str _t26 = SD_STR_LIT("hoverProvider");
+  sd_map_set((&L.l_caps), &_t26, &L._t25);
+  L._t25 = NULL;
+  L._t27 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 5, .u.c_Object = {L.l_completion}});
+  L.l_completion = NULL;
+  sd_str _t28 = SD_STR_LIT("completionProvider");
+  sd_map_set((&L.l_caps), &_t28, &L._t27);
+  L._t27 = NULL;
+  L._t29 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 1, .u.c_Bool = {true}});
+  sd_str _t30 = SD_STR_LIT("documentSymbolProvider");
+  sd_map_set((&L.l_caps), &_t30, &L._t29);
+  L._t29 = NULL;
+  sd_map * _t31 = sd_map_new(&sd_type_str, &sd_type_box);
+  L.l_info = _t31;
+  L._t32 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 3, .u.c_String = {SD_STR_LIT("seed lsp")}});
+  sd_str _t33 = SD_STR_LIT("name");
+  sd_map_set((&L.l_info), &_t33, &L._t32);
+  L._t32 = NULL;
+  sd_map * _t34 = sd_map_new(&sd_type_str, &sd_type_box);
+  L.l_result = _t34;
+  L._t35 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 5, .u.c_Object = {L.l_caps}});
+  L.l_caps = NULL;
+  sd_str _t36 = SD_STR_LIT("capabilities");
+  sd_map_set((&L.l_result), &_t36, &L._t35);
+  L._t35 = NULL;
+  L._t37 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 5, .u.c_Object = {L.l_info}});
+  L.l_info = NULL;
+  sd_str _t38 = SD_STR_LIT("serverInfo");
+  sd_map_set((&L.l_result), &_t38, &L._t37);
+  L._t37 = NULL;
+  sd_box * _t39 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 5, .u.c_Object = {L.l_result}});
+  L.l_result = NULL;
+  SD_LF_LEAVE(L);
+  return _t39;
+}
+
+typedef struct { sd_lframe h; sd_box * _t1; sd_str l_next; sd_box * l_r; sd_box * _t7; sd_box * _t8; sd_box * _t10; sd_box * _t11; sd_box * _t13; sd_box * _t14; sd_box * _t16; sd_box * _t17; sd_str _t23; sd_str _t24; } sd_L_sd_f_lspApplyChange;
+static void sd_lr_sd_f_lspApplyChange(sd_lframe *p) {
+  sd_L_sd_f_lspApplyChange *L = (sd_L_sd_f_lspApplyChange *)p;
+  sd_box_release(L->_t1);
+  sd_str_release(L->l_next);
+  sd_box_release(L->l_r);
+  sd_box_release(L->_t7);
+  sd_box_release(L->_t8);
+  sd_box_release(L->_t10);
+  sd_box_release(L->_t11);
+  sd_box_release(L->_t13);
+  sd_box_release(L->_t14);
+  sd_box_release(L->_t16);
+  sd_box_release(L->_t17);
+  sd_str_release(L->_t23);
+  sd_str_release(L->_t24);
+}
+static sd_str sd_f_lspApplyChange(sd_str l_text, sd_box * l_change) {
+  sd_L_sd_f_lspApplyChange L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_lspApplyChange);
+  L._t1 = sd_m_json_Value__get(l_change, SD_STR_LIT("text"));
+  sd_str _t2 = sd_m_json_Value__asString(L._t1);
+  L.l_next = _t2;
+  sd_box_release(L._t1); L._t1 = NULL;
+  if (((L.l_next) == NULL)) {
+    sd_str _t3 = sd_str_retain(l_text);
+    SD_LF_LEAVE(L);
+    sd_str_release(L.l_next);
+    return _t3;
+  }
+  sd_box * _t4 = sd_m_json_Value__get(l_change, SD_STR_LIT("range"));
+  L.l_r = _t4;
+  bool _t5 = sd_m_json_Value__isNull(L.l_r);
+  if (_t5) {
+    sd_str _t6 = sd_str_retain(L.l_next);
+    SD_LF_LEAVE(L);
+    sd_box_release(L.l_r);
+    sd_str_release(L.l_next);
+    return _t6;
+  }
+  L._t7 = sd_m_json_Value__get(L.l_r, SD_STR_LIT("start"));
+  L._t8 = sd_m_json_Value__get(L._t7, SD_STR_LIT("line"));
+  sd_int _t9 = sd_m_json_Value__asInt(L._t8);
+  sd_int l_sl = _t9;
+  sd_box_release(L._t8); L._t8 = NULL;
+  sd_box_release(L._t7); L._t7 = NULL;
+  L._t10 = sd_m_json_Value__get(L.l_r, SD_STR_LIT("start"));
+  L._t11 = sd_m_json_Value__get(L._t10, SD_STR_LIT("character"));
+  sd_int _t12 = sd_m_json_Value__asInt(L._t11);
+  sd_int l_sc = _t12;
+  sd_box_release(L._t11); L._t11 = NULL;
+  sd_box_release(L._t10); L._t10 = NULL;
+  L._t13 = sd_m_json_Value__get(L.l_r, SD_STR_LIT("end"));
+  L._t14 = sd_m_json_Value__get(L._t13, SD_STR_LIT("line"));
+  sd_int _t15 = sd_m_json_Value__asInt(L._t14);
+  sd_int l_el = _t15;
+  sd_box_release(L._t14); L._t14 = NULL;
+  sd_box_release(L._t13); L._t13 = NULL;
+  L._t16 = sd_m_json_Value__get(L.l_r, SD_STR_LIT("end"));
+  L._t17 = sd_m_json_Value__get(L._t16, SD_STR_LIT("character"));
+  sd_int _t18 = sd_m_json_Value__asInt(L._t17);
+  sd_int l_ec = _t18;
+  sd_box_release(L._t17); L._t17 = NULL;
+  sd_box_release(L._t16); L._t16 = NULL;
+  if ((((sd_int_is_null(l_sl) || sd_int_is_null(l_sc)) || sd_int_is_null(l_el)) || sd_int_is_null(l_ec))) {
+    sd_str _t19 = sd_str_retain(L.l_next);
+    SD_LF_LEAVE(L);
+    sd_int_release(l_ec);
+    sd_int_release(l_el);
+    sd_int_release(l_sc);
+    sd_int_release(l_sl);
+    sd_box_release(L.l_r);
+    sd_str_release(L.l_next);
+    return _t19;
+  }
+  sd_int _t20 = sd_f_lspOffset(l_text, l_sl, l_sc);
+  sd_int l_from = _t20;
+  sd_int _t21 = sd_f_lspOffset(l_text, l_el, l_ec);
+  sd_int l_to = _t21;
+  if (sd_int_lt(l_to, l_from)) {
+    sd_str _t22 = sd_str_retain(l_text);
+    SD_LF_LEAVE(L);
+    sd_int_release(l_to);
+    sd_int_release(l_from);
+    sd_int_release(l_ec);
+    sd_int_release(l_el);
+    sd_int_release(l_sc);
+    sd_int_release(l_sl);
+    sd_box_release(L.l_r);
+    sd_str_release(L.l_next);
+    return _t22;
+  }
+  L._t23 = sd_str_slice(l_text, SD_INT(0), l_from);
+  L._t24 = sd_str_slice(l_text, l_to, sd_str_len(l_text));
+  sd_str _t25[] = {L._t23, L.l_next, L._t24};
+  sd_str _t26 = sd_str_concat_n(_t25, 3);
+  sd_str _t27 = _t26;
+  SD_LF_LEAVE(L);
+  sd_str_release(L._t24);
+  sd_str_release(L._t23);
+  sd_int_release(l_to);
+  sd_int_release(l_from);
+  sd_int_release(l_ec);
+  sd_int_release(l_el);
+  sd_int_release(l_sc);
+  sd_int_release(l_sl);
+  sd_box_release(L.l_r);
+  sd_str_release(L.l_next);
+  return _t27;
+}
+
+typedef struct { sd_lframe h; sd_map * l_out; sd_list * l_uris; sd_box * l_d; sd_str _t7; sd_str _t8; } sd_L_sd_m_LspServer__overlay;
+static void sd_lr_sd_m_LspServer__overlay(sd_lframe *p) {
+  sd_L_sd_m_LspServer__overlay *L = (sd_L_sd_m_LspServer__overlay *)p;
+  sd_map_release(L->l_out);
+  sd_list_release(L->l_uris);
+  sd_box_release(L->l_d);
+  sd_str_release(L->_t7);
+  sd_str_release(L->_t8);
+}
+static sd_map * sd_m_LspServer__overlay(sd_S_LspServer l_s) {
+  sd_L_sd_m_LspServer__overlay L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_m_LspServer__overlay);
+  sd_map * _t1 = sd_map_new(&sd_type_str, &sd_type_str);
+  L.l_out = _t1;
+  sd_list * _t2 = sd_map_keys((l_s).f_docs);
+  L.l_uris = _t2;
+  {
+    int64_t l_i = ((int64_t)0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!((l_i < SD_SMALL(sd_list_len(L.l_uris))))) break;
+      {
+        sd_str _t4 = SD_LIST_GET(L.l_uris, sd_str, SD_INT_S(l_i));
+        sd_S_LspDoc *_t5 = sd_map_get((l_s).f_docs, &_t4);
+        sd_box * _t6 = _t5 ? ({ sd_S_LspDoc c_ = sd_rt_S6LspDoc(*_t5); sd_box_new(&sd_D_LspDoc, &c_); }) : NULL;
+        L.l_d = _t6;
+        if ((!((L.l_d) == NULL))) {
+          L._t7 = sd_str_retain((SD_BOX_GET(L.l_d, sd_S_LspDoc)).f_text);
+          L._t8 = sd_str_retain((SD_BOX_GET(L.l_d, sd_S_LspDoc)).f_path);
+          sd_map_set((&L.l_out), &L._t8, &L._t7);
+          L._t8 = NULL;
+          L._t7 = NULL;
+        }
+        sd_box_release(L.l_d); L.l_d = NULL;
+      }
+      _c3:;
+      l_i++;
+    }
+  }
+  sd_map * _t9 = L.l_out;
+  SD_LF_LEAVE(L);
+  sd_list_release(L.l_uris);
+  return _t9;
+}
+
+typedef struct { sd_lframe h; sd_S_LspJob l_job; sd_box * l_v; } sd_L_sd_m_LspServer__runJob;
+static void sd_lr_sd_m_LspServer__runJob(sd_lframe *p) {
+  sd_L_sd_m_LspServer__runJob *L = (sd_L_sd_m_LspServer__runJob *)p;
+  sd_rl_S6LspJob(L->l_job);
+  sd_box_release(L->l_v);
+}
+static sd_box * sd_m_LspServer__runJob(sd_S_LspServer l_s, sd_str l_kind, sd_str l_path, sd_int l_line, sd_int l_character) {
+  sd_L_sd_m_LspServer__runJob L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_m_LspServer__runJob);
+  sd_map * _t1 = sd_m_LspServer__overlay(l_s);
+  sd_S_LspJob _t2 = (sd_S_LspJob){.f_kind = sd_str_retain(l_kind), .f_seedRoot = sd_str_retain((l_s).f_seedRoot), .f_path = sd_str_retain(l_path), .f_overlay = _t1, .f_line = sd_int_retain(l_line), .f_character = sd_int_retain(l_character)};
+  L.l_job = _t2;
+  sd_box * _t3 = sd_f_lspTryJob(L.l_job);
+  L.l_v = _t3;
+  if ((((L.l_v) == NULL) && sd_str_eq(l_kind, SD_STR_LIT("completion")))) {
+    sd_str _t4 = SD_STR_LIT("completion-unchecked");
+    sd_str *_t5 = (&((&L.l_job))->f_kind);
+    sd_str_release(*_t5);
+    *_t5 = _t4;
+    sd_box * _t6 = sd_f_lspTryJob(L.l_job);
+    sd_box_release(L.l_v);
+    L.l_v = _t6;
+  }
+  if (((L.l_v) == NULL)) {
+    sd_box * _t7 = SD_BOX_REF(sd_k_json_Value__Null);
+    SD_LF_LEAVE(L);
+    sd_box_release(L.l_v);
+    sd_rl_S6LspJob(L.l_job);
+    return _t7;
+  }
+  sd_box * _t8 = L.l_v;
+  SD_LF_LEAVE(L);
+  sd_rl_S6LspJob(L.l_job);
+  return _t8;
+}
+
+typedef struct { sd_lframe h; sd_chan * l_out; sd_err l_err; sd_str _t4; sd_str _t6; } sd_L_sd_f_lspTryJob;
+static void sd_lr_sd_f_lspTryJob(sd_lframe *p) {
+  sd_L_sd_f_lspTryJob *L = (sd_L_sd_f_lspTryJob *)p;
+  sd_chan_release(L->l_out);
+  sd_iface_release(L->l_err);
+  sd_str_release(L->_t4);
+  sd_str_release(L->_t6);
+}
+static sd_box * sd_f_lspTryJob(sd_S_LspJob l_job) {
+  sd_L_sd_f_lspTryJob L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_lspTryJob);
+  sd_chan * _t1 = sd_chan_new(&sd_type_box, SD_INT(1));
+  L.l_out = _t1;
+  sd_err _t2 = SD_ERR_NULL;
+  {
+    sd_group *_t3 = sd_group_begin();
+    { sd_g1_args a_ = {l_job, L.l_out}; sd_spawn(_t3, sd_g1, &sd_g1_type, &a_); }
+    _t2 = sd_group_wait(_t3);
+  }
+  L.l_err = _t2;
+  if ((!sd_iface_is_null(L.l_err))) {
+    SD_PREEMPT();
+    L._t4 = sd_err_message(L.l_err);
+    sd_str _t5[] = {SD_STR_LIT("seed lsp: "), (l_job).f_kind, SD_STR_LIT(" "), (l_job).f_path, SD_STR_LIT(": "), L._t4};
+    L._t6 = sd_str_concat_n(_t5, 6);
+    sd_f_fmt_eprintln(L._t6);
+    sd_str_release(L._t6); L._t6 = NULL;
+    sd_str_release(L._t4); L._t4 = NULL;
+    sd_box * _t7 = NULL;
+    SD_LF_LEAVE(L);
+    sd_iface_release(L.l_err);
+    sd_chan_release(L.l_out);
+    return _t7;
+  }
+  sd_box * _t8;
+  bool _t9 = sd_chan_receive(L.l_out, &_t8);
+  sd_box * _t10 = _t9 ? _t8 : NULL;
+  sd_box * _t11 = _t10;
+  SD_LF_LEAVE(L);
+  sd_iface_release(L.l_err);
+  sd_chan_release(L.l_out);
+  return _t11;
+}
+
+typedef struct { sd_lframe h; sd_T_T2E10json_Valuee _t1; sd_box * l_v; } sd_L_sd_f_lspJobTask;
+static void sd_lr_sd_f_lspJobTask(sd_lframe *p) {
+  sd_L_sd_f_lspJobTask *L = (sd_L_sd_f_lspJobTask *)p;
+  sd_rl_T2E10json_Valuee(L->_t1);
+  sd_box_release(L->l_v);
+}
+static sd_err sd_f_lspJobTask(sd_S_LspJob l_job, sd_chan * l_out) {
+  sd_L_sd_f_lspJobTask L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_lspJobTask);
+  L._t1 = sd_f_lspRunJob(l_job);
+  if (!sd_err_is_null(L._t1.r1)) {
+    sd_box_release(L._t1.r0);
+    SD_LF_LEAVE(L);
+    return L._t1.r1;
+  }
+  sd_box * _t2 = L._t1.r0;
+  L._t1 = ((sd_T_T2E10json_Valuee){0});
+  L.l_v = _t2;
+  sd_chan_send(l_out, &L.l_v);
+  sd_err _t3 = SD_IFACE_NULL;
+  SD_LF_LEAVE(L);
+  sd_box_release(L.l_v);
+  return _t3;
+}
+
+static sd_T_T2E10json_Valuee sd_f_lspRunJob(sd_S_LspJob l_job) {
+  if (sd_str_eq((l_job).f_kind, SD_STR_LIT("crash"))) {
+    sd_f_os_crash(SD_STR_LIT("seed lsp: crash requested (seed/crash)"));
+  }
+  if (sd_str_eq((l_job).f_kind, SD_STR_LIT("diagnostics"))) {
+    sd_T_T2E10json_Valuee _t1 = sd_f_lspDiagnostics(l_job);
+    return _t1;
+  }
+  if (sd_str_eq((l_job).f_kind, SD_STR_LIT("format"))) {
+    sd_box * _t2 = sd_f_lspFormat(l_job);
+    return (sd_T_T2E10json_Valuee){_t2, SD_IFACE_NULL};
+  }
+  if (sd_str_eq((l_job).f_kind, SD_STR_LIT("symbols"))) {
+    sd_box * _t3 = sd_f_lspSymbols(l_job);
+    return (sd_T_T2E10json_Valuee){_t3, SD_IFACE_NULL};
+  }
+  if ((sd_str_eq((l_job).f_kind, SD_STR_LIT("completion")) || sd_str_eq((l_job).f_kind, SD_STR_LIT("completion-unchecked")))) {
+    sd_T_T2E10json_Valuee _t4 = sd_f_lspCompletion(l_job);
+    return _t4;
+  }
+  sd_T_T2E10json_Valuee _t5 = sd_f_lspLookup(l_job);
+  return _t5;
+}
+
+typedef struct { sd_lframe h; sd_list * l_uris; sd_map * l_known; sd_box * l_d; sd_box * l_done; sd_box * l_list; sd_box * l_all; sd_map * l_got; sd_list * l_paths; sd_box * l_ds; sd_box * _t16; sd_str _t17; sd_list * _t19; sd_box * _t20; sd_box * _t21; } sd_L_sd_m_LspServer__publishAll;
+static void sd_lr_sd_m_LspServer__publishAll(sd_lframe *p) {
+  sd_L_sd_m_LspServer__publishAll *L = (sd_L_sd_m_LspServer__publishAll *)p;
+  sd_list_release(L->l_uris);
+  sd_map_release(L->l_known);
+  sd_box_release(L->l_d);
+  sd_box_release(L->l_done);
+  sd_box_release(L->l_list);
+  sd_box_release(L->l_all);
+  sd_map_release(L->l_got);
+  sd_list_release(L->l_paths);
+  sd_box_release(L->l_ds);
+  sd_box_release(L->_t16);
+  sd_str_release(L->_t17);
+  sd_list_release(L->_t19);
+  sd_box_release(L->_t20);
+  sd_box_release(L->_t21);
+}
+static void sd_m_LspServer__publishAll(sd_S_LspServer * l_s) {
+  sd_L_sd_m_LspServer__publishAll L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_m_LspServer__publishAll);
+  sd_list * _t1 = sd_map_keys(((*l_s)).f_docs);
+  L.l_uris = _t1;
+  sd_map * _t2 = sd_map_new(&sd_type_str, &sd_type_box);
+  L.l_known = _t2;
+  {
+    int64_t l_i = ((int64_t)0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!((l_i < SD_SMALL(sd_list_len(L.l_uris))))) break;
+      {
+        sd_str _t4 = SD_LIST_GET(L.l_uris, sd_str, SD_INT_S(l_i));
+        sd_S_LspDoc *_t5 = sd_map_get(((*l_s)).f_docs, &_t4);
+        sd_box * _t6 = _t5 ? ({ sd_S_LspDoc c_ = sd_rt_S6LspDoc(*_t5); sd_box_new(&sd_D_LspDoc, &c_); }) : NULL;
+        L.l_d = _t6;
+        if (((L.l_d) == NULL)) {
+          sd_box_release(L.l_d); L.l_d = NULL;
+          goto _c3;
+        }
+        sd_str _t7 = (SD_BOX_GET(L.l_d, sd_S_LspDoc)).f_path;
+        sd_box * *_t8 = sd_map_get(L.l_known, &_t7);
+        L.l_done = sd_box_retain((_t8 ? *_t8 : NULL));
+        L.l_list = SD_BOX_REF(sd_k_json_Value__Null);
+        if ((!((L.l_done) == NULL))) {
+          sd_box * _t9 = sd_box_retain(L.l_done);
+          sd_box_release(L.l_list);
+          L.l_list = _t9;
+        } else {
+          sd_box * _t10 = sd_m_LspServer__runJob((*l_s), SD_STR_LIT("diagnostics"), (SD_BOX_GET(L.l_d, sd_S_LspDoc)).f_path, SD_INT(0), SD_INT(0));
+          L.l_all = _t10;
+          sd_map * _t11 = sd_m_json_Value__asObject(L.l_all);
+          L.l_got = _t11;
+          if ((!((L.l_got) == NULL))) {
+            sd_list * _t12 = sd_map_keys(L.l_got);
+            L.l_paths = _t12;
+            {
+              int64_t l_k = ((int64_t)0);
+              for (;;) {
+                SD_PREEMPT();
+                if (!((l_k < SD_SMALL(sd_list_len(L.l_paths))))) break;
+                {
+                  sd_str _t14 = SD_LIST_GET(L.l_paths, sd_str, SD_INT_S(l_k));
+                  sd_box * *_t15 = sd_map_get(L.l_got, &_t14);
+                  L.l_ds = sd_box_retain((_t15 ? *_t15 : NULL));
+                  if ((!((L.l_ds) == NULL))) {
+                    L._t16 = sd_box_retain(L.l_ds);
+                    L._t17 = sd_str_retain(SD_LIST_GET(L.l_paths, sd_str, SD_INT_S(l_k)));
+                    sd_map_set((&L.l_known), &L._t17, &L._t16);
+                    L._t17 = NULL;
+                    L._t16 = NULL;
+                  }
+                  sd_box_release(L.l_ds); L.l_ds = NULL;
+                }
+                _c13:;
+                l_k++;
+              }
+            }
+            sd_list_release(L.l_paths); L.l_paths = NULL;
+          }
+          sd_box * _t18 = sd_m_json_Value__get(L.l_all, (SD_BOX_GET(L.l_d, sd_S_LspDoc)).f_path);
+          sd_box_release(L.l_list);
+          L.l_list = _t18;
+          sd_map_release(L.l_got); L.l_got = NULL;
+          sd_box_release(L.l_all); L.l_all = NULL;
+        }
+        L._t19 = sd_m_json_Value__asArray(L.l_list);
+        L._t20 = sd_f_lspDiagParams((SD_BOX_GET(L.l_d, sd_S_LspDoc)).f_uri, L._t19);
+        L._t21 = sd_f_lspNotification(SD_STR_LIT("textDocument/publishDiagnostics"), L._t20);
+        sd_f_lspSend(L._t21);
+        sd_box_release(L._t21); L._t21 = NULL;
+        sd_box_release(L._t20); L._t20 = NULL;
+        sd_list_release(L._t19); L._t19 = NULL;
+        sd_box_release(L.l_list); L.l_list = NULL;
+        sd_box_release(L.l_done); L.l_done = NULL;
+        sd_box_release(L.l_d); L.l_d = NULL;
+      }
+      _c3:;
+      l_i++;
+    }
+  }
+  sd_map_release(L.l_known); L.l_known = NULL;
+  sd_list_release(L.l_uris); L.l_uris = NULL;
+  SD_LF_LEAVE(L);
+}
+
+typedef struct { sd_lframe h; sd_map * l_m; sd_box * _t2; sd_box * _t5; sd_box * _t7; } sd_L_sd_f_lspDiagParams;
+static void sd_lr_sd_f_lspDiagParams(sd_lframe *p) {
+  sd_L_sd_f_lspDiagParams *L = (sd_L_sd_f_lspDiagParams *)p;
+  sd_map_release(L->l_m);
+  sd_box_release(L->_t2);
+  sd_box_release(L->_t5);
+  sd_box_release(L->_t7);
+}
+static sd_box * sd_f_lspDiagParams(sd_str l_uri, sd_list * l_diags) {
+  sd_L_sd_f_lspDiagParams L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_lspDiagParams);
+  sd_map * _t1 = sd_map_new(&sd_type_str, &sd_type_box);
+  L.l_m = _t1;
+  L._t2 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 3, .u.c_String = {sd_str_retain(l_uri)}});
+  sd_str _t3 = SD_STR_LIT("uri");
+  sd_map_set((&L.l_m), &_t3, &L._t2);
+  L._t2 = NULL;
+  if (((l_diags) == NULL)) {
+    sd_list * _t4 = sd_list_new(&sd_type_box, 0);
+    L._t5 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 4, .u.c_Array = {_t4}});
+    sd_str _t6 = SD_STR_LIT("diagnostics");
+    sd_map_set((&L.l_m), &_t6, &L._t5);
+    L._t5 = NULL;
+  } else {
+    L._t7 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 4, .u.c_Array = {sd_list_retain(l_diags)}});
+    sd_str _t8 = SD_STR_LIT("diagnostics");
+    sd_map_set((&L.l_m), &_t8, &L._t7);
+    L._t7 = NULL;
+  }
+  sd_box * _t9 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 5, .u.c_Object = {L.l_m}});
+  L.l_m = NULL;
+  SD_LF_LEAVE(L);
+  return _t9;
+}
+
+typedef struct { sd_lframe h; sd_str l_p; sd_list * l_out; sd_str _t24; sd_str _t25; } sd_L_sd_f_lspUriToPath;
+static void sd_lr_sd_f_lspUriToPath(sd_lframe *p) {
+  sd_L_sd_f_lspUriToPath *L = (sd_L_sd_f_lspUriToPath *)p;
+  sd_str_release(L->l_p);
+  sd_list_release(L->l_out);
+  sd_str_release(L->_t24);
+  sd_str_release(L->_t25);
+}
+static sd_str sd_f_lspUriToPath(sd_str l_uri) {
+  sd_L_sd_f_lspUriToPath L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_lspUriToPath);
+  L.l_p = sd_str_retain(l_uri);
+  if (sd_str_starts_with(L.l_p, SD_STR_LIT("file://"))) {
+    sd_str _t1 = sd_str_slice(L.l_p, SD_INT(7), sd_str_len(L.l_p));
+    sd_str_release(L.l_p);
+    L.l_p = _t1;
+    if ((!sd_str_starts_with(L.l_p, SD_STR_LIT("/")))) {
+      sd_int _t2 = sd_str_index(L.l_p, SD_STR_LIT("/"));
+      sd_int l_slash = _t2;
+      if (sd_int_is_null(l_slash)) {
+        sd_str _t3 = SD_STR_LIT("/");
+        sd_str_release(L.l_p);
+        L.l_p = _t3;
+      } else {
+        sd_str _t4 = sd_str_slice(L.l_p, l_slash, sd_str_len(L.l_p));
+        sd_str_release(L.l_p);
+        L.l_p = _t4;
+      }
+      sd_int_release(l_slash);
+    }
+  }
+  sd_list * _t5 = sd_list_new(&sd_type_byte, 0);
+  L.l_out = _t5;
+  {
+    sd_int l_i = SD_INT(0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!(sd_int_lt(l_i, sd_str_len(L.l_p)))) break;
+      {
+        bool _t8 = ((sd_str_at(L.l_p, l_i)) == (((uint8_t)37)));
+        if (_t8) {
+          sd_int _t7 = sd_int_add(l_i, SD_INT(2));
+          _t8 = sd_int_lt(_t7, sd_str_len(L.l_p));
+          sd_int_release(_t7);
+        }
+        bool _t11 = _t8;
+        if (_t11) {
+          sd_int _t9 = sd_int_add(l_i, SD_INT(1));
+          sd_int _t10 = sd_f_hexValue(sd_str_at(L.l_p, _t9));
+          _t11 = sd_int_ge(_t10, SD_INT(0));
+          sd_int_release(_t10);
+          sd_int_release(_t9);
+        }
+        bool _t14 = _t11;
+        if (_t14) {
+          sd_int _t12 = sd_int_add(l_i, SD_INT(2));
+          sd_int _t13 = sd_f_hexValue(sd_str_at(L.l_p, _t12));
+          _t14 = sd_int_ge(_t13, SD_INT(0));
+          sd_int_release(_t13);
+          sd_int_release(_t12);
+        }
+        if (_t14) {
+          sd_int _t15 = sd_int_add(l_i, SD_INT(1));
+          sd_int _t16 = sd_f_hexValue(sd_str_at(L.l_p, _t15));
+          sd_int _t17 = sd_int_mul(_t16, SD_INT(16));
+          sd_int _t18 = sd_int_add(l_i, SD_INT(2));
+          sd_int _t19 = sd_f_hexValue(sd_str_at(L.l_p, _t18));
+          sd_int _t20 = sd_int_add(_t17, _t19);
+          uint8_t _t21 = sd_int_to_byte(_t20);
+          SD_LIST_PUSH((&L.l_out), uint8_t, _t21);
+          sd_int_release(_t20);
+          sd_int_release(_t19);
+          sd_int_release(_t18);
+          sd_int_release(_t17);
+          sd_int_release(_t16);
+          sd_int_release(_t15);
+          sd_int _t22 = SD_INT_S((((int64_t)2)));
+          { int64_t r_; if (SD_LIKELY((((l_i).w | _t22.w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_i).w, _t22.w, &r_))) (l_i).w = r_; else { sd_int s_ = sd_int_add_slow((l_i), _t22); sd_int_release((l_i)); (l_i) = s_; } }
+        } else {
+          uint8_t _t23 = sd_str_at(L.l_p, l_i);
+          SD_LIST_PUSH((&L.l_out), uint8_t, _t23);
+        }
+      }
+      _c6:;
+      { int64_t r_; if (SD_LIKELY((((l_i).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_i).w, SD_INT(1).w, &r_))) (l_i).w = r_; else { sd_int s_ = sd_int_add_slow((l_i), SD_INT(1)); sd_int_release((l_i)); (l_i) = s_; } }
+    }
+    sd_int_release(l_i);
+  }
+  L._t24 = sd_str_from_bytes(L.l_out);
+  L._t25 = sd_f_absPath(L._t24);
+  sd_str _t26 = sd_f_cleanPath(L._t25);
+  sd_str _t27 = _t26;
+  SD_LF_LEAVE(L);
+  sd_str_release(L._t25);
+  sd_str_release(L._t24);
+  sd_list_release(L.l_out);
+  sd_str_release(L.l_p);
+  return _t27;
+}
+
+typedef struct { sd_lframe h; sd_str l_hex; sd_list * l_out; sd_str _t7; } sd_L_sd_f_lspPathToUri;
+static void sd_lr_sd_f_lspPathToUri(sd_lframe *p) {
+  sd_L_sd_f_lspPathToUri *L = (sd_L_sd_f_lspPathToUri *)p;
+  sd_str_release(L->l_hex);
+  sd_list_release(L->l_out);
+  sd_str_release(L->_t7);
+}
+static sd_str sd_f_lspPathToUri(sd_str l_path) {
+  sd_L_sd_f_lspPathToUri L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_lspPathToUri);
+  L.l_hex = SD_STR_LIT("0123456789ABCDEF");
+  sd_list * _t1 = sd_list_new(&sd_type_byte, 0);
+  L.l_out = _t1;
+  {
+    int64_t l_i = ((int64_t)0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!((l_i < SD_SMALL(sd_str_len(l_path))))) break;
+      {
+        uint8_t l_b = sd_str_at(l_path, SD_INT_S(l_i));
+        if (((((((((((l_b) >= (((uint8_t)97))) && ((l_b) <= (((uint8_t)122)))) || (((l_b) >= (((uint8_t)65))) && ((l_b) <= (((uint8_t)90))))) || (((l_b) >= (((uint8_t)48))) && ((l_b) <= (((uint8_t)57))))) || ((l_b) == (((uint8_t)47)))) || ((l_b) == (((uint8_t)45)))) || ((l_b) == (((uint8_t)46)))) || ((l_b) == (((uint8_t)95)))) || ((l_b) == (((uint8_t)126))))) {
+          uint8_t _t3 = l_b;
+          SD_LIST_PUSH((&L.l_out), uint8_t, _t3);
+        } else {
+          uint8_t _t4 = ((uint8_t)37);
+          SD_LIST_PUSH((&L.l_out), uint8_t, _t4);
+          uint8_t _t5 = sd_str_at(L.l_hex, SD_INT_S(((SD_SMALL(sd_byte_to_int(l_b))) >> 4)));
+          SD_LIST_PUSH((&L.l_out), uint8_t, _t5);
+          uint8_t _t6 = sd_str_at(L.l_hex, SD_INT_S(((SD_SMALL(sd_byte_to_int(l_b))) & 15)));
+          SD_LIST_PUSH((&L.l_out), uint8_t, _t6);
+        }
+      }
+      _c2:;
+      l_i++;
+    }
+  }
+  L._t7 = sd_str_from_bytes(L.l_out);
+  sd_str _t8 = sd_str_concat(SD_STR_LIT("file://"), L._t7);
+  sd_str _t9 = _t8;
+  SD_LF_LEAVE(L);
+  sd_str_release(L._t7);
+  sd_list_release(L.l_out);
+  sd_str_release(L.l_hex);
+  return _t9;
+}
+
+typedef struct { sd_lframe h; sd_str l_text; } sd_L_sd_f_lspReadText;
+static void sd_lr_sd_f_lspReadText(sd_lframe *p) {
+  sd_L_sd_f_lspReadText *L = (sd_L_sd_f_lspReadText *)p;
+  sd_str_release(L->l_text);
+}
+static sd_T_T2se sd_f_lspReadText(sd_str l_path, sd_map * l_overlay) {
+  sd_L_sd_f_lspReadText L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_lspReadText);
+  sd_str *_t1 = sd_map_get(l_overlay, &l_path);
+  L.l_text = sd_str_retain((_t1 ? *_t1 : NULL));
+  if ((!((L.l_text) == NULL))) {
+    sd_T_T2se _t2 = (sd_T_T2se){sd_str_retain(L.l_text), SD_IFACE_NULL};
+    SD_LF_LEAVE(L);
+    sd_str_release(L.l_text);
+    return _t2;
+  }
+  sd_T_T2se _t3 = sd_f_fs_read(l_path);
+  sd_T_T2se _t4 = _t3;
+  SD_LF_LEAVE(L);
+  sd_str_release(L.l_text);
+  return _t4;
+}
+
+typedef struct { sd_lframe h; sd_list * l_files; sd_T_T2Lse _t3; sd_list * l_open; } sd_L_sd_f_lspSourceFiles;
+static void sd_lr_sd_f_lspSourceFiles(sd_lframe *p) {
+  sd_L_sd_f_lspSourceFiles *L = (sd_L_sd_f_lspSourceFiles *)p;
+  sd_list_release(L->l_files);
+  sd_rl_T2Lse(L->_t3);
+  sd_list_release(L->l_open);
+}
+static sd_T_T2Lse sd_f_lspSourceFiles(sd_str l_dir, sd_map * l_overlay) {
+  sd_L_sd_f_lspSourceFiles L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_lspSourceFiles);
+  sd_list * _t1 = sd_list_new(&sd_type_str, 0);
+  L.l_files = _t1;
+  bool _t2 = sd_f_fs_isDir(l_dir);
+  if (_t2) {
+    L._t3 = sd_f_sourceFiles(l_dir);
+    if (!sd_err_is_null(L._t3.r1)) {
+      sd_list_release(L._t3.r0);
+      sd_T_T2Lse _t4 = (sd_T_T2Lse){.r1 = L._t3.r1};
+      SD_LF_LEAVE(L);
+      sd_list_release(L.l_files);
+      return _t4;
+    }
+    sd_list * _t5 = L._t3.r0;
+    L._t3 = ((sd_T_T2Lse){0});
+    sd_list_release(L.l_files);
+    L.l_files = _t5;
+  }
+  sd_list * _t6 = sd_map_keys(l_overlay);
+  L.l_open = _t6;
+  {
+    int64_t l_i = ((int64_t)0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!((l_i < SD_SMALL(sd_list_len(L.l_open))))) break;
+      {
+        sd_str l_p = SD_LIST_GET(L.l_open, sd_str, SD_INT_S(l_i));
+        bool _t9 = sd_str_ends_with(l_p, SD_STR_LIT(".sd"));
+        if (_t9) {
+          sd_str _t8 = sd_f_dirName(l_p);
+          _t9 = sd_str_eq(_t8, l_dir);
+          sd_str_release(_t8); 
+        }
+        if ((_t9 && (!sd_list_contains(L.l_files, &l_p)))) {
+          sd_str _t10 = sd_str_retain(l_p);
+          SD_LIST_PUSH((&L.l_files), sd_str, _t10);
+        }
+      }
+      _c7:;
+      l_i++;
+    }
+  }
+  sd_list_sort((&L.l_files));
+  sd_T_T2Lse _t11 = (sd_T_T2Lse){L.l_files, SD_IFACE_NULL};
+  SD_LF_LEAVE(L);
+  sd_list_release(L.l_open);
+  return _t11;
+}
+
+typedef struct { sd_lframe h; sd_list * l_lines; sd_str l_line; sd_str _t4; } sd_L_sd_f_lspPackageClause;
+static void sd_lr_sd_f_lspPackageClause(sd_lframe *p) {
+  sd_L_sd_f_lspPackageClause *L = (sd_L_sd_f_lspPackageClause *)p;
+  sd_list_release(L->l_lines);
+  sd_str_release(L->l_line);
+  sd_str_release(L->_t4);
+}
+static sd_str sd_f_lspPackageClause(sd_str l_text) {
+  sd_L_sd_f_lspPackageClause L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_lspPackageClause);
+  sd_list * _t1 = sd_str_split(l_text, SD_STR_LIT("\012"));
+  L.l_lines = _t1;
+  {
+    int64_t l_i = ((int64_t)0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!((l_i < SD_SMALL(sd_list_len(L.l_lines))))) break;
+      {
+        sd_str _t3 = sd_str_trim(SD_LIST_GET(L.l_lines, sd_str, SD_INT_S(l_i)));
+        L.l_line = _t3;
+        if (sd_str_starts_with(L.l_line, SD_STR_LIT("package "))) {
+          L._t4 = sd_str_slice(L.l_line, SD_INT(8), sd_str_len(L.l_line));
+          sd_str _t5 = sd_str_trim(L._t4);
+          sd_str _t6 = _t5;
+          SD_LF_LEAVE(L);
+          sd_str_release(L._t4);
+          sd_str_release(L.l_line);
+          sd_list_release(L.l_lines);
+          return _t6;
+        }
+        if (((!sd_str_eq(L.l_line, SD_STR_LIT(""))) && (!sd_str_starts_with(L.l_line, SD_STR_LIT("//"))))) {
+          sd_str _t7 = SD_STR_LIT("");
+          SD_LF_LEAVE(L);
+          sd_str_release(L.l_line);
+          sd_list_release(L.l_lines);
+          return _t7;
+        }
+        sd_str_release(L.l_line); L.l_line = NULL;
+      }
+      _c2:;
+      l_i++;
+    }
+  }
+  sd_str _t8 = SD_STR_LIT("");
+  SD_LF_LEAVE(L);
+  sd_list_release(L.l_lines);
+  return _t8;
+}
+
+static bool sd_f_lspHasMain(sd_str l_text) {
+  return (sd_str_starts_with(l_text, SD_STR_LIT("fn main(")) || sd_str_contains(l_text, SD_STR_LIT("\012fn main(")));
+}
+
+typedef struct { sd_lframe h; sd_T_T2se _t1; sd_str l_text; sd_str l_dir; sd_str l_pkgDir; sd_str _t6; sd_T_T2Lse _t7; sd_list * l_parentFiles; sd_T_T2Lse _t12; sd_list * l_files; sd_T_T2se _t19; sd_str l_other; sd_T_T2se _t23; sd_S_Loader l_l; sd_err _t40; sd_T_T2Lse _t42; sd_list * l_testFiles; sd_err _t46; sd_str l_projectRoot; sd_str _t51; sd_str _t53; sd_str _t54; sd_str _t60; sd_err _t63; sd_S_Checker l_c; } sd_L_sd_f_lspAnalyze;
+static void sd_lr_sd_f_lspAnalyze(sd_lframe *p) {
+  sd_L_sd_f_lspAnalyze *L = (sd_L_sd_f_lspAnalyze *)p;
+  sd_rl_T2se(L->_t1);
+  sd_str_release(L->l_text);
+  sd_str_release(L->l_dir);
+  sd_str_release(L->l_pkgDir);
+  sd_str_release(L->_t6);
+  sd_rl_T2Lse(L->_t7);
+  sd_list_release(L->l_parentFiles);
+  sd_rl_T2Lse(L->_t12);
+  sd_list_release(L->l_files);
+  sd_rl_T2se(L->_t19);
+  sd_str_release(L->l_other);
+  sd_rl_T2se(L->_t23);
+  sd_rl_S6Loader(L->l_l);
+  sd_iface_release(L->_t40);
+  sd_rl_T2Lse(L->_t42);
+  sd_list_release(L->l_testFiles);
+  sd_iface_release(L->_t46);
+  sd_str_release(L->l_projectRoot);
+  sd_str_release(L->_t51);
+  sd_str_release(L->_t53);
+  sd_str_release(L->_t54);
+  sd_str_release(L->_t60);
+  sd_iface_release(L->_t63);
+  sd_rl_S7Checker(L->l_c);
+}
+static sd_T_T2S11LspAnalysise sd_f_lspAnalyze(sd_S_LspJob l_job, bool l_checkBroken) {
+  sd_L_sd_f_lspAnalyze L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_lspAnalyze);
+  sd_str l_path = (l_job).f_path;
+  L._t1 = sd_f_lspReadText(l_path, (l_job).f_overlay);
+  if (!sd_err_is_null(L._t1.r1)) {
+    sd_str_release(L._t1.r0);
+    SD_LF_LEAVE(L);
+    return (sd_T_T2S11LspAnalysise){.r1 = L._t1.r1};
+  }
+  sd_str _t2 = L._t1.r0;
+  L._t1 = ((sd_T_T2se){0});
+  L.l_text = _t2;
+  sd_str _t3 = sd_f_dirName(l_path);
+  L.l_dir = _t3;
+  L.l_pkgDir = sd_str_retain(L.l_dir);
+  bool l_tests = false;
+  sd_str _t4 = sd_f_lastElement(L.l_dir);
+  bool _t5 = sd_str_eq(_t4, SD_STR_LIT("tests"));
+  sd_str_release(_t4); 
+  if (_t5) {
+    L._t6 = sd_f_dirName(L.l_dir);
+    L._t7 = sd_f_lspSourceFiles(L._t6, (l_job).f_overlay);
+    if (!sd_err_is_null(L._t7.r1)) {
+      sd_list_release(L._t7.r0);
+      sd_T_T2S11LspAnalysise _t8 = (sd_T_T2S11LspAnalysise){.r1 = L._t7.r1};
+      SD_LF_LEAVE(L);
+      sd_str_release(L._t6);
+      sd_str_release(L.l_pkgDir);
+      sd_str_release(L.l_dir);
+      sd_str_release(L.l_text);
+      return _t8;
+    }
+    sd_list * _t9 = L._t7.r0;
+    L._t7 = ((sd_T_T2Lse){0});
+    L.l_parentFiles = _t9;
+    sd_str_release(L._t6); L._t6 = NULL;
+    if ((SD_SMALL(sd_list_len(L.l_parentFiles)) > ((int64_t)0))) {
+      sd_str _t10 = sd_f_dirName(L.l_dir);
+      sd_str_release(L.l_pkgDir);
+      L.l_pkgDir = _t10;
+      bool _t11 = true;
+      l_tests = _t11;
+    }
+    sd_list_release(L.l_parentFiles); L.l_parentFiles = NULL;
+  }
+  L._t12 = sd_f_lspSourceFiles(L.l_pkgDir, (l_job).f_overlay);
+  if (!sd_err_is_null(L._t12.r1)) {
+    sd_list_release(L._t12.r0);
+    sd_T_T2S11LspAnalysise _t13 = (sd_T_T2S11LspAnalysise){.r1 = L._t12.r1};
+    SD_LF_LEAVE(L);
+    sd_str_release(L.l_pkgDir);
+    sd_str_release(L.l_dir);
+    sd_str_release(L.l_text);
+    return _t13;
+  }
+  sd_list * _t14 = L._t12.r0;
+  L._t12 = ((sd_T_T2Lse){0});
+  L.l_files = _t14;
+  sd_str _t15 = sd_f_lspPackageClause(L.l_text);
+  bool l_isMain = sd_str_eq(_t15, SD_STR_LIT("main"));
+  sd_str_release(_t15); 
+  bool l_whole = (!l_tests);
+  if ((l_isMain && (!l_tests))) {
+    sd_int l_mains = SD_INT(0);
+    {
+      int64_t l_i = ((int64_t)0);
+      if (SD_LIKELY(((l_mains.w) & 1) == 0)) {
+        int64_t r_mains_3684 = SD_SMALL(l_mains);
+        for (;;) {
+          SD_PREEMPT();
+          if (!((l_i < SD_SMALL(sd_list_len(L.l_files))))) break;
+          {
+            L._t19 = sd_f_lspReadText(SD_LIST_GET(L.l_files, sd_str, SD_INT_S(l_i)), (l_job).f_overlay);
+            if (!sd_err_is_null(L._t19.r1)) {
+              sd_str_release(L._t19.r0);
+              sd_T_T2S11LspAnalysise _t20 = (sd_T_T2S11LspAnalysise){.r1 = L._t19.r1};
+              SD_LF_LEAVE(L);
+              sd_int_release(l_mains);
+              sd_list_release(L.l_files);
+              sd_str_release(L.l_pkgDir);
+              sd_str_release(L.l_dir);
+              sd_str_release(L.l_text);
+              return _t20;
+            }
+            sd_str _t21 = L._t19.r0;
+            L._t19 = ((sd_T_T2se){0});
+            L.l_other = _t21;
+            bool _t22 = sd_f_lspHasMain(L.l_other);
+            if (_t22) {
+              r_mains_3684 += ((int64_t)1);
+            }
+            sd_str_release(L.l_other); L.l_other = NULL;
+          }
+          _c18:;
+          l_i++;
+        }
+        l_mains = sd_int_from_i64(r_mains_3684);
+        goto _d16;
+      }
+      for (;;) {
+        SD_PREEMPT();
+        if (!((l_i < SD_SMALL(sd_list_len(L.l_files))))) break;
+        {
+          L._t23 = sd_f_lspReadText(SD_LIST_GET(L.l_files, sd_str, SD_INT_S(l_i)), (l_job).f_overlay);
+          if (!sd_err_is_null(L._t23.r1)) {
+            sd_str_release(L._t23.r0);
+            sd_T_T2S11LspAnalysise _t24 = (sd_T_T2S11LspAnalysise){.r1 = L._t23.r1};
+            SD_LF_LEAVE(L);
+            sd_int_release(l_mains);
+            sd_list_release(L.l_files);
+            sd_str_release(L.l_pkgDir);
+            sd_str_release(L.l_dir);
+            sd_str_release(L.l_text);
+            return _t24;
+          }
+          sd_str _t25 = L._t23.r0;
+          L._t23 = ((sd_T_T2se){0});
+          L.l_other = _t25;
+          bool _t26 = sd_f_lspHasMain(L.l_other);
+          if (_t26) {
+            { int64_t r_; if (SD_LIKELY((((l_mains).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_mains).w, SD_INT(1).w, &r_))) (l_mains).w = r_; else { sd_int s_ = sd_int_add_slow((l_mains), SD_INT(1)); sd_int_release((l_mains)); (l_mains) = s_; } }
+          }
+          sd_str_release(L.l_other); L.l_other = NULL;
+        }
+        _c17:;
+        __asm__ __volatile__("" : "+r"(l_i));
+        l_i++;
+      }
+      _d16:;
+    }
+    if (sd_int_gt(l_mains, SD_INT(1))) {
+      bool _t27 = false;
+      l_whole = _t27;
+      bool _t28 = sd_f_lspHasMain(L.l_text);
+      if (_t28) {
+        sd_list * _t29 = sd_list_new(&sd_type_str, 1);
+        SD_LIST_PUSH(&_t29, sd_str, sd_str_retain(l_path));
+        sd_list_release(L.l_files);
+        L.l_files = _t29;
+      }
+    }
+    sd_int_release(l_mains);
+  }
+  if (((!l_tests) && (!sd_list_contains(L.l_files, &l_path)))) {
+    sd_str _t30 = sd_str_retain(l_path);
+    SD_LIST_PUSH((&L.l_files), sd_str, _t30);
+  }
+  bool l_testMode = (l_tests || (!l_isMain));
+  sd_S_Loader _t31 = sd_f_newLoader((l_job).f_seedRoot, L.l_pkgDir);
+  L.l_l = _t31;
+  sd_map * _t32 = sd_map_retain((l_job).f_overlay);
+  sd_map * *_t33 = (&((&L.l_l))->f_overlay);
+  sd_map_release(*_t33);
+  *_t33 = _t32;
+  sd_str _t34 = sd_f_absPath(L.l_pkgDir);
+  sd_str _t35 = sd_str_concat((L.l_l).f_libDir, SD_STR_LIT("/"));
+  bool l_isLib = sd_str_starts_with(_t34, _t35);
+  sd_str_release(_t35); 
+  sd_str_release(_t34); 
+  sd_str _t36 = SD_STR_LIT("");
+  bool _t37 = l_isLib;
+  sd_int _t38 = sd_m_Loader__addPackage((&L.l_l), _t36, L.l_pkgDir, _t37);
+  sd_int l_pkg = _t38;
+  bool _t39 = false;
+  L._t40 = sd_m_Loader__addFiles((&L.l_l), l_pkg, L.l_files, _t39);
+  if (!sd_err_is_null(L._t40)) {
+    sd_T_T2S11LspAnalysise _t41 = (sd_T_T2S11LspAnalysise){.r1 = L._t40};
+    SD_LF_LEAVE(L);
+    sd_int_release(l_pkg);
+    sd_rl_S6Loader(L.l_l);
+    sd_list_release(L.l_files);
+    sd_str_release(L.l_pkgDir);
+    sd_str_release(L.l_dir);
+    sd_str_release(L.l_text);
+    return _t41;
+  }
+  if (l_tests) {
+  L._t40 = SD_IFACE_NULL;
+    L._t42 = sd_f_lspSourceFiles(L.l_dir, (l_job).f_overlay);
+    if (!sd_err_is_null(L._t42.r1)) {
+      sd_list_release(L._t42.r0);
+      sd_T_T2S11LspAnalysise _t43 = (sd_T_T2S11LspAnalysise){.r1 = L._t42.r1};
+      SD_LF_LEAVE(L);
+      sd_int_release(l_pkg);
+      sd_rl_S6Loader(L.l_l);
+      sd_list_release(L.l_files);
+      sd_str_release(L.l_pkgDir);
+      sd_str_release(L.l_dir);
+      sd_str_release(L.l_text);
+      return _t43;
+    }
+    sd_list * _t44 = L._t42.r0;
+    L._t42 = ((sd_T_T2Lse){0});
+    L.l_testFiles = _t44;
+    bool _t45 = true;
+    L._t46 = sd_m_Loader__addFiles((&L.l_l), l_pkg, L.l_testFiles, _t45);
+    if (!sd_err_is_null(L._t46)) {
+      sd_T_T2S11LspAnalysise _t47 = (sd_T_T2S11LspAnalysise){.r1 = L._t46};
+      SD_LF_LEAVE(L);
+      sd_list_release(L.l_testFiles);
+      sd_int_release(l_pkg);
+      sd_rl_S6Loader(L.l_l);
+      sd_list_release(L.l_files);
+      sd_str_release(L.l_pkgDir);
+      sd_str_release(L.l_dir);
+      sd_str_release(L.l_text);
+      return _t47;
+    }
+    sd_list_release(L.l_testFiles); L.l_testFiles = NULL;
+    L._t46 = SD_IFACE_NULL;
+  }
+  sd_str _t48 = sd_f_lspProjectRoot(L.l_l, L.l_pkgDir);
+  L.l_projectRoot = _t48;
+  sd_str _t49 = sd_str_retain(L.l_projectRoot);
+  sd_str *_t50 = (&((&L.l_l))->f_projectRoot);
+  sd_str_release(*_t50);
+  *_t50 = _t49;
+  if (l_isLib) {
+    L._t51 = sd_f_absPath(L.l_pkgDir);
+    sd_int _t52 = sd_int_add(sd_str_len((L.l_l).f_libDir), SD_INT(1));
+    L._t53 = sd_f_absPath(L.l_pkgDir);
+    L._t54 = sd_str_slice(L._t51, _t52, sd_str_len(L._t53));
+    sd_int _t55 = sd_int_retain(l_pkg);
+    sd_str *_t56 = (&(((sd_S_Package *)sd_list_at_mut((&((&((&((&L.l_l))->f_p))->f_ast))->f_pkgs), _t55)))->f_path);
+    sd_str_release(*_t56);
+    *_t56 = L._t54;
+    L._t54 = NULL;
+    sd_int_release(_t55);
+    sd_str_release(L._t53); L._t53 = NULL;
+    sd_int_release(_t52);
+    sd_str_release(L._t51); L._t51 = NULL;
+  } else {
+    bool _t58 = l_testMode;
+    if (_t58) {
+      sd_str _t57 = sd_str_concat(L.l_projectRoot, SD_STR_LIT("/"));
+      _t58 = sd_str_starts_with(L.l_pkgDir, _t57);
+      sd_str_release(_t57); 
+    }
+    if (_t58) {
+      sd_int _t59 = sd_int_add(sd_str_len(L.l_projectRoot), SD_INT(1));
+      L._t60 = sd_str_slice(L.l_pkgDir, _t59, sd_str_len(L.l_pkgDir));
+      sd_int _t61 = sd_int_retain(l_pkg);
+      sd_str *_t62 = (&(((sd_S_Package *)sd_list_at_mut((&((&((&((&L.l_l))->f_p))->f_ast))->f_pkgs), _t61)))->f_path);
+      sd_str_release(*_t62);
+      *_t62 = L._t60;
+      L._t60 = NULL;
+      sd_int_release(_t61);
+      sd_int_release(_t59);
+    }
+  }
+  L._t63 = sd_m_Loader__loadImports((&L.l_l));
+  if (!sd_err_is_null(L._t63)) {
+    sd_T_T2S11LspAnalysise _t64 = (sd_T_T2S11LspAnalysise){.r1 = L._t63};
+    SD_LF_LEAVE(L);
+    sd_str_release(L.l_projectRoot);
+    sd_int_release(l_pkg);
+    sd_rl_S6Loader(L.l_l);
+    sd_list_release(L.l_files);
+    sd_str_release(L.l_pkgDir);
+    sd_str_release(L.l_dir);
+    sd_str_release(L.l_text);
+    return _t64;
+  }
+  int64_t l_file = ((int64_t)-1);
+  L._t63 = SD_IFACE_NULL;
+  {
+    int64_t l_f = ((int64_t)0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!((l_f < SD_SMALL(sd_list_len((((L.l_l).f_p).f_ast).f_files))))) break;
+      {
+        if (sd_str_eq((SD_LIST_GET((((L.l_l).f_p).f_ast).f_files, sd_S_SourceFile, SD_INT_S(l_f))).f_path, l_path)) {
+          l_file = l_f;
+        }
+      }
+      _c65:;
+      l_f++;
+    }
+  }
+  sd_int _t66 = sd_m_Diags__count(((L.l_l).f_p).f_diags);
+  bool l_clean = sd_int_eq(_t66, SD_INT(0));
+  sd_int_release(_t66);
+  if (((!l_clean) && l_checkBroken)) {
+    sd_S_Ast _t67 = sd_f_lspRepair(((L.l_l).f_p).f_ast);
+    sd_S_Ast *_t68 = (&((&((&L.l_l))->f_p))->f_ast);
+    sd_rl_S3Ast(*_t68);
+    *_t68 = _t67;
+  }
+  sd_S_Checker _t69 = sd_f_newChecker(((L.l_l).f_p).f_ast, ((L.l_l).f_p).f_diags, l_testMode);
+  L.l_c = _t69;
+  sd_str _t70 = sd_str_retain((L.l_l).f_libDir);
+  sd_str *_t71 = (&((&L.l_c))->f_libDir);
+  sd_str_release(*_t71);
+  *_t71 = _t70;
+  sd_str _t72 = L.l_projectRoot;
+  L.l_projectRoot = NULL;
+  sd_str *_t73 = (&((&L.l_c))->f_projectRoot);
+  sd_str_release(*_t73);
+  *_t73 = _t72;
+  if ((l_clean || l_checkBroken)) {
+    sd_m_Checker__checkProgram((&L.l_c));
+  }
+  sd_S_LspAnalysis _t74 = (sd_S_LspAnalysis){.f_c = L.l_c, .f_file = SD_INT_S(l_file), .f_clean = l_clean, .f_whole = l_whole, .f_unformatted = sd_list_retain((L.l_l).f_unformatted), .f_src = L.l_text};
+  L.l_c = ((sd_S_Checker){0});
+  L.l_text = NULL;
+  sd_T_T2S11LspAnalysise _t75 = (sd_T_T2S11LspAnalysise){_t74, SD_IFACE_NULL};
+  SD_LF_LEAVE(L);
+  sd_int_release(l_pkg);
+  sd_rl_S6Loader(L.l_l);
+  sd_list_release(L.l_files);
+  sd_str_release(L.l_pkgDir);
+  sd_str_release(L.l_dir);
+  return _t75;
+}
+
+typedef struct { sd_lframe h; sd_S_Ast l_a; sd_S_TypeExpr l_missing; sd_S_TypeExpr l_te; sd_S_FnDecl l_fd; } sd_L_sd_f_lspRepair;
+static void sd_lr_sd_f_lspRepair(sd_lframe *p) {
+  sd_L_sd_f_lspRepair *L = (sd_L_sd_f_lspRepair *)p;
+  sd_rl_S3Ast(L->l_a);
+  sd_rl_S8TypeExpr(L->l_missing);
+  sd_rl_S8TypeExpr(L->l_te);
+  sd_rl_S6FnDecl(L->l_fd);
+}
+static sd_S_Ast sd_f_lspRepair(sd_S_Ast l_tree) {
+  sd_L_sd_f_lspRepair L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_lspRepair);
+  L.l_a = sd_rt_S3Ast(l_tree);
+  sd_S_Pos _t1 = (sd_S_Pos){.f_file = SD_INT(0), .f_line = SD_INT(1), .f_col = SD_INT(1)};
+  sd_S_TypeExpr _t2 = sd_f_newTypeExpr(SD_BOX_REF(sd_k_TypeExprKind__Name), _t1);
+  L.l_missing = _t2;
+  sd_rl_S3Pos(_t1);
+  sd_str _t3 = sd_str_retain(sd_c_lspPlaceholder());
+  sd_str *_t4 = (&((&L.l_missing))->f_name);
+  sd_str_release(*_t4);
+  *_t4 = _t3;
+  sd_int _t5 = sd_m_Ast__addTypeExpr((&L.l_a), L.l_missing);
+  sd_int l_m = _t5;
+  {
+    int64_t l_t = ((int64_t)0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!((l_t < SD_SMALL(sd_list_len((L.l_a).f_typeExprs))))) break;
+      {
+        L.l_te = sd_rt_S8TypeExpr(SD_LIST_GET((L.l_a).f_typeExprs, sd_S_TypeExpr, SD_INT_S(l_t)));
+        if ((SD_BOX_GET((L.l_te).f_kind, sd_E_TypeExprKind).tag == 0)) {
+          sd_rl_S8TypeExpr(L.l_te); L.l_te = ((sd_S_TypeExpr){0});
+          goto _c6;
+        }
+        if (((!(SD_BOX_GET((L.l_te).f_kind, sd_E_TypeExprKind).tag == 4)) && sd_int_lt((L.l_te).f_a, SD_INT(0)))) {
+          sd_int _t7 = sd_int_retain(l_m);
+          sd_int _t8 = SD_INT_S(l_t);
+          sd_int *_t9 = (&(((sd_S_TypeExpr *)sd_list_at_mut((&((&L.l_a))->f_typeExprs), _t8)))->f_a);
+          sd_int_release(*_t9);
+          *_t9 = _t7;
+        }
+        if (((SD_BOX_GET((L.l_te).f_kind, sd_E_TypeExprKind).tag == 2) && sd_int_lt((L.l_te).f_b, SD_INT(0)))) {
+          sd_int _t10 = sd_int_retain(l_m);
+          sd_int _t11 = SD_INT_S(l_t);
+          sd_int *_t12 = (&(((sd_S_TypeExpr *)sd_list_at_mut((&((&L.l_a))->f_typeExprs), _t11)))->f_b);
+          sd_int_release(*_t12);
+          *_t12 = _t10;
+        }
+        if ((SD_BOX_GET((L.l_te).f_kind, sd_E_TypeExprKind).tag == 4)) {
+          sd_m_Ast__lspRepairList((&L.l_a), (L.l_te).f_list, (L.l_te).f_count, l_m);
+          sd_m_Ast__lspRepairList((&L.l_a), (L.l_te).f_results, (L.l_te).f_resultCount, l_m);
+        }
+        sd_rl_S8TypeExpr(L.l_te); L.l_te = ((sd_S_TypeExpr){0});
+      }
+      _c6:;
+      l_t++;
+    }
+  }
+  {
+    int64_t l_p = ((int64_t)0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!((l_p < SD_SMALL(sd_list_len((L.l_a).f_params))))) break;
+      {
+        if (sd_int_lt((SD_LIST_GET((L.l_a).f_params, sd_S_Param, SD_INT_S(l_p))).f_typeExpr, SD_INT(0))) {
+          sd_int _t14 = sd_int_retain(l_m);
+          sd_int _t15 = SD_INT_S(l_p);
+          sd_int *_t16 = (&(((sd_S_Param *)sd_list_at_mut((&((&L.l_a))->f_params), _t15)))->f_typeExpr);
+          sd_int_release(*_t16);
+          *_t16 = _t14;
+        }
+      }
+      _c13:;
+      l_p++;
+    }
+  }
+  {
+    int64_t l_g = ((int64_t)0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!((l_g < SD_SMALL(sd_list_len((L.l_a).f_targets))))) break;
+      {
+        if (((SD_BOX_GET((SD_LIST_GET((L.l_a).f_targets, sd_S_Target, SD_INT_S(l_g))).f_kind, sd_E_TargetKind).tag == 0) && sd_int_lt((SD_LIST_GET((L.l_a).f_targets, sd_S_Target, SD_INT_S(l_g))).f_typeExpr, SD_INT(0)))) {
+          sd_int _t18 = sd_int_retain(l_m);
+          sd_int _t19 = SD_INT_S(l_g);
+          sd_int *_t20 = (&(((sd_S_Target *)sd_list_at_mut((&((&L.l_a))->f_targets), _t19)))->f_typeExpr);
+          sd_int_release(*_t20);
+          *_t20 = _t18;
+        }
+      }
+      _c17:;
+      l_g++;
+    }
+  }
+  {
+    int64_t l_s = ((int64_t)0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!((l_s < SD_SMALL(sd_list_len((L.l_a).f_stmts))))) break;
+      {
+        if (((SD_BOX_GET((SD_LIST_GET((L.l_a).f_stmts, sd_S_Stmt, SD_INT_S(l_s))).f_kind, sd_E_StmtKind).tag == 14) && sd_int_lt((SD_LIST_GET((L.l_a).f_stmts, sd_S_Stmt, SD_INT_S(l_s))).f_typeExpr, SD_INT(0)))) {
+          sd_int _t22 = sd_int_retain(l_m);
+          sd_int _t23 = SD_INT_S(l_s);
+          sd_int *_t24 = (&(((sd_S_Stmt *)sd_list_at_mut((&((&L.l_a))->f_stmts), _t23)))->f_typeExpr);
+          sd_int_release(*_t24);
+          *_t24 = _t22;
+        }
+      }
+      _c21:;
+      l_s++;
+    }
+  }
+  {
+    int64_t l_k = ((int64_t)0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!((l_k < SD_SMALL(sd_list_len((L.l_a).f_consts))))) break;
+      {
+        if (sd_int_lt((SD_LIST_GET((L.l_a).f_consts, sd_S_ConstDecl, SD_INT_S(l_k))).f_typeExpr, SD_INT(0))) {
+          sd_int _t26 = sd_int_retain(l_m);
+          sd_int _t27 = SD_INT_S(l_k);
+          sd_int *_t28 = (&(((sd_S_ConstDecl *)sd_list_at_mut((&((&L.l_a))->f_consts), _t27)))->f_typeExpr);
+          sd_int_release(*_t28);
+          *_t28 = _t26;
+        }
+      }
+      _c25:;
+      l_k++;
+    }
+  }
+  {
+    int64_t l_f = ((int64_t)0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!((l_f < SD_SMALL(sd_list_len((L.l_a).f_fns))))) break;
+      {
+        L.l_fd = sd_rt_S6FnDecl(SD_LIST_GET((L.l_a).f_fns, sd_S_FnDecl, SD_INT_S(l_f)));
+        if (((L.l_fd).f_isMethod && sd_int_lt((L.l_fd).f_recvType, SD_INT(0)))) {
+          sd_int _t30 = sd_int_retain(l_m);
+          sd_int _t31 = SD_INT_S(l_f);
+          sd_int *_t32 = (&(((sd_S_FnDecl *)sd_list_at_mut((&((&L.l_a))->f_fns), _t31)))->f_recvType);
+          sd_int_release(*_t32);
+          *_t32 = _t30;
+        }
+        sd_m_Ast__lspRepairList((&L.l_a), (L.l_fd).f_results, (L.l_fd).f_resultCount, l_m);
+        sd_rl_S6FnDecl(L.l_fd); L.l_fd = ((sd_S_FnDecl){0});
+      }
+      _c29:;
+      l_f++;
+    }
+  }
+  {
+    int64_t l_d = ((int64_t)0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!((l_d < SD_SMALL(sd_list_len((L.l_a).f_typeDecls))))) break;
+      {
+        sd_S_TypeDecl l_td = SD_LIST_GET((L.l_a).f_typeDecls, sd_S_TypeDecl, SD_INT_S(l_d));
+        sd_m_Ast__lspRepairList((&L.l_a), (l_td).f_impls, (l_td).f_implCount, l_m);
+      }
+      _c33:;
+      l_d++;
+    }
+  }
+  {
+    int64_t l_x = ((int64_t)0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!((l_x < SD_SMALL(sd_list_len((L.l_a).f_methodSigs))))) break;
+      {
+        sd_S_MethodSig l_ms = SD_LIST_GET((L.l_a).f_methodSigs, sd_S_MethodSig, SD_INT_S(l_x));
+        sd_m_Ast__lspRepairList((&L.l_a), (l_ms).f_results, (l_ms).f_resultCount, l_m);
+      }
+      _c34:;
+      l_x++;
+    }
+  }
+  sd_S_Ast _t35 = L.l_a;
+  SD_LF_LEAVE(L);
+  sd_int_release(l_m);
+  sd_rl_S8TypeExpr(L.l_missing);
+  return _t35;
+}
+
+static void sd_m_Ast__lspRepairList(sd_S_Ast * l_a, sd_int l_start, sd_int l_count, sd_int l_m) {
+  {
+    sd_int l_i = SD_INT(0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!(sd_int_lt(l_i, l_count))) break;
+      {
+        sd_int _t2 = sd_int_add(l_start, l_i);
+        bool _t4 = sd_int_lt(_t2, sd_list_len(((*l_a)).f_lists));
+        if (_t4) {
+          sd_int _t3 = sd_int_add(l_start, l_i);
+          _t4 = sd_int_lt(SD_LIST_GET(((*l_a)).f_lists, sd_int, _t3), SD_INT(0));
+          sd_int_release(_t3);
+        }
+        bool _t5 = _t4;
+        sd_int_release(_t2);
+        if (_t5) {
+          sd_int _t6 = sd_int_retain(l_m);
+          sd_int _t7 = sd_int_add(l_start, l_i);
+          sd_list_set((&(l_a)->f_lists), _t7, &_t6);
+          sd_int_release(_t7);
+        }
+      }
+      _c1:;
+      { int64_t r_; if (SD_LIKELY((((l_i).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_i).w, SD_INT(1).w, &r_))) (l_i).w = r_; else { sd_int s_ = sd_int_add_slow((l_i), SD_INT(1)); sd_int_release((l_i)); (l_i) = s_; } }
+    }
+    sd_int_release(l_i);
+  }
+}
+
+typedef struct { sd_lframe h; sd_list * l_local; sd_str _t5; sd_str l_d; sd_str _t12; } sd_L_sd_f_lspProjectRoot;
+static void sd_lr_sd_f_lspProjectRoot(sd_lframe *p) {
+  sd_L_sd_f_lspProjectRoot *L = (sd_L_sd_f_lspProjectRoot *)p;
+  sd_list_release(L->l_local);
+  sd_str_release(L->_t5);
+  sd_str_release(L->l_d);
+  sd_str_release(L->_t12);
+}
+static sd_str sd_f_lspProjectRoot(sd_S_Loader l_l, sd_str l_pkgDir) {
+  sd_L_sd_f_lspProjectRoot L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_lspProjectRoot);
+  sd_list * _t1 = sd_list_new(&sd_type_str, 0);
+  L.l_local = _t1;
+  {
+    int64_t l_i = ((int64_t)0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!((l_i < SD_SMALL(sd_list_len((((l_l).f_p).f_ast).f_imports))))) break;
+      {
+        sd_str l_ip = (SD_LIST_GET((((l_l).f_p).f_ast).f_imports, sd_S_Import, SD_INT_S(l_i))).f_path;
+        bool _t3 = sd_f_validImportPath(l_ip);
+        bool _t7 = _t3;
+        if (_t7) {
+          sd_str _t4[] = {(l_l).f_seedRoot, SD_STR_LIT("/lib/"), l_ip};
+          L._t5 = sd_str_concat_n(_t4, 3);
+          bool _t6 = sd_f_fs_isDir(L._t5);
+          _t7 = (!_t6);
+          sd_str_release(L._t5); L._t5 = NULL;
+        }
+        if (_t7) {
+          sd_str _t8 = sd_str_retain(l_ip);
+          SD_LIST_PUSH((&L.l_local), sd_str, _t8);
+        }
+      }
+      _c2:;
+      l_i++;
+    }
+  }
+  if ((SD_SMALL(sd_list_len(L.l_local)) == ((int64_t)0))) {
+    sd_str _t9 = sd_str_retain(l_pkgDir);
+    SD_LF_LEAVE(L);
+    sd_list_release(L.l_local);
+    return _t9;
+  }
+  L.l_d = sd_str_retain(l_pkgDir);
+  {
+    int64_t l_up = ((int64_t)0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!((l_up < ((int64_t)12)))) break;
+      {
+        bool l_all = true;
+        {
+          int64_t l_j = ((int64_t)0);
+          for (;;) {
+            SD_PREEMPT();
+            if (!((l_j < SD_SMALL(sd_list_len(L.l_local))))) break;
+            {
+              L._t12 = sd_f_joinPath(L.l_d, SD_LIST_GET(L.l_local, sd_str, SD_INT_S(l_j)));
+              bool _t13 = sd_f_fs_isDir(L._t12);
+              bool _t14 = (!_t13);
+              sd_str_release(L._t12); L._t12 = NULL;
+              if (_t14) {
+                bool _t15 = false;
+                l_all = _t15;
+                break;
+              }
+            }
+            _c11:;
+            l_j++;
+          }
+        }
+        if (l_all) {
+          sd_str _t16 = L.l_d;
+          SD_LF_LEAVE(L);
+          sd_list_release(L.l_local);
+          return _t16;
+        }
+        if (((sd_str_eq(L.l_d, SD_STR_LIT("/")) || sd_str_eq(L.l_d, SD_STR_LIT("."))) || sd_str_eq(L.l_d, SD_STR_LIT("")))) {
+          break;
+        }
+        sd_str _t17 = sd_f_dirName(L.l_d);
+        sd_str_release(L.l_d);
+        L.l_d = _t17;
+      }
+      _c10:;
+      l_up++;
+    }
+  }
+  sd_str _t18 = sd_str_retain(l_pkgDir);
+  SD_LF_LEAVE(L);
+  sd_str_release(L.l_d);
+  sd_list_release(L.l_local);
+  return _t18;
+}
+
+typedef struct { sd_lframe h; sd_T_T2S11LspAnalysise _t1; sd_S_LspAnalysis l_a; sd_map * l_byPath; sd_list * _t4; sd_str _t5; sd_list * _t7; sd_str _t8; sd_list * l_all; sd_str l_message; sd_list * l_list; sd_list * _t17; sd_str _t18; sd_str l_where; sd_list * l_own; sd_str _t27; sd_list * _t29; sd_str _t30; sd_map * l_out; sd_list * l_paths; sd_list * l_ds; sd_box * _t36; sd_str _t37; } sd_L_sd_f_lspDiagnostics;
+static void sd_lr_sd_f_lspDiagnostics(sd_lframe *p) {
+  sd_L_sd_f_lspDiagnostics *L = (sd_L_sd_f_lspDiagnostics *)p;
+  sd_rl_T2S11LspAnalysise(L->_t1);
+  sd_rl_S11LspAnalysis(L->l_a);
+  sd_map_release(L->l_byPath);
+  sd_list_release(L->_t4);
+  sd_str_release(L->_t5);
+  sd_list_release(L->_t7);
+  sd_str_release(L->_t8);
+  sd_list_release(L->l_all);
+  sd_str_release(L->l_message);
+  sd_list_release(L->l_list);
+  sd_list_release(L->_t17);
+  sd_str_release(L->_t18);
+  sd_str_release(L->l_where);
+  sd_list_release(L->l_own);
+  sd_str_release(L->_t27);
+  sd_list_release(L->_t29);
+  sd_str_release(L->_t30);
+  sd_map_release(L->l_out);
+  sd_list_release(L->l_paths);
+  sd_list_release(L->l_ds);
+  sd_box_release(L->_t36);
+  sd_str_release(L->_t37);
+}
+static sd_T_T2E10json_Valuee sd_f_lspDiagnostics(sd_S_LspJob l_job) {
+  sd_L_sd_f_lspDiagnostics L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_lspDiagnostics);
+  L._t1 = sd_f_lspAnalyze(l_job, false);
+  if (!sd_err_is_null(L._t1.r1)) {
+    sd_rl_S11LspAnalysis(L._t1.r0);
+    SD_LF_LEAVE(L);
+    return (sd_T_T2E10json_Valuee){.r1 = L._t1.r1};
+  }
+  sd_S_LspAnalysis _t2 = L._t1.r0;
+  L._t1 = ((sd_T_T2S11LspAnalysise){0});
+  L.l_a = _t2;
+  sd_map * _t3 = sd_map_new(&sd_type_str, &sd_type_list);
+  L.l_byPath = _t3;
+  L._t4 = sd_list_new(&sd_type_box, 0);
+  L._t5 = sd_str_retain((l_job).f_path);
+  sd_map_set((&L.l_byPath), &L._t5, &L._t4);
+  L._t5 = NULL;
+  L._t4 = NULL;
+  {
+    int64_t l_f = ((int64_t)0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!((l_f < SD_SMALL(sd_list_len((((L.l_a).f_c).f_ast).f_files))))) break;
+      {
+        if (((L.l_a).f_whole && sd_int_eq((SD_LIST_GET((((L.l_a).f_c).f_ast).f_files, sd_S_SourceFile, SD_INT_S(l_f))).f_pkgIndex, SD_INT(0)))) {
+          L._t7 = sd_list_new(&sd_type_box, 0);
+          L._t8 = sd_str_retain((SD_LIST_GET((((L.l_a).f_c).f_ast).f_files, sd_S_SourceFile, SD_INT_S(l_f))).f_path);
+          sd_map_set((&L.l_byPath), &L._t8, &L._t7);
+          L._t8 = NULL;
+          L._t7 = NULL;
+        }
+      }
+      _c6:;
+      l_f++;
+    }
+  }
+  sd_list * _t9 = sd_m_Diags__sorted(((L.l_a).f_c).f_diags);
+  L.l_all = _t9;
+  {
+    int64_t l_i = ((int64_t)0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!((l_i < SD_SMALL(sd_list_len((L.l_a).f_unformatted))))) break;
+      {
+        sd_S_Diag _t11 = sd_rt_S4Diag(SD_LIST_GET((L.l_a).f_unformatted, sd_S_Diag, SD_INT_S(l_i)));
+        SD_LIST_PUSH((&L.l_all), sd_S_Diag, _t11);
+      }
+      _c10:;
+      l_i++;
+    }
+  }
+  {
+    int64_t l_k = ((int64_t)0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!((l_k < SD_SMALL(sd_list_len(L.l_all))))) break;
+      {
+        sd_S_Diag l_g = SD_LIST_GET(L.l_all, sd_S_Diag, SD_INT_S(l_k));
+        int64_t l_severity = ((int64_t)1);
+        if ((l_k >= (SD_SMALL(sd_list_len(L.l_all)) - SD_SMALL(sd_list_len((L.l_a).f_unformatted))))) {
+          l_severity = ((int64_t)2);
+        }
+        sd_int l_gf = ((l_g).f_pos).f_file;
+        if ((sd_int_lt(l_gf, SD_INT(0)) || sd_int_ge(l_gf, sd_list_len((((L.l_a).f_c).f_ast).f_files)))) {
+          goto _c12;
+        }
+        L.l_message = sd_str_retain((l_g).f_message);
+        if ((l_severity == ((int64_t)2))) {
+          sd_str _t13 = SD_STR_LIT("not formatted: seed fmt changes this line");
+          sd_str_release(L.l_message);
+          L.l_message = _t13;
+        } else {
+          if ((!sd_str_eq((l_g).f_hint, SD_STR_LIT("")))) {
+            sd_str_part _t14[] = {{SD_STR_LIT("\012hint: ")}, {(l_g).f_hint}};
+            L.l_message = sd_str_append_parts(L.l_message, _t14, 2);
+          }
+        }
+        sd_str l_gpath = (SD_LIST_GET((((L.l_a).f_c).f_ast).f_files, sd_S_SourceFile, l_gf)).f_path;
+        sd_list * *_t15 = sd_map_get(L.l_byPath, &l_gpath);
+        L.l_list = sd_list_retain((_t15 ? *_t15 : NULL));
+        if ((!((L.l_list) == NULL))) {
+          sd_box * _t16 = sd_f_lspDiagJson(SD_LIST_GET((((L.l_a).f_c).f_diags).f_sources, sd_str, l_gf), (l_g).f_pos, L.l_message, SD_INT_S(l_severity));
+          SD_LIST_PUSH((&L.l_list), sd_box *, _t16);
+          L._t17 = sd_list_retain(L.l_list);
+          L._t18 = sd_str_retain(l_gpath);
+          sd_map_set((&L.l_byPath), &L._t18, &L._t17);
+          L._t18 = NULL;
+          L._t17 = NULL;
+          sd_list_release(L.l_list); L.l_list = NULL;
+          sd_str_release(L.l_message); L.l_message = NULL;
+          goto _c12;
+        }
+        if (sd_int_lt((L.l_a).f_file, SD_INT(0))) {
+          sd_list_release(L.l_list); L.l_list = NULL;
+          sd_str_release(L.l_message); L.l_message = NULL;
+          goto _c12;
+        }
+        sd_S_Pos _t19 = (sd_S_Pos){.f_file = sd_int_retain((L.l_a).f_file), .f_line = SD_INT(1), .f_col = SD_INT(1)};
+        sd_S_Pos l_at = _t19;
+        {
+          int64_t l_m = ((int64_t)0);
+          for (;;) {
+            SD_PREEMPT();
+            if (!((l_m < SD_SMALL(sd_list_len((((L.l_a).f_c).f_ast).f_imports))))) break;
+            {
+              sd_S_Import l_im = SD_LIST_GET((((L.l_a).f_c).f_ast).f_imports, sd_S_Import, SD_INT_S(l_m));
+              if ((sd_int_eq((l_im).f_file, (L.l_a).f_file) && sd_int_eq((l_im).f_target, (SD_LIST_GET((((L.l_a).f_c).f_ast).f_files, sd_S_SourceFile, l_gf)).f_pkgIndex))) {
+                sd_S_Pos _t21 = sd_rt_S3Pos((l_im).f_pos);
+                sd_rl_S3Pos(l_at);
+                l_at = _t21;
+              }
+            }
+            _c20:;
+            l_m++;
+          }
+        }
+        sd_str_part _t22[] = {{l_gpath}, {SD_STR_LIT(":")}, {NULL, ((l_g).f_pos).f_line}, {SD_STR_LIT(":")}, {NULL, ((l_g).f_pos).f_col}};
+        sd_str _t23 = sd_str_concat_parts(_t22, 5);
+        L.l_where = _t23;
+        sd_str _t24 = (l_job).f_path;
+        sd_list * *_t25 = sd_map_get(L.l_byPath, &_t24);
+        L.l_own = sd_list_retain((_t25 ? *_t25 : NULL));
+        if ((!((L.l_own) == NULL))) {
+          sd_str _t26[] = {L.l_where, SD_STR_LIT(": "), L.l_message};
+          L._t27 = sd_str_concat_n(_t26, 3);
+          sd_box * _t28 = sd_f_lspDiagJson((L.l_a).f_src, l_at, L._t27, SD_INT_S(l_severity));
+          SD_LIST_PUSH((&L.l_own), sd_box *, _t28);
+          sd_str_release(L._t27); L._t27 = NULL;
+          L._t29 = sd_list_retain(L.l_own);
+          L._t30 = sd_str_retain((l_job).f_path);
+          sd_map_set((&L.l_byPath), &L._t30, &L._t29);
+          L._t30 = NULL;
+          L._t29 = NULL;
+        }
+        sd_list_release(L.l_own); L.l_own = NULL;
+        sd_str_release(L.l_where); L.l_where = NULL;
+        sd_rl_S3Pos(l_at);
+        sd_list_release(L.l_list); L.l_list = NULL;
+        sd_str_release(L.l_message); L.l_message = NULL;
+      }
+      _c12:;
+      l_k++;
+    }
+  }
+  sd_map * _t31 = sd_map_new(&sd_type_str, &sd_type_box);
+  L.l_out = _t31;
+  sd_list * _t32 = sd_map_keys(L.l_byPath);
+  L.l_paths = _t32;
+  {
+    int64_t l_p = ((int64_t)0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!((l_p < SD_SMALL(sd_list_len(L.l_paths))))) break;
+      {
+        sd_str _t34 = SD_LIST_GET(L.l_paths, sd_str, SD_INT_S(l_p));
+        sd_list * *_t35 = sd_map_get(L.l_byPath, &_t34);
+        L.l_ds = sd_list_retain((_t35 ? *_t35 : NULL));
+        if ((!((L.l_ds) == NULL))) {
+          L._t36 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 4, .u.c_Array = {sd_list_retain(L.l_ds)}});
+          L._t37 = sd_str_retain(SD_LIST_GET(L.l_paths, sd_str, SD_INT_S(l_p)));
+          sd_map_set((&L.l_out), &L._t37, &L._t36);
+          L._t37 = NULL;
+          L._t36 = NULL;
+        }
+        sd_list_release(L.l_ds); L.l_ds = NULL;
+      }
+      _c33:;
+      l_p++;
+    }
+  }
+  sd_box * _t38 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 5, .u.c_Object = {L.l_out}});
+  L.l_out = NULL;
+  sd_T_T2E10json_Valuee _t39 = (sd_T_T2E10json_Valuee){_t38, SD_IFACE_NULL};
+  SD_LF_LEAVE(L);
+  sd_list_release(L.l_paths);
+  sd_list_release(L.l_all);
+  sd_map_release(L.l_byPath);
+  sd_rl_S11LspAnalysis(L.l_a);
+  return _t39;
+}
+
+typedef struct { sd_lframe h; sd_map * l_m; sd_box * _t3; sd_box * _t5; sd_box * _t7; sd_box * _t9; } sd_L_sd_f_lspDiagJson;
+static void sd_lr_sd_f_lspDiagJson(sd_lframe *p) {
+  sd_L_sd_f_lspDiagJson *L = (sd_L_sd_f_lspDiagJson *)p;
+  sd_map_release(L->l_m);
+  sd_box_release(L->_t3);
+  sd_box_release(L->_t5);
+  sd_box_release(L->_t7);
+  sd_box_release(L->_t9);
+}
+static sd_box * sd_f_lspDiagJson(sd_str l_src, sd_S_Pos l_pos, sd_str l_message, sd_int l_severity) {
+  sd_L_sd_f_lspDiagJson L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_lspDiagJson);
+  sd_map * _t1 = sd_map_new(&sd_type_str, &sd_type_box);
+  L.l_m = _t1;
+  sd_S_Pos _t2 = sd_f_lspWordEnd(l_src, l_pos);
+  L._t3 = sd_f_lspRange(l_src, l_pos, _t2);
+  sd_str _t4 = SD_STR_LIT("range");
+  sd_map_set((&L.l_m), &_t4, &L._t3);
+  L._t3 = NULL;
+  sd_rl_S3Pos(_t2);
+  L._t5 = sd_f_lspNum(l_severity);
+  sd_str _t6 = SD_STR_LIT("severity");
+  sd_map_set((&L.l_m), &_t6, &L._t5);
+  L._t5 = NULL;
+  L._t7 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 3, .u.c_String = {SD_STR_LIT("seed")}});
+  sd_str _t8 = SD_STR_LIT("source");
+  sd_map_set((&L.l_m), &_t8, &L._t7);
+  L._t7 = NULL;
+  L._t9 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 3, .u.c_String = {sd_str_retain(l_message)}});
+  sd_str _t10 = SD_STR_LIT("message");
+  sd_map_set((&L.l_m), &_t10, &L._t9);
+  L._t9 = NULL;
+  sd_box * _t11 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 5, .u.c_Object = {L.l_m}});
+  L.l_m = NULL;
+  SD_LF_LEAVE(L);
+  return _t11;
+}
+
+static sd_int sd_f_lspLineStart(sd_str l_src, sd_int l_line) {
+  if (sd_int_le(l_line, SD_INT(0))) {
+    return SD_INT(0);
+  }
+  sd_int l_cur = SD_INT(0);
+  {
+    int64_t l_i = ((int64_t)0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!((l_i < SD_SMALL(sd_str_len(l_src))))) break;
+      {
+        if (((sd_str_at(l_src, SD_INT_S(l_i))) == (((uint8_t)10)))) {
+          { int64_t r_; if (SD_LIKELY((((l_cur).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_cur).w, SD_INT(1).w, &r_))) (l_cur).w = r_; else { sd_int s_ = sd_int_add_slow((l_cur), SD_INT(1)); sd_int_release((l_cur)); (l_cur) = s_; } }
+          if (sd_int_eq(l_cur, l_line)) {
+            sd_int _t2 = sd_int_add(SD_INT_S(l_i), SD_INT(1));
+            sd_int _t3 = _t2;
+            sd_int_release(l_cur);
+            return _t3;
+          }
+        }
+      }
+      _c1:;
+      l_i++;
+    }
+  }
+  sd_int _t4 = SD_INT(-1);
+  sd_int_release(l_cur);
+  return _t4;
+}
+
+static sd_int sd_f_lspCharBytes(uint8_t l_b) {
+  if (((l_b) >= (sd_int_to_byte(SD_INT(240))))) {
+    return SD_INT(4);
+  }
+  if (((l_b) >= (sd_int_to_byte(SD_INT(224))))) {
+    return SD_INT(3);
+  }
+  if (((l_b) >= (sd_int_to_byte(SD_INT(192))))) {
+    return SD_INT(2);
+  }
+  return SD_INT(1);
+}
+
+static sd_int sd_f_lspUnits(sd_str l_src, sd_int l_start, sd_int l_end) {
+  sd_int l_n = SD_INT(0);
+  sd_int l_i = sd_int_retain(l_start);
+  {
+    for (;;) {
+      SD_PREEMPT();
+      if (!((sd_int_lt(l_i, l_end) && sd_int_lt(l_i, sd_str_len(l_src))))) break;
+      {
+        sd_int _t1 = sd_f_lspCharBytes(sd_str_at(l_src, l_i));
+        sd_int l_w = _t1;
+        if (sd_int_eq(l_w, SD_INT(4))) {
+          sd_int _t2 = SD_INT_S((((int64_t)2)));
+          { int64_t r_; if (SD_LIKELY((((l_n).w | _t2.w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_n).w, _t2.w, &r_))) (l_n).w = r_; else { sd_int s_ = sd_int_add_slow((l_n), _t2); sd_int_release((l_n)); (l_n) = s_; } }
+        } else {
+          { int64_t r_; if (SD_LIKELY((((l_n).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_n).w, SD_INT(1).w, &r_))) (l_n).w = r_; else { sd_int s_ = sd_int_add_slow((l_n), SD_INT(1)); sd_int_release((l_n)); (l_n) = s_; } }
+        }
+        { int64_t r_; if (SD_LIKELY((((l_i).w | l_w.w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_i).w, l_w.w, &r_))) (l_i).w = r_; else { sd_int s_ = sd_int_add_slow((l_i), l_w); sd_int_release((l_i)); (l_i) = s_; } }
+        sd_int_release(l_w);
+      }
+    }
+  }
+  sd_int _t3 = l_n;
+  sd_int_release(l_i);
+  return _t3;
+}
+
+static sd_int sd_f_lspOffset(sd_str l_src, sd_int l_line, sd_int l_character) {
+  sd_int _t1 = sd_f_lspLineStart(l_src, l_line);
+  sd_int l_ls = _t1;
+  if (sd_int_lt(l_ls, SD_INT(0))) {
+    sd_int _t2 = sd_str_len(l_src);
+    sd_int_release(l_ls);
+    return _t2;
+  }
+  sd_int l_units = SD_INT(0);
+  sd_int l_i = l_ls;
+  {
+    for (;;) {
+      SD_PREEMPT();
+      if (!(((sd_int_lt(l_i, sd_str_len(l_src)) && (!((sd_str_at(l_src, l_i)) == (((uint8_t)10))))) && sd_int_lt(l_units, l_character)))) break;
+      {
+        sd_int _t3 = sd_f_lspCharBytes(sd_str_at(l_src, l_i));
+        sd_int l_w = _t3;
+        if (sd_int_eq(l_w, SD_INT(4))) {
+          sd_int _t4 = SD_INT_S((((int64_t)2)));
+          { int64_t r_; if (SD_LIKELY((((l_units).w | _t4.w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_units).w, _t4.w, &r_))) (l_units).w = r_; else { sd_int s_ = sd_int_add_slow((l_units), _t4); sd_int_release((l_units)); (l_units) = s_; } }
+        } else {
+          { int64_t r_; if (SD_LIKELY((((l_units).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_units).w, SD_INT(1).w, &r_))) (l_units).w = r_; else { sd_int s_ = sd_int_add_slow((l_units), SD_INT(1)); sd_int_release((l_units)); (l_units) = s_; } }
+        }
+        { int64_t r_; if (SD_LIKELY((((l_i).w | l_w.w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_i).w, l_w.w, &r_))) (l_i).w = r_; else { sd_int s_ = sd_int_add_slow((l_i), l_w); sd_int_release((l_i)); (l_i) = s_; } }
+        sd_int_release(l_w);
+      }
+    }
+  }
+  if (sd_int_gt(l_i, sd_str_len(l_src))) {
+    sd_int _t5 = sd_str_len(l_src);
+    sd_int_release(l_i);
+    sd_int_release(l_units);
+    return _t5;
+  }
+  sd_int _t6 = l_i;
+  sd_int_release(l_units);
+  return _t6;
+}
+
+static sd_S_Pos sd_f_lspPosOf(sd_str l_src, sd_int l_file, sd_int l_line, sd_int l_character) {
+  sd_int _t1 = sd_f_lspOffset(l_src, l_line, l_character);
+  sd_int l_off = _t1;
+  sd_int _t2 = sd_f_lspLineStart(l_src, l_line);
+  sd_int l_ls = _t2;
+  if (sd_int_lt(l_ls, SD_INT(0))) {
+    sd_int _t3 = SD_INT(0);
+    sd_int_release(l_ls);
+    l_ls = _t3;
+  }
+  sd_int _t4 = sd_int_add(l_line, SD_INT(1));
+  sd_int _t5 = sd_int_sub(l_off, l_ls);
+  sd_int _t6 = sd_int_add(_t5, SD_INT(1));
+  sd_S_Pos _t7 = (sd_S_Pos){.f_file = sd_int_retain(l_file), .f_line = _t4, .f_col = _t6};
+  sd_S_Pos _t8 = _t7;
+  sd_int_release(_t5);
+  sd_int_release(l_ls);
+  sd_int_release(l_off);
+  return _t8;
+}
+
+typedef struct { sd_lframe h; sd_map * l_m; sd_box * _t8; sd_box * _t10; } sd_L_sd_f_lspPosition;
+static void sd_lr_sd_f_lspPosition(sd_lframe *p) {
+  sd_L_sd_f_lspPosition *L = (sd_L_sd_f_lspPosition *)p;
+  sd_map_release(L->l_m);
+  sd_box_release(L->_t8);
+  sd_box_release(L->_t10);
+}
+static sd_box * sd_f_lspPosition(sd_str l_src, sd_S_Pos l_pos) {
+  sd_L_sd_f_lspPosition L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_lspPosition);
+  sd_int _t1 = sd_int_sub((l_pos).f_line, SD_INT(1));
+  sd_int l_line = _t1;
+  if (sd_int_lt(l_line, SD_INT(0))) {
+    sd_int _t2 = SD_INT(0);
+    sd_int_release(l_line);
+    l_line = _t2;
+  }
+  sd_int _t3 = sd_f_lspLineStart(l_src, l_line);
+  sd_int l_ls = _t3;
+  sd_int l_character = SD_INT(0);
+  if (sd_int_ge(l_ls, SD_INT(0))) {
+    sd_int _t4 = sd_int_add(l_ls, (l_pos).f_col);
+    sd_int _t5 = sd_int_sub(_t4, SD_INT(1));
+    sd_int _t6 = sd_f_lspUnits(l_src, l_ls, _t5);
+    sd_int_release(l_character);
+    l_character = _t6;
+    sd_int_release(_t5);
+    sd_int_release(_t4);
+  }
+  sd_map * _t7 = sd_map_new(&sd_type_str, &sd_type_box);
+  L.l_m = _t7;
+  L._t8 = sd_f_lspNum(l_line);
+  sd_str _t9 = SD_STR_LIT("line");
+  sd_map_set((&L.l_m), &_t9, &L._t8);
+  L._t8 = NULL;
+  L._t10 = sd_f_lspNum(l_character);
+  sd_str _t11 = SD_STR_LIT("character");
+  sd_map_set((&L.l_m), &_t11, &L._t10);
+  L._t10 = NULL;
+  sd_box * _t12 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 5, .u.c_Object = {L.l_m}});
+  L.l_m = NULL;
+  sd_box * _t13 = _t12;
+  SD_LF_LEAVE(L);
+  sd_int_release(l_character);
+  sd_int_release(l_ls);
+  sd_int_release(l_line);
+  return _t13;
+}
+
+typedef struct { sd_lframe h; sd_map * l_m; sd_box * _t2; sd_box * _t4; } sd_L_sd_f_lspRange;
+static void sd_lr_sd_f_lspRange(sd_lframe *p) {
+  sd_L_sd_f_lspRange *L = (sd_L_sd_f_lspRange *)p;
+  sd_map_release(L->l_m);
+  sd_box_release(L->_t2);
+  sd_box_release(L->_t4);
+}
+static sd_box * sd_f_lspRange(sd_str l_src, sd_S_Pos l_start, sd_S_Pos l_end) {
+  sd_L_sd_f_lspRange L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_lspRange);
+  sd_map * _t1 = sd_map_new(&sd_type_str, &sd_type_box);
+  L.l_m = _t1;
+  L._t2 = sd_f_lspPosition(l_src, l_start);
+  sd_str _t3 = SD_STR_LIT("start");
+  sd_map_set((&L.l_m), &_t3, &L._t2);
+  L._t2 = NULL;
+  L._t4 = sd_f_lspPosition(l_src, l_end);
+  sd_str _t5 = SD_STR_LIT("end");
+  sd_map_set((&L.l_m), &_t5, &L._t4);
+  L._t4 = NULL;
+  sd_box * _t6 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 5, .u.c_Object = {L.l_m}});
+  L.l_m = NULL;
+  SD_LF_LEAVE(L);
+  return _t6;
+}
+
+static bool sd_f_lspIdentByte(uint8_t l_b) {
+  return ((((((l_b) >= (((uint8_t)97))) && ((l_b) <= (((uint8_t)122)))) || (((l_b) >= (((uint8_t)65))) && ((l_b) <= (((uint8_t)90))))) || (((l_b) >= (((uint8_t)48))) && ((l_b) <= (((uint8_t)57))))) || ((l_b) == (((uint8_t)95))));
+}
+
+static sd_S_Pos sd_f_lspWordEnd(sd_str l_src, sd_S_Pos l_pos) {
+  sd_int _t1 = sd_int_sub((l_pos).f_line, SD_INT(1));
+  sd_int _t2 = sd_f_lspLineStart(l_src, _t1);
+  sd_int l_ls = _t2;
+  sd_int_release(_t1);
+  if (sd_int_lt(l_ls, SD_INT(0))) {
+    sd_S_Pos _t3 = sd_rt_S3Pos(l_pos);
+    sd_int_release(l_ls);
+    return _t3;
+  }
+  sd_int _t4 = sd_int_add(l_ls, (l_pos).f_col);
+  sd_int _t5 = sd_int_sub(_t4, SD_INT(1));
+  sd_int l_i = _t5;
+  sd_int_release(_t4);
+  if (((sd_int_ge(l_i, sd_str_len(l_src)) || ((sd_str_at(l_src, l_i)) == (((uint8_t)10)))) || ((sd_str_at(l_src, l_i)) == (((uint8_t)13))))) {
+    sd_S_Pos _t6 = sd_rt_S3Pos(l_pos);
+    sd_int_release(l_i);
+    sd_int_release(l_ls);
+    return _t6;
+  }
+  sd_int l_j = sd_int_retain(l_i);
+  {
+    for (;;) {
+      SD_PREEMPT();
+      bool _t8 = sd_int_lt(l_j, sd_str_len(l_src));
+      if (_t8) {
+        bool _t7 = sd_f_lspIdentByte(sd_str_at(l_src, l_j));
+        _t8 = _t7;
+      }
+      if (!(_t8)) break;
+      {
+        { int64_t r_; if (SD_LIKELY((((l_j).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_j).w, SD_INT(1).w, &r_))) (l_j).w = r_; else { sd_int s_ = sd_int_add_slow((l_j), SD_INT(1)); sd_int_release((l_j)); (l_j) = s_; } }
+      }
+    }
+  }
+  if (sd_int_eq(l_j, l_i)) {
+    sd_int _t9 = sd_f_lspCharBytes(sd_str_at(l_src, l_i));
+    sd_int _t10 = sd_int_add(l_i, _t9);
+    sd_int_release(l_j);
+    l_j = _t10;
+    sd_int_release(_t9);
+  }
+  sd_int _t11 = sd_int_add((l_pos).f_col, l_j);
+  sd_int _t12 = sd_int_sub(_t11, l_i);
+  sd_S_Pos _t13 = (sd_S_Pos){.f_file = sd_int_retain((l_pos).f_file), .f_line = sd_int_retain((l_pos).f_line), .f_col = _t12};
+  sd_S_Pos _t14 = _t13;
+  sd_int_release(_t11);
+  sd_int_release(l_j);
+  sd_int_release(l_i);
+  sd_int_release(l_ls);
+  return _t14;
+}
+
+typedef struct { sd_lframe h; sd_list * l_edits; sd_str l_text; sd_S_Parser l_before; sd_str l_out; sd_S_Parser l_after; sd_str _t16; sd_map * l_end; sd_box * _t27; sd_box * _t30; sd_map * l_start; sd_box * _t33; sd_box * _t35; sd_map * l_r; sd_box * _t38; sd_box * _t40; sd_map * l_edit; sd_box * _t43; sd_box * _t45; } sd_L_sd_f_lspFormat;
+static void sd_lr_sd_f_lspFormat(sd_lframe *p) {
+  sd_L_sd_f_lspFormat *L = (sd_L_sd_f_lspFormat *)p;
+  sd_list_release(L->l_edits);
+  sd_str_release(L->l_text);
+  sd_rl_S6Parser(L->l_before);
+  sd_str_release(L->l_out);
+  sd_rl_S6Parser(L->l_after);
+  sd_str_release(L->_t16);
+  sd_map_release(L->l_end);
+  sd_box_release(L->_t27);
+  sd_box_release(L->_t30);
+  sd_map_release(L->l_start);
+  sd_box_release(L->_t33);
+  sd_box_release(L->_t35);
+  sd_map_release(L->l_r);
+  sd_box_release(L->_t38);
+  sd_box_release(L->_t40);
+  sd_map_release(L->l_edit);
+  sd_box_release(L->_t43);
+  sd_box_release(L->_t45);
+}
+static sd_box * sd_f_lspFormat(sd_S_LspJob l_job) {
+  sd_L_sd_f_lspFormat L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_lspFormat);
+  sd_list * _t1 = sd_list_new(&sd_type_box, 0);
+  L.l_edits = _t1;
+  sd_str _t2 = (l_job).f_path;
+  sd_str *_t3 = sd_map_get((l_job).f_overlay, &_t2);
+  L.l_text = sd_str_retain((_t3 ? *_t3 : NULL));
+  if (((L.l_text) == NULL)) {
+    sd_box * _t4 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 4, .u.c_Array = {sd_list_retain(L.l_edits)}});
+    sd_box * _t5 = _t4;
+    SD_LF_LEAVE(L);
+    sd_str_release(L.l_text);
+    sd_list_release(L.l_edits);
+    return _t5;
+  }
+  sd_S_Parser _t6 = sd_f_fmtParse((l_job).f_path, L.l_text);
+  L.l_before = _t6;
+  sd_int _t7 = sd_m_Diags__count((L.l_before).f_diags);
+  bool _t8 = sd_int_gt(_t7, SD_INT(0));
+  sd_int_release(_t7);
+  if (_t8) {
+    sd_box * _t9 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 4, .u.c_Array = {sd_list_retain(L.l_edits)}});
+    sd_box * _t10 = _t9;
+    SD_LF_LEAVE(L);
+    sd_rl_S6Parser(L.l_before);
+    sd_str_release(L.l_text);
+    sd_list_release(L.l_edits);
+    return _t10;
+  }
+  sd_str _t11 = sd_f_formatSource(L.l_text);
+  L.l_out = _t11;
+  if (sd_str_eq(L.l_out, L.l_text)) {
+    sd_box * _t12 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 4, .u.c_Array = {sd_list_retain(L.l_edits)}});
+    sd_box * _t13 = _t12;
+    SD_LF_LEAVE(L);
+    sd_str_release(L.l_out);
+    sd_rl_S6Parser(L.l_before);
+    sd_str_release(L.l_text);
+    sd_list_release(L.l_edits);
+    return _t13;
+  }
+  sd_S_Parser _t14 = sd_f_fmtParse((l_job).f_path, L.l_out);
+  L.l_after = _t14;
+  sd_int _t15 = sd_m_Diags__count((L.l_after).f_diags);
+  bool _t18 = sd_int_gt(_t15, SD_INT(0));
+  if (!_t18) {
+    L._t16 = sd_m_Ast__dump((L.l_after).f_ast);
+    sd_str _t17 = sd_m_Ast__dump((L.l_before).f_ast);
+    _t18 = (!sd_str_eq(L._t16, _t17));
+    sd_str_release(_t17); 
+    sd_str_release(L._t16); L._t16 = NULL;
+  }
+  bool _t20 = _t18;
+  if (!_t20) {
+    bool _t19 = sd_f_sameComments((L.l_before).f_ast, (L.l_after).f_ast);
+    _t20 = (!_t19);
+  }
+  bool _t21 = _t20;
+  sd_int_release(_t15);
+  if (_t21) {
+    sd_box * _t22 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 4, .u.c_Array = {sd_list_retain(L.l_edits)}});
+    sd_box * _t23 = _t22;
+    SD_LF_LEAVE(L);
+    sd_rl_S6Parser(L.l_after);
+    sd_str_release(L.l_out);
+    sd_rl_S6Parser(L.l_before);
+    sd_str_release(L.l_text);
+    sd_list_release(L.l_edits);
+    return _t23;
+  }
+  sd_int l_lines = SD_INT(0);
+  sd_int l_last = SD_INT(0);
+  {
+    int64_t l_i = ((int64_t)0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!((l_i < SD_SMALL(sd_str_len(L.l_text))))) break;
+      {
+        if (((sd_str_at(L.l_text, SD_INT_S(l_i))) == (((uint8_t)10)))) {
+          { int64_t r_; if (SD_LIKELY((((l_lines).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_lines).w, SD_INT(1).w, &r_))) (l_lines).w = r_; else { sd_int s_ = sd_int_add_slow((l_lines), SD_INT(1)); sd_int_release((l_lines)); (l_lines) = s_; } }
+          sd_int _t25 = sd_int_add(SD_INT_S(l_i), SD_INT(1));
+          sd_int_release(l_last);
+          l_last = _t25;
+        }
+      }
+      _c24:;
+      l_i++;
+    }
+  }
+  sd_map * _t26 = sd_map_new(&sd_type_str, &sd_type_box);
+  L.l_end = _t26;
+  L._t27 = sd_f_lspNum(l_lines);
+  sd_str _t28 = SD_STR_LIT("line");
+  sd_map_set((&L.l_end), &_t28, &L._t27);
+  L._t27 = NULL;
+  sd_int _t29 = sd_f_lspUnits(L.l_text, l_last, sd_str_len(L.l_text));
+  L._t30 = sd_f_lspNum(_t29);
+  sd_str _t31 = SD_STR_LIT("character");
+  sd_map_set((&L.l_end), &_t31, &L._t30);
+  L._t30 = NULL;
+  sd_int_release(_t29);
+  sd_map * _t32 = sd_map_new(&sd_type_str, &sd_type_box);
+  L.l_start = _t32;
+  L._t33 = sd_f_lspNum(SD_INT(0));
+  sd_str _t34 = SD_STR_LIT("line");
+  sd_map_set((&L.l_start), &_t34, &L._t33);
+  L._t33 = NULL;
+  L._t35 = sd_f_lspNum(SD_INT(0));
+  sd_str _t36 = SD_STR_LIT("character");
+  sd_map_set((&L.l_start), &_t36, &L._t35);
+  L._t35 = NULL;
+  sd_map * _t37 = sd_map_new(&sd_type_str, &sd_type_box);
+  L.l_r = _t37;
+  L._t38 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 5, .u.c_Object = {L.l_start}});
+  L.l_start = NULL;
+  sd_str _t39 = SD_STR_LIT("start");
+  sd_map_set((&L.l_r), &_t39, &L._t38);
+  L._t38 = NULL;
+  L._t40 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 5, .u.c_Object = {L.l_end}});
+  L.l_end = NULL;
+  sd_str _t41 = SD_STR_LIT("end");
+  sd_map_set((&L.l_r), &_t41, &L._t40);
+  L._t40 = NULL;
+  sd_map * _t42 = sd_map_new(&sd_type_str, &sd_type_box);
+  L.l_edit = _t42;
+  L._t43 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 5, .u.c_Object = {L.l_r}});
+  L.l_r = NULL;
+  sd_str _t44 = SD_STR_LIT("range");
+  sd_map_set((&L.l_edit), &_t44, &L._t43);
+  L._t43 = NULL;
+  L._t45 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 3, .u.c_String = {L.l_out}});
+  L.l_out = NULL;
+  sd_str _t46 = SD_STR_LIT("newText");
+  sd_map_set((&L.l_edit), &_t46, &L._t45);
+  L._t45 = NULL;
+  sd_box * _t47 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 5, .u.c_Object = {L.l_edit}});
+  L.l_edit = NULL;
+  SD_LIST_PUSH((&L.l_edits), sd_box *, _t47);
+  sd_box * _t48 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 4, .u.c_Array = {L.l_edits}});
+  L.l_edits = NULL;
+  sd_box * _t49 = _t48;
+  SD_LF_LEAVE(L);
+  sd_int_release(l_last);
+  sd_int_release(l_lines);
+  sd_rl_S6Parser(L.l_after);
+  sd_rl_S6Parser(L.l_before);
+  sd_str_release(L.l_text);
+  return _t49;
+}
+
+static sd_S_LspSym sd_f_lspNoSym(void) {
+  sd_S_Pos _t1 = (sd_S_Pos){.f_file = SD_INT(-1), .f_line = SD_INT(0), .f_col = SD_INT(0)};
+  sd_S_LspSym _t2 = (sd_S_LspSym){.f_found = false, .f_pos = _t1, .f_len = SD_INT(0), .f_sig = SD_STR_LIT(""), .f_doc = SD_STR_LIT("")};
+  return _t2;
+}
+
+static sd_S_LspSym sd_f_lspSymOf(sd_S_Pos l_pos, sd_str l_name, sd_str l_sig, sd_str l_doc) {
+  sd_S_LspSym _t1 = (sd_S_LspSym){.f_found = true, .f_pos = sd_rt_S3Pos(l_pos), .f_len = sd_str_len(l_name), .f_sig = sd_str_retain(l_sig), .f_doc = sd_str_retain(l_doc)};
+  return _t1;
+}
+
+typedef struct { sd_lframe h; sd_T_T2S11LspAnalysise _t1; sd_S_LspAnalysis l_a; sd_S_Lexer l_lx; sd_S_LspSym l_s; sd_map * l_loc; sd_box * _t13; sd_box * _t17; sd_str l_value; sd_map * l_contents; sd_box * _t25; sd_box * _t27; sd_map * l_hover; sd_box * _t30; sd_box * _t34; } sd_L_sd_f_lspLookup;
+static void sd_lr_sd_f_lspLookup(sd_lframe *p) {
+  sd_L_sd_f_lspLookup *L = (sd_L_sd_f_lspLookup *)p;
+  sd_rl_T2S11LspAnalysise(L->_t1);
+  sd_rl_S11LspAnalysis(L->l_a);
+  sd_rl_S5Lexer(L->l_lx);
+  sd_rl_S6LspSym(L->l_s);
+  sd_map_release(L->l_loc);
+  sd_box_release(L->_t13);
+  sd_box_release(L->_t17);
+  sd_str_release(L->l_value);
+  sd_map_release(L->l_contents);
+  sd_box_release(L->_t25);
+  sd_box_release(L->_t27);
+  sd_map_release(L->l_hover);
+  sd_box_release(L->_t30);
+  sd_box_release(L->_t34);
+}
+static sd_T_T2E10json_Valuee sd_f_lspLookup(sd_S_LspJob l_job) {
+  sd_L_sd_f_lspLookup L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_lspLookup);
+  L._t1 = sd_f_lspAnalyze(l_job, true);
+  if (!sd_err_is_null(L._t1.r1)) {
+    sd_rl_S11LspAnalysis(L._t1.r0);
+    SD_LF_LEAVE(L);
+    return (sd_T_T2E10json_Valuee){.r1 = L._t1.r1};
+  }
+  sd_S_LspAnalysis _t2 = L._t1.r0;
+  L._t1 = ((sd_T_T2S11LspAnalysise){0});
+  L.l_a = _t2;
+  if (sd_int_lt((L.l_a).f_file, SD_INT(0))) {
+    sd_T_T2E10json_Valuee _t3 = (sd_T_T2E10json_Valuee){SD_BOX_REF(sd_k_json_Value__Null), SD_IFACE_NULL};
+    SD_LF_LEAVE(L);
+    sd_rl_S11LspAnalysis(L.l_a);
+    return _t3;
+  }
+  sd_S_Lexer _t4 = sd_f_lex((L.l_a).f_file, (L.l_a).f_src);
+  L.l_lx = _t4;
+  sd_S_Pos _t5 = sd_f_lspPosOf((L.l_a).f_src, (L.l_a).f_file, (l_job).f_line, (l_job).f_character);
+  sd_S_Pos l_cur = _t5;
+  sd_int _t6 = sd_f_lspTokenAt((L.l_lx).f_tokens, l_cur);
+  sd_int l_ti = _t6;
+  if (sd_int_lt(l_ti, SD_INT(0))) {
+    sd_T_T2E10json_Valuee _t7 = (sd_T_T2E10json_Valuee){SD_BOX_REF(sd_k_json_Value__Null), SD_IFACE_NULL};
+    SD_LF_LEAVE(L);
+    sd_int_release(l_ti);
+    sd_rl_S3Pos(l_cur);
+    sd_rl_S5Lexer(L.l_lx);
+    sd_rl_S11LspAnalysis(L.l_a);
+    return _t7;
+  }
+  sd_S_LspSym _t8 = sd_f_lspResolve((L.l_a).f_c, (L.l_lx).f_tokens, l_ti);
+  L.l_s = _t8;
+  if ((!(L.l_s).f_found)) {
+    sd_T_T2E10json_Valuee _t9 = (sd_T_T2E10json_Valuee){SD_BOX_REF(sd_k_json_Value__Null), SD_IFACE_NULL};
+    SD_LF_LEAVE(L);
+    sd_rl_S6LspSym(L.l_s);
+    sd_int_release(l_ti);
+    sd_rl_S3Pos(l_cur);
+    sd_rl_S5Lexer(L.l_lx);
+    sd_rl_S11LspAnalysis(L.l_a);
+    return _t9;
+  }
+  if (sd_str_eq((l_job).f_kind, SD_STR_LIT("definition"))) {
+    if ((sd_int_lt(((L.l_s).f_pos).f_file, SD_INT(0)) || sd_int_ge(((L.l_s).f_pos).f_file, sd_list_len((((L.l_a).f_c).f_ast).f_files)))) {
+      sd_T_T2E10json_Valuee _t10 = (sd_T_T2E10json_Valuee){SD_BOX_REF(sd_k_json_Value__Null), SD_IFACE_NULL};
+      SD_LF_LEAVE(L);
+      sd_rl_S6LspSym(L.l_s);
+      sd_int_release(l_ti);
+      sd_rl_S3Pos(l_cur);
+      sd_rl_S5Lexer(L.l_lx);
+      sd_rl_S11LspAnalysis(L.l_a);
+      return _t10;
+    }
+    sd_str l_dsrc = SD_LIST_GET((((L.l_a).f_c).f_diags).f_sources, sd_str, ((L.l_s).f_pos).f_file);
+    sd_map * _t11 = sd_map_new(&sd_type_str, &sd_type_box);
+    L.l_loc = _t11;
+    sd_str _t12 = sd_f_lspPathToUri((SD_LIST_GET((((L.l_a).f_c).f_ast).f_files, sd_S_SourceFile, ((L.l_s).f_pos).f_file)).f_path);
+    L._t13 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 3, .u.c_String = {_t12}});
+    sd_str _t14 = SD_STR_LIT("uri");
+    sd_map_set((&L.l_loc), &_t14, &L._t13);
+    L._t13 = NULL;
+    sd_int _t15 = sd_int_add(((L.l_s).f_pos).f_col, (L.l_s).f_len);
+    sd_S_Pos _t16 = (sd_S_Pos){.f_file = sd_int_retain(((L.l_s).f_pos).f_file), .f_line = sd_int_retain(((L.l_s).f_pos).f_line), .f_col = _t15};
+    L._t17 = sd_f_lspRange(l_dsrc, (L.l_s).f_pos, _t16);
+    sd_str _t18 = SD_STR_LIT("range");
+    sd_map_set((&L.l_loc), &_t18, &L._t17);
+    L._t17 = NULL;
+    sd_rl_S3Pos(_t16);
+    sd_box * _t19 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 5, .u.c_Object = {L.l_loc}});
+    L.l_loc = NULL;
+    sd_T_T2E10json_Valuee _t20 = (sd_T_T2E10json_Valuee){_t19, SD_IFACE_NULL};
+    SD_LF_LEAVE(L);
+    sd_rl_S6LspSym(L.l_s);
+    sd_int_release(l_ti);
+    sd_rl_S3Pos(l_cur);
+    sd_rl_S5Lexer(L.l_lx);
+    sd_rl_S11LspAnalysis(L.l_a);
+    return _t20;
+  }
+  sd_str _t21[] = {SD_STR_LIT("```seed\012"), (L.l_s).f_sig, SD_STR_LIT("\012```")};
+  sd_str _t22 = sd_str_concat_n(_t21, 3);
+  L.l_value = _t22;
+  if ((!sd_str_eq((L.l_s).f_doc, SD_STR_LIT("")))) {
+    sd_str_part _t23[] = {{SD_STR_LIT("\012\012")}, {(L.l_s).f_doc}};
+    L.l_value = sd_str_append_parts(L.l_value, _t23, 2);
+  }
+  sd_map * _t24 = sd_map_new(&sd_type_str, &sd_type_box);
+  L.l_contents = _t24;
+  L._t25 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 3, .u.c_String = {SD_STR_LIT("markdown")}});
+  sd_str _t26 = SD_STR_LIT("kind");
+  sd_map_set((&L.l_contents), &_t26, &L._t25);
+  L._t25 = NULL;
+  L._t27 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 3, .u.c_String = {L.l_value}});
+  L.l_value = NULL;
+  sd_str _t28 = SD_STR_LIT("value");
+  sd_map_set((&L.l_contents), &_t28, &L._t27);
+  L._t27 = NULL;
+  sd_S_Token l_t = SD_LIST_GET((L.l_lx).f_tokens, sd_S_Token, l_ti);
+  sd_map * _t29 = sd_map_new(&sd_type_str, &sd_type_box);
+  L.l_hover = _t29;
+  L._t30 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 5, .u.c_Object = {L.l_contents}});
+  L.l_contents = NULL;
+  sd_str _t31 = SD_STR_LIT("contents");
+  sd_map_set((&L.l_hover), &_t31, &L._t30);
+  L._t30 = NULL;
+  sd_int _t32 = sd_int_add(((l_t).f_pos).f_col, sd_str_len((l_t).f_raw));
+  sd_S_Pos _t33 = (sd_S_Pos){.f_file = sd_int_retain(((l_t).f_pos).f_file), .f_line = sd_int_retain(((l_t).f_pos).f_line), .f_col = _t32};
+  L._t34 = sd_f_lspRange((L.l_a).f_src, (l_t).f_pos, _t33);
+  sd_str _t35 = SD_STR_LIT("range");
+  sd_map_set((&L.l_hover), &_t35, &L._t34);
+  L._t34 = NULL;
+  sd_rl_S3Pos(_t33);
+  sd_box * _t36 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 5, .u.c_Object = {L.l_hover}});
+  L.l_hover = NULL;
+  sd_T_T2E10json_Valuee _t37 = (sd_T_T2E10json_Valuee){_t36, SD_IFACE_NULL};
+  SD_LF_LEAVE(L);
+  sd_rl_S6LspSym(L.l_s);
+  sd_int_release(l_ti);
+  sd_rl_S3Pos(l_cur);
+  sd_rl_S5Lexer(L.l_lx);
+  sd_rl_S11LspAnalysis(L.l_a);
+  return _t37;
+}
+
+static sd_int sd_f_lspTokenAt(sd_list * l_toks, sd_S_Pos l_cur) {
+  int64_t l_touching = ((int64_t)-1);
+  {
+    int64_t l_i = ((int64_t)0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!((l_i < SD_SMALL(sd_list_len(l_toks))))) break;
+      {
+        sd_S_Token l_t = SD_LIST_GET(l_toks, sd_S_Token, SD_INT_S(l_i));
+        if (((!sd_int_eq(((l_t).f_pos).f_line, (l_cur).f_line)) || ((!(SD_BOX_GET((l_t).f_kind, sd_E_Tok).tag == 2)) && (!(SD_BOX_GET((l_t).f_kind, sd_E_Tok).tag == 6))))) {
+          goto _c1;
+        }
+        sd_int _t2 = sd_int_add(((l_t).f_pos).f_col, sd_str_len((l_t).f_raw));
+        sd_int l_end = _t2;
+        if ((sd_int_le(((l_t).f_pos).f_col, (l_cur).f_col) && sd_int_lt((l_cur).f_col, l_end))) {
+          sd_int _t3 = SD_INT_S(l_i);
+          sd_int_release(l_end);
+          return _t3;
+        }
+        if (sd_int_eq((l_cur).f_col, l_end)) {
+          l_touching = l_i;
+        }
+        sd_int_release(l_end);
+      }
+      _c1:;
+      l_i++;
+    }
+  }
+  return SD_INT_S(l_touching);
+}
+
+typedef struct { sd_lframe h; sd_S_LspSym l_d; sd_S_LspSym l_e; sd_S_LspSym l_q; sd_S_LspSym l_ts; } sd_L_sd_f_lspResolve;
+static void sd_lr_sd_f_lspResolve(sd_lframe *p) {
+  sd_L_sd_f_lspResolve *L = (sd_L_sd_f_lspResolve *)p;
+  sd_rl_S6LspSym(L->l_d);
+  sd_rl_S6LspSym(L->l_e);
+  sd_rl_S6LspSym(L->l_q);
+  sd_rl_S6LspSym(L->l_ts);
+}
+static sd_S_LspSym sd_f_lspResolve(sd_S_Checker l_c, sd_list * l_toks, sd_int l_ti) {
+  sd_L_sd_f_lspResolve L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_lspResolve);
+  sd_S_Token l_t = SD_LIST_GET(l_toks, sd_S_Token, l_ti);
+  if ((SD_BOX_GET((l_t).f_kind, sd_E_Tok).tag == 6)) {
+    {
+      int64_t l_i = ((int64_t)0);
+      for (;;) {
+        SD_PREEMPT();
+        if (!((l_i < SD_SMALL(sd_list_len(((l_c).f_ast).f_imports))))) break;
+        {
+          sd_S_Import l_im = SD_LIST_GET(((l_c).f_ast).f_imports, sd_S_Import, SD_INT_S(l_i));
+          if (((sd_int_eq((l_im).f_file, ((l_t).f_pos).f_file) && sd_int_eq(((l_im).f_pos).f_line, ((l_t).f_pos).f_line)) && sd_int_ge((l_im).f_target, SD_INT(0)))) {
+            sd_S_LspSym _t2 = sd_f_lspPkgSym(l_c, (l_im).f_target);
+            SD_LF_LEAVE(L);
+            return _t2;
+          }
+        }
+        _c1:;
+        l_i++;
+      }
+    }
+    sd_S_LspSym _t3 = sd_f_lspNoSym();
+    SD_LF_LEAVE(L);
+    return _t3;
+  }
+  bool _t5 = sd_int_gt(l_ti, SD_INT(0));
+  if (_t5) {
+    sd_int _t4 = sd_int_sub(l_ti, SD_INT(1));
+    _t5 = (SD_BOX_GET((SD_LIST_GET(l_toks, sd_S_Token, _t4)).f_kind, sd_E_Tok).tag == 7);
+    sd_int_release(_t4);
+  }
+  if (_t5) {
+    if ((sd_int_lt(((l_t).f_pos).f_file, SD_INT(0)) || sd_int_ge(((l_t).f_pos).f_file, sd_list_len(((l_c).f_ast).f_files)))) {
+      sd_S_LspSym _t6 = sd_f_lspNoSym();
+      SD_LF_LEAVE(L);
+      return _t6;
+    }
+    sd_S_LspSym _t7 = sd_f_lspPkgSym(l_c, (SD_LIST_GET(((l_c).f_ast).f_files, sd_S_SourceFile, ((l_t).f_pos).f_file)).f_pkgIndex);
+    SD_LF_LEAVE(L);
+    return _t7;
+  }
+  sd_S_LspSym _t8 = sd_f_lspDeclAt(l_c, l_toks, l_ti);
+  L.l_d = _t8;
+  if ((L.l_d).f_found) {
+    SD_LF_LEAVE(L);
+    return L.l_d;
+  }
+  sd_S_LspSym _t9 = sd_f_lspExprAt(l_c, l_toks, (l_t).f_pos, (l_t).f_text);
+  L.l_e = _t9;
+  if ((L.l_e).f_found) {
+    sd_S_LspSym _t10 = L.l_e;
+    SD_LF_LEAVE(L);
+    sd_rl_S6LspSym(L.l_d);
+    return _t10;
+  }
+  sd_S_LspSym _t11 = sd_f_lspQualified(l_c, l_toks, l_ti);
+  L.l_q = _t11;
+  if ((L.l_q).f_found) {
+    sd_S_LspSym _t12 = L.l_q;
+    SD_LF_LEAVE(L);
+    sd_rl_S6LspSym(L.l_e);
+    sd_rl_S6LspSym(L.l_d);
+    return _t12;
+  }
+  {
+    int64_t l_k = ((int64_t)0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!((l_k < SD_SMALL(sd_list_len(((l_c).f_ast).f_typeExprs))))) break;
+      {
+        sd_S_TypeExpr l_te = SD_LIST_GET(((l_c).f_ast).f_typeExprs, sd_S_TypeExpr, SD_INT_S(l_k));
+        if ((((((SD_BOX_GET((l_te).f_kind, sd_E_TypeExprKind).tag == 0) && sd_eq_S3Pos((l_te).f_pos, (l_t).f_pos)) && sd_str_eq((l_te).f_pkg, SD_STR_LIT(""))) && sd_str_eq((l_te).f_name, (l_t).f_text)) && (l_k < SD_SMALL(sd_list_len((l_c).f_teType))))) {
+          sd_S_LspSym _t14 = sd_f_lspTypeSym(l_c, SD_LIST_GET((l_c).f_teType, sd_int, SD_INT_S(l_k)));
+          L.l_ts = _t14;
+          if ((L.l_ts).f_found) {
+            sd_S_LspSym _t15 = L.l_ts;
+            SD_LF_LEAVE(L);
+            sd_rl_S6LspSym(L.l_q);
+            sd_rl_S6LspSym(L.l_e);
+            sd_rl_S6LspSym(L.l_d);
+            return _t15;
+          }
+          sd_rl_S6LspSym(L.l_ts); L.l_ts = ((sd_S_LspSym){0});
+        }
+      }
+      _c13:;
+      l_k++;
+    }
+  }
+  sd_S_LspSym _t16 = sd_f_lspNameSym(l_c, ((l_t).f_pos).f_file, (l_t).f_text);
+  sd_S_LspSym _t17 = _t16;
+  SD_LF_LEAVE(L);
+  sd_rl_S6LspSym(L.l_q);
+  sd_rl_S6LspSym(L.l_e);
+  sd_rl_S6LspSym(L.l_d);
+  return _t17;
+}
+
+static sd_S_LspSym sd_f_lspNameSym(sd_S_Checker l_c, sd_int l_file, sd_str l_name) {
+  if ((sd_int_lt(l_file, SD_INT(0)) || sd_int_ge(l_file, sd_list_len(((l_c).f_ast).f_files)))) {
+    sd_S_LspSym _t1 = sd_f_lspNoSym();
+    return _t1;
+  }
+  sd_int _t2 = sd_m_Checker__importedPkg(l_c, l_file, l_name);
+  sd_int l_ip = _t2;
+  if (sd_int_ge(l_ip, SD_INT(0))) {
+    sd_S_LspSym _t3 = sd_f_lspPkgSym(l_c, l_ip);
+    sd_S_LspSym _t4 = _t3;
+    sd_int_release(l_ip);
+    return _t4;
+  }
+  sd_int _t5 = sd_m_Checker__global(l_c, (SD_LIST_GET(((l_c).f_ast).f_files, sd_S_SourceFile, l_file)).f_pkgIndex, l_name);
+  sd_int l_g = _t5;
+  if ((!sd_int_is_null(l_g))) {
+    sd_S_LspSym _t6 = sd_f_lspGlobalSym(l_c, l_g);
+    sd_S_LspSym _t7 = _t6;
+    sd_int_release(l_g);
+    sd_int_release(l_ip);
+    return _t7;
+  }
+  bool _t8 = sd_f_isBuiltinTypeName(l_name);
+  if (_t8) {
+    sd_S_Pos _t9 = (sd_S_Pos){.f_file = SD_INT(-1), .f_line = SD_INT(0), .f_col = SD_INT(0)};
+    sd_S_LspSym _t10 = (sd_S_LspSym){.f_found = true, .f_pos = _t9, .f_len = SD_INT(0), .f_sig = sd_str_retain(l_name), .f_doc = SD_STR_LIT("built-in type (docs/builtins.md)")};
+    sd_S_LspSym _t11 = _t10;
+    sd_int_release(l_g);
+    sd_int_release(l_ip);
+    return _t11;
+  }
+  sd_S_LspSym _t12 = sd_f_lspNoSym();
+  sd_S_LspSym _t13 = _t12;
+  sd_int_release(l_g);
+  sd_int_release(l_ip);
+  return _t13;
+}
+
+static sd_S_LspSym sd_f_lspQualified(sd_S_Checker l_c, sd_list * l_toks, sd_int l_ti) {
+  bool _t2 = sd_int_lt(l_ti, SD_INT(2));
+  if (!_t2) {
+    sd_int _t1 = sd_int_sub(l_ti, SD_INT(1));
+    _t2 = (!(SD_BOX_GET((SD_LIST_GET(l_toks, sd_S_Token, _t1)).f_kind, sd_E_Tok).tag == 70));
+    sd_int_release(_t1);
+  }
+  bool _t4 = _t2;
+  if (!_t4) {
+    sd_int _t3 = sd_int_sub(l_ti, SD_INT(2));
+    _t4 = (!(SD_BOX_GET((SD_LIST_GET(l_toks, sd_S_Token, _t3)).f_kind, sd_E_Tok).tag == 2));
+    sd_int_release(_t3);
+  }
+  if (_t4) {
+    sd_S_LspSym _t5 = sd_f_lspNoSym();
+    return _t5;
+  }
+  sd_int l_file = ((SD_LIST_GET(l_toks, sd_S_Token, l_ti)).f_pos).f_file;
+  sd_str l_name = (SD_LIST_GET(l_toks, sd_S_Token, l_ti)).f_text;
+  sd_int _t6 = sd_int_sub(l_ti, SD_INT(2));
+  sd_str l_q = (SD_LIST_GET(l_toks, sd_S_Token, _t6)).f_text;
+  sd_int_release(_t6);
+  sd_int l_outer = SD_INT(-1);
+  bool _t8 = sd_int_ge(l_ti, SD_INT(4));
+  if (_t8) {
+    sd_int _t7 = sd_int_sub(l_ti, SD_INT(3));
+    _t8 = (SD_BOX_GET((SD_LIST_GET(l_toks, sd_S_Token, _t7)).f_kind, sd_E_Tok).tag == 70);
+    sd_int_release(_t7);
+  }
+  bool _t10 = _t8;
+  if (_t10) {
+    sd_int _t9 = sd_int_sub(l_ti, SD_INT(4));
+    _t10 = (SD_BOX_GET((SD_LIST_GET(l_toks, sd_S_Token, _t9)).f_kind, sd_E_Tok).tag == 2);
+    sd_int_release(_t9);
+  }
+  if (_t10) {
+    sd_int _t11 = sd_int_sub(l_ti, SD_INT(4));
+    sd_int _t12 = sd_m_Checker__importedPkg(l_c, l_file, (SD_LIST_GET(l_toks, sd_S_Token, _t11)).f_text);
+    sd_int_release(l_outer);
+    l_outer = _t12;
+    sd_int_release(_t11);
+  }
+  sd_int _t13 = sd_m_Checker__importedPkg(l_c, l_file, l_q);
+  sd_int l_ip = _t13;
+  if ((sd_int_ge(l_ip, SD_INT(0)) && sd_int_lt(l_outer, SD_INT(0)))) {
+    sd_int _t14 = sd_m_Checker__global(l_c, l_ip, l_name);
+    sd_int l_g = _t14;
+    if ((!sd_int_is_null(l_g))) {
+      sd_S_LspSym _t15 = sd_f_lspGlobalSym(l_c, l_g);
+      sd_S_LspSym _t16 = _t15;
+      sd_int_release(l_g);
+      sd_int_release(l_ip);
+      sd_int_release(l_outer);
+      return _t16;
+    }
+    sd_S_LspSym _t17 = sd_f_lspNoSym();
+    sd_S_LspSym _t18 = _t17;
+    sd_int_release(l_g);
+    sd_int_release(l_ip);
+    sd_int_release(l_outer);
+    return _t18;
+  }
+  sd_int l_pkg = sd_int_retain((SD_LIST_GET(((l_c).f_ast).f_files, sd_S_SourceFile, l_file)).f_pkgIndex);
+  if (sd_int_ge(l_outer, SD_INT(0))) {
+    sd_int _t19 = sd_int_retain(l_outer);
+    sd_int_release(l_pkg);
+    l_pkg = _t19;
+  }
+  sd_int _t20 = sd_m_Checker__global(l_c, l_pkg, l_q);
+  sd_int l_tg = _t20;
+  if ((sd_int_is_null(l_tg) || (!(SD_BOX_GET((SD_LIST_GET((l_c).f_globalList, sd_S_Global, l_tg)).f_kind, sd_E_GlobalKind).tag == 1)))) {
+    sd_S_LspSym _t21 = sd_f_lspNoSym();
+    sd_S_LspSym _t22 = _t21;
+    sd_int_release(l_tg);
+    sd_int_release(l_pkg);
+    sd_int_release(l_ip);
+    sd_int_release(l_outer);
+    return _t22;
+  }
+  sd_int l_d = (SD_LIST_GET((l_c).f_globalList, sd_S_Global, l_tg)).f_index;
+  if ((!(SD_BOX_GET((SD_LIST_GET(((l_c).f_ast).f_typeDecls, sd_S_TypeDecl, l_d)).f_kind, sd_E_DeclKind).tag == 1))) {
+    sd_S_LspSym _t23 = sd_f_lspNoSym();
+    sd_S_LspSym _t24 = _t23;
+    sd_int_release(l_tg);
+    sd_int_release(l_pkg);
+    sd_int_release(l_ip);
+    sd_int_release(l_outer);
+    return _t24;
+  }
+  sd_int _t25 = sd_m_Checker__findCase(l_c, l_d, l_name);
+  sd_int l_ci = _t25;
+  if (sd_int_lt(l_ci, SD_INT(0))) {
+    sd_S_LspSym _t26 = sd_f_lspNoSym();
+    sd_S_LspSym _t27 = _t26;
+    sd_int_release(l_ci);
+    sd_int_release(l_tg);
+    sd_int_release(l_pkg);
+    sd_int_release(l_ip);
+    sd_int_release(l_outer);
+    return _t27;
+  }
+  sd_S_LspSym _t28 = sd_f_lspCaseSym(l_c, l_d, l_ci);
+  sd_S_LspSym _t29 = _t28;
+  sd_int_release(l_ci);
+  sd_int_release(l_tg);
+  sd_int_release(l_pkg);
+  sd_int_release(l_ip);
+  sd_int_release(l_outer);
+  return _t29;
+}
+
+typedef struct { sd_lframe h; sd_str _t12; sd_str _t14; sd_str _t30; sd_str _t32; sd_str _t33; sd_str _t35; sd_str _t47; sd_str _t49; sd_str _t54; sd_str _t56; sd_str _t61; sd_str _t63; } sd_L_sd_f_lspDeclAt;
+static void sd_lr_sd_f_lspDeclAt(sd_lframe *p) {
+  sd_L_sd_f_lspDeclAt *L = (sd_L_sd_f_lspDeclAt *)p;
+  sd_str_release(L->_t12);
+  sd_str_release(L->_t14);
+  sd_str_release(L->_t30);
+  sd_str_release(L->_t32);
+  sd_str_release(L->_t33);
+  sd_str_release(L->_t35);
+  sd_str_release(L->_t47);
+  sd_str_release(L->_t49);
+  sd_str_release(L->_t54);
+  sd_str_release(L->_t56);
+  sd_str_release(L->_t61);
+  sd_str_release(L->_t63);
+}
+static sd_S_LspSym sd_f_lspDeclAt(sd_S_Checker l_c, sd_list * l_toks, sd_int l_ti) {
+  sd_L_sd_f_lspDeclAt L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_lspDeclAt);
+  sd_S_Pos l_p = (SD_LIST_GET(l_toks, sd_S_Token, l_ti)).f_pos;
+  sd_str l_name = (SD_LIST_GET(l_toks, sd_S_Token, l_ti)).f_text;
+  {
+    int64_t l_f = ((int64_t)0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!((l_f < SD_SMALL(sd_list_len(((l_c).f_ast).f_fns))))) break;
+      {
+        sd_S_FnDecl l_fd = SD_LIST_GET(((l_c).f_ast).f_fns, sd_S_FnDecl, SD_INT_S(l_f));
+        if (((sd_eq_S3Pos((l_fd).f_pos, l_p) && sd_str_eq((l_fd).f_name, l_name)) && (!(l_fd).f_isTest))) {
+          sd_S_LspSym _t2 = sd_f_lspFnSym(l_c, SD_INT_S(l_f));
+          SD_LF_LEAVE(L);
+          return _t2;
+        }
+        bool _t4 = ((((l_fd).f_isMethod && sd_str_eq((l_fd).f_recvName, l_name)) && sd_int_eq(((l_fd).f_recvPos).f_file, (l_p).f_file)) && sd_int_eq(((l_fd).f_recvPos).f_line, (l_p).f_line));
+        if (_t4) {
+          bool _t3 = sd_f_posBefore((l_fd).f_recvPos, l_p);
+          _t4 = _t3;
+        }
+        bool _t6 = _t4;
+        if (_t6) {
+          sd_int _t5 = sd_int_add(l_ti, SD_INT(1));
+          _t6 = sd_int_lt(_t5, sd_list_len(l_toks));
+          sd_int_release(_t5);
+        }
+        bool _t8 = _t6;
+        if (_t8) {
+          sd_int _t7 = sd_int_add(l_ti, SD_INT(1));
+          _t8 = (SD_BOX_GET((SD_LIST_GET(l_toks, sd_S_Token, _t7)).f_kind, sd_E_Tok).tag == 62);
+          sd_int_release(_t7);
+        }
+        if (_t8) {
+          if (((l_f < SD_SMALL(sd_list_len((l_c).f_recvVar))) && sd_int_ge(SD_LIST_GET((l_c).f_recvVar, sd_int, SD_INT_S(l_f)), SD_INT(0)))) {
+            sd_S_LspSym _t9 = sd_f_lspVarSym(l_c, SD_LIST_GET((l_c).f_recvVar, sd_int, SD_INT_S(l_f)));
+            sd_S_LspSym l_rs = _t9;
+            sd_S_Pos _t10 = sd_rt_S3Pos(l_p);
+            sd_S_Pos *_t11 = (&((&l_rs))->f_pos);
+            sd_rl_S3Pos(*_t11);
+            *_t11 = _t10;
+            SD_LF_LEAVE(L);
+            return l_rs;
+          }
+          L._t12 = sd_m_Ast__typeExprText((l_c).f_ast, (l_fd).f_recvType);
+          sd_str _t13[] = {L._t12, SD_STR_LIT(" "), l_name};
+          L._t14 = sd_str_concat_n(_t13, 3);
+          sd_S_LspSym _t15 = sd_f_lspSymOf(l_p, l_name, L._t14, SD_STR_LIT("(receiver)"));
+          sd_S_LspSym _t16 = _t15;
+          SD_LF_LEAVE(L);
+          sd_str_release(L._t14);
+          sd_str_release(L._t12);
+          return _t16;
+        }
+      }
+      _c1:;
+      l_f++;
+    }
+  }
+  {
+    int64_t l_d = ((int64_t)0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!((l_d < SD_SMALL(sd_list_len(((l_c).f_ast).f_typeDecls))))) break;
+      {
+        sd_S_TypeDecl l_td = SD_LIST_GET(((l_c).f_ast).f_typeDecls, sd_S_TypeDecl, SD_INT_S(l_d));
+        if ((!sd_int_eq((l_td).f_file, (l_p).f_file))) {
+          goto _c17;
+        }
+        if ((sd_eq_S3Pos((l_td).f_pos, l_p) && sd_str_eq((l_td).f_name, l_name))) {
+          sd_S_LspSym _t18 = sd_f_lspTypeDeclSym(l_c, SD_INT_S(l_d));
+          SD_LF_LEAVE(L);
+          return _t18;
+        }
+        {
+          sd_int l_i = SD_INT(0);
+          for (;;) {
+            SD_PREEMPT();
+            if (!(sd_int_lt(l_i, (l_td).f_fieldCount))) break;
+            {
+              sd_int _t20 = sd_m_Ast__at((l_c).f_ast, (l_td).f_fields, l_i);
+              bool _t21 = sd_eq_S3Pos((SD_LIST_GET(((l_c).f_ast).f_params, sd_S_Param, _t20)).f_pos, l_p);
+              sd_int_release(_t20);
+              if (_t21) {
+                sd_S_LspSym _t22 = sd_f_lspFieldSym(l_c, SD_INT_S(l_d), l_i);
+                sd_S_LspSym _t23 = _t22;
+                SD_LF_LEAVE(L);
+                sd_int_release(l_i);
+                return _t23;
+              }
+            }
+            _c19:;
+            { int64_t r_; if (SD_LIKELY((((l_i).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_i).w, SD_INT(1).w, &r_))) (l_i).w = r_; else { sd_int s_ = sd_int_add_slow((l_i), SD_INT(1)); sd_int_release((l_i)); (l_i) = s_; } }
+          }
+          sd_int_release(l_i);
+        }
+        {
+          sd_int l_j = SD_INT(0);
+          for (;;) {
+            SD_PREEMPT();
+            if (!(sd_int_lt(l_j, (l_td).f_caseCount))) break;
+            {
+              sd_int _t25 = sd_m_Ast__at((l_c).f_ast, (l_td).f_cases, l_j);
+              sd_S_EnumCase l_ec = SD_LIST_GET(((l_c).f_ast).f_enumCases, sd_S_EnumCase, _t25);
+              sd_int_release(_t25);
+              if (sd_eq_S3Pos((l_ec).f_pos, l_p)) {
+                sd_S_LspSym _t26 = sd_f_lspCaseSym(l_c, SD_INT_S(l_d), l_j);
+                sd_S_LspSym _t27 = _t26;
+                SD_LF_LEAVE(L);
+                sd_int_release(l_j);
+                return _t27;
+              }
+              {
+                sd_int l_k = SD_INT(0);
+                for (;;) {
+                  SD_PREEMPT();
+                  if (!(sd_int_lt(l_k, (l_ec).f_paramCount))) break;
+                  {
+                    sd_int _t29 = sd_m_Ast__at((l_c).f_ast, (l_ec).f_params, l_k);
+                    sd_S_Param l_cp = SD_LIST_GET(((l_c).f_ast).f_params, sd_S_Param, _t29);
+                    sd_int_release(_t29);
+                    if (sd_eq_S3Pos((l_cp).f_pos, l_p)) {
+                      L._t30 = sd_m_Ast__typeExprText((l_c).f_ast, (l_cp).f_typeExpr);
+                      sd_str _t31[] = {L._t30, SD_STR_LIT(" "), (l_cp).f_name};
+                      L._t32 = sd_str_concat_n(_t31, 3);
+                      L._t33 = sd_m_Checker__declDisplayName(l_c, SD_INT_S(l_d));
+                      sd_str _t34[] = {SD_STR_LIT("field of "), L._t33, SD_STR_LIT("."), (l_ec).f_name};
+                      L._t35 = sd_str_concat_n(_t34, 4);
+                      sd_S_LspSym _t36 = sd_f_lspSymOf(l_p, l_name, L._t32, L._t35);
+                      sd_S_LspSym _t37 = _t36;
+                      SD_LF_LEAVE(L);
+                      sd_str_release(L._t35);
+                      sd_str_release(L._t33);
+                      sd_str_release(L._t32);
+                      sd_str_release(L._t30);
+                      sd_int_release(l_k);
+                      sd_int_release(l_j);
+                      return _t37;
+                    }
+                  }
+                  _c28:;
+                  { int64_t r_; if (SD_LIKELY((((l_k).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_k).w, SD_INT(1).w, &r_))) (l_k).w = r_; else { sd_int s_ = sd_int_add_slow((l_k), SD_INT(1)); sd_int_release((l_k)); (l_k) = s_; } }
+                }
+                sd_int_release(l_k);
+              }
+            }
+            _c24:;
+            { int64_t r_; if (SD_LIKELY((((l_j).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_j).w, SD_INT(1).w, &r_))) (l_j).w = r_; else { sd_int s_ = sd_int_add_slow((l_j), SD_INT(1)); sd_int_release((l_j)); (l_j) = s_; } }
+          }
+          sd_int_release(l_j);
+        }
+        {
+          sd_int l_m = SD_INT(0);
+          for (;;) {
+            SD_PREEMPT();
+            if (!(sd_int_lt(l_m, (l_td).f_methodCount))) break;
+            {
+              sd_int _t39 = sd_m_Ast__at((l_c).f_ast, (l_td).f_methods, l_m);
+              bool _t40 = sd_eq_S3Pos((SD_LIST_GET(((l_c).f_ast).f_methodSigs, sd_S_MethodSig, _t39)).f_pos, l_p);
+              sd_int_release(_t39);
+              if (_t40) {
+                sd_S_LspSym _t41 = sd_f_lspIfaceMethodSym(l_c, SD_INT_S(l_d), l_m);
+                sd_S_LspSym _t42 = _t41;
+                SD_LF_LEAVE(L);
+                sd_int_release(l_m);
+                return _t42;
+              }
+            }
+            _c38:;
+            { int64_t r_; if (SD_LIKELY((((l_m).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_m).w, SD_INT(1).w, &r_))) (l_m).w = r_; else { sd_int s_ = sd_int_add_slow((l_m), SD_INT(1)); sd_int_release((l_m)); (l_m) = s_; } }
+          }
+          sd_int_release(l_m);
+        }
+      }
+      _c17:;
+      l_d++;
+    }
+  }
+  {
+    int64_t l_k = ((int64_t)0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!((l_k < SD_SMALL(sd_list_len(((l_c).f_ast).f_consts))))) break;
+      {
+        if (sd_eq_S3Pos((SD_LIST_GET(((l_c).f_ast).f_consts, sd_S_ConstDecl, SD_INT_S(l_k))).f_pos, l_p)) {
+          sd_S_LspSym _t44 = sd_f_lspConstSym(l_c, SD_INT_S(l_k));
+          SD_LF_LEAVE(L);
+          return _t44;
+        }
+      }
+      _c43:;
+      l_k++;
+    }
+  }
+  {
+    int64_t l_pi = ((int64_t)0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!((l_pi < SD_SMALL(sd_list_len(((l_c).f_ast).f_params))))) break;
+      {
+        sd_S_Param l_pm = SD_LIST_GET(((l_c).f_ast).f_params, sd_S_Param, SD_INT_S(l_pi));
+        if ((sd_eq_S3Pos((l_pm).f_pos, l_p) && sd_str_eq((l_pm).f_name, l_name))) {
+          if (((l_pi < SD_SMALL(sd_list_len((l_c).f_paramVar))) && sd_int_ge(SD_LIST_GET((l_c).f_paramVar, sd_int, SD_INT_S(l_pi)), SD_INT(0)))) {
+            sd_S_LspSym _t46 = sd_f_lspVarSym(l_c, SD_LIST_GET((l_c).f_paramVar, sd_int, SD_INT_S(l_pi)));
+            SD_LF_LEAVE(L);
+            return _t46;
+          }
+          L._t47 = sd_m_Ast__typeExprText((l_c).f_ast, (l_pm).f_typeExpr);
+          sd_str _t48[] = {L._t47, SD_STR_LIT(" "), l_name};
+          L._t49 = sd_str_concat_n(_t48, 3);
+          sd_S_LspSym _t50 = sd_f_lspSymOf(l_p, l_name, L._t49, SD_STR_LIT(""));
+          sd_S_LspSym _t51 = _t50;
+          SD_LF_LEAVE(L);
+          sd_str_release(L._t49);
+          sd_str_release(L._t47);
+          return _t51;
+        }
+      }
+      _c45:;
+      l_pi++;
+    }
+  }
+  {
+    int64_t l_t = ((int64_t)0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!((l_t < SD_SMALL(sd_list_len(((l_c).f_ast).f_targets))))) break;
+      {
+        sd_S_Target l_tg = SD_LIST_GET(((l_c).f_ast).f_targets, sd_S_Target, SD_INT_S(l_t));
+        if ((((SD_BOX_GET((l_tg).f_kind, sd_E_TargetKind).tag == 0) && sd_eq_S3Pos((l_tg).f_pos, l_p)) && sd_str_eq((l_tg).f_name, l_name))) {
+          if (((l_t < SD_SMALL(sd_list_len((l_c).f_targetVar))) && sd_int_ge(SD_LIST_GET((l_c).f_targetVar, sd_int, SD_INT_S(l_t)), SD_INT(0)))) {
+            sd_S_LspSym _t53 = sd_f_lspVarSym(l_c, SD_LIST_GET((l_c).f_targetVar, sd_int, SD_INT_S(l_t)));
+            SD_LF_LEAVE(L);
+            return _t53;
+          }
+          L._t54 = sd_m_Ast__typeExprText((l_c).f_ast, (l_tg).f_typeExpr);
+          sd_str _t55[] = {L._t54, SD_STR_LIT(" "), l_name};
+          L._t56 = sd_str_concat_n(_t55, 3);
+          sd_S_LspSym _t57 = sd_f_lspSymOf(l_p, l_name, L._t56, SD_STR_LIT("(variable)"));
+          sd_S_LspSym _t58 = _t57;
+          SD_LF_LEAVE(L);
+          sd_str_release(L._t56);
+          sd_str_release(L._t54);
+          return _t58;
+        }
+      }
+      _c52:;
+      l_t++;
+    }
+  }
+  {
+    int64_t l_s = ((int64_t)0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!((l_s < SD_SMALL(sd_list_len(((l_c).f_ast).f_stmts))))) break;
+      {
+        sd_S_Stmt l_st = SD_LIST_GET(((l_c).f_ast).f_stmts, sd_S_Stmt, SD_INT_S(l_s));
+        if ((((SD_BOX_GET((l_st).f_kind, sd_E_StmtKind).tag == 14) && sd_eq_S3Pos((l_st).f_namePos, l_p)) && sd_str_eq((l_st).f_name, l_name))) {
+          if (((l_s < SD_SMALL(sd_list_len((l_c).f_stmtVar))) && sd_int_ge(SD_LIST_GET((l_c).f_stmtVar, sd_int, SD_INT_S(l_s)), SD_INT(0)))) {
+            sd_S_LspSym _t60 = sd_f_lspVarSym(l_c, SD_LIST_GET((l_c).f_stmtVar, sd_int, SD_INT_S(l_s)));
+            SD_LF_LEAVE(L);
+            return _t60;
+          }
+          L._t61 = sd_m_Ast__typeExprText((l_c).f_ast, (l_st).f_typeExpr);
+          sd_str _t62[] = {SD_STR_LIT("const "), L._t61, SD_STR_LIT(" "), l_name};
+          L._t63 = sd_str_concat_n(_t62, 4);
+          sd_S_LspSym _t64 = sd_f_lspSymOf(l_p, l_name, L._t63, SD_STR_LIT("(local constant)"));
+          sd_S_LspSym _t65 = _t64;
+          SD_LF_LEAVE(L);
+          sd_str_release(L._t63);
+          sd_str_release(L._t61);
+          return _t65;
+        }
+      }
+      _c59:;
+      l_s++;
+    }
+  }
+  sd_S_LspSym _t66 = sd_f_lspNoSym();
+  SD_LF_LEAVE(L);
+  return _t66;
+}
+
+typedef struct { sd_lframe h; sd_S_LspSym l_s; } sd_L_sd_f_lspExprAt;
+static void sd_lr_sd_f_lspExprAt(sd_lframe *p) {
+  sd_L_sd_f_lspExprAt *L = (sd_L_sd_f_lspExprAt *)p;
+  sd_rl_S6LspSym(L->l_s);
+}
+static sd_S_LspSym sd_f_lspExprAt(sd_S_Checker l_c, sd_list * l_toks, sd_S_Pos l_p, sd_str l_name) {
+  sd_L_sd_f_lspExprAt L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_lspExprAt);
+  {
+    int64_t l_e = (SD_SMALL(sd_list_len(((l_c).f_ast).f_exprs)) - ((int64_t)1));
+    for (;;) {
+      SD_PREEMPT();
+      if (!((l_e >= ((int64_t)0)))) break;
+      {
+        if ((sd_eq_S3Pos((SD_LIST_GET(((l_c).f_ast).f_exprs, sd_S_Expr, SD_INT_S(l_e))).f_pos, l_p) && (l_e < SD_SMALL(sd_list_len((l_c).f_info))))) {
+          sd_S_LspSym _t2 = sd_f_lspExprSym(l_c, l_toks, SD_INT_S(l_e), l_name);
+          L.l_s = _t2;
+          if ((L.l_s).f_found) {
+            SD_LF_LEAVE(L);
+            return L.l_s;
+          }
+          sd_rl_S6LspSym(L.l_s); L.l_s = ((sd_S_LspSym){0});
+        }
+      }
+      _c1:;
+      l_e--;
+    }
+  }
+  sd_S_LspSym _t3 = sd_f_lspNoSym();
+  SD_LF_LEAVE(L);
+  return _t3;
+}
+
+typedef struct { sd_lframe h; sd_str l_recv; sd_str l_result; } sd_L_sd_f_lspExprSym;
+static void sd_lr_sd_f_lspExprSym(sd_lframe *p) {
+  sd_L_sd_f_lspExprSym *L = (sd_L_sd_f_lspExprSym *)p;
+  sd_str_release(L->l_recv);
+  sd_str_release(L->l_result);
+}
+static sd_S_LspSym sd_f_lspExprSym(sd_S_Checker l_c, sd_list * l_toks, sd_int l_e, sd_str l_name) {
+  sd_L_sd_f_lspExprSym L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_lspExprSym);
+  sd_S_Expr l_x = SD_LIST_GET(((l_c).f_ast).f_exprs, sd_S_Expr, l_e);
+  sd_S_ExprInfo l_inf = SD_LIST_GET((l_c).f_info, sd_S_ExprInfo, l_e);
+  if ((SD_BOX_GET((l_x).f_kind, sd_E_ExprKind).tag == 10)) {
+    if (sd_int_lt((l_x).f_a, SD_INT(0))) {
+      sd_S_LspSym _t1 = sd_f_lspNoSym();
+      SD_LF_LEAVE(L);
+      return _t1;
+    }
+    sd_S_Expr l_callee = SD_LIST_GET(((l_c).f_ast).f_exprs, sd_S_Expr, (l_x).f_a);
+    if ((((!(SD_BOX_GET((l_callee).f_kind, sd_E_ExprKind).tag == 7)) && (!(SD_BOX_GET((l_callee).f_kind, sd_E_ExprKind).tag == 8))) || (!sd_str_eq((l_callee).f_text, l_name)))) {
+      sd_S_LspSym _t2 = sd_f_lspNoSym();
+      SD_LF_LEAVE(L);
+      return _t2;
+    }
+    if ((((SD_BOX_GET((l_inf).f_res, sd_E_Res).tag == 3) || (SD_BOX_GET((l_inf).f_res, sd_E_Res).tag == 4)) && sd_int_ge((l_inf).f_ref, SD_INT(0)))) {
+      sd_S_LspSym _t3 = sd_f_lspFnSym(l_c, (l_inf).f_ref);
+      SD_LF_LEAVE(L);
+      return _t3;
+    }
+    if (((SD_BOX_GET((l_inf).f_res, sd_E_Res).tag == 14) && sd_int_ge((l_inf).f_ref, SD_INT(0)))) {
+      sd_S_LspSym _t4 = sd_f_lspIfaceMethodSym(l_c, (l_inf).f_ref, (l_inf).f_sub);
+      SD_LF_LEAVE(L);
+      return _t4;
+    }
+    if (((SD_BOX_GET((l_inf).f_res, sd_E_Res).tag == 7) && sd_int_ge((l_inf).f_ref, SD_INT(0)))) {
+      sd_S_LspSym _t5 = sd_f_lspCaseSym(l_c, (l_inf).f_ref, (l_inf).f_sub);
+      SD_LF_LEAVE(L);
+      return _t5;
+    }
+    if ((((SD_BOX_GET((l_inf).f_res, sd_E_Res).tag == 5) && (SD_BOX_GET((l_callee).f_kind, sd_E_ExprKind).tag == 8)) && sd_int_ge((l_callee).f_a, SD_INT(0)))) {
+      sd_str _t6 = sd_m_Checker__typeName(l_c, (SD_LIST_GET((l_c).f_info, sd_S_ExprInfo, (l_callee).f_a)).f_ty);
+      L.l_recv = _t6;
+      L.l_result = SD_STR_LIT("");
+      if (((!sd_int_eq((l_inf).f_ty, sd_c_tyVoid())) && (!sd_int_eq((l_inf).f_ty, sd_c_tyInvalid())))) {
+        sd_str _t7 = sd_m_Checker__typeName(l_c, (l_inf).f_ty);
+        sd_str _t8 = sd_str_concat(SD_STR_LIT(" "), _t7);
+        sd_str_release(L.l_result);
+        L.l_result = _t8;
+        sd_str_release(_t7); 
+      }
+      sd_S_Pos _t9 = (sd_S_Pos){.f_file = SD_INT(-1), .f_line = SD_INT(0), .f_col = SD_INT(0)};
+      sd_str _t10[] = {L.l_recv, SD_STR_LIT("."), l_name, SD_STR_LIT("()"), L.l_result};
+      sd_str _t11 = sd_str_concat_n(_t10, 5);
+      sd_S_LspSym _t12 = (sd_S_LspSym){.f_found = true, .f_pos = _t9, .f_len = SD_INT(0), .f_sig = _t11, .f_doc = SD_STR_LIT("built-in method (docs/builtins.md)")};
+      sd_S_LspSym _t13 = _t12;
+      SD_LF_LEAVE(L);
+      sd_str_release(L.l_result);
+      sd_str_release(L.l_recv);
+      return _t13;
+    }
+    if ((SD_BOX_GET((l_inf).f_res, sd_E_Res).tag == 6)) {
+      sd_S_Pos _t14 = (sd_S_Pos){.f_file = SD_INT(-1), .f_line = SD_INT(0), .f_col = SD_INT(0)};
+      sd_str _t15[] = {l_name, SD_STR_LIT("(...) "), l_name};
+      sd_str _t16 = sd_str_concat_n(_t15, 3);
+      sd_str _t17[] = {SD_STR_LIT("conversion to "), l_name, SD_STR_LIT(" (docs/builtins.md)")};
+      sd_str _t18 = sd_str_concat_n(_t17, 3);
+      sd_S_LspSym _t19 = (sd_S_LspSym){.f_found = true, .f_pos = _t14, .f_len = SD_INT(0), .f_sig = _t16, .f_doc = _t18};
+      SD_LF_LEAVE(L);
+      return _t19;
+    }
+    sd_S_LspSym _t20 = sd_f_lspNoSym();
+    SD_LF_LEAVE(L);
+    return _t20;
+  }
+  if (((SD_BOX_GET((l_x).f_kind, sd_E_ExprKind).tag == 7) || (SD_BOX_GET((l_x).f_kind, sd_E_ExprKind).tag == 8))) {
+    if ((!sd_str_eq((l_x).f_text, l_name))) {
+      sd_S_LspSym _t21 = sd_f_lspNoSym();
+      SD_LF_LEAVE(L);
+      return _t21;
+    }
+    if ((SD_BOX_GET((l_inf).f_res, sd_E_Res).tag == 1)) {
+      sd_S_LspSym _t22 = sd_f_lspVarSymIn(l_c, l_toks, (l_inf).f_ref);
+      SD_LF_LEAVE(L);
+      return _t22;
+    }
+    if (((SD_BOX_GET((l_inf).f_res, sd_E_Res).tag == 2) && sd_int_ge((l_inf).f_ref, SD_INT(0)))) {
+      sd_S_LspSym _t23 = sd_f_lspConstSym(l_c, (l_inf).f_ref);
+      SD_LF_LEAVE(L);
+      return _t23;
+    }
+    if ((((SD_BOX_GET((l_inf).f_res, sd_E_Res).tag == 3) || (SD_BOX_GET((l_inf).f_res, sd_E_Res).tag == 4)) && sd_int_ge((l_inf).f_ref, SD_INT(0)))) {
+      sd_S_LspSym _t24 = sd_f_lspFnSym(l_c, (l_inf).f_ref);
+      SD_LF_LEAVE(L);
+      return _t24;
+    }
+    if (((SD_BOX_GET((l_inf).f_res, sd_E_Res).tag == 8) && sd_int_ge((l_inf).f_ref, SD_INT(0)))) {
+      sd_S_LspSym _t25 = sd_f_lspCaseSym(l_c, (l_inf).f_ref, (l_inf).f_sub);
+      SD_LF_LEAVE(L);
+      return _t25;
+    }
+    if ((((SD_BOX_GET((l_inf).f_res, sd_E_Res).tag == 9) && (SD_BOX_GET((l_x).f_kind, sd_E_ExprKind).tag == 8)) && sd_int_ge((l_x).f_a, SD_INT(0)))) {
+      sd_int _t26 = sd_f_lspStructDecl(l_c, (SD_LIST_GET((l_c).f_info, sd_S_ExprInfo, (l_x).f_a)).f_ty);
+      sd_int l_d = _t26;
+      if (sd_int_ge(l_d, SD_INT(0))) {
+        sd_S_LspSym _t27 = sd_f_lspFieldSym(l_c, l_d, (l_inf).f_sub);
+        sd_S_LspSym _t28 = _t27;
+        SD_LF_LEAVE(L);
+        sd_int_release(l_d);
+        return _t28;
+      }
+      sd_int_release(l_d);
+    }
+    sd_S_LspSym _t29 = sd_f_lspNoSym();
+    SD_LF_LEAVE(L);
+    return _t29;
+  }
+  if ((SD_BOX_GET((l_x).f_kind, sd_E_ExprKind).tag == 17)) {
+    if ((sd_str_eq((l_x).f_pkg, SD_STR_LIT("")) && sd_str_eq((l_x).f_text, l_name))) {
+      sd_int _t30 = sd_f_lspStructDecl(l_c, (l_inf).f_ty);
+      sd_int l_sd = _t30;
+      if (sd_int_ge(l_sd, SD_INT(0))) {
+        sd_S_LspSym _t31 = sd_f_lspTypeDeclSym(l_c, l_sd);
+        sd_S_LspSym _t32 = _t31;
+        SD_LF_LEAVE(L);
+        sd_int_release(l_sd);
+        return _t32;
+      }
+      sd_S_LspSym _t33 = sd_f_lspNameSym(l_c, ((l_x).f_pos).f_file, l_name);
+      sd_S_LspSym _t34 = _t33;
+      SD_LF_LEAVE(L);
+      sd_int_release(l_sd);
+      return _t34;
+    }
+    if (sd_str_eq((l_x).f_pkg, l_name)) {
+      sd_S_LspSym _t35 = sd_f_lspNameSym(l_c, ((l_x).f_pos).f_file, l_name);
+      SD_LF_LEAVE(L);
+      return _t35;
+    }
+    sd_S_LspSym _t36 = sd_f_lspNoSym();
+    SD_LF_LEAVE(L);
+    return _t36;
+  }
+  if (((SD_BOX_GET((l_x).f_kind, sd_E_ExprKind).tag == 18) && sd_str_eq((l_x).f_text, l_name))) {
+    {
+      int64_t l_s = ((int64_t)0);
+      for (;;) {
+        SD_PREEMPT();
+        if (!((l_s < SD_SMALL(sd_list_len(((l_c).f_ast).f_exprs))))) break;
+        {
+          sd_S_Expr l_lit = SD_LIST_GET(((l_c).f_ast).f_exprs, sd_S_Expr, SD_INT_S(l_s));
+          if ((!(SD_BOX_GET((l_lit).f_kind, sd_E_ExprKind).tag == 17))) {
+            goto _c37;
+          }
+          {
+            sd_int l_i = SD_INT(0);
+            for (;;) {
+              SD_PREEMPT();
+              if (!(sd_int_lt(l_i, (l_lit).f_count))) break;
+              {
+                sd_int _t39 = sd_m_Ast__at((l_c).f_ast, (l_lit).f_list, l_i);
+                bool _t40 = sd_int_eq(_t39, l_e);
+                sd_int_release(_t39);
+                if (_t40) {
+                  sd_int _t41 = sd_f_lspStructDecl(l_c, (SD_LIST_GET((l_c).f_info, sd_S_ExprInfo, SD_INT_S(l_s))).f_ty);
+                  sd_int l_fd = _t41;
+                  if (sd_int_lt(l_fd, SD_INT(0))) {
+                    sd_S_LspSym _t42 = sd_f_lspNoSym();
+                    sd_S_LspSym _t43 = _t42;
+                    SD_LF_LEAVE(L);
+                    sd_int_release(l_fd);
+                    sd_int_release(l_i);
+                    return _t43;
+                  }
+                  sd_int _t44 = sd_m_Checker__findField(l_c, l_fd, l_name);
+                  sd_int l_fi = _t44;
+                  if (sd_int_lt(l_fi, SD_INT(0))) {
+                    sd_S_LspSym _t45 = sd_f_lspNoSym();
+                    sd_S_LspSym _t46 = _t45;
+                    SD_LF_LEAVE(L);
+                    sd_int_release(l_fi);
+                    sd_int_release(l_fd);
+                    sd_int_release(l_i);
+                    return _t46;
+                  }
+                  sd_S_LspSym _t47 = sd_f_lspFieldSym(l_c, l_fd, l_fi);
+                  sd_S_LspSym _t48 = _t47;
+                  SD_LF_LEAVE(L);
+                  sd_int_release(l_fi);
+                  sd_int_release(l_fd);
+                  sd_int_release(l_i);
+                  return _t48;
+                }
+              }
+              _c38:;
+              { int64_t r_; if (SD_LIKELY((((l_i).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_i).w, SD_INT(1).w, &r_))) (l_i).w = r_; else { sd_int s_ = sd_int_add_slow((l_i), SD_INT(1)); sd_int_release((l_i)); (l_i) = s_; } }
+            }
+            sd_int_release(l_i);
+          }
+        }
+        _c37:;
+        l_s++;
+      }
+    }
+  }
+  sd_S_LspSym _t49 = sd_f_lspNoSym();
+  SD_LF_LEAVE(L);
+  return _t49;
+}
+
+static sd_int sd_f_lspStructDecl(sd_S_Checker l_c, sd_int l_t) {
+  if (((sd_int_lt(l_t, SD_INT(0)) || sd_int_eq(l_t, sd_c_tyInvalid())) || sd_int_ge(l_t, sd_list_len(((l_c).f_types).f_list)))) {
+    return SD_INT(-1);
+  }
+  sd_int l_ty = sd_int_retain(l_t);
+  bool _t1 = sd_m_Types__isOpt((l_c).f_types, l_ty);
+  if (_t1) {
+    sd_int _t2 = sd_m_Types__elem((l_c).f_types, l_ty);
+    sd_int_release(l_ty);
+    l_ty = _t2;
+  }
+  sd_box * _t3 = sd_m_Checker__kindOf(l_c, l_ty);
+  sd_box * l_k = _t3;
+  if ((((SD_BOX_GET(l_k, sd_E_Kind).tag == 12) || (SD_BOX_GET(l_k, sd_E_Kind).tag == 13)) || (SD_BOX_GET(l_k, sd_E_Kind).tag == 14))) {
+    sd_int _t4 = sd_m_Types__decl((l_c).f_types, l_ty);
+    sd_int _t5 = _t4;
+    sd_box_release(l_k);
+    sd_int_release(l_ty);
+    return _t5;
+  }
+  sd_int _t6 = SD_INT(-1);
+  sd_box_release(l_k);
+  sd_int_release(l_ty);
+  return _t6;
+}
+
+static sd_S_LspSym sd_f_lspTypeSym(sd_S_Checker l_c, sd_int l_t) {
+  sd_int _t1 = sd_f_lspStructDecl(l_c, l_t);
+  sd_int l_d = _t1;
+  if (sd_int_ge(l_d, SD_INT(0))) {
+    sd_S_LspSym _t2 = sd_f_lspTypeDeclSym(l_c, l_d);
+    sd_S_LspSym _t3 = _t2;
+    sd_int_release(l_d);
+    return _t3;
+  }
+  sd_S_LspSym _t4 = sd_f_lspNoSym();
+  sd_S_LspSym _t5 = _t4;
+  sd_int_release(l_d);
+  return _t5;
+}
+
+static sd_S_LspSym sd_f_lspGlobalSym(sd_S_Checker l_c, sd_int l_g) {
+  sd_S_Global l_gl = SD_LIST_GET((l_c).f_globalList, sd_S_Global, l_g);
+  {
+    sd_box * _t1 = (l_gl).f_kind;
+    int32_t _t2 = SD_BOX_GET(_t1, sd_E_GlobalKind).tag;
+    if (_t2 == 0) {
+      sd_S_LspSym _t3 = sd_f_lspFnSym(l_c, (l_gl).f_index);
+      return _t3;
+    } else if (_t2 == 1) {
+      sd_S_LspSym _t4 = sd_f_lspTypeDeclSym(l_c, (l_gl).f_index);
+      return _t4;
+    } else if (_t2 == 2) {
+      sd_S_LspSym _t5 = sd_f_lspConstSym(l_c, (l_gl).f_index);
+      return _t5;
+    }
+  }
+  sd_crash("internal error: lspGlobalSym reached its end without returning");
+}
+
+typedef struct { sd_lframe h; sd_str _t2; sd_str _t3; } sd_L_sd_f_lspFnSym;
+static void sd_lr_sd_f_lspFnSym(sd_lframe *p) {
+  sd_L_sd_f_lspFnSym *L = (sd_L_sd_f_lspFnSym *)p;
+  sd_str_release(L->_t2);
+  sd_str_release(L->_t3);
+}
+static sd_S_LspSym sd_f_lspFnSym(sd_S_Checker l_c, sd_int l_f) {
+  sd_L_sd_f_lspFnSym L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_lspFnSym);
+  if ((sd_int_lt(l_f, SD_INT(0)) || sd_int_ge(l_f, sd_list_len(((l_c).f_ast).f_fns)))) {
+    sd_S_LspSym _t1 = sd_f_lspNoSym();
+    SD_LF_LEAVE(L);
+    return _t1;
+  }
+  sd_S_FnDecl l_fd = SD_LIST_GET(((l_c).f_ast).f_fns, sd_S_FnDecl, l_f);
+  L._t2 = sd_f_lspFnSig((l_c).f_ast, l_f);
+  L._t3 = sd_f_lspDocComment((l_c).f_ast, (l_fd).f_file, ((l_fd).f_start).f_line);
+  sd_S_LspSym _t4 = sd_f_lspSymOf((l_fd).f_pos, (l_fd).f_name, L._t2, L._t3);
+  sd_S_LspSym _t5 = _t4;
+  SD_LF_LEAVE(L);
+  sd_str_release(L._t3);
+  sd_str_release(L._t2);
+  return _t5;
+}
+
+typedef struct { sd_lframe h; sd_str l_s; sd_str _t6; sd_str _t7; } sd_L_sd_f_lspFnSig;
+static void sd_lr_sd_f_lspFnSig(sd_lframe *p) {
+  sd_L_sd_f_lspFnSig *L = (sd_L_sd_f_lspFnSig *)p;
+  sd_str_release(L->l_s);
+  sd_str_release(L->_t6);
+  sd_str_release(L->_t7);
+}
+static sd_str sd_f_lspFnSig(sd_S_Ast l_ast, sd_int l_f) {
+  sd_L_sd_f_lspFnSig L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_lspFnSig);
+  sd_S_FnDecl l_fd = SD_LIST_GET((l_ast).f_fns, sd_S_FnDecl, l_f);
+  if ((l_fd).f_isTest) {
+    sd_str _t1[] = {SD_STR_LIT("test \""), (l_fd).f_name, SD_STR_LIT("\"")};
+    sd_str _t2 = sd_str_concat_n(_t1, 3);
+    SD_LF_LEAVE(L);
+    return _t2;
+  }
+  L.l_s = SD_STR_LIT("fn ");
+  if ((l_fd).f_isPub) {
+    sd_str _t3 = SD_STR_LIT("pub fn ");
+    sd_str_release(L.l_s);
+    L.l_s = _t3;
+  }
+  if ((l_fd).f_isMethod) {
+    sd_str _t4 = sd_m_Ast__typeExprText(l_ast, (l_fd).f_recvType);
+    sd_str_part _t5[] = {{SD_STR_LIT("(")}, {_t4}, {SD_STR_LIT(" ")}, {(l_fd).f_recvName}, {SD_STR_LIT(") ")}};
+    L.l_s = sd_str_append_parts(L.l_s, _t5, 5);
+    sd_str_release(_t4); 
+    if ((l_fd).f_recvMut) {
+      L.l_s = sd_str_append(L.l_s, SD_STR_LIT("mut "));
+    }
+  }
+  L._t6 = sd_f_lspParamsText(l_ast, (l_fd).f_params, (l_fd).f_paramCount);
+  L._t7 = sd_f_lspResultsText(l_ast, (l_fd).f_results, (l_fd).f_resultCount);
+  sd_str _t8[] = {L.l_s, (l_fd).f_name, L._t6, L._t7};
+  sd_str _t9 = sd_str_concat_n(_t8, 4);
+  sd_str _t10 = _t9;
+  SD_LF_LEAVE(L);
+  sd_str_release(L._t7);
+  sd_str_release(L._t6);
+  sd_str_release(L.l_s);
+  return _t10;
+}
+
+typedef struct { sd_lframe h; sd_list * l_ps; sd_str _t7; } sd_L_sd_f_lspParamsText;
+static void sd_lr_sd_f_lspParamsText(sd_lframe *p) {
+  sd_L_sd_f_lspParamsText *L = (sd_L_sd_f_lspParamsText *)p;
+  sd_list_release(L->l_ps);
+  sd_str_release(L->_t7);
+}
+static sd_str sd_f_lspParamsText(sd_S_Ast l_ast, sd_int l_list, sd_int l_count) {
+  sd_L_sd_f_lspParamsText L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_lspParamsText);
+  sd_list * _t1 = sd_list_new(&sd_type_str, 0);
+  L.l_ps = _t1;
+  {
+    sd_int l_i = SD_INT(0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!(sd_int_lt(l_i, l_count))) break;
+      {
+        sd_int _t3 = sd_m_Ast__at(l_ast, l_list, l_i);
+        sd_S_Param l_p = SD_LIST_GET((l_ast).f_params, sd_S_Param, _t3);
+        sd_int_release(_t3);
+        sd_str _t4 = sd_m_Ast__typeExprText(l_ast, (l_p).f_typeExpr);
+        sd_str _t5[] = {_t4, SD_STR_LIT(" "), (l_p).f_name};
+        sd_str _t6 = sd_str_concat_n(_t5, 3);
+        SD_LIST_PUSH((&L.l_ps), sd_str, _t6);
+        sd_str_release(_t4); 
+      }
+      _c2:;
+      { int64_t r_; if (SD_LIKELY((((l_i).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_i).w, SD_INT(1).w, &r_))) (l_i).w = r_; else { sd_int s_ = sd_int_add_slow((l_i), SD_INT(1)); sd_int_release((l_i)); (l_i) = s_; } }
+    }
+    sd_int_release(l_i);
+  }
+  L._t7 = sd_list_join(L.l_ps, SD_STR_LIT(", "));
+  sd_str _t8[] = {SD_STR_LIT("("), L._t7, SD_STR_LIT(")")};
+  sd_str _t9 = sd_str_concat_n(_t8, 3);
+  sd_str _t10 = _t9;
+  SD_LF_LEAVE(L);
+  sd_str_release(L._t7);
+  sd_list_release(L.l_ps);
+  return _t10;
+}
+
+typedef struct { sd_lframe h; sd_str _t2; sd_list * l_rs; sd_str _t9; } sd_L_sd_f_lspResultsText;
+static void sd_lr_sd_f_lspResultsText(sd_lframe *p) {
+  sd_L_sd_f_lspResultsText *L = (sd_L_sd_f_lspResultsText *)p;
+  sd_str_release(L->_t2);
+  sd_list_release(L->l_rs);
+  sd_str_release(L->_t9);
+}
+static sd_str sd_f_lspResultsText(sd_S_Ast l_ast, sd_int l_list, sd_int l_count) {
+  sd_L_sd_f_lspResultsText L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_lspResultsText);
+  if (sd_int_eq(l_count, SD_INT(0))) {
+    SD_LF_LEAVE(L);
+    return SD_STR_LIT("");
+  }
+  if (sd_int_eq(l_count, SD_INT(1))) {
+    sd_int _t1 = sd_m_Ast__at(l_ast, l_list, SD_INT(0));
+    L._t2 = sd_m_Ast__typeExprText(l_ast, _t1);
+    sd_str _t3 = sd_str_concat(SD_STR_LIT(" "), L._t2);
+    sd_str _t4 = _t3;
+    SD_LF_LEAVE(L);
+    sd_str_release(L._t2);
+    sd_int_release(_t1);
+    return _t4;
+  }
+  sd_list * _t5 = sd_list_new(&sd_type_str, 0);
+  L.l_rs = _t5;
+  {
+    sd_int l_i = SD_INT(0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!(sd_int_lt(l_i, l_count))) break;
+      {
+        sd_int _t7 = sd_m_Ast__at(l_ast, l_list, l_i);
+        sd_str _t8 = sd_m_Ast__typeExprText(l_ast, _t7);
+        SD_LIST_PUSH((&L.l_rs), sd_str, _t8);
+        sd_int_release(_t7);
+      }
+      _c6:;
+      { int64_t r_; if (SD_LIKELY((((l_i).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_i).w, SD_INT(1).w, &r_))) (l_i).w = r_; else { sd_int s_ = sd_int_add_slow((l_i), SD_INT(1)); sd_int_release((l_i)); (l_i) = s_; } }
+    }
+    sd_int_release(l_i);
+  }
+  L._t9 = sd_list_join(L.l_rs, SD_STR_LIT(", "));
+  sd_str _t10[] = {SD_STR_LIT(" ("), L._t9, SD_STR_LIT(")")};
+  sd_str _t11 = sd_str_concat_n(_t10, 3);
+  sd_str _t12 = _t11;
+  SD_LF_LEAVE(L);
+  sd_str_release(L._t9);
+  sd_list_release(L.l_rs);
+  return _t12;
+}
+
+typedef struct { sd_lframe h; sd_str _t2; sd_str _t3; } sd_L_sd_f_lspTypeDeclSym;
+static void sd_lr_sd_f_lspTypeDeclSym(sd_lframe *p) {
+  sd_L_sd_f_lspTypeDeclSym *L = (sd_L_sd_f_lspTypeDeclSym *)p;
+  sd_str_release(L->_t2);
+  sd_str_release(L->_t3);
+}
+static sd_S_LspSym sd_f_lspTypeDeclSym(sd_S_Checker l_c, sd_int l_d) {
+  sd_L_sd_f_lspTypeDeclSym L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_lspTypeDeclSym);
+  if ((sd_int_lt(l_d, SD_INT(0)) || sd_int_ge(l_d, sd_list_len(((l_c).f_ast).f_typeDecls)))) {
+    sd_S_LspSym _t1 = sd_f_lspNoSym();
+    SD_LF_LEAVE(L);
+    return _t1;
+  }
+  sd_S_TypeDecl l_td = SD_LIST_GET(((l_c).f_ast).f_typeDecls, sd_S_TypeDecl, l_d);
+  L._t2 = sd_f_lspTypeSig((l_c).f_ast, l_d);
+  L._t3 = sd_f_lspDocComment((l_c).f_ast, (l_td).f_file, ((l_td).f_pos).f_line);
+  sd_S_LspSym _t4 = sd_f_lspSymOf((l_td).f_pos, (l_td).f_name, L._t2, L._t3);
+  sd_S_LspSym _t5 = _t4;
+  SD_LF_LEAVE(L);
+  sd_str_release(L._t3);
+  sd_str_release(L._t2);
+  return _t5;
+}
+
+typedef struct { sd_lframe h; sd_str l_s; sd_list * l_impls; sd_list * l_members; sd_str _t27; } sd_L_sd_f_lspTypeSig;
+static void sd_lr_sd_f_lspTypeSig(sd_lframe *p) {
+  sd_L_sd_f_lspTypeSig *L = (sd_L_sd_f_lspTypeSig *)p;
+  sd_str_release(L->l_s);
+  sd_list_release(L->l_impls);
+  sd_list_release(L->l_members);
+  sd_str_release(L->_t27);
+}
+static sd_str sd_f_lspTypeSig(sd_S_Ast l_ast, sd_int l_d) {
+  sd_L_sd_f_lspTypeSig L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_lspTypeSig);
+  sd_S_TypeDecl l_td = SD_LIST_GET((l_ast).f_typeDecls, sd_S_TypeDecl, l_d);
+  sd_str _t1 = sd_str_concat(SD_STR_LIT("type "), (l_td).f_name);
+  L.l_s = _t1;
+  if ((l_td).f_isPub) {
+    sd_str _t2 = sd_str_concat(SD_STR_LIT("pub "), L.l_s);
+    sd_str_release(L.l_s);
+    L.l_s = _t2;
+  }
+  if ((SD_BOX_GET((l_td).f_kind, sd_E_DeclKind).tag == 0)) {
+    L.l_s = sd_str_append(L.l_s, SD_STR_LIT(" struct"));
+  } else {
+    if ((SD_BOX_GET((l_td).f_kind, sd_E_DeclKind).tag == 1)) {
+      L.l_s = sd_str_append(L.l_s, SD_STR_LIT(" enum"));
+    } else {
+      L.l_s = sd_str_append(L.l_s, SD_STR_LIT(" interface"));
+    }
+  }
+  if (sd_int_gt((l_td).f_implCount, SD_INT(0))) {
+    sd_list * _t3 = sd_list_new(&sd_type_str, 0);
+    L.l_impls = _t3;
+    {
+      sd_int l_i = SD_INT(0);
+      for (;;) {
+        SD_PREEMPT();
+        if (!(sd_int_lt(l_i, (l_td).f_implCount))) break;
+        {
+          sd_int _t5 = sd_m_Ast__at(l_ast, (l_td).f_impls, l_i);
+          sd_str _t6 = sd_m_Ast__typeExprText(l_ast, _t5);
+          SD_LIST_PUSH((&L.l_impls), sd_str, _t6);
+          sd_int_release(_t5);
+        }
+        _c4:;
+        { int64_t r_; if (SD_LIKELY((((l_i).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_i).w, SD_INT(1).w, &r_))) (l_i).w = r_; else { sd_int s_ = sd_int_add_slow((l_i), SD_INT(1)); sd_int_release((l_i)); (l_i) = s_; } }
+      }
+      sd_int_release(l_i);
+    }
+    sd_str _t7 = sd_list_join(L.l_impls, SD_STR_LIT(", "));
+    sd_str_part _t8[] = {{SD_STR_LIT(" implements ")}, {_t7}};
+    L.l_s = sd_str_append_parts(L.l_s, _t8, 2);
+    sd_str_release(_t7); 
+    sd_list_release(L.l_impls); L.l_impls = NULL;
+  }
+  sd_list * _t9 = sd_list_new(&sd_type_str, 0);
+  L.l_members = _t9;
+  {
+    sd_int l_f = SD_INT(0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!(sd_int_lt(l_f, (l_td).f_fieldCount))) break;
+      {
+        sd_int _t11 = sd_m_Ast__at(l_ast, (l_td).f_fields, l_f);
+        sd_S_Param l_p = SD_LIST_GET((l_ast).f_params, sd_S_Param, _t11);
+        sd_int_release(_t11);
+        sd_str _t12 = sd_m_Ast__typeExprText(l_ast, (l_p).f_typeExpr);
+        sd_str _t13[] = {_t12, SD_STR_LIT(" "), (l_p).f_name};
+        sd_str _t14 = sd_str_concat_n(_t13, 3);
+        sd_str l_field = _t14;
+        sd_str_release(_t12); 
+        if ((l_p).f_isPub) {
+          sd_str _t15 = sd_str_concat(SD_STR_LIT("pub "), l_field);
+          sd_str_release(l_field);
+          l_field = _t15;
+        }
+        sd_str _t16 = l_field;
+        SD_LIST_PUSH((&L.l_members), sd_str, _t16);
+      }
+      _c10:;
+      { int64_t r_; if (SD_LIKELY((((l_f).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_f).w, SD_INT(1).w, &r_))) (l_f).w = r_; else { sd_int s_ = sd_int_add_slow((l_f), SD_INT(1)); sd_int_release((l_f)); (l_f) = s_; } }
+    }
+    sd_int_release(l_f);
+  }
+  {
+    sd_int l_k = SD_INT(0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!(sd_int_lt(l_k, (l_td).f_caseCount))) break;
+      {
+        sd_int _t18 = sd_m_Ast__at(l_ast, (l_td).f_cases, l_k);
+        sd_S_EnumCase l_ec = SD_LIST_GET((l_ast).f_enumCases, sd_S_EnumCase, _t18);
+        sd_int_release(_t18);
+        if (sd_int_gt((l_ec).f_paramCount, SD_INT(0))) {
+          sd_str _t19 = sd_f_lspParamsText(l_ast, (l_ec).f_params, (l_ec).f_paramCount);
+          sd_str _t20 = sd_str_concat((l_ec).f_name, _t19);
+          SD_LIST_PUSH((&L.l_members), sd_str, _t20);
+          sd_str_release(_t19); 
+        } else {
+          sd_str _t21 = sd_str_retain((l_ec).f_name);
+          SD_LIST_PUSH((&L.l_members), sd_str, _t21);
+        }
+      }
+      _c17:;
+      { int64_t r_; if (SD_LIKELY((((l_k).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_k).w, SD_INT(1).w, &r_))) (l_k).w = r_; else { sd_int s_ = sd_int_add_slow((l_k), SD_INT(1)); sd_int_release((l_k)); (l_k) = s_; } }
+    }
+    sd_int_release(l_k);
+  }
+  {
+    sd_int l_m = SD_INT(0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!(sd_int_lt(l_m, (l_td).f_methodCount))) break;
+      {
+        sd_int _t23 = sd_m_Ast__at(l_ast, (l_td).f_methods, l_m);
+        sd_str _t24 = sd_f_lspMethodSigText(l_ast, _t23);
+        SD_LIST_PUSH((&L.l_members), sd_str, _t24);
+        sd_int_release(_t23);
+      }
+      _c22:;
+      { int64_t r_; if (SD_LIKELY((((l_m).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_m).w, SD_INT(1).w, &r_))) (l_m).w = r_; else { sd_int s_ = sd_int_add_slow((l_m), SD_INT(1)); sd_int_release((l_m)); (l_m) = s_; } }
+    }
+    sd_int_release(l_m);
+  }
+  if ((SD_SMALL(sd_list_len(L.l_members)) == ((int64_t)0))) {
+    sd_str _t25 = sd_str_concat(L.l_s, SD_STR_LIT(" {}"));
+    sd_str _t26 = _t25;
+    SD_LF_LEAVE(L);
+    sd_list_release(L.l_members);
+    sd_str_release(L.l_s);
+    return _t26;
+  }
+  L._t27 = sd_list_join(L.l_members, SD_STR_LIT("\012    "));
+  sd_str _t28[] = {L.l_s, SD_STR_LIT(" {\012    "), L._t27, SD_STR_LIT("\012}")};
+  sd_str _t29 = sd_str_concat_n(_t28, 4);
+  sd_str _t30 = _t29;
+  SD_LF_LEAVE(L);
+  sd_str_release(L._t27);
+  sd_list_release(L.l_members);
+  sd_str_release(L.l_s);
+  return _t30;
+}
+
+typedef struct { sd_lframe h; sd_str _t1; sd_str l_s; } sd_L_sd_f_lspMethodSigText;
+static void sd_lr_sd_f_lspMethodSigText(sd_lframe *p) {
+  sd_L_sd_f_lspMethodSigText *L = (sd_L_sd_f_lspMethodSigText *)p;
+  sd_str_release(L->_t1);
+  sd_str_release(L->l_s);
+}
+static sd_str sd_f_lspMethodSigText(sd_S_Ast l_ast, sd_int l_m) {
+  sd_L_sd_f_lspMethodSigText L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_lspMethodSigText);
+  sd_S_MethodSig l_ms = SD_LIST_GET((l_ast).f_methodSigs, sd_S_MethodSig, l_m);
+  L._t1 = sd_f_lspParamsText(l_ast, (l_ms).f_params, (l_ms).f_paramCount);
+  sd_str _t2 = sd_f_lspResultsText(l_ast, (l_ms).f_results, (l_ms).f_resultCount);
+  sd_str _t3[] = {(l_ms).f_name, L._t1, _t2};
+  sd_str _t4 = sd_str_concat_n(_t3, 3);
+  L.l_s = _t4;
+  sd_str_release(_t2); 
+  sd_str_release(L._t1); L._t1 = NULL;
+  if ((l_ms).f_isMut) {
+    sd_str _t5 = sd_str_concat(SD_STR_LIT("mut "), L.l_s);
+    sd_str _t6 = _t5;
+    SD_LF_LEAVE(L);
+    sd_str_release(L.l_s);
+    return _t6;
+  }
+  SD_LF_LEAVE(L);
+  return L.l_s;
+}
+
+typedef struct { sd_lframe h; sd_str l_sig; sd_str _t7; sd_str _t8; sd_str _t9; sd_str _t10; } sd_L_sd_f_lspFieldSym;
+static void sd_lr_sd_f_lspFieldSym(sd_lframe *p) {
+  sd_L_sd_f_lspFieldSym *L = (sd_L_sd_f_lspFieldSym *)p;
+  sd_str_release(L->l_sig);
+  sd_str_release(L->_t7);
+  sd_str_release(L->_t8);
+  sd_str_release(L->_t9);
+  sd_str_release(L->_t10);
+}
+static sd_S_LspSym sd_f_lspFieldSym(sd_S_Checker l_c, sd_int l_d, sd_int l_i) {
+  sd_L_sd_f_lspFieldSym L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_lspFieldSym);
+  sd_S_TypeDecl l_td = SD_LIST_GET(((l_c).f_ast).f_typeDecls, sd_S_TypeDecl, l_d);
+  if ((sd_int_lt(l_i, SD_INT(0)) || sd_int_ge(l_i, (l_td).f_fieldCount))) {
+    sd_S_LspSym _t1 = sd_f_lspNoSym();
+    SD_LF_LEAVE(L);
+    return _t1;
+  }
+  sd_int _t2 = sd_m_Ast__at((l_c).f_ast, (l_td).f_fields, l_i);
+  sd_S_Param l_p = SD_LIST_GET(((l_c).f_ast).f_params, sd_S_Param, _t2);
+  sd_int_release(_t2);
+  sd_str _t3 = sd_m_Ast__typeExprText((l_c).f_ast, (l_p).f_typeExpr);
+  sd_str _t4[] = {_t3, SD_STR_LIT(" "), (l_p).f_name};
+  sd_str _t5 = sd_str_concat_n(_t4, 3);
+  L.l_sig = _t5;
+  sd_str_release(_t3); 
+  if ((l_p).f_isPub) {
+    sd_str _t6 = sd_str_concat(SD_STR_LIT("pub "), L.l_sig);
+    sd_str_release(L.l_sig);
+    L.l_sig = _t6;
+  }
+  L._t7 = sd_f_lspDocComment((l_c).f_ast, (l_td).f_file, ((l_p).f_pos).f_line);
+  L._t8 = sd_m_Checker__declDisplayName(l_c, l_d);
+  L._t9 = sd_str_concat(SD_STR_LIT("field of "), L._t8);
+  L._t10 = sd_f_lspJoinDoc(L._t7, L._t9);
+  sd_S_LspSym _t11 = sd_f_lspSymOf((l_p).f_pos, (l_p).f_name, L.l_sig, L._t10);
+  sd_S_LspSym _t12 = _t11;
+  SD_LF_LEAVE(L);
+  sd_str_release(L._t10);
+  sd_str_release(L._t9);
+  sd_str_release(L._t8);
+  sd_str_release(L._t7);
+  sd_str_release(L.l_sig);
+  return _t12;
+}
+
+typedef struct { sd_lframe h; sd_str l_sig; sd_str _t8; sd_str _t9; sd_str _t10; sd_str _t11; } sd_L_sd_f_lspCaseSym;
+static void sd_lr_sd_f_lspCaseSym(sd_lframe *p) {
+  sd_L_sd_f_lspCaseSym *L = (sd_L_sd_f_lspCaseSym *)p;
+  sd_str_release(L->l_sig);
+  sd_str_release(L->_t8);
+  sd_str_release(L->_t9);
+  sd_str_release(L->_t10);
+  sd_str_release(L->_t11);
+}
+static sd_S_LspSym sd_f_lspCaseSym(sd_S_Checker l_c, sd_int l_d, sd_int l_ci) {
+  sd_L_sd_f_lspCaseSym L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_lspCaseSym);
+  if ((sd_int_lt(l_d, SD_INT(0)) || sd_int_ge(l_d, sd_list_len(((l_c).f_ast).f_typeDecls)))) {
+    sd_S_LspSym _t1 = sd_f_lspNoSym();
+    SD_LF_LEAVE(L);
+    return _t1;
+  }
+  sd_S_TypeDecl l_td = SD_LIST_GET(((l_c).f_ast).f_typeDecls, sd_S_TypeDecl, l_d);
+  if ((sd_int_lt(l_ci, SD_INT(0)) || sd_int_ge(l_ci, (l_td).f_caseCount))) {
+    sd_S_LspSym _t2 = sd_f_lspNoSym();
+    SD_LF_LEAVE(L);
+    return _t2;
+  }
+  sd_int _t3 = sd_m_Ast__at((l_c).f_ast, (l_td).f_cases, l_ci);
+  sd_S_EnumCase l_ec = SD_LIST_GET(((l_c).f_ast).f_enumCases, sd_S_EnumCase, _t3);
+  sd_int_release(_t3);
+  sd_str _t4 = sd_m_Checker__declDisplayName(l_c, l_d);
+  sd_str _t5[] = {_t4, SD_STR_LIT("."), (l_ec).f_name};
+  sd_str _t6 = sd_str_concat_n(_t5, 3);
+  L.l_sig = _t6;
+  sd_str_release(_t4); 
+  if (sd_int_gt((l_ec).f_paramCount, SD_INT(0))) {
+    sd_str _t7 = sd_f_lspParamsText((l_c).f_ast, (l_ec).f_params, (l_ec).f_paramCount);
+    L.l_sig = sd_str_append(L.l_sig, _t7);
+    sd_str_release(_t7); 
+  }
+  L._t8 = sd_f_lspDocComment((l_c).f_ast, (l_td).f_file, ((l_ec).f_pos).f_line);
+  L._t9 = sd_m_Checker__declDisplayName(l_c, l_d);
+  L._t10 = sd_str_concat(SD_STR_LIT("case of enum "), L._t9);
+  L._t11 = sd_f_lspJoinDoc(L._t8, L._t10);
+  sd_S_LspSym _t12 = sd_f_lspSymOf((l_ec).f_pos, (l_ec).f_name, L.l_sig, L._t11);
+  sd_S_LspSym _t13 = _t12;
+  SD_LF_LEAVE(L);
+  sd_str_release(L._t11);
+  sd_str_release(L._t10);
+  sd_str_release(L._t9);
+  sd_str_release(L._t8);
+  sd_str_release(L.l_sig);
+  return _t13;
+}
+
+typedef struct { sd_lframe h; sd_str _t4; sd_str _t5; sd_str _t6; sd_str _t7; sd_str _t8; sd_str _t9; } sd_L_sd_f_lspIfaceMethodSym;
+static void sd_lr_sd_f_lspIfaceMethodSym(sd_lframe *p) {
+  sd_L_sd_f_lspIfaceMethodSym *L = (sd_L_sd_f_lspIfaceMethodSym *)p;
+  sd_str_release(L->_t4);
+  sd_str_release(L->_t5);
+  sd_str_release(L->_t6);
+  sd_str_release(L->_t7);
+  sd_str_release(L->_t8);
+  sd_str_release(L->_t9);
+}
+static sd_S_LspSym sd_f_lspIfaceMethodSym(sd_S_Checker l_c, sd_int l_d, sd_int l_mi) {
+  sd_L_sd_f_lspIfaceMethodSym L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_lspIfaceMethodSym);
+  if ((sd_int_lt(l_d, SD_INT(0)) || sd_int_ge(l_d, sd_list_len(((l_c).f_ast).f_typeDecls)))) {
+    sd_S_LspSym _t1 = sd_f_lspNoSym();
+    SD_LF_LEAVE(L);
+    return _t1;
+  }
+  sd_S_TypeDecl l_td = SD_LIST_GET(((l_c).f_ast).f_typeDecls, sd_S_TypeDecl, l_d);
+  if ((sd_int_lt(l_mi, SD_INT(0)) || sd_int_ge(l_mi, (l_td).f_methodCount))) {
+    sd_S_LspSym _t2 = sd_f_lspNoSym();
+    SD_LF_LEAVE(L);
+    return _t2;
+  }
+  sd_int _t3 = sd_m_Ast__at((l_c).f_ast, (l_td).f_methods, l_mi);
+  sd_int l_m = _t3;
+  sd_S_MethodSig l_ms = SD_LIST_GET(((l_c).f_ast).f_methodSigs, sd_S_MethodSig, l_m);
+  L._t4 = sd_f_lspMethodSigText((l_c).f_ast, l_m);
+  L._t5 = sd_str_concat(SD_STR_LIT("fn "), L._t4);
+  L._t6 = sd_f_lspDocComment((l_c).f_ast, (l_td).f_file, ((l_ms).f_pos).f_line);
+  L._t7 = sd_m_Checker__declDisplayName(l_c, l_d);
+  L._t8 = sd_str_concat(SD_STR_LIT("method of interface "), L._t7);
+  L._t9 = sd_f_lspJoinDoc(L._t6, L._t8);
+  sd_S_LspSym _t10 = sd_f_lspSymOf((l_ms).f_pos, (l_ms).f_name, L._t5, L._t9);
+  sd_S_LspSym _t11 = _t10;
+  SD_LF_LEAVE(L);
+  sd_str_release(L._t9);
+  sd_str_release(L._t8);
+  sd_str_release(L._t7);
+  sd_str_release(L._t6);
+  sd_str_release(L._t5);
+  sd_str_release(L._t4);
+  sd_int_release(l_m);
+  return _t11;
+}
+
+typedef struct { sd_lframe h; sd_str l_sig; sd_str l_value; sd_str _t8; } sd_L_sd_f_lspConstSym;
+static void sd_lr_sd_f_lspConstSym(sd_lframe *p) {
+  sd_L_sd_f_lspConstSym *L = (sd_L_sd_f_lspConstSym *)p;
+  sd_str_release(L->l_sig);
+  sd_str_release(L->l_value);
+  sd_str_release(L->_t8);
+}
+static sd_S_LspSym sd_f_lspConstSym(sd_S_Checker l_c, sd_int l_k) {
+  sd_L_sd_f_lspConstSym L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_lspConstSym);
+  if ((sd_int_lt(l_k, SD_INT(0)) || sd_int_ge(l_k, sd_list_len(((l_c).f_ast).f_consts)))) {
+    sd_S_LspSym _t1 = sd_f_lspNoSym();
+    SD_LF_LEAVE(L);
+    return _t1;
+  }
+  sd_S_ConstDecl l_cd = SD_LIST_GET(((l_c).f_ast).f_consts, sd_S_ConstDecl, l_k);
+  sd_str _t2 = sd_m_Ast__typeExprText((l_c).f_ast, (l_cd).f_typeExpr);
+  sd_str _t3[] = {SD_STR_LIT("const "), _t2, SD_STR_LIT(" "), (l_cd).f_name};
+  sd_str _t4 = sd_str_concat_n(_t3, 4);
+  L.l_sig = _t4;
+  sd_str_release(_t2); 
+  if ((l_cd).f_isPub) {
+    sd_str _t5 = sd_str_concat(SD_STR_LIT("pub "), L.l_sig);
+    sd_str_release(L.l_sig);
+    L.l_sig = _t5;
+  }
+  sd_str _t6 = sd_m_Ast__exprText((l_c).f_ast, (l_cd).f_expr);
+  L.l_value = _t6;
+  if ((!sd_str_eq(L.l_value, SD_STR_LIT("")))) {
+    sd_str_part _t7[] = {{SD_STR_LIT(" = ")}, {L.l_value}};
+    L.l_sig = sd_str_append_parts(L.l_sig, _t7, 2);
+  }
+  L._t8 = sd_f_lspDocComment((l_c).f_ast, (l_cd).f_file, ((l_cd).f_pos).f_line);
+  sd_S_LspSym _t9 = sd_f_lspSymOf((l_cd).f_pos, (l_cd).f_name, L.l_sig, L._t8);
+  sd_S_LspSym _t10 = _t9;
+  SD_LF_LEAVE(L);
+  sd_str_release(L._t8);
+  sd_str_release(L.l_value);
+  sd_str_release(L.l_sig);
+  return _t10;
+}
+
+typedef struct { sd_lframe h; sd_str l_sig; sd_str l_what; } sd_L_sd_f_lspVarSym;
+static void sd_lr_sd_f_lspVarSym(sd_lframe *p) {
+  sd_L_sd_f_lspVarSym *L = (sd_L_sd_f_lspVarSym *)p;
+  sd_str_release(L->l_sig);
+  sd_str_release(L->l_what);
+}
+static sd_S_LspSym sd_f_lspVarSym(sd_S_Checker l_c, sd_int l_v) {
+  sd_L_sd_f_lspVarSym L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_lspVarSym);
+  if ((sd_int_lt(l_v, SD_INT(0)) || sd_int_ge(l_v, sd_list_len((l_c).f_vars)))) {
+    sd_S_LspSym _t1 = sd_f_lspNoSym();
+    SD_LF_LEAVE(L);
+    return _t1;
+  }
+  sd_S_Var l_x = SD_LIST_GET((l_c).f_vars, sd_S_Var, l_v);
+  L.l_sig = sd_str_retain((l_x).f_name);
+  if (((sd_int_ge((l_x).f_ty, SD_INT(0)) && (!sd_int_eq((l_x).f_ty, sd_c_tyInvalid()))) && sd_int_lt((l_x).f_ty, sd_list_len(((l_c).f_types).f_list)))) {
+    sd_str _t2 = sd_m_Checker__typeName(l_c, (l_x).f_ty);
+    sd_str _t3[] = {_t2, SD_STR_LIT(" "), (l_x).f_name};
+    sd_str _t4 = sd_str_concat_n(_t3, 3);
+    sd_str_release(L.l_sig);
+    L.l_sig = _t4;
+    sd_str_release(_t2); 
+  }
+  L.l_what = SD_STR_LIT("(variable)");
+  if ((SD_BOX_GET((l_x).f_kind, sd_E_VarKind).tag == 1)) {
+    sd_str _t5 = SD_STR_LIT("(parameter)");
+    sd_str_release(L.l_what);
+    L.l_what = _t5;
+  } else {
+    if ((SD_BOX_GET((l_x).f_kind, sd_E_VarKind).tag == 2)) {
+      sd_str _t6 = SD_STR_LIT("(receiver)");
+      sd_str_release(L.l_what);
+      L.l_what = _t6;
+    } else {
+      if ((SD_BOX_GET((l_x).f_kind, sd_E_VarKind).tag == 3)) {
+        sd_str _t7 = SD_STR_LIT("(mut receiver)");
+        sd_str_release(L.l_what);
+        L.l_what = _t7;
+      } else {
+        if ((SD_BOX_GET((l_x).f_kind, sd_E_VarKind).tag == 4)) {
+          sd_str _t8 = sd_str_concat(SD_STR_LIT("const "), L.l_sig);
+          sd_str_release(L.l_sig);
+          L.l_sig = _t8;
+          sd_str _t9 = SD_STR_LIT("(local constant)");
+          sd_str_release(L.l_what);
+          L.l_what = _t9;
+        }
+      }
+    }
+  }
+  sd_S_LspSym _t10 = sd_f_lspSymOf((l_x).f_pos, (l_x).f_name, L.l_sig, L.l_what);
+  sd_S_LspSym _t11 = _t10;
+  SD_LF_LEAVE(L);
+  sd_str_release(L.l_what);
+  sd_str_release(L.l_sig);
+  return _t11;
+}
+
+typedef struct { sd_lframe h; sd_S_LspSym l_s; } sd_L_sd_f_lspVarSymIn;
+static void sd_lr_sd_f_lspVarSymIn(sd_lframe *p) {
+  sd_L_sd_f_lspVarSymIn *L = (sd_L_sd_f_lspVarSymIn *)p;
+  sd_rl_S6LspSym(L->l_s);
+}
+static sd_S_LspSym sd_f_lspVarSymIn(sd_S_Checker l_c, sd_list * l_toks, sd_int l_v) {
+  sd_L_sd_f_lspVarSymIn L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_lspVarSymIn);
+  sd_S_LspSym _t1 = sd_f_lspVarSym(l_c, l_v);
+  L.l_s = _t1;
+  if ((!(L.l_s).f_found)) {
+    SD_LF_LEAVE(L);
+    return L.l_s;
+  }
+  sd_S_Var l_x = SD_LIST_GET((l_c).f_vars, sd_S_Var, l_v);
+  if (((!(SD_BOX_GET((l_x).f_kind, sd_E_VarKind).tag == 2)) && (!(SD_BOX_GET((l_x).f_kind, sd_E_VarKind).tag == 3)))) {
+    SD_LF_LEAVE(L);
+    return L.l_s;
+  }
+  {
+    sd_int l_i = SD_INT(0);
+    for (;;) {
+      SD_PREEMPT();
+      sd_int _t3 = sd_int_add(l_i, SD_INT(1));
+      bool _t4 = sd_int_lt(_t3, sd_list_len(l_toks));
+      sd_int_release(_t3);
+      if (!(_t4)) break;
+      {
+        sd_S_Token l_t = SD_LIST_GET(l_toks, sd_S_Token, l_i);
+        bool _t6 = (sd_int_eq(((l_t).f_pos).f_file, ((l_x).f_pos).f_file) && sd_int_eq(((l_t).f_pos).f_line, ((l_x).f_pos).f_line));
+        if (_t6) {
+          bool _t5 = sd_f_posBefore((l_t).f_pos, (l_x).f_pos);
+          _t6 = (!_t5);
+        }
+        bool _t8 = ((_t6 && (SD_BOX_GET((l_t).f_kind, sd_E_Tok).tag == 2)) && sd_str_eq((l_t).f_text, (l_x).f_name));
+        if (_t8) {
+          sd_int _t7 = sd_int_add(l_i, SD_INT(1));
+          _t8 = (SD_BOX_GET((SD_LIST_GET(l_toks, sd_S_Token, _t7)).f_kind, sd_E_Tok).tag == 62);
+          sd_int_release(_t7);
+        }
+        if (_t8) {
+          sd_S_Pos _t9 = sd_rt_S3Pos((l_t).f_pos);
+          sd_S_Pos *_t10 = (&((&L.l_s))->f_pos);
+          sd_rl_S3Pos(*_t10);
+          *_t10 = _t9;
+          sd_S_LspSym _t11 = L.l_s;
+          SD_LF_LEAVE(L);
+          sd_int_release(l_i);
+          return _t11;
+        }
+      }
+      _c2:;
+      { int64_t r_; if (SD_LIKELY((((l_i).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_i).w, SD_INT(1).w, &r_))) (l_i).w = r_; else { sd_int s_ = sd_int_add_slow((l_i), SD_INT(1)); sd_int_release((l_i)); (l_i) = s_; } }
+    }
+    sd_int_release(l_i);
+  }
+  SD_LF_LEAVE(L);
+  return L.l_s;
+}
+
+typedef struct { sd_lframe h; sd_str l_doc; sd_str l_sig; } sd_L_sd_f_lspPkgSym;
+static void sd_lr_sd_f_lspPkgSym(sd_lframe *p) {
+  sd_L_sd_f_lspPkgSym *L = (sd_L_sd_f_lspPkgSym *)p;
+  sd_str_release(L->l_doc);
+  sd_str_release(L->l_sig);
+}
+static sd_S_LspSym sd_f_lspPkgSym(sd_S_Checker l_c, sd_int l_pkg) {
+  sd_L_sd_f_lspPkgSym L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_lspPkgSym);
+  if ((sd_int_lt(l_pkg, SD_INT(0)) || sd_int_ge(l_pkg, sd_list_len(((l_c).f_ast).f_pkgs)))) {
+    sd_S_LspSym _t1 = sd_f_lspNoSym();
+    SD_LF_LEAVE(L);
+    return _t1;
+  }
+  sd_S_Package l_pk = SD_LIST_GET(((l_c).f_ast).f_pkgs, sd_S_Package, l_pkg);
+  int64_t l_first = ((int64_t)-1);
+  L.l_doc = SD_STR_LIT("");
+  {
+    int64_t l_f = ((int64_t)0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!((l_f < SD_SMALL(sd_list_len(((l_c).f_ast).f_files))))) break;
+      {
+        sd_S_SourceFile l_sf = SD_LIST_GET(((l_c).f_ast).f_files, sd_S_SourceFile, SD_INT_S(l_f));
+        if (((!sd_int_eq((l_sf).f_pkgIndex, l_pkg)) || (l_sf).f_isTest)) {
+          goto _c2;
+        }
+        if ((l_first < ((int64_t)0))) {
+          l_first = l_f;
+        }
+        sd_str _t3 = sd_f_lspDocComment((l_c).f_ast, SD_INT_S(l_f), ((l_sf).f_pkgPos).f_line);
+        sd_str l_d = _t3;
+        if (((!sd_str_eq(l_d, SD_STR_LIT(""))) && sd_str_eq(L.l_doc, SD_STR_LIT("")))) {
+          sd_str _t4 = sd_str_retain(l_d);
+          sd_str_release(L.l_doc);
+          L.l_doc = _t4;
+          l_first = l_f;
+        }
+        sd_str_release(l_d); 
+      }
+      _c2:;
+      l_f++;
+    }
+  }
+  sd_str _t5 = sd_str_concat(SD_STR_LIT("package "), (l_pk).f_name);
+  L.l_sig = _t5;
+  if ((!sd_str_eq((l_pk).f_path, SD_STR_LIT("")))) {
+    sd_str _t6[] = {SD_STR_LIT("import \""), (l_pk).f_path, SD_STR_LIT("\"")};
+    sd_str _t7 = sd_str_concat_n(_t6, 3);
+    sd_str_release(L.l_sig);
+    L.l_sig = _t7;
+  }
+  if ((l_first < ((int64_t)0))) {
+    sd_S_Pos _t8 = (sd_S_Pos){.f_file = SD_INT(-1), .f_line = SD_INT(0), .f_col = SD_INT(0)};
+    sd_S_LspSym _t9 = (sd_S_LspSym){.f_found = true, .f_pos = _t8, .f_len = SD_INT(0), .f_sig = sd_str_retain(L.l_sig), .f_doc = sd_str_retain(L.l_doc)};
+    sd_S_LspSym _t10 = _t9;
+    SD_LF_LEAVE(L);
+    sd_str_release(L.l_sig);
+    sd_str_release(L.l_doc);
+    return _t10;
+  }
+  sd_S_LspSym _t11 = sd_f_lspSymOf((SD_LIST_GET(((l_c).f_ast).f_files, sd_S_SourceFile, SD_INT_S(l_first))).f_pkgPos, (l_pk).f_name, L.l_sig, L.l_doc);
+  sd_S_LspSym _t12 = _t11;
+  SD_LF_LEAVE(L);
+  sd_str_release(L.l_sig);
+  sd_str_release(L.l_doc);
+  return _t12;
+}
+
+typedef struct { sd_lframe h; sd_list * l_lines; sd_str l_text; sd_str _t7; } sd_L_sd_f_lspDocComment;
+static void sd_lr_sd_f_lspDocComment(sd_lframe *p) {
+  sd_L_sd_f_lspDocComment *L = (sd_L_sd_f_lspDocComment *)p;
+  sd_list_release(L->l_lines);
+  sd_str_release(L->l_text);
+  sd_str_release(L->_t7);
+}
+static sd_str sd_f_lspDocComment(sd_S_Ast l_ast, sd_int l_file, sd_int l_line) {
+  sd_L_sd_f_lspDocComment L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_lspDocComment);
+  sd_list * _t1 = sd_list_new(&sd_type_str, 0);
+  L.l_lines = _t1;
+  sd_int _t2 = sd_int_sub(l_line, SD_INT(1));
+  sd_int l_want = _t2;
+  {
+    int64_t l_i = (SD_SMALL(sd_list_len((l_ast).f_comments)) - ((int64_t)1));
+    for (;;) {
+      SD_PREEMPT();
+      if (!((l_i >= ((int64_t)0)))) break;
+      {
+        sd_S_Comment l_cm = SD_LIST_GET((l_ast).f_comments, sd_S_Comment, SD_INT_S(l_i));
+        if (((!sd_int_eq(((l_cm).f_pos).f_file, l_file)) || sd_int_gt(((l_cm).f_pos).f_line, l_want))) {
+          goto _c3;
+        }
+        if ((sd_int_lt(((l_cm).f_pos).f_line, l_want) || (!(l_cm).f_ownLine))) {
+          break;
+        }
+        L.l_text = sd_str_retain((l_cm).f_text);
+        if (sd_str_starts_with(L.l_text, SD_STR_LIT("// "))) {
+          sd_str _t4 = sd_str_slice(L.l_text, SD_INT(3), sd_str_len(L.l_text));
+          sd_str_release(L.l_text);
+          L.l_text = _t4;
+        } else {
+          if (sd_str_starts_with(L.l_text, SD_STR_LIT("//"))) {
+            sd_str _t5 = sd_str_slice(L.l_text, SD_INT(2), sd_str_len(L.l_text));
+            sd_str_release(L.l_text);
+            L.l_text = _t5;
+          }
+        }
+        sd_int _t6 = SD_INT(0);
+        L._t7 = L.l_text;
+        L.l_text = NULL;
+        sd_list_insert((&L.l_lines), _t6, &L._t7);
+        L._t7 = NULL;
+        { int64_t r_; if (SD_LIKELY((((l_want).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_sub_overflow((l_want).w, SD_INT(1).w, &r_))) (l_want).w = r_; else { sd_int s_ = sd_int_sub_slow((l_want), SD_INT(1)); sd_int_release((l_want)); (l_want) = s_; } }
+      }
+      _c3:;
+      l_i--;
+    }
+  }
+  sd_str _t8 = sd_list_join(L.l_lines, SD_STR_LIT("\012"));
+  sd_str _t9 = _t8;
+  SD_LF_LEAVE(L);
+  sd_int_release(l_want);
+  sd_list_release(L.l_lines);
+  return _t9;
+}
+
+static sd_str sd_f_lspJoinDoc(sd_str l_a, sd_str l_b) {
+  if (sd_str_eq(l_a, SD_STR_LIT(""))) {
+    return sd_str_retain(l_b);
+  }
+  sd_str _t1[] = {l_a, SD_STR_LIT("\012\012"), l_b};
+  sd_str _t2 = sd_str_concat_n(_t1, 3);
+  return _t2;
+}
+
+typedef struct { sd_lframe h; sd_T_T2se _t1; sd_str l_text; sd_S_LspJob l_probe; sd_str _t9; sd_str _t10; sd_str _t12; sd_str _t13; sd_str _t14; sd_str _t15; sd_T_T2S11LspAnalysise _t16; sd_S_LspAnalysis l_a; sd_list * l_items; sd_map * l_list; sd_box * _t29; sd_box * _t31; } sd_L_sd_f_lspCompletion;
+static void sd_lr_sd_f_lspCompletion(sd_lframe *p) {
+  sd_L_sd_f_lspCompletion *L = (sd_L_sd_f_lspCompletion *)p;
+  sd_rl_T2se(L->_t1);
+  sd_str_release(L->l_text);
+  sd_rl_S6LspJob(L->l_probe);
+  sd_str_release(L->_t9);
+  sd_str_release(L->_t10);
+  sd_str_release(L->_t12);
+  sd_str_release(L->_t13);
+  sd_str_release(L->_t14);
+  sd_str_release(L->_t15);
+  sd_rl_T2S11LspAnalysise(L->_t16);
+  sd_rl_S11LspAnalysis(L->l_a);
+  sd_list_release(L->l_items);
+  sd_map_release(L->l_list);
+  sd_box_release(L->_t29);
+  sd_box_release(L->_t31);
+}
+static sd_T_T2E10json_Valuee sd_f_lspCompletion(sd_S_LspJob l_job) {
+  sd_L_sd_f_lspCompletion L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_lspCompletion);
+  L._t1 = sd_f_lspReadText((l_job).f_path, (l_job).f_overlay);
+  if (!sd_err_is_null(L._t1.r1)) {
+    sd_str_release(L._t1.r0);
+    SD_LF_LEAVE(L);
+    return (sd_T_T2E10json_Valuee){.r1 = L._t1.r1};
+  }
+  sd_str _t2 = L._t1.r0;
+  L._t1 = ((sd_T_T2se){0});
+  L.l_text = _t2;
+  sd_int _t3 = sd_f_lspOffset(L.l_text, (l_job).f_line, (l_job).f_character);
+  sd_int l_off = _t3;
+  sd_int l_start = sd_int_retain(l_off);
+  {
+    for (;;) {
+      SD_PREEMPT();
+      bool _t6 = sd_int_gt(l_start, SD_INT(0));
+      if (_t6) {
+        sd_int _t4 = sd_int_sub(l_start, SD_INT(1));
+        bool _t5 = sd_f_lspIdentByte(sd_str_at(L.l_text, _t4));
+        _t6 = _t5;
+        sd_int_release(_t4);
+      }
+      if (!(_t6)) break;
+      {
+        { int64_t r_; if (SD_LIKELY((((l_start).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_sub_overflow((l_start).w, SD_INT(1).w, &r_))) (l_start).w = r_; else { sd_int s_ = sd_int_sub_slow((l_start), SD_INT(1)); sd_int_release((l_start)); (l_start) = s_; } }
+      }
+    }
+  }
+  bool _t8 = sd_int_gt(l_start, SD_INT(0));
+  if (_t8) {
+    sd_int _t7 = sd_int_sub(l_start, SD_INT(1));
+    _t8 = ((sd_str_at(L.l_text, _t7)) == (((uint8_t)46)));
+    sd_int_release(_t7);
+  }
+  bool l_member = _t8;
+  L.l_probe = sd_rt_S6LspJob(l_job);
+  if ((l_member && sd_int_eq(l_start, l_off))) {
+    L._t9 = sd_str_slice(L.l_text, SD_INT(0), l_off);
+    L._t10 = sd_str_slice(L.l_text, l_off, sd_str_len(L.l_text));
+    sd_str _t11[] = {L._t9, sd_c_lspPlaceholder(), L._t10};
+    L._t12 = sd_str_concat_n(_t11, 3);
+    L._t13 = sd_str_retain((l_job).f_path);
+    sd_map_set((&((&L.l_probe))->f_overlay), &L._t13, &L._t12);
+    L._t13 = NULL;
+    L._t12 = NULL;
+    sd_str_release(L._t10); L._t10 = NULL;
+    sd_str_release(L._t9); L._t9 = NULL;
+  } else {
+    L._t14 = sd_str_retain(L.l_text);
+    L._t15 = sd_str_retain((l_job).f_path);
+    sd_map_set((&((&L.l_probe))->f_overlay), &L._t15, &L._t14);
+    L._t15 = NULL;
+    L._t14 = NULL;
+  }
+  L._t16 = sd_f_lspAnalyze(L.l_probe, sd_str_eq((l_job).f_kind, SD_STR_LIT("completion")));
+  if (!sd_err_is_null(L._t16.r1)) {
+    sd_rl_S11LspAnalysis(L._t16.r0);
+    sd_T_T2E10json_Valuee _t17 = (sd_T_T2E10json_Valuee){.r1 = L._t16.r1};
+    SD_LF_LEAVE(L);
+    sd_rl_S6LspJob(L.l_probe);
+    sd_int_release(l_start);
+    sd_int_release(l_off);
+    sd_str_release(L.l_text);
+    return _t17;
+  }
+  sd_S_LspAnalysis _t18 = L._t16.r0;
+  L._t16 = ((sd_T_T2S11LspAnalysise){0});
+  L.l_a = _t18;
+  sd_list * _t19 = sd_list_new(&sd_type_box, 0);
+  L.l_items = _t19;
+  sd_int _t20 = sd_f_lspLineStart(L.l_text, (l_job).f_line);
+  sd_int l_ls = _t20;
+  if ((sd_int_ge((L.l_a).f_file, SD_INT(0)) && sd_int_ge(l_ls, SD_INT(0)))) {
+    sd_int _t21 = sd_int_add((l_job).f_line, SD_INT(1));
+    sd_int _t22 = sd_int_sub(l_start, l_ls);
+    sd_int _t23 = sd_int_add(_t22, SD_INT(1));
+    sd_S_Pos _t24 = (sd_S_Pos){.f_file = sd_int_retain((L.l_a).f_file), .f_line = _t21, .f_col = _t23};
+    sd_S_Pos l_at = _t24;
+    sd_int_release(_t22);
+    if (l_member) {
+      sd_int _t25 = sd_int_sub(l_start, SD_INT(1));
+      sd_list * _t26 = sd_f_lspMemberItems((L.l_a).f_c, l_at, L.l_text, _t25);
+      sd_list_release(L.l_items);
+      L.l_items = _t26;
+      sd_int_release(_t25);
+    } else {
+      sd_list * _t27 = sd_f_lspScopeItems((L.l_a).f_c, l_at);
+      sd_list_release(L.l_items);
+      L.l_items = _t27;
+    }
+    sd_rl_S3Pos(l_at);
+  }
+  sd_map * _t28 = sd_map_new(&sd_type_str, &sd_type_box);
+  L.l_list = _t28;
+  L._t29 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 1, .u.c_Bool = {false}});
+  sd_str _t30 = SD_STR_LIT("isIncomplete");
+  sd_map_set((&L.l_list), &_t30, &L._t29);
+  L._t29 = NULL;
+  L._t31 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 4, .u.c_Array = {L.l_items}});
+  L.l_items = NULL;
+  sd_str _t32 = SD_STR_LIT("items");
+  sd_map_set((&L.l_list), &_t32, &L._t31);
+  L._t31 = NULL;
+  sd_box * _t33 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 5, .u.c_Object = {L.l_list}});
+  L.l_list = NULL;
+  sd_T_T2E10json_Valuee _t34 = (sd_T_T2E10json_Valuee){_t33, SD_IFACE_NULL};
+  SD_LF_LEAVE(L);
+  sd_int_release(l_ls);
+  sd_rl_S11LspAnalysis(L.l_a);
+  sd_rl_S6LspJob(L.l_probe);
+  sd_int_release(l_start);
+  sd_int_release(l_off);
+  sd_str_release(L.l_text);
+  return _t34;
+}
+
+typedef struct { sd_lframe h; sd_map * l_m; sd_box * _t2; sd_box * _t4; sd_box * _t6; sd_map * l_d; sd_box * _t9; sd_box * _t11; sd_box * _t13; } sd_L_sd_f_lspItem;
+static void sd_lr_sd_f_lspItem(sd_lframe *p) {
+  sd_L_sd_f_lspItem *L = (sd_L_sd_f_lspItem *)p;
+  sd_map_release(L->l_m);
+  sd_box_release(L->_t2);
+  sd_box_release(L->_t4);
+  sd_box_release(L->_t6);
+  sd_map_release(L->l_d);
+  sd_box_release(L->_t9);
+  sd_box_release(L->_t11);
+  sd_box_release(L->_t13);
+}
+static sd_box * sd_f_lspItem(sd_str l_label, sd_int l_kind, sd_str l_detail, sd_str l_doc) {
+  sd_L_sd_f_lspItem L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_lspItem);
+  sd_map * _t1 = sd_map_new(&sd_type_str, &sd_type_box);
+  L.l_m = _t1;
+  L._t2 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 3, .u.c_String = {sd_str_retain(l_label)}});
+  sd_str _t3 = SD_STR_LIT("label");
+  sd_map_set((&L.l_m), &_t3, &L._t2);
+  L._t2 = NULL;
+  L._t4 = sd_f_lspNum(l_kind);
+  sd_str _t5 = SD_STR_LIT("kind");
+  sd_map_set((&L.l_m), &_t5, &L._t4);
+  L._t4 = NULL;
+  if ((!sd_str_eq(l_detail, SD_STR_LIT("")))) {
+    L._t6 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 3, .u.c_String = {sd_str_retain(l_detail)}});
+    sd_str _t7 = SD_STR_LIT("detail");
+    sd_map_set((&L.l_m), &_t7, &L._t6);
+    L._t6 = NULL;
+  }
+  if ((!sd_str_eq(l_doc, SD_STR_LIT("")))) {
+    sd_map * _t8 = sd_map_new(&sd_type_str, &sd_type_box);
+    L.l_d = _t8;
+    L._t9 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 3, .u.c_String = {SD_STR_LIT("markdown")}});
+    sd_str _t10 = SD_STR_LIT("kind");
+    sd_map_set((&L.l_d), &_t10, &L._t9);
+    L._t9 = NULL;
+    L._t11 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 3, .u.c_String = {sd_str_retain(l_doc)}});
+    sd_str _t12 = SD_STR_LIT("value");
+    sd_map_set((&L.l_d), &_t12, &L._t11);
+    L._t11 = NULL;
+    L._t13 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 5, .u.c_Object = {L.l_d}});
+    L.l_d = NULL;
+    sd_str _t14 = SD_STR_LIT("documentation");
+    sd_map_set((&L.l_m), &_t14, &L._t13);
+    L._t13 = NULL;
+  }
+  sd_box * _t15 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 5, .u.c_Object = {L.l_m}});
+  L.l_m = NULL;
+  SD_LF_LEAVE(L);
+  return _t15;
+}
+
+typedef struct { sd_lframe h; sd_str _t3; sd_str _t4; sd_str _t7; sd_str _t8; sd_S_LspSym l_s; } sd_L_sd_f_lspGlobalItem;
+static void sd_lr_sd_f_lspGlobalItem(sd_lframe *p) {
+  sd_L_sd_f_lspGlobalItem *L = (sd_L_sd_f_lspGlobalItem *)p;
+  sd_str_release(L->_t3);
+  sd_str_release(L->_t4);
+  sd_str_release(L->_t7);
+  sd_str_release(L->_t8);
+  sd_rl_S6LspSym(L->l_s);
+}
+static sd_box * sd_f_lspGlobalItem(sd_S_Checker l_c, sd_int l_g) {
+  sd_L_sd_f_lspGlobalItem L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_lspGlobalItem);
+  sd_S_Global l_gl = SD_LIST_GET((l_c).f_globalList, sd_S_Global, l_g);
+  {
+    sd_box * _t1 = (l_gl).f_kind;
+    int32_t _t2 = SD_BOX_GET(_t1, sd_E_GlobalKind).tag;
+    if (_t2 == 0) {
+      L._t3 = sd_f_lspFnSig((l_c).f_ast, (l_gl).f_index);
+      L._t4 = sd_f_lspDocComment((l_c).f_ast, (SD_LIST_GET(((l_c).f_ast).f_fns, sd_S_FnDecl, (l_gl).f_index)).f_file, ((SD_LIST_GET(((l_c).f_ast).f_fns, sd_S_FnDecl, (l_gl).f_index)).f_start).f_line);
+      sd_box * _t5 = sd_f_lspItem((l_gl).f_name, SD_INT(3), L._t3, L._t4);
+      sd_box * _t6 = _t5;
+      SD_LF_LEAVE(L);
+      sd_str_release(L._t4);
+      sd_str_release(L._t3);
+      return _t6;
+    } else if (_t2 == 1) {
+      sd_S_TypeDecl l_td = SD_LIST_GET(((l_c).f_ast).f_typeDecls, sd_S_TypeDecl, (l_gl).f_index);
+      int64_t l_kind = ((int64_t)22);
+      if ((SD_BOX_GET((l_td).f_kind, sd_E_DeclKind).tag == 1)) {
+        l_kind = ((int64_t)13);
+      } else {
+        if ((SD_BOX_GET((l_td).f_kind, sd_E_DeclKind).tag == 2)) {
+          l_kind = ((int64_t)8);
+        }
+      }
+      L._t7 = sd_f_lspTypeSig((l_c).f_ast, (l_gl).f_index);
+      L._t8 = sd_f_lspDocComment((l_c).f_ast, (l_td).f_file, ((l_td).f_pos).f_line);
+      sd_box * _t9 = sd_f_lspItem((l_gl).f_name, SD_INT_S(l_kind), L._t7, L._t8);
+      sd_box * _t10 = _t9;
+      SD_LF_LEAVE(L);
+      sd_str_release(L._t8);
+      sd_str_release(L._t7);
+      return _t10;
+    } else if (_t2 == 2) {
+      sd_S_LspSym _t11 = sd_f_lspConstSym(l_c, (l_gl).f_index);
+      L.l_s = _t11;
+      sd_box * _t12 = sd_f_lspItem((l_gl).f_name, SD_INT(21), (L.l_s).f_sig, (L.l_s).f_doc);
+      sd_box * _t13 = _t12;
+      SD_LF_LEAVE(L);
+      sd_rl_S6LspSym(L.l_s);
+      return _t13;
+    }
+  }
+  sd_crash("internal error: lspGlobalItem reached its end without returning");
+}
+
+typedef struct { sd_lframe h; sd_list * l_items; sd_str l_base; } sd_L_sd_f_lspMemberItems;
+static void sd_lr_sd_f_lspMemberItems(sd_lframe *p) {
+  sd_L_sd_f_lspMemberItems *L = (sd_L_sd_f_lspMemberItems *)p;
+  sd_list_release(L->l_items);
+  sd_str_release(L->l_base);
+}
+static sd_list * sd_f_lspMemberItems(sd_S_Checker l_c, sd_S_Pos l_at, sd_str l_text, sd_int l_dot) {
+  sd_L_sd_f_lspMemberItems L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_lspMemberItems);
+  sd_list * _t1 = sd_list_new(&sd_type_box, 0);
+  L.l_items = _t1;
+  sd_int l_bs = sd_int_retain(l_dot);
+  {
+    for (;;) {
+      SD_PREEMPT();
+      bool _t4 = sd_int_gt(l_bs, SD_INT(0));
+      if (_t4) {
+        sd_int _t2 = sd_int_sub(l_bs, SD_INT(1));
+        bool _t3 = sd_f_lspIdentByte(sd_str_at(l_text, _t2));
+        _t4 = _t3;
+        sd_int_release(_t2);
+      }
+      if (!(_t4)) break;
+      {
+        { int64_t r_; if (SD_LIKELY((((l_bs).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_sub_overflow((l_bs).w, SD_INT(1).w, &r_))) (l_bs).w = r_; else { sd_int s_ = sd_int_sub_slow((l_bs), SD_INT(1)); sd_int_release((l_bs)); (l_bs) = s_; } }
+      }
+    }
+  }
+  sd_str _t5 = sd_str_slice(l_text, l_bs, l_dot);
+  L.l_base = _t5;
+  bool _t7 = sd_int_gt(l_bs, SD_INT(0));
+  if (_t7) {
+    sd_int _t6 = sd_int_sub(l_bs, SD_INT(1));
+    _t7 = ((sd_str_at(l_text, _t6)) == (((uint8_t)46)));
+    sd_int_release(_t6);
+  }
+  bool l_qualified = _t7;
+  if (((!sd_str_eq(L.l_base, SD_STR_LIT(""))) && (!l_qualified))) {
+    sd_int _t8 = sd_m_Checker__importedPkg(l_c, (l_at).f_file, L.l_base);
+    sd_int l_ip = _t8;
+    if (sd_int_ge(l_ip, SD_INT(0))) {
+      {
+        int64_t l_g = ((int64_t)0);
+        for (;;) {
+          SD_PREEMPT();
+          if (!((l_g < SD_SMALL(sd_list_len((l_c).f_globalList))))) break;
+          {
+            bool _t11 = sd_int_eq((SD_LIST_GET((l_c).f_globalList, sd_S_Global, SD_INT_S(l_g))).f_pkg, l_ip);
+            if (_t11) {
+              bool _t10 = sd_m_Checker__globalPub(l_c, SD_INT_S(l_g));
+              _t11 = _t10;
+            }
+            if (_t11) {
+              sd_box * _t12 = sd_f_lspGlobalItem(l_c, SD_INT_S(l_g));
+              SD_LIST_PUSH((&L.l_items), sd_box *, _t12);
+            }
+          }
+          _c9:;
+          l_g++;
+        }
+      }
+      sd_list * _t13 = L.l_items;
+      SD_LF_LEAVE(L);
+      sd_int_release(l_ip);
+      sd_str_release(L.l_base);
+      sd_int_release(l_bs);
+      return _t13;
+    }
+    sd_int_release(l_ip);
+  }
+  {
+    int64_t l_e = ((int64_t)0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!(((l_e < SD_SMALL(sd_list_len(((l_c).f_ast).f_exprs))) && (l_e < SD_SMALL(sd_list_len((l_c).f_info)))))) break;
+      {
+        sd_S_Expr l_x = SD_LIST_GET(((l_c).f_ast).f_exprs, sd_S_Expr, SD_INT_S(l_e));
+        if ((((!(SD_BOX_GET((l_x).f_kind, sd_E_ExprKind).tag == 8)) || (!sd_eq_S3Pos((l_x).f_pos, l_at))) || sd_int_lt((l_x).f_a, SD_INT(0)))) {
+          goto _c14;
+        }
+        if ((SD_BOX_GET((SD_LIST_GET((l_c).f_info, sd_S_ExprInfo, (l_x).f_a)).f_res, sd_E_Res).tag == 0)) {
+          sd_int _t15 = sd_f_lspNamedType(l_c, (l_x).f_a);
+          sd_int l_d = _t15;
+          if (sd_int_ge(l_d, SD_INT(0))) {
+            sd_list * _t16 = sd_f_lspCaseItems(l_c, l_d);
+            sd_list * _t17 = _t16;
+            SD_LF_LEAVE(L);
+            sd_int_release(l_d);
+            sd_str_release(L.l_base);
+            sd_int_release(l_bs);
+            sd_list_release(L.l_items);
+            return _t17;
+          }
+          sd_int_release(l_d);
+        }
+        sd_list * _t18 = sd_f_lspTypeItems(l_c, (SD_LIST_GET((l_c).f_info, sd_S_ExprInfo, (l_x).f_a)).f_ty, l_at);
+        sd_list * _t19 = _t18;
+        SD_LF_LEAVE(L);
+        sd_str_release(L.l_base);
+        sd_int_release(l_bs);
+        sd_list_release(L.l_items);
+        return _t19;
+      }
+      _c14:;
+      l_e++;
+    }
+  }
+  if (((!sd_str_eq(L.l_base, SD_STR_LIT(""))) && (!l_qualified))) {
+    sd_int _t20 = sd_m_Checker__global(l_c, (SD_LIST_GET(((l_c).f_ast).f_files, sd_S_SourceFile, (l_at).f_file)).f_pkgIndex, L.l_base);
+    sd_int l_tg = _t20;
+    if (((!sd_int_is_null(l_tg)) && (SD_BOX_GET((SD_LIST_GET((l_c).f_globalList, sd_S_Global, l_tg)).f_kind, sd_E_GlobalKind).tag == 1))) {
+      sd_list * _t21 = sd_f_lspCaseItems(l_c, (SD_LIST_GET((l_c).f_globalList, sd_S_Global, l_tg)).f_index);
+      sd_list * _t22 = _t21;
+      SD_LF_LEAVE(L);
+      sd_int_release(l_tg);
+      sd_str_release(L.l_base);
+      sd_int_release(l_bs);
+      sd_list_release(L.l_items);
+      return _t22;
+    }
+    sd_int_release(l_tg);
+  }
+  sd_list * _t23 = L.l_items;
+  SD_LF_LEAVE(L);
+  sd_str_release(L.l_base);
+  sd_int_release(l_bs);
+  return _t23;
+}
+
+static sd_int sd_f_lspNamedType(sd_S_Checker l_c, sd_int l_e) {
+  sd_S_Expr l_x = SD_LIST_GET(((l_c).f_ast).f_exprs, sd_S_Expr, l_e);
+  sd_int l_pkg = sd_int_retain((SD_LIST_GET(((l_c).f_ast).f_files, sd_S_SourceFile, ((l_x).f_pos).f_file)).f_pkgIndex);
+  if ((SD_BOX_GET((l_x).f_kind, sd_E_ExprKind).tag == 8)) {
+    if ((sd_int_lt((l_x).f_a, SD_INT(0)) || (!(SD_BOX_GET((SD_LIST_GET(((l_c).f_ast).f_exprs, sd_S_Expr, (l_x).f_a)).f_kind, sd_E_ExprKind).tag == 7)))) {
+      sd_int _t1 = SD_INT(-1);
+      sd_int_release(l_pkg);
+      return _t1;
+    }
+    sd_int _t2 = sd_m_Checker__importedPkg(l_c, ((l_x).f_pos).f_file, (SD_LIST_GET(((l_c).f_ast).f_exprs, sd_S_Expr, (l_x).f_a)).f_text);
+    sd_int_release(l_pkg);
+    l_pkg = _t2;
+    if (sd_int_lt(l_pkg, SD_INT(0))) {
+      sd_int _t3 = SD_INT(-1);
+      sd_int_release(l_pkg);
+      return _t3;
+    }
+  } else {
+    if ((!(SD_BOX_GET((l_x).f_kind, sd_E_ExprKind).tag == 7))) {
+      sd_int _t4 = SD_INT(-1);
+      sd_int_release(l_pkg);
+      return _t4;
+    }
+  }
+  sd_int _t5 = sd_m_Checker__global(l_c, l_pkg, (l_x).f_text);
+  sd_int l_g = _t5;
+  if ((sd_int_is_null(l_g) || (!(SD_BOX_GET((SD_LIST_GET((l_c).f_globalList, sd_S_Global, l_g)).f_kind, sd_E_GlobalKind).tag == 1)))) {
+    sd_int _t6 = SD_INT(-1);
+    sd_int_release(l_g);
+    sd_int_release(l_pkg);
+    return _t6;
+  }
+  sd_int _t7 = sd_int_retain((SD_LIST_GET((l_c).f_globalList, sd_S_Global, l_g)).f_index);
+  sd_int_release(l_g);
+  sd_int_release(l_pkg);
+  return _t7;
+}
+
+typedef struct { sd_lframe h; sd_list * l_items; sd_S_LspSym l_s; } sd_L_sd_f_lspCaseItems;
+static void sd_lr_sd_f_lspCaseItems(sd_lframe *p) {
+  sd_L_sd_f_lspCaseItems *L = (sd_L_sd_f_lspCaseItems *)p;
+  sd_list_release(L->l_items);
+  sd_rl_S6LspSym(L->l_s);
+}
+static sd_list * sd_f_lspCaseItems(sd_S_Checker l_c, sd_int l_d) {
+  sd_L_sd_f_lspCaseItems L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_lspCaseItems);
+  sd_list * _t1 = sd_list_new(&sd_type_box, 0);
+  L.l_items = _t1;
+  sd_S_TypeDecl l_td = SD_LIST_GET(((l_c).f_ast).f_typeDecls, sd_S_TypeDecl, l_d);
+  {
+    sd_int l_i = SD_INT(0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!(sd_int_lt(l_i, (l_td).f_caseCount))) break;
+      {
+        sd_S_LspSym _t3 = sd_f_lspCaseSym(l_c, l_d, l_i);
+        L.l_s = _t3;
+        sd_int _t4 = sd_m_Ast__at((l_c).f_ast, (l_td).f_cases, l_i);
+        sd_box * _t5 = sd_f_lspItem((SD_LIST_GET(((l_c).f_ast).f_enumCases, sd_S_EnumCase, _t4)).f_name, SD_INT(20), (L.l_s).f_sig, (L.l_s).f_doc);
+        SD_LIST_PUSH((&L.l_items), sd_box *, _t5);
+        sd_int_release(_t4);
+        sd_rl_S6LspSym(L.l_s); L.l_s = ((sd_S_LspSym){0});
+      }
+      _c2:;
+      { int64_t r_; if (SD_LIKELY((((l_i).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_i).w, SD_INT(1).w, &r_))) (l_i).w = r_; else { sd_int s_ = sd_int_add_slow((l_i), SD_INT(1)); sd_int_release((l_i)); (l_i) = s_; } }
+    }
+    sd_int_release(l_i);
+  }
+  SD_LF_LEAVE(L);
+  return L.l_items;
+}
+
+typedef struct { sd_lframe h; sd_list * l_items; sd_S_LspSym l_fs; sd_str _t9; sd_str _t15; sd_str _t16; sd_S_LspSym l_ms; } sd_L_sd_f_lspTypeItems;
+static void sd_lr_sd_f_lspTypeItems(sd_lframe *p) {
+  sd_L_sd_f_lspTypeItems *L = (sd_L_sd_f_lspTypeItems *)p;
+  sd_list_release(L->l_items);
+  sd_rl_S6LspSym(L->l_fs);
+  sd_str_release(L->_t9);
+  sd_str_release(L->_t15);
+  sd_str_release(L->_t16);
+  sd_rl_S6LspSym(L->l_ms);
+}
+static sd_list * sd_f_lspTypeItems(sd_S_Checker l_c, sd_int l_t, sd_S_Pos l_at) {
+  sd_L_sd_f_lspTypeItems L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_lspTypeItems);
+  sd_list * _t1 = sd_list_new(&sd_type_box, 0);
+  L.l_items = _t1;
+  if (((sd_int_lt(l_t, SD_INT(0)) || sd_int_eq(l_t, sd_c_tyInvalid())) || sd_int_ge(l_t, sd_list_len(((l_c).f_types).f_list)))) {
+    SD_LF_LEAVE(L);
+    return L.l_items;
+  }
+  sd_int l_ty = sd_int_retain(l_t);
+  bool _t2 = sd_m_Types__isOpt((l_c).f_types, l_ty);
+  if (_t2) {
+    sd_int _t3 = sd_m_Types__elem((l_c).f_types, l_ty);
+    sd_int_release(l_ty);
+    l_ty = _t3;
+  }
+  sd_box * _t4 = sd_m_Checker__kindOf(l_c, l_ty);
+  sd_box * l_k = _t4;
+  if (((SD_BOX_GET(l_k, sd_E_Kind).tag == 12) || (SD_BOX_GET(l_k, sd_E_Kind).tag == 13))) {
+    sd_int _t5 = sd_m_Types__decl((l_c).f_types, l_ty);
+    sd_int l_d = _t5;
+    sd_S_TypeDecl l_td = SD_LIST_GET(((l_c).f_ast).f_typeDecls, sd_S_TypeDecl, l_d);
+    {
+      sd_int l_i = SD_INT(0);
+      for (;;) {
+        SD_PREEMPT();
+        if (!(sd_int_lt(l_i, (l_td).f_fieldCount))) break;
+        {
+          bool _t7 = sd_m_Checker__fieldVisible(l_c, l_d, l_i, l_at);
+          if (_t7) {
+            sd_S_LspSym _t8 = sd_f_lspFieldSym(l_c, l_d, l_i);
+            L.l_fs = _t8;
+            L._t9 = sd_m_Checker__fieldName(l_c, l_d, l_i);
+            sd_box * _t10 = sd_f_lspItem(L._t9, SD_INT(5), (L.l_fs).f_sig, (L.l_fs).f_doc);
+            SD_LIST_PUSH((&L.l_items), sd_box *, _t10);
+            sd_str_release(L._t9); L._t9 = NULL;
+            sd_rl_S6LspSym(L.l_fs); L.l_fs = ((sd_S_LspSym){0});
+          }
+        }
+        _c6:;
+        { int64_t r_; if (SD_LIKELY((((l_i).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_i).w, SD_INT(1).w, &r_))) (l_i).w = r_; else { sd_int s_ = sd_int_add_slow((l_i), SD_INT(1)); sd_int_release((l_i)); (l_i) = s_; } }
+      }
+      sd_int_release(l_i);
+    }
+    sd_int l_here = (SD_LIST_GET(((l_c).f_ast).f_files, sd_S_SourceFile, (l_at).f_file)).f_pkgIndex;
+    {
+      int64_t l_f = ((int64_t)0);
+      for (;;) {
+        SD_PREEMPT();
+        if (!(((l_f < SD_SMALL(sd_list_len(((l_c).f_ast).f_fns))) && (l_f < SD_SMALL(sd_list_len((l_c).f_fnRecv)))))) break;
+        {
+          sd_S_FnDecl l_fd = SD_LIST_GET(((l_c).f_ast).f_fns, sd_S_FnDecl, SD_INT_S(l_f));
+          bool _t14 = (sd_int_eq(SD_LIST_GET((l_c).f_fnRecv, sd_int, SD_INT_S(l_f)), l_d) && (l_fd).f_isMethod);
+          if (_t14) {
+            bool _t13 = (l_fd).f_isPub;
+            if (!_t13) {
+              sd_int _t12 = sd_m_Checker__fnPkg(l_c, SD_INT_S(l_f));
+              _t13 = sd_int_eq(_t12, l_here);
+              sd_int_release(_t12);
+            }
+            _t14 = _t13;
+          }
+          if (_t14) {
+            L._t15 = sd_f_lspFnSig((l_c).f_ast, SD_INT_S(l_f));
+            L._t16 = sd_f_lspDocComment((l_c).f_ast, (l_fd).f_file, ((l_fd).f_start).f_line);
+            sd_box * _t17 = sd_f_lspItem((l_fd).f_name, SD_INT(2), L._t15, L._t16);
+            SD_LIST_PUSH((&L.l_items), sd_box *, _t17);
+            sd_str_release(L._t16); L._t16 = NULL;
+            sd_str_release(L._t15); L._t15 = NULL;
+          }
+        }
+        _c11:;
+        l_f++;
+      }
+    }
+    sd_list * _t18 = L.l_items;
+    SD_LF_LEAVE(L);
+    sd_int_release(l_d);
+    sd_box_release(l_k);
+    sd_int_release(l_ty);
+    return _t18;
+  }
+  if ((SD_BOX_GET(l_k, sd_E_Kind).tag == 14)) {
+    sd_int _t19 = sd_m_Types__decl((l_c).f_types, l_ty);
+    sd_int l_idecl = _t19;
+    sd_S_TypeDecl l_itd = SD_LIST_GET(((l_c).f_ast).f_typeDecls, sd_S_TypeDecl, l_idecl);
+    {
+      sd_int l_m = SD_INT(0);
+      for (;;) {
+        SD_PREEMPT();
+        if (!(sd_int_lt(l_m, (l_itd).f_methodCount))) break;
+        {
+          sd_S_LspSym _t21 = sd_f_lspIfaceMethodSym(l_c, l_idecl, l_m);
+          L.l_ms = _t21;
+          sd_int _t22 = sd_m_Ast__at((l_c).f_ast, (l_itd).f_methods, l_m);
+          sd_box * _t23 = sd_f_lspItem((SD_LIST_GET(((l_c).f_ast).f_methodSigs, sd_S_MethodSig, _t22)).f_name, SD_INT(2), (L.l_ms).f_sig, (L.l_ms).f_doc);
+          SD_LIST_PUSH((&L.l_items), sd_box *, _t23);
+          sd_int_release(_t22);
+          sd_rl_S6LspSym(L.l_ms); L.l_ms = ((sd_S_LspSym){0});
+        }
+        _c20:;
+        { int64_t r_; if (SD_LIKELY((((l_m).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_m).w, SD_INT(1).w, &r_))) (l_m).w = r_; else { sd_int s_ = sd_int_add_slow((l_m), SD_INT(1)); sd_int_release((l_m)); (l_m) = s_; } }
+      }
+      sd_int_release(l_m);
+    }
+    sd_list * _t24 = L.l_items;
+    SD_LF_LEAVE(L);
+    sd_int_release(l_idecl);
+    sd_box_release(l_k);
+    sd_int_release(l_ty);
+    return _t24;
+  }
+  sd_list * _t25 = sd_f_lspBuiltinItems(l_c, l_ty);
+  sd_list * _t26 = _t25;
+  SD_LF_LEAVE(L);
+  sd_box_release(l_k);
+  sd_int_release(l_ty);
+  sd_list_release(L.l_items);
+  return _t26;
+}
+
+typedef struct { sd_lframe h; sd_list * l_specs; sd_str l_elem; sd_str l_key; sd_list * _t3; sd_list * _t4; sd_list * _t7; sd_list * _t15; sd_list * _t18; sd_list * _t19; sd_list * l_items; sd_list * l_parts; sd_str l_sig; } sd_L_sd_f_lspBuiltinItems;
+static void sd_lr_sd_f_lspBuiltinItems(sd_lframe *p) {
+  sd_L_sd_f_lspBuiltinItems *L = (sd_L_sd_f_lspBuiltinItems *)p;
+  sd_list_release(L->l_specs);
+  sd_str_release(L->l_elem);
+  sd_str_release(L->l_key);
+  sd_list_release(L->_t3);
+  sd_list_release(L->_t4);
+  sd_list_release(L->_t7);
+  sd_list_release(L->_t15);
+  sd_list_release(L->_t18);
+  sd_list_release(L->_t19);
+  sd_list_release(L->l_items);
+  sd_list_release(L->l_parts);
+  sd_str_release(L->l_sig);
+}
+static sd_list * sd_f_lspBuiltinItems(sd_S_Checker l_c, sd_int l_ty) {
+  sd_L_sd_f_lspBuiltinItems L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_lspBuiltinItems);
+  sd_box * _t1 = sd_m_Checker__kindOf(l_c, l_ty);
+  sd_box * l_k = _t1;
+  sd_list * _t2 = sd_list_new(&sd_type_str, 0);
+  L.l_specs = _t2;
+  L.l_elem = SD_STR_LIT("");
+  L.l_key = SD_STR_LIT("");
+  if (((((SD_BOX_GET(l_k, sd_E_Kind).tag == 1) || (SD_BOX_GET(l_k, sd_E_Kind).tag == 2)) || (SD_BOX_GET(l_k, sd_E_Kind).tag == 3)) || (SD_BOX_GET(l_k, sd_E_Kind).tag == 4))) {
+    L._t3 = sd_list_new(&sd_type_str, 1);
+    SD_LIST_PUSH(&L._t3, sd_str, SD_STR_LIT("string|fn string() string"));
+    sd_list_release(L.l_specs);
+    L.l_specs = L._t3;
+    L._t3 = NULL;
+  } else {
+    if ((SD_BOX_GET(l_k, sd_E_Kind).tag == 5)) {
+      L._t4 = sd_list_new(&sd_type_str, 16);
+      SD_LIST_PUSH(&L._t4, sd_str, SD_STR_LIT("len|fn len() int"));
+      SD_LIST_PUSH(&L._t4, sd_str, SD_STR_LIT("slice|fn slice(int a, int b) string"));
+      SD_LIST_PUSH(&L._t4, sd_str, SD_STR_LIT("contains|fn contains(string sub) bool"));
+      SD_LIST_PUSH(&L._t4, sd_str, SD_STR_LIT("index|fn index(string sub) int\?"));
+      SD_LIST_PUSH(&L._t4, sd_str, SD_STR_LIT("startsWith|fn startsWith(string prefix) bool"));
+      SD_LIST_PUSH(&L._t4, sd_str, SD_STR_LIT("endsWith|fn endsWith(string suffix) bool"));
+      SD_LIST_PUSH(&L._t4, sd_str, SD_STR_LIT("split|fn split(string sep) []string"));
+      SD_LIST_PUSH(&L._t4, sd_str, SD_STR_LIT("trim|fn trim() string"));
+      SD_LIST_PUSH(&L._t4, sd_str, SD_STR_LIT("replace|fn replace(string old, string new) string"));
+      SD_LIST_PUSH(&L._t4, sd_str, SD_STR_LIT("toUpper|fn toUpper() string"));
+      SD_LIST_PUSH(&L._t4, sd_str, SD_STR_LIT("toLower|fn toLower() string"));
+      SD_LIST_PUSH(&L._t4, sd_str, SD_STR_LIT("toInt|fn toInt() (int, error)"));
+      SD_LIST_PUSH(&L._t4, sd_str, SD_STR_LIT("toFloat|fn toFloat() (float, error)"));
+      SD_LIST_PUSH(&L._t4, sd_str, SD_STR_LIT("bytes|fn bytes() []byte"));
+      SD_LIST_PUSH(&L._t4, sd_str, SD_STR_LIT("chars|fn chars() []string"));
+      SD_LIST_PUSH(&L._t4, sd_str, SD_STR_LIT("string|fn string() string"));
+      sd_list_release(L.l_specs);
+      L.l_specs = L._t4;
+      L._t4 = NULL;
+    } else {
+      if ((SD_BOX_GET(l_k, sd_E_Kind).tag == 9)) {
+        sd_int _t5 = sd_m_Types__elem((l_c).f_types, l_ty);
+        sd_str _t6 = sd_m_Checker__typeName(l_c, _t5);
+        sd_str_release(L.l_elem);
+        L.l_elem = _t6;
+        sd_int_release(_t5);
+        L._t7 = sd_list_new(&sd_type_str, 11);
+        SD_LIST_PUSH(&L._t7, sd_str, SD_STR_LIT("len|fn len() int"));
+        SD_LIST_PUSH(&L._t7, sd_str, SD_STR_LIT("push|fn mut push(T x)"));
+        SD_LIST_PUSH(&L._t7, sd_str, SD_STR_LIT("pop|fn mut pop() T\?"));
+        SD_LIST_PUSH(&L._t7, sd_str, SD_STR_LIT("insert|fn mut insert(int i, T x)"));
+        SD_LIST_PUSH(&L._t7, sd_str, SD_STR_LIT("remove|fn mut remove(int i)"));
+        SD_LIST_PUSH(&L._t7, sd_str, SD_STR_LIT("contains|fn contains(T x) bool"));
+        SD_LIST_PUSH(&L._t7, sd_str, SD_STR_LIT("index|fn index(T x) int\?"));
+        SD_LIST_PUSH(&L._t7, sd_str, SD_STR_LIT("slice|fn slice(int a, int b) []T"));
+        SD_LIST_PUSH(&L._t7, sd_str, SD_STR_LIT("reverse|fn mut reverse()"));
+        SD_LIST_PUSH(&L._t7, sd_str, SD_STR_LIT("sort|fn mut sort()"));
+        SD_LIST_PUSH(&L._t7, sd_str, SD_STR_LIT("sortBy|fn mut sortBy(fn(T, T) bool less)"));
+        sd_list_release(L.l_specs);
+        L.l_specs = L._t7;
+        L._t7 = NULL;
+        sd_int _t8 = sd_m_Types__elem((l_c).f_types, l_ty);
+        bool _t9 = sd_int_eq(_t8, sd_c_tyString());
+        sd_int_release(_t8);
+        if (_t9) {
+          sd_str _t10 = SD_STR_LIT("join|fn join(string sep) string");
+          SD_LIST_PUSH((&L.l_specs), sd_str, _t10);
+        }
+      } else {
+        if ((SD_BOX_GET(l_k, sd_E_Kind).tag == 10)) {
+          sd_int _t11 = sd_m_Types__elem((l_c).f_types, l_ty);
+          sd_str _t12 = sd_m_Checker__typeName(l_c, _t11);
+          sd_str_release(L.l_elem);
+          L.l_elem = _t12;
+          sd_int_release(_t11);
+          sd_int _t13 = sd_m_Types__key((l_c).f_types, l_ty);
+          sd_str _t14 = sd_m_Checker__typeName(l_c, _t13);
+          sd_str_release(L.l_key);
+          L.l_key = _t14;
+          sd_int_release(_t13);
+          L._t15 = sd_list_new(&sd_type_str, 3);
+          SD_LIST_PUSH(&L._t15, sd_str, SD_STR_LIT("len|fn len() int"));
+          SD_LIST_PUSH(&L._t15, sd_str, SD_STR_LIT("delete|fn mut delete(K key)"));
+          SD_LIST_PUSH(&L._t15, sd_str, SD_STR_LIT("keys|fn keys() []K"));
+          sd_list_release(L.l_specs);
+          L.l_specs = L._t15;
+          L._t15 = NULL;
+        } else {
+          if ((SD_BOX_GET(l_k, sd_E_Kind).tag == 17)) {
+            sd_int _t16 = sd_m_Types__elem((l_c).f_types, l_ty);
+            sd_str _t17 = sd_m_Checker__typeName(l_c, _t16);
+            sd_str_release(L.l_elem);
+            L.l_elem = _t17;
+            sd_int_release(_t16);
+            L._t18 = sd_list_new(&sd_type_str, 3);
+            SD_LIST_PUSH(&L._t18, sd_str, SD_STR_LIT("send|fn send(T v)"));
+            SD_LIST_PUSH(&L._t18, sd_str, SD_STR_LIT("receive|fn receive() T\?"));
+            SD_LIST_PUSH(&L._t18, sd_str, SD_STR_LIT("close|fn close()"));
+            sd_list_release(L.l_specs);
+            L.l_specs = L._t18;
+            L._t18 = NULL;
+          } else {
+            if ((SD_BOX_GET(l_k, sd_E_Kind).tag == 6)) {
+              L._t19 = sd_list_new(&sd_type_str, 1);
+              SD_LIST_PUSH(&L._t19, sd_str, SD_STR_LIT("message|fn message() string"));
+              sd_list_release(L.l_specs);
+              L.l_specs = L._t19;
+              L._t19 = NULL;
+            }
+          }
+        }
+      }
+    }
+  }
+  sd_list * _t20 = sd_list_new(&sd_type_box, 0);
+  L.l_items = _t20;
+  {
+    int64_t l_i = ((int64_t)0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!((l_i < SD_SMALL(sd_list_len(L.l_specs))))) break;
+      {
+        sd_list * _t22 = sd_str_split(SD_LIST_GET(L.l_specs, sd_str, SD_INT_S(l_i)), SD_STR_LIT("|"));
+        L.l_parts = _t22;
+        L.l_sig = sd_str_retain(SD_LIST_GET(L.l_parts, sd_str, SD_INT(1)));
+        if ((!sd_str_eq(L.l_elem, SD_STR_LIT("")))) {
+          sd_str _t23 = sd_str_replace(L.l_sig, SD_STR_LIT("T"), L.l_elem);
+          sd_str_release(L.l_sig);
+          L.l_sig = _t23;
+        }
+        if ((!sd_str_eq(L.l_key, SD_STR_LIT("")))) {
+          sd_str _t24 = sd_str_replace(L.l_sig, SD_STR_LIT("K"), L.l_key);
+          sd_str_release(L.l_sig);
+          L.l_sig = _t24;
+        }
+        sd_box * _t25 = sd_f_lspItem(SD_LIST_GET(L.l_parts, sd_str, SD_INT(0)), SD_INT(2), L.l_sig, SD_STR_LIT("built-in method (docs/builtins.md)"));
+        SD_LIST_PUSH((&L.l_items), sd_box *, _t25);
+        sd_str_release(L.l_sig); L.l_sig = NULL;
+        sd_list_release(L.l_parts); L.l_parts = NULL;
+      }
+      _c21:;
+      l_i++;
+    }
+  }
+  sd_list * _t26 = L.l_items;
+  SD_LF_LEAVE(L);
+  sd_str_release(L.l_key);
+  sd_str_release(L.l_elem);
+  sd_list_release(L.l_specs);
+  sd_box_release(l_k);
+  return _t26;
+}
+
+typedef struct { sd_lframe h; sd_list * l_items; sd_map * l_seen; sd_list * l_locals; sd_str _t9; sd_str _t15; sd_str _t22; sd_str _t23; sd_str _t30; sd_str _t31; sd_str _t38; sd_str _t39; sd_str _t41; sd_str _t48; sd_str _t50; } sd_L_sd_f_lspScopeItems;
+static void sd_lr_sd_f_lspScopeItems(sd_lframe *p) {
+  sd_L_sd_f_lspScopeItems *L = (sd_L_sd_f_lspScopeItems *)p;
+  sd_list_release(L->l_items);
+  sd_map_release(L->l_seen);
+  sd_list_release(L->l_locals);
+  sd_str_release(L->_t9);
+  sd_str_release(L->_t15);
+  sd_str_release(L->_t22);
+  sd_str_release(L->_t23);
+  sd_str_release(L->_t30);
+  sd_str_release(L->_t31);
+  sd_str_release(L->_t38);
+  sd_str_release(L->_t39);
+  sd_str_release(L->_t41);
+  sd_str_release(L->_t48);
+  sd_str_release(L->_t50);
+}
+static sd_list * sd_f_lspScopeItems(sd_S_Checker l_c, sd_S_Pos l_at) {
+  sd_L_sd_f_lspScopeItems L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_lspScopeItems);
+  sd_list * _t1 = sd_list_new(&sd_type_box, 0);
+  L.l_items = _t1;
+  sd_map * _t2 = sd_map_new(&sd_type_str, &sd_type_bool);
+  L.l_seen = _t2;
+  sd_list * _t3 = sd_f_lspLocals((l_c).f_ast, l_at);
+  L.l_locals = _t3;
+  {
+    int64_t l_i = ((int64_t)0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!((l_i < SD_SMALL(sd_list_len(L.l_locals))))) break;
+      {
+        sd_S_LspLocal l_lo = SD_LIST_GET(L.l_locals, sd_S_LspLocal, SD_INT_S(l_i));
+        bool _t7 = ((!sd_str_eq((l_lo).f_name, SD_STR_LIT(""))) && (!sd_str_eq((l_lo).f_name, SD_STR_LIT("_"))));
+        if (_t7) {
+          sd_str _t5 = (l_lo).f_name;
+          bool *_t6 = sd_map_get(L.l_seen, &_t5);
+          _t7 = (!((_t6 ? (sd_opt_bool){true, *_t6} : (sd_opt_bool){false, 0})).has);
+        }
+        if (_t7) {
+          bool _t8 = true;
+          L._t9 = sd_str_retain((l_lo).f_name);
+          sd_map_set((&L.l_seen), &L._t9, &_t8);
+          L._t9 = NULL;
+          sd_box * _t10 = sd_f_lspItem((l_lo).f_name, SD_INT(6), (l_lo).f_detail, SD_STR_LIT(""));
+          SD_LIST_PUSH((&L.l_items), sd_box *, _t10);
+        }
+      }
+      _c4:;
+      l_i++;
+    }
+  }
+  sd_int l_here = (SD_LIST_GET(((l_c).f_ast).f_files, sd_S_SourceFile, (l_at).f_file)).f_pkgIndex;
+  {
+    int64_t l_g = ((int64_t)0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!((l_g < SD_SMALL(sd_list_len((l_c).f_globalList))))) break;
+      {
+        sd_str l_gname = (SD_LIST_GET((l_c).f_globalList, sd_S_Global, SD_INT_S(l_g))).f_name;
+        bool _t13 = sd_int_eq((SD_LIST_GET((l_c).f_globalList, sd_S_Global, SD_INT_S(l_g))).f_pkg, l_here);
+        if (_t13) {
+          bool *_t12 = sd_map_get(L.l_seen, &l_gname);
+          _t13 = (!((_t12 ? (sd_opt_bool){true, *_t12} : (sd_opt_bool){false, 0})).has);
+        }
+        if (_t13) {
+          bool _t14 = true;
+          L._t15 = sd_str_retain(l_gname);
+          sd_map_set((&L.l_seen), &L._t15, &_t14);
+          L._t15 = NULL;
+          sd_box * _t16 = sd_f_lspGlobalItem(l_c, SD_INT_S(l_g));
+          SD_LIST_PUSH((&L.l_items), sd_box *, _t16);
+        }
+      }
+      _c11:;
+      l_g++;
+    }
+  }
+  if ((SD_SMALL(sd_list_len((l_c).f_globalList)) == ((int64_t)0))) {
+    {
+      int64_t l_f = ((int64_t)0);
+      for (;;) {
+        SD_PREEMPT();
+        if (!((l_f < SD_SMALL(sd_list_len(((l_c).f_ast).f_fns))))) break;
+        {
+          sd_S_FnDecl l_fd = SD_LIST_GET(((l_c).f_ast).f_fns, sd_S_FnDecl, SD_INT_S(l_f));
+          bool _t20 = (((!(l_fd).f_isMethod) && (!(l_fd).f_isTest)) && sd_int_eq((SD_LIST_GET(((l_c).f_ast).f_files, sd_S_SourceFile, (l_fd).f_file)).f_pkgIndex, l_here));
+          if (_t20) {
+            sd_str _t18 = (l_fd).f_name;
+            bool *_t19 = sd_map_get(L.l_seen, &_t18);
+            _t20 = (!((_t19 ? (sd_opt_bool){true, *_t19} : (sd_opt_bool){false, 0})).has);
+          }
+          if (_t20) {
+            bool _t21 = true;
+            L._t22 = sd_str_retain((l_fd).f_name);
+            sd_map_set((&L.l_seen), &L._t22, &_t21);
+            L._t22 = NULL;
+            L._t23 = sd_f_lspFnSig((l_c).f_ast, SD_INT_S(l_f));
+            sd_box * _t24 = sd_f_lspItem((l_fd).f_name, SD_INT(3), L._t23, SD_STR_LIT(""));
+            SD_LIST_PUSH((&L.l_items), sd_box *, _t24);
+            sd_str_release(L._t23); L._t23 = NULL;
+          }
+        }
+        _c17:;
+        l_f++;
+      }
+    }
+    {
+      int64_t l_d = ((int64_t)0);
+      for (;;) {
+        SD_PREEMPT();
+        if (!((l_d < SD_SMALL(sd_list_len(((l_c).f_ast).f_typeDecls))))) break;
+        {
+          sd_S_TypeDecl l_td = SD_LIST_GET(((l_c).f_ast).f_typeDecls, sd_S_TypeDecl, SD_INT_S(l_d));
+          bool _t28 = sd_int_eq((SD_LIST_GET(((l_c).f_ast).f_files, sd_S_SourceFile, (l_td).f_file)).f_pkgIndex, l_here);
+          if (_t28) {
+            sd_str _t26 = (l_td).f_name;
+            bool *_t27 = sd_map_get(L.l_seen, &_t26);
+            _t28 = (!((_t27 ? (sd_opt_bool){true, *_t27} : (sd_opt_bool){false, 0})).has);
+          }
+          if (_t28) {
+            bool _t29 = true;
+            L._t30 = sd_str_retain((l_td).f_name);
+            sd_map_set((&L.l_seen), &L._t30, &_t29);
+            L._t30 = NULL;
+            L._t31 = sd_f_lspTypeSig((l_c).f_ast, SD_INT_S(l_d));
+            sd_box * _t32 = sd_f_lspItem((l_td).f_name, SD_INT(22), L._t31, SD_STR_LIT(""));
+            SD_LIST_PUSH((&L.l_items), sd_box *, _t32);
+            sd_str_release(L._t31); L._t31 = NULL;
+          }
+        }
+        _c25:;
+        l_d++;
+      }
+    }
+    {
+      int64_t l_k = ((int64_t)0);
+      for (;;) {
+        SD_PREEMPT();
+        if (!((l_k < SD_SMALL(sd_list_len(((l_c).f_ast).f_consts))))) break;
+        {
+          sd_S_ConstDecl l_cd = SD_LIST_GET(((l_c).f_ast).f_consts, sd_S_ConstDecl, SD_INT_S(l_k));
+          bool _t36 = sd_int_eq((SD_LIST_GET(((l_c).f_ast).f_files, sd_S_SourceFile, (l_cd).f_file)).f_pkgIndex, l_here);
+          if (_t36) {
+            sd_str _t34 = (l_cd).f_name;
+            bool *_t35 = sd_map_get(L.l_seen, &_t34);
+            _t36 = (!((_t35 ? (sd_opt_bool){true, *_t35} : (sd_opt_bool){false, 0})).has);
+          }
+          if (_t36) {
+            bool _t37 = true;
+            L._t38 = sd_str_retain((l_cd).f_name);
+            sd_map_set((&L.l_seen), &L._t38, &_t37);
+            L._t38 = NULL;
+            L._t39 = sd_m_Ast__typeExprText((l_c).f_ast, (l_cd).f_typeExpr);
+            sd_str _t40[] = {SD_STR_LIT("const "), L._t39, SD_STR_LIT(" "), (l_cd).f_name};
+            L._t41 = sd_str_concat_n(_t40, 4);
+            sd_box * _t42 = sd_f_lspItem((l_cd).f_name, SD_INT(21), L._t41, SD_STR_LIT(""));
+            SD_LIST_PUSH((&L.l_items), sd_box *, _t42);
+            sd_str_release(L._t41); L._t41 = NULL;
+            sd_str_release(L._t39); L._t39 = NULL;
+          }
+        }
+        _c33:;
+        l_k++;
+      }
+    }
+  }
+  {
+    int64_t l_m = ((int64_t)0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!((l_m < SD_SMALL(sd_list_len(((l_c).f_ast).f_imports))))) break;
+      {
+        sd_S_Import l_im = SD_LIST_GET(((l_c).f_ast).f_imports, sd_S_Import, SD_INT_S(l_m));
+        bool _t46 = sd_int_eq((l_im).f_file, (l_at).f_file);
+        if (_t46) {
+          sd_str _t44 = (l_im).f_name;
+          bool *_t45 = sd_map_get(L.l_seen, &_t44);
+          _t46 = (!((_t45 ? (sd_opt_bool){true, *_t45} : (sd_opt_bool){false, 0})).has);
+        }
+        if (_t46) {
+          bool _t47 = true;
+          L._t48 = sd_str_retain((l_im).f_name);
+          sd_map_set((&L.l_seen), &L._t48, &_t47);
+          L._t48 = NULL;
+          sd_str _t49[] = {SD_STR_LIT("import \""), (l_im).f_path, SD_STR_LIT("\"")};
+          L._t50 = sd_str_concat_n(_t49, 3);
+          sd_box * _t51 = sd_f_lspItem((l_im).f_name, SD_INT(9), L._t50, SD_STR_LIT(""));
+          SD_LIST_PUSH((&L.l_items), sd_box *, _t51);
+          sd_str_release(L._t50); L._t50 = NULL;
+        }
+      }
+      _c43:;
+      l_m++;
+    }
+  }
+  {
+    int64_t l_k = ((int64_t)0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!((l_k < SD_SMALL(sd_list_len(sd_c_lspKeywords()))))) break;
+      {
+        sd_box * _t53 = sd_f_lspItem(SD_LIST_GET(sd_c_lspKeywords(), sd_str, SD_INT_S(l_k)), SD_INT(14), SD_STR_LIT(""), SD_STR_LIT(""));
+        SD_LIST_PUSH((&L.l_items), sd_box *, _t53);
+      }
+      _c52:;
+      l_k++;
+    }
+  }
+  {
+    int64_t l_b = ((int64_t)0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!((l_b < SD_SMALL(sd_list_len(sd_c_lspBuiltinTypes()))))) break;
+      {
+        sd_box * _t55 = sd_f_lspItem(SD_LIST_GET(sd_c_lspBuiltinTypes(), sd_str, SD_INT_S(l_b)), SD_INT(7), SD_STR_LIT("built-in type"), SD_STR_LIT(""));
+        SD_LIST_PUSH((&L.l_items), sd_box *, _t55);
+      }
+      _c54:;
+      l_b++;
+    }
+  }
+  sd_list * _t56 = L.l_items;
+  SD_LF_LEAVE(L);
+  sd_list_release(L.l_locals);
+  sd_map_release(L.l_seen);
+  return _t56;
+}
+
+static bool sd_f_lspBlockHas(sd_S_Ast l_ast, sd_int l_b, sd_S_Pos l_at) {
+  if ((sd_int_lt(l_b, SD_INT(0)) || sd_int_ge(l_b, sd_list_len((l_ast).f_blocks)))) {
+    return false;
+  }
+  sd_S_Block l_bl = SD_LIST_GET((l_ast).f_blocks, sd_S_Block, l_b);
+  bool _t1 = sd_f_posBefore(l_at, (l_bl).f_pos);
+  bool _t3 = (!_t1);
+  if (_t3) {
+    bool _t2 = sd_f_posBefore((l_bl).f_end, l_at);
+    _t3 = (!_t2);
+  }
+  return _t3;
+}
+
+typedef struct { sd_lframe h; sd_list * l_out; } sd_L_sd_f_lspLocals;
+static void sd_lr_sd_f_lspLocals(sd_lframe *p) {
+  sd_L_sd_f_lspLocals *L = (sd_L_sd_f_lspLocals *)p;
+  sd_list_release(L->l_out);
+}
+static sd_list * sd_f_lspLocals(sd_S_Ast l_ast, sd_S_Pos l_at) {
+  sd_L_sd_f_lspLocals L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_lspLocals);
+  sd_list * _t1 = sd_list_new(&sd_D_LspLocal, 0);
+  L.l_out = _t1;
+  {
+    int64_t l_f = ((int64_t)0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!((l_f < SD_SMALL(sd_list_len((l_ast).f_fns))))) break;
+      {
+        sd_S_FnDecl l_fd = SD_LIST_GET((l_ast).f_fns, sd_S_FnDecl, SD_INT_S(l_f));
+        bool _t4 = (!sd_int_eq((l_fd).f_file, (l_at).f_file));
+        if (!_t4) {
+          bool _t3 = sd_f_lspBlockHas(l_ast, (l_fd).f_body, l_at);
+          _t4 = (!_t3);
+        }
+        if (_t4) {
+          goto _c2;
+        }
+        if ((l_fd).f_isMethod) {
+          sd_str _t5 = sd_m_Ast__typeExprText(l_ast, (l_fd).f_recvType);
+          sd_S_LspLocal _t6 = (sd_S_LspLocal){.f_name = sd_str_retain((l_fd).f_recvName), .f_detail = _t5};
+          SD_LIST_PUSH((&L.l_out), sd_S_LspLocal, _t6);
+        }
+        {
+          sd_int l_i = SD_INT(0);
+          for (;;) {
+            SD_PREEMPT();
+            if (!(sd_int_lt(l_i, (l_fd).f_paramCount))) break;
+            {
+              sd_int _t8 = sd_m_Ast__at(l_ast, (l_fd).f_params, l_i);
+              sd_S_Param l_p = SD_LIST_GET((l_ast).f_params, sd_S_Param, _t8);
+              sd_int_release(_t8);
+              sd_str _t9 = sd_m_Ast__typeExprText(l_ast, (l_p).f_typeExpr);
+              sd_S_LspLocal _t10 = (sd_S_LspLocal){.f_name = sd_str_retain((l_p).f_name), .f_detail = _t9};
+              SD_LIST_PUSH((&L.l_out), sd_S_LspLocal, _t10);
+            }
+            _c7:;
+            { int64_t r_; if (SD_LIKELY((((l_i).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_i).w, SD_INT(1).w, &r_))) (l_i).w = r_; else { sd_int s_ = sd_int_add_slow((l_i), SD_INT(1)); sd_int_release((l_i)); (l_i) = s_; } }
+          }
+          sd_int_release(l_i);
+        }
+        sd_list * _t11 = sd_f_lspWalkBlock(l_ast, (l_fd).f_body, l_at, L.l_out);
+        sd_list * _t12 = _t11;
+        SD_LF_LEAVE(L);
+        sd_list_release(L.l_out);
+        return _t12;
+      }
+      _c2:;
+      l_f++;
+    }
+  }
+  SD_LF_LEAVE(L);
+  return L.l_out;
+}
+
+typedef struct { sd_lframe h; sd_list * l_out; } sd_L_sd_f_lspWalkBlock;
+static void sd_lr_sd_f_lspWalkBlock(sd_lframe *p) {
+  sd_L_sd_f_lspWalkBlock *L = (sd_L_sd_f_lspWalkBlock *)p;
+  sd_list_release(L->l_out);
+}
+SD_NO_TCE static sd_list * sd_f_lspWalkBlock(sd_S_Ast l_ast, sd_int l_b, sd_S_Pos l_at, sd_list * l_found) {
+  sd_L_sd_f_lspWalkBlock L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_lspWalkBlock);
+  L.l_out = sd_list_retain(l_found);
+  sd_S_Block l_bl = SD_LIST_GET((l_ast).f_blocks, sd_S_Block, l_b);
+  {
+    sd_int l_i = SD_INT(0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!(sd_int_lt(l_i, (l_bl).f_count))) break;
+      {
+        sd_int _t2 = sd_m_Ast__at(l_ast, (l_bl).f_list, l_i);
+        sd_int l_s = _t2;
+        bool _t4 = sd_int_lt(l_s, SD_INT(0));
+        if (!_t4) {
+          bool _t3 = sd_f_posBefore(l_at, (SD_LIST_GET((l_ast).f_stmts, sd_S_Stmt, l_s)).f_pos);
+          _t4 = _t3;
+        }
+        if (_t4) {
+          sd_int_release(l_s);
+          break;
+        }
+        SD_PREEMPT();
+        sd_list * _t5 = sd_f_lspWalkStmt(l_ast, l_s, l_at, L.l_out);
+        sd_list_release(L.l_out);
+        L.l_out = _t5;
+        sd_int_release(l_s);
+      }
+      _c1:;
+      { int64_t r_; if (SD_LIKELY((((l_i).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_i).w, SD_INT(1).w, &r_))) (l_i).w = r_; else { sd_int s_ = sd_int_add_slow((l_i), SD_INT(1)); sd_int_release((l_i)); (l_i) = s_; } }
+    }
+    sd_int_release(l_i);
+  }
+  SD_LF_LEAVE(L);
+  return L.l_out;
+}
+
+typedef struct { sd_lframe h; sd_list * l_out; } sd_L_sd_f_lspWalkStmt;
+static void sd_lr_sd_f_lspWalkStmt(sd_lframe *p) {
+  sd_L_sd_f_lspWalkStmt *L = (sd_L_sd_f_lspWalkStmt *)p;
+  sd_list_release(L->l_out);
+}
+SD_NO_TCE static sd_list * sd_f_lspWalkStmt(sd_S_Ast l_ast, sd_int l_s, sd_S_Pos l_at, sd_list * l_found) {
+  sd_L_sd_f_lspWalkStmt L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_lspWalkStmt);
+  L.l_out = sd_list_retain(l_found);
+  sd_S_Stmt l_st = SD_LIST_GET((l_ast).f_stmts, sd_S_Stmt, l_s);
+  if ((SD_BOX_GET((l_st).f_kind, sd_E_StmtKind).tag == 2)) {
+    {
+      sd_int l_i = SD_INT(0);
+      for (;;) {
+        SD_PREEMPT();
+        if (!(sd_int_lt(l_i, (l_st).f_count))) break;
+        {
+          sd_int _t2 = sd_m_Ast__at(l_ast, (l_st).f_list, l_i);
+          sd_S_Target l_tg = SD_LIST_GET((l_ast).f_targets, sd_S_Target, _t2);
+          sd_int_release(_t2);
+          if ((SD_BOX_GET((l_tg).f_kind, sd_E_TargetKind).tag == 0)) {
+            sd_str _t3 = sd_m_Ast__typeExprText(l_ast, (l_tg).f_typeExpr);
+            sd_S_LspLocal _t4 = (sd_S_LspLocal){.f_name = sd_str_retain((l_tg).f_name), .f_detail = _t3};
+            SD_LIST_PUSH((&L.l_out), sd_S_LspLocal, _t4);
+          }
+        }
+        _c1:;
+        { int64_t r_; if (SD_LIKELY((((l_i).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_i).w, SD_INT(1).w, &r_))) (l_i).w = r_; else { sd_int s_ = sd_int_add_slow((l_i), SD_INT(1)); sd_int_release((l_i)); (l_i) = s_; } }
+      }
+      sd_int_release(l_i);
+    }
+    SD_PREEMPT();
+    sd_list * _t5 = sd_f_lspWalkExpr(l_ast, (l_st).f_expr, l_at, L.l_out);
+    sd_list * _t6 = _t5;
+    SD_LF_LEAVE(L);
+    sd_list_release(L.l_out);
+    return _t6;
+  }
+  if ((SD_BOX_GET((l_st).f_kind, sd_E_StmtKind).tag == 14)) {
+    sd_str _t7 = sd_m_Ast__typeExprText(l_ast, (l_st).f_typeExpr);
+    sd_str _t8 = sd_str_concat(SD_STR_LIT("const "), _t7);
+    sd_S_LspLocal _t9 = (sd_S_LspLocal){.f_name = sd_str_retain((l_st).f_name), .f_detail = _t8};
+    SD_LIST_PUSH((&L.l_out), sd_S_LspLocal, _t9);
+    sd_str_release(_t7); 
+    SD_LF_LEAVE(L);
+    return L.l_out;
+  }
+  if ((SD_BOX_GET((l_st).f_kind, sd_E_StmtKind).tag == 4)) {
+    bool _t10 = sd_f_lspBlockHas(l_ast, (l_st).f_body, l_at);
+    if (_t10) {
+      SD_PREEMPT();
+      sd_list * _t11 = sd_f_lspWalkBlock(l_ast, (l_st).f_body, l_at, L.l_out);
+      sd_list * _t12 = _t11;
+      SD_LF_LEAVE(L);
+      sd_list_release(L.l_out);
+      return _t12;
+    }
+    bool _t13 = sd_f_lspBlockHas(l_ast, (l_st).f_els, l_at);
+    if (_t13) {
+      SD_PREEMPT();
+      sd_list * _t14 = sd_f_lspWalkBlock(l_ast, (l_st).f_els, l_at, L.l_out);
+      sd_list * _t15 = _t14;
+      SD_LF_LEAVE(L);
+      sd_list_release(L.l_out);
+      return _t15;
+    }
+    bool _t17 = sd_int_ge((l_st).f_elseIf, SD_INT(0));
+    if (_t17) {
+      bool _t16 = sd_f_posBefore(l_at, (SD_LIST_GET((l_ast).f_stmts, sd_S_Stmt, (l_st).f_elseIf)).f_pos);
+      _t17 = (!_t16);
+    }
+    if (_t17) {
+      SD_PREEMPT();
+      sd_list * _t18 = sd_f_lspWalkStmt(l_ast, (l_st).f_elseIf, l_at, L.l_out);
+      sd_list * _t19 = _t18;
+      SD_LF_LEAVE(L);
+      sd_list_release(L.l_out);
+      return _t19;
+    }
+    SD_PREEMPT();
+    sd_list * _t20 = sd_f_lspWalkExpr(l_ast, (l_st).f_expr, l_at, L.l_out);
+    sd_list * _t21 = _t20;
+    SD_LF_LEAVE(L);
+    sd_list_release(L.l_out);
+    return _t21;
+  }
+  if ((SD_BOX_GET((l_st).f_kind, sd_E_StmtKind).tag == 5)) {
+    bool _t23 = (sd_int_lt((l_st).f_body, SD_INT(0)) || sd_int_ge((l_st).f_body, sd_list_len((l_ast).f_blocks)));
+    if (!_t23) {
+      bool _t22 = sd_f_posBefore((SD_LIST_GET((l_ast).f_blocks, sd_S_Block, (l_st).f_body)).f_end, l_at);
+      _t23 = _t22;
+    }
+    if (_t23) {
+      SD_LF_LEAVE(L);
+      return L.l_out;
+    }
+    if (sd_int_ge((l_st).f_init, SD_INT(0))) {
+      SD_PREEMPT();
+      sd_list * _t24 = sd_f_lspWalkStmt(l_ast, (l_st).f_init, l_at, L.l_out);
+      sd_list_release(L.l_out);
+      L.l_out = _t24;
+    }
+    bool _t25 = sd_f_lspBlockHas(l_ast, (l_st).f_body, l_at);
+    if (_t25) {
+      SD_PREEMPT();
+      sd_list * _t26 = sd_f_lspWalkBlock(l_ast, (l_st).f_body, l_at, L.l_out);
+      sd_list * _t27 = _t26;
+      SD_LF_LEAVE(L);
+      sd_list_release(L.l_out);
+      return _t27;
+    }
+    SD_LF_LEAVE(L);
+    return L.l_out;
+  }
+  if (((SD_BOX_GET((l_st).f_kind, sd_E_StmtKind).tag == 6) || (SD_BOX_GET((l_st).f_kind, sd_E_StmtKind).tag == 7))) {
+    {
+      sd_int l_k = SD_INT(0);
+      for (;;) {
+        SD_PREEMPT();
+        if (!(sd_int_lt(l_k, (l_st).f_count))) break;
+        {
+          sd_int _t29 = sd_m_Ast__at(l_ast, (l_st).f_list, l_k);
+          sd_S_Case l_cs = SD_LIST_GET((l_ast).f_cases, sd_S_Case, _t29);
+          sd_int_release(_t29);
+          bool _t30 = sd_f_lspBlockHas(l_ast, (l_cs).f_body, l_at);
+          if ((!_t30)) {
+            goto _c28;
+          }
+          {
+            sd_int l_j = SD_INT(0);
+            for (;;) {
+              SD_PREEMPT();
+              if (!(sd_int_lt(l_j, (l_cs).f_labelCount))) break;
+              {
+                sd_int _t32 = sd_m_Ast__at(l_ast, (l_cs).f_labels, l_j);
+                sd_S_Label l_lb = SD_LIST_GET((l_ast).f_labels, sd_S_Label, _t32);
+                sd_int_release(_t32);
+                {
+                  sd_int l_q = SD_INT(0);
+                  for (;;) {
+                    SD_PREEMPT();
+                    if (!(sd_int_lt(l_q, (l_lb).f_paramCount))) break;
+                    {
+                      sd_int _t34 = sd_m_Ast__at(l_ast, (l_lb).f_params, l_q);
+                      sd_S_Param l_bp = SD_LIST_GET((l_ast).f_params, sd_S_Param, _t34);
+                      sd_int_release(_t34);
+                      sd_str _t35 = sd_m_Ast__typeExprText(l_ast, (l_bp).f_typeExpr);
+                      sd_S_LspLocal _t36 = (sd_S_LspLocal){.f_name = sd_str_retain((l_bp).f_name), .f_detail = _t35};
+                      SD_LIST_PUSH((&L.l_out), sd_S_LspLocal, _t36);
+                    }
+                    _c33:;
+                    { int64_t r_; if (SD_LIKELY((((l_q).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_q).w, SD_INT(1).w, &r_))) (l_q).w = r_; else { sd_int s_ = sd_int_add_slow((l_q), SD_INT(1)); sd_int_release((l_q)); (l_q) = s_; } }
+                  }
+                  sd_int_release(l_q);
+                }
+              }
+              _c31:;
+              { int64_t r_; if (SD_LIKELY((((l_j).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_j).w, SD_INT(1).w, &r_))) (l_j).w = r_; else { sd_int s_ = sd_int_add_slow((l_j), SD_INT(1)); sd_int_release((l_j)); (l_j) = s_; } }
+            }
+            sd_int_release(l_j);
+          }
+          if (sd_int_ge((l_cs).f_comm, SD_INT(0))) {
+            SD_PREEMPT();
+            sd_list * _t37 = sd_f_lspWalkStmt(l_ast, (l_cs).f_comm, l_at, L.l_out);
+            sd_list_release(L.l_out);
+            L.l_out = _t37;
+          }
+          SD_PREEMPT();
+          sd_list * _t38 = sd_f_lspWalkBlock(l_ast, (l_cs).f_body, l_at, L.l_out);
+          sd_list * _t39 = _t38;
+          SD_LF_LEAVE(L);
+          sd_int_release(l_k);
+          sd_list_release(L.l_out);
+          return _t39;
+        }
+        _c28:;
+        { int64_t r_; if (SD_LIKELY((((l_k).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_k).w, SD_INT(1).w, &r_))) (l_k).w = r_; else { sd_int s_ = sd_int_add_slow((l_k), SD_INT(1)); sd_int_release((l_k)); (l_k) = s_; } }
+      }
+      sd_int_release(l_k);
+    }
+    SD_PREEMPT();
+    sd_list * _t40 = sd_f_lspWalkExpr(l_ast, (l_st).f_expr, l_at, L.l_out);
+    sd_list * _t41 = _t40;
+    SD_LF_LEAVE(L);
+    sd_list_release(L.l_out);
+    return _t41;
+  }
+  if ((SD_BOX_GET((l_st).f_kind, sd_E_StmtKind).tag == 8)) {
+    {
+      sd_int l_r = SD_INT(0);
+      for (;;) {
+        SD_PREEMPT();
+        if (!(sd_int_lt(l_r, (l_st).f_count))) break;
+        {
+          sd_int _t43 = sd_m_Ast__at(l_ast, (l_st).f_list, l_r);
+          SD_PREEMPT();
+          sd_list * _t44 = sd_f_lspWalkExpr(l_ast, _t43, l_at, L.l_out);
+          sd_list_release(L.l_out);
+          L.l_out = _t44;
+          sd_int_release(_t43);
+        }
+        _c42:;
+        { int64_t r_; if (SD_LIKELY((((l_r).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_r).w, SD_INT(1).w, &r_))) (l_r).w = r_; else { sd_int s_ = sd_int_add_slow((l_r), SD_INT(1)); sd_int_release((l_r)); (l_r) = s_; } }
+      }
+      sd_int_release(l_r);
+    }
+    SD_LF_LEAVE(L);
+    return L.l_out;
+  }
+  SD_PREEMPT();
+  sd_list * _t45 = sd_f_lspWalkExpr(l_ast, (l_st).f_expr, l_at, L.l_out);
+  sd_list * _t46 = _t45;
+  SD_LF_LEAVE(L);
+  sd_list_release(L.l_out);
+  return _t46;
+}
+
+typedef struct { sd_lframe h; sd_list * l_out; } sd_L_sd_f_lspWalkExpr;
+static void sd_lr_sd_f_lspWalkExpr(sd_lframe *p) {
+  sd_L_sd_f_lspWalkExpr *L = (sd_L_sd_f_lspWalkExpr *)p;
+  sd_list_release(L->l_out);
+}
+SD_NO_TCE static sd_list * sd_f_lspWalkExpr(sd_S_Ast l_ast, sd_int l_e, sd_S_Pos l_at, sd_list * l_found) {
+  sd_L_sd_f_lspWalkExpr L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_lspWalkExpr);
+  if ((sd_int_lt(l_e, SD_INT(0)) || sd_int_ge(l_e, sd_list_len((l_ast).f_exprs)))) {
+    SD_LF_LEAVE(L);
+    return sd_list_retain(l_found);
+  }
+  sd_S_Expr l_x = SD_LIST_GET((l_ast).f_exprs, sd_S_Expr, l_e);
+  if ((SD_BOX_GET((l_x).f_kind, sd_E_ExprKind).tag == 20)) {
+    bool _t1 = sd_f_lspBlockHas(l_ast, (l_x).f_block, l_at);
+    if (_t1) {
+      SD_PREEMPT();
+      sd_list * _t2 = sd_f_lspWalkBlock(l_ast, (l_x).f_block, l_at, l_found);
+      SD_LF_LEAVE(L);
+      return _t2;
+    }
+    SD_LF_LEAVE(L);
+    return sd_list_retain(l_found);
+  }
+  SD_PREEMPT();
+  sd_list * _t3 = sd_f_lspWalkExpr(l_ast, (l_x).f_a, l_at, l_found);
+  L.l_out = _t3;
+  sd_list * _t4 = sd_f_lspWalkExpr(l_ast, (l_x).f_b, l_at, L.l_out);
+  sd_list_release(L.l_out);
+  L.l_out = _t4;
+  {
+    sd_int l_i = SD_INT(0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!(sd_int_lt(l_i, (l_x).f_count))) break;
+      {
+        sd_int _t6 = sd_m_Ast__at(l_ast, (l_x).f_list, l_i);
+        sd_list * _t7 = sd_f_lspWalkExpr(l_ast, _t6, l_at, L.l_out);
+        sd_list_release(L.l_out);
+        L.l_out = _t7;
+        sd_int_release(_t6);
+      }
+      _c5:;
+      { int64_t r_; if (SD_LIKELY((((l_i).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_i).w, SD_INT(1).w, &r_))) (l_i).w = r_; else { sd_int s_ = sd_int_add_slow((l_i), SD_INT(1)); sd_int_release((l_i)); (l_i) = s_; } }
+    }
+    sd_int_release(l_i);
+  }
+  SD_LF_LEAVE(L);
+  return L.l_out;
+}
+
+typedef struct { sd_lframe h; sd_list * l_out; sd_str l_text; sd_S_Parser l_p; sd_S_Lexer l_lx; sd_str l_name; sd_str _t12; sd_list * _t14; sd_str _t18; sd_list * _t20; sd_str l_tname; sd_list * _t25; } sd_L_sd_f_lspSymbols;
+static void sd_lr_sd_f_lspSymbols(sd_lframe *p) {
+  sd_L_sd_f_lspSymbols *L = (sd_L_sd_f_lspSymbols *)p;
+  sd_list_release(L->l_out);
+  sd_str_release(L->l_text);
+  sd_rl_S6Parser(L->l_p);
+  sd_rl_S5Lexer(L->l_lx);
+  sd_str_release(L->l_name);
+  sd_str_release(L->_t12);
+  sd_list_release(L->_t14);
+  sd_str_release(L->_t18);
+  sd_list_release(L->_t20);
+  sd_str_release(L->l_tname);
+  sd_list_release(L->_t25);
+}
+static sd_box * sd_f_lspSymbols(sd_S_LspJob l_job) {
+  sd_L_sd_f_lspSymbols L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_lspSymbols);
+  sd_list * _t1 = sd_list_new(&sd_type_box, 0);
+  L.l_out = _t1;
+  sd_str _t2 = (l_job).f_path;
+  sd_str *_t3 = sd_map_get((l_job).f_overlay, &_t2);
+  L.l_text = sd_str_retain((_t3 ? *_t3 : NULL));
+  if (((L.l_text) == NULL)) {
+    sd_box * _t4 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 4, .u.c_Array = {sd_list_retain(L.l_out)}});
+    sd_box * _t5 = _t4;
+    SD_LF_LEAVE(L);
+    sd_str_release(L.l_text);
+    sd_list_release(L.l_out);
+    return _t5;
+  }
+  sd_S_Parser _t6 = sd_f_fmtParse((l_job).f_path, L.l_text);
+  L.l_p = _t6;
+  sd_S_Lexer _t7 = sd_f_lex(SD_INT(0), L.l_text);
+  L.l_lx = _t7;
+  {
+    int64_t l_i = ((int64_t)0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!((l_i < SD_SMALL(sd_list_len(((L.l_p).f_ast).f_tops))))) break;
+      {
+        sd_S_TopDecl l_top = SD_LIST_GET(((L.l_p).f_ast).f_tops, sd_S_TopDecl, SD_INT_S(l_i));
+        if ((SD_BOX_GET((l_top).f_kind, sd_E_TopKind).tag == 0)) {
+          sd_S_FnDecl l_fd = SD_LIST_GET(((L.l_p).f_ast).f_fns, sd_S_FnDecl, (l_top).f_index);
+          if (sd_str_eq((l_fd).f_name, SD_STR_LIT(""))) {
+            goto _c8;
+          }
+          L.l_name = sd_str_retain((l_fd).f_name);
+          int64_t l_kind = ((int64_t)12);
+          if ((l_fd).f_isMethod) {
+            sd_str _t9 = sd_f_lspRecvTypeName((L.l_p).f_ast, (l_fd).f_recvType);
+            sd_str _t10[] = {_t9, SD_STR_LIT("."), (l_fd).f_name};
+            sd_str _t11 = sd_str_concat_n(_t10, 3);
+            sd_str_release(L.l_name);
+            L.l_name = _t11;
+            sd_str_release(_t9); 
+            l_kind = ((int64_t)6);
+          }
+          L._t12 = sd_f_lspFnSig((L.l_p).f_ast, (l_top).f_index);
+          sd_S_Pos _t13 = sd_f_lspDeclEnd((L.l_lx).f_tokens, (l_fd).f_start);
+          L._t14 = sd_list_new(&sd_type_box, 0);
+          sd_box * _t15 = sd_f_lspSymbolJson(L.l_text, L.l_name, SD_INT_S(l_kind), L._t12, (l_fd).f_start, _t13, (l_fd).f_pos, sd_str_len((l_fd).f_name), L._t14);
+          SD_LIST_PUSH((&L.l_out), sd_box *, _t15);
+          sd_list_release(L._t14); L._t14 = NULL;
+          sd_rl_S3Pos(_t13);
+          sd_str_release(L._t12); L._t12 = NULL;
+          sd_str_release(L.l_name); L.l_name = NULL;
+        } else {
+          if ((SD_BOX_GET((l_top).f_kind, sd_E_TopKind).tag == 1)) {
+            sd_box * _t16 = sd_f_lspTypeSymbolJson((L.l_p).f_ast, L.l_text, (L.l_lx).f_tokens, (l_top).f_index);
+            SD_LIST_PUSH((&L.l_out), sd_box *, _t16);
+          } else {
+            if ((SD_BOX_GET((l_top).f_kind, sd_E_TopKind).tag == 2)) {
+              sd_S_ConstDecl l_cd = SD_LIST_GET(((L.l_p).f_ast).f_consts, sd_S_ConstDecl, (l_top).f_index);
+              if (sd_str_eq((l_cd).f_name, SD_STR_LIT(""))) {
+                goto _c8;
+              }
+              sd_S_Pos _t17 = (sd_S_Pos){.f_file = sd_int_retain(((l_cd).f_pos).f_file), .f_line = sd_int_retain(((l_cd).f_pos).f_line), .f_col = SD_INT(1)};
+              sd_S_Pos l_cstart = _t17;
+              L._t18 = sd_m_Ast__typeExprText((L.l_p).f_ast, (l_cd).f_typeExpr);
+              sd_S_Pos _t19 = sd_f_lspDeclEnd((L.l_lx).f_tokens, (l_cd).f_pos);
+              L._t20 = sd_list_new(&sd_type_box, 0);
+              sd_box * _t21 = sd_f_lspSymbolJson(L.l_text, (l_cd).f_name, SD_INT(14), L._t18, l_cstart, _t19, (l_cd).f_pos, sd_str_len((l_cd).f_name), L._t20);
+              SD_LIST_PUSH((&L.l_out), sd_box *, _t21);
+              sd_list_release(L._t20); L._t20 = NULL;
+              sd_rl_S3Pos(_t19);
+              sd_str_release(L._t18); L._t18 = NULL;
+              sd_rl_S3Pos(l_cstart);
+            } else {
+              sd_S_TestDecl l_tdl = SD_LIST_GET(((L.l_p).f_ast).f_tests, sd_S_TestDecl, (l_top).f_index);
+              sd_str _t22[] = {SD_STR_LIT("test \""), (l_tdl).f_name, SD_STR_LIT("\"")};
+              sd_str _t23 = sd_str_concat_n(_t22, 3);
+              L.l_tname = _t23;
+              sd_S_Pos _t24 = sd_f_lspDeclEnd((L.l_lx).f_tokens, (l_tdl).f_pos);
+              L._t25 = sd_list_new(&sd_type_box, 0);
+              sd_box * _t26 = sd_f_lspSymbolJson(L.l_text, L.l_tname, SD_INT(12), SD_STR_LIT(""), (l_tdl).f_pos, _t24, (l_tdl).f_pos, SD_INT(4), L._t25);
+              SD_LIST_PUSH((&L.l_out), sd_box *, _t26);
+              sd_list_release(L._t25); L._t25 = NULL;
+              sd_rl_S3Pos(_t24);
+              sd_str_release(L.l_tname); L.l_tname = NULL;
+            }
+          }
+        }
+      }
+      _c8:;
+      l_i++;
+    }
+  }
+  sd_box * _t27 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 4, .u.c_Array = {L.l_out}});
+  L.l_out = NULL;
+  sd_box * _t28 = _t27;
+  SD_LF_LEAVE(L);
+  sd_rl_S5Lexer(L.l_lx);
+  sd_rl_S6Parser(L.l_p);
+  sd_str_release(L.l_text);
+  return _t28;
+}
+
+SD_NO_TCE static sd_str sd_f_lspRecvTypeName(sd_S_Ast l_ast, sd_int l_t) {
+  if (sd_int_lt(l_t, SD_INT(0))) {
+    return SD_STR_LIT("\?");
+  }
+  sd_S_TypeExpr l_te = SD_LIST_GET((l_ast).f_typeExprs, sd_S_TypeExpr, l_t);
+  if ((SD_BOX_GET((l_te).f_kind, sd_E_TypeExprKind).tag == 5)) {
+    SD_PREEMPT();
+    sd_str _t1 = sd_f_lspRecvTypeName(l_ast, (l_te).f_a);
+    return _t1;
+  }
+  sd_str _t2 = sd_m_Ast__typeExprText(l_ast, l_t);
+  return _t2;
+}
+
+typedef struct { sd_lframe h; sd_list * l_children; sd_str _t4; sd_list * _t6; sd_str l_detail; sd_list * _t12; sd_str _t17; sd_list * _t19; } sd_L_sd_f_lspTypeSymbolJson;
+static void sd_lr_sd_f_lspTypeSymbolJson(sd_lframe *p) {
+  sd_L_sd_f_lspTypeSymbolJson *L = (sd_L_sd_f_lspTypeSymbolJson *)p;
+  sd_list_release(L->l_children);
+  sd_str_release(L->_t4);
+  sd_list_release(L->_t6);
+  sd_str_release(L->l_detail);
+  sd_list_release(L->_t12);
+  sd_str_release(L->_t17);
+  sd_list_release(L->_t19);
+}
+static sd_box * sd_f_lspTypeSymbolJson(sd_S_Ast l_ast, sd_str l_text, sd_list * l_toks, sd_int l_d) {
+  sd_L_sd_f_lspTypeSymbolJson L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_lspTypeSymbolJson);
+  sd_S_TypeDecl l_td = SD_LIST_GET((l_ast).f_typeDecls, sd_S_TypeDecl, l_d);
+  sd_list * _t1 = sd_list_new(&sd_type_box, 0);
+  L.l_children = _t1;
+  {
+    sd_int l_i = SD_INT(0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!(sd_int_lt(l_i, (l_td).f_fieldCount))) break;
+      {
+        sd_int _t3 = sd_m_Ast__at(l_ast, (l_td).f_fields, l_i);
+        sd_S_Param l_p = SD_LIST_GET((l_ast).f_params, sd_S_Param, _t3);
+        sd_int_release(_t3);
+        if ((!sd_str_eq((l_p).f_name, SD_STR_LIT("")))) {
+          L._t4 = sd_m_Ast__typeExprText(l_ast, (l_p).f_typeExpr);
+          sd_S_Pos _t5 = sd_f_lspDeclEnd(l_toks, (l_p).f_pos);
+          L._t6 = sd_list_new(&sd_type_box, 0);
+          sd_box * _t7 = sd_f_lspSymbolJson(l_text, (l_p).f_name, SD_INT(8), L._t4, (l_p).f_pos, _t5, (l_p).f_pos, sd_str_len((l_p).f_name), L._t6);
+          SD_LIST_PUSH((&L.l_children), sd_box *, _t7);
+          sd_list_release(L._t6); L._t6 = NULL;
+          sd_rl_S3Pos(_t5);
+          sd_str_release(L._t4); L._t4 = NULL;
+        }
+      }
+      _c2:;
+      { int64_t r_; if (SD_LIKELY((((l_i).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_i).w, SD_INT(1).w, &r_))) (l_i).w = r_; else { sd_int s_ = sd_int_add_slow((l_i), SD_INT(1)); sd_int_release((l_i)); (l_i) = s_; } }
+    }
+    sd_int_release(l_i);
+  }
+  {
+    sd_int l_k = SD_INT(0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!(sd_int_lt(l_k, (l_td).f_caseCount))) break;
+      {
+        sd_int _t9 = sd_m_Ast__at(l_ast, (l_td).f_cases, l_k);
+        sd_S_EnumCase l_ec = SD_LIST_GET((l_ast).f_enumCases, sd_S_EnumCase, _t9);
+        sd_int_release(_t9);
+        if ((!sd_str_eq((l_ec).f_name, SD_STR_LIT("")))) {
+          L.l_detail = SD_STR_LIT("");
+          if (sd_int_gt((l_ec).f_paramCount, SD_INT(0))) {
+            sd_str _t10 = sd_f_lspParamsText(l_ast, (l_ec).f_params, (l_ec).f_paramCount);
+            sd_str_release(L.l_detail);
+            L.l_detail = _t10;
+          }
+          sd_S_Pos _t11 = sd_f_lspDeclEnd(l_toks, (l_ec).f_pos);
+          L._t12 = sd_list_new(&sd_type_box, 0);
+          sd_box * _t13 = sd_f_lspSymbolJson(l_text, (l_ec).f_name, SD_INT(22), L.l_detail, (l_ec).f_pos, _t11, (l_ec).f_pos, sd_str_len((l_ec).f_name), L._t12);
+          SD_LIST_PUSH((&L.l_children), sd_box *, _t13);
+          sd_list_release(L._t12); L._t12 = NULL;
+          sd_rl_S3Pos(_t11);
+          sd_str_release(L.l_detail); L.l_detail = NULL;
+        }
+      }
+      _c8:;
+      { int64_t r_; if (SD_LIKELY((((l_k).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_k).w, SD_INT(1).w, &r_))) (l_k).w = r_; else { sd_int s_ = sd_int_add_slow((l_k), SD_INT(1)); sd_int_release((l_k)); (l_k) = s_; } }
+    }
+    sd_int_release(l_k);
+  }
+  {
+    sd_int l_m = SD_INT(0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!(sd_int_lt(l_m, (l_td).f_methodCount))) break;
+      {
+        sd_int _t15 = sd_m_Ast__at(l_ast, (l_td).f_methods, l_m);
+        sd_S_MethodSig l_ms = SD_LIST_GET((l_ast).f_methodSigs, sd_S_MethodSig, _t15);
+        sd_int_release(_t15);
+        if ((!sd_str_eq((l_ms).f_name, SD_STR_LIT("")))) {
+          sd_int _t16 = sd_m_Ast__at(l_ast, (l_td).f_methods, l_m);
+          L._t17 = sd_f_lspMethodSigText(l_ast, _t16);
+          sd_S_Pos _t18 = sd_f_lspDeclEnd(l_toks, (l_ms).f_pos);
+          L._t19 = sd_list_new(&sd_type_box, 0);
+          sd_box * _t20 = sd_f_lspSymbolJson(l_text, (l_ms).f_name, SD_INT(6), L._t17, (l_ms).f_pos, _t18, (l_ms).f_pos, sd_str_len((l_ms).f_name), L._t19);
+          SD_LIST_PUSH((&L.l_children), sd_box *, _t20);
+          sd_list_release(L._t19); L._t19 = NULL;
+          sd_rl_S3Pos(_t18);
+          sd_str_release(L._t17); L._t17 = NULL;
+          sd_int_release(_t16);
+        }
+      }
+      _c14:;
+      { int64_t r_; if (SD_LIKELY((((l_m).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_m).w, SD_INT(1).w, &r_))) (l_m).w = r_; else { sd_int s_ = sd_int_add_slow((l_m), SD_INT(1)); sd_int_release((l_m)); (l_m) = s_; } }
+    }
+    sd_int_release(l_m);
+  }
+  int64_t l_kind = ((int64_t)23);
+  if ((SD_BOX_GET((l_td).f_kind, sd_E_DeclKind).tag == 1)) {
+    l_kind = ((int64_t)10);
+  } else {
+    if ((SD_BOX_GET((l_td).f_kind, sd_E_DeclKind).tag == 2)) {
+      l_kind = ((int64_t)11);
+    }
+  }
+  sd_S_Pos _t21 = (sd_S_Pos){.f_file = sd_int_retain(((l_td).f_pos).f_file), .f_line = sd_int_retain(((l_td).f_pos).f_line), .f_col = SD_INT(1)};
+  sd_S_Pos l_start = _t21;
+  L.l_detail = SD_STR_LIT("struct");
+  if ((SD_BOX_GET((l_td).f_kind, sd_E_DeclKind).tag == 1)) {
+    sd_str _t22 = SD_STR_LIT("enum");
+    sd_str_release(L.l_detail);
+    L.l_detail = _t22;
+  } else {
+    if ((SD_BOX_GET((l_td).f_kind, sd_E_DeclKind).tag == 2)) {
+      sd_str _t23 = SD_STR_LIT("interface");
+      sd_str_release(L.l_detail);
+      L.l_detail = _t23;
+    }
+  }
+  sd_S_Pos _t24 = sd_f_lspDeclEnd(l_toks, (l_td).f_pos);
+  sd_box * _t25 = sd_f_lspSymbolJson(l_text, (l_td).f_name, SD_INT_S(l_kind), L.l_detail, l_start, _t24, (l_td).f_pos, sd_str_len((l_td).f_name), L.l_children);
+  sd_box * _t26 = _t25;
+  SD_LF_LEAVE(L);
+  sd_rl_S3Pos(_t24);
+  sd_str_release(L.l_detail);
+  sd_rl_S3Pos(l_start);
+  sd_list_release(L.l_children);
+  return _t26;
+}
+
+typedef struct { sd_lframe h; sd_map * l_m; sd_box * _t6; sd_box * _t8; sd_box * _t10; sd_box * _t12; sd_box * _t14; sd_box * _t16; } sd_L_sd_f_lspSymbolJson;
+static void sd_lr_sd_f_lspSymbolJson(sd_lframe *p) {
+  sd_L_sd_f_lspSymbolJson *L = (sd_L_sd_f_lspSymbolJson *)p;
+  sd_map_release(L->l_m);
+  sd_box_release(L->_t6);
+  sd_box_release(L->_t8);
+  sd_box_release(L->_t10);
+  sd_box_release(L->_t12);
+  sd_box_release(L->_t14);
+  sd_box_release(L->_t16);
+}
+static sd_box * sd_f_lspSymbolJson(sd_str l_text, sd_str l_name, sd_int l_kind, sd_str l_detail, sd_S_Pos l_start, sd_S_Pos l_end, sd_S_Pos l_sel, sd_int l_selLen, sd_list * l_children) {
+  sd_L_sd_f_lspSymbolJson L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_lspSymbolJson);
+  sd_int _t1 = sd_int_add((l_sel).f_col, l_selLen);
+  sd_S_Pos _t2 = (sd_S_Pos){.f_file = sd_int_retain((l_sel).f_file), .f_line = sd_int_retain((l_sel).f_line), .f_col = _t1};
+  sd_S_Pos l_selEnd = _t2;
+  sd_S_Pos l_last = sd_rt_S3Pos(l_end);
+  bool _t3 = sd_f_posBefore(l_last, l_selEnd);
+  if (_t3) {
+    sd_S_Pos _t4 = sd_rt_S3Pos(l_selEnd);
+    sd_rl_S3Pos(l_last);
+    l_last = _t4;
+  }
+  sd_map * _t5 = sd_map_new(&sd_type_str, &sd_type_box);
+  L.l_m = _t5;
+  L._t6 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 3, .u.c_String = {sd_str_retain(l_name)}});
+  sd_str _t7 = SD_STR_LIT("name");
+  sd_map_set((&L.l_m), &_t7, &L._t6);
+  L._t6 = NULL;
+  L._t8 = sd_f_lspNum(l_kind);
+  sd_str _t9 = SD_STR_LIT("kind");
+  sd_map_set((&L.l_m), &_t9, &L._t8);
+  L._t8 = NULL;
+  if ((!sd_str_eq(l_detail, SD_STR_LIT("")))) {
+    L._t10 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 3, .u.c_String = {sd_str_retain(l_detail)}});
+    sd_str _t11 = SD_STR_LIT("detail");
+    sd_map_set((&L.l_m), &_t11, &L._t10);
+    L._t10 = NULL;
+  }
+  L._t12 = sd_f_lspRange(l_text, l_start, l_last);
+  sd_str _t13 = SD_STR_LIT("range");
+  sd_map_set((&L.l_m), &_t13, &L._t12);
+  L._t12 = NULL;
+  L._t14 = sd_f_lspRange(l_text, l_sel, l_selEnd);
+  sd_str _t15 = SD_STR_LIT("selectionRange");
+  sd_map_set((&L.l_m), &_t15, &L._t14);
+  L._t14 = NULL;
+  L._t16 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 4, .u.c_Array = {sd_list_retain(l_children)}});
+  sd_str _t17 = SD_STR_LIT("children");
+  sd_map_set((&L.l_m), &_t17, &L._t16);
+  L._t16 = NULL;
+  sd_box * _t18 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 5, .u.c_Object = {L.l_m}});
+  L.l_m = NULL;
+  sd_box * _t19 = _t18;
+  SD_LF_LEAVE(L);
+  sd_rl_S3Pos(l_last);
+  sd_rl_S3Pos(l_selEnd);
+  return _t19;
+}
+
+static sd_S_Pos sd_f_lspDeclEnd(sd_list * l_toks, sd_S_Pos l_start) {
+  sd_int l_depth = SD_INT(0);
+  sd_S_Pos l_end = sd_rt_S3Pos(l_start);
+  {
+    int64_t l_i = ((int64_t)0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!((l_i < SD_SMALL(sd_list_len(l_toks))))) break;
+      {
+        sd_S_Token l_t = SD_LIST_GET(l_toks, sd_S_Token, SD_INT_S(l_i));
+        bool _t2 = sd_f_posBefore((l_t).f_pos, l_start);
+        if (_t2) {
+          goto _c1;
+        }
+        if (((SD_BOX_GET((l_t).f_kind, sd_E_Tok).tag == 0) || ((SD_BOX_GET((l_t).f_kind, sd_E_Tok).tag == 1) && sd_int_le(l_depth, SD_INT(0))))) {
+          sd_S_Pos _t3 = l_end;
+          sd_int_release(l_depth);
+          return _t3;
+        }
+        if ((((SD_BOX_GET((l_t).f_kind, sd_E_Tok).tag == 61) || (SD_BOX_GET((l_t).f_kind, sd_E_Tok).tag == 63)) || (SD_BOX_GET((l_t).f_kind, sd_E_Tok).tag == 65))) {
+          { int64_t r_; if (SD_LIKELY((((l_depth).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_depth).w, SD_INT(1).w, &r_))) (l_depth).w = r_; else { sd_int s_ = sd_int_add_slow((l_depth), SD_INT(1)); sd_int_release((l_depth)); (l_depth) = s_; } }
+        } else {
+          if ((((SD_BOX_GET((l_t).f_kind, sd_E_Tok).tag == 62) || (SD_BOX_GET((l_t).f_kind, sd_E_Tok).tag == 64)) || (SD_BOX_GET((l_t).f_kind, sd_E_Tok).tag == 66))) {
+            { int64_t r_; if (SD_LIKELY((((l_depth).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_sub_overflow((l_depth).w, SD_INT(1).w, &r_))) (l_depth).w = r_; else { sd_int s_ = sd_int_sub_slow((l_depth), SD_INT(1)); sd_int_release((l_depth)); (l_depth) = s_; } }
+            if (sd_int_lt(l_depth, SD_INT(0))) {
+              sd_S_Pos _t4 = l_end;
+              sd_int_release(l_depth);
+              return _t4;
+            }
+          }
+        }
+        if ((!(SD_BOX_GET((l_t).f_kind, sd_E_Tok).tag == 1))) {
+          sd_int _t5 = sd_int_add(((l_t).f_pos).f_col, sd_str_len((l_t).f_raw));
+          sd_S_Pos _t6 = (sd_S_Pos){.f_file = sd_int_retain(((l_t).f_pos).f_file), .f_line = sd_int_retain(((l_t).f_pos).f_line), .f_col = _t5};
+          sd_rl_S3Pos(l_end);
+          l_end = _t6;
+        }
+      }
+      _c1:;
+      l_i++;
+    }
+  }
+  sd_S_Pos _t7 = l_end;
+  sd_int_release(l_depth);
+  return _t7;
+}
+
+typedef struct { sd_lframe h; sd_list * l_rest; sd_str l_root; sd_T_T2S5Builde _t3; sd_S_Build l_t; sd_T_T2Ose _t6; sd_str l_program; sd_T_T2se _t9; sd_str l_runtime; sd_str _t12; sd_T_T2S6Parsere _t14; sd_S_Parser l_p; sd_str _t17; sd_T_T2ie _t19; sd_str l_out; sd_T_T2S5Builde _t31; sd_S_Build l_bt; sd_T_T2be _t35; sd_list * l_progArgs; sd_list * _t41; sd_T_T2S5Builde _t42; sd_S_Build l_rt; sd_T_T2ie _t45; sd_T_T2ie _t48; sd_str _t54; } sd_L_sd_f_main;
 static void sd_lr_sd_f_main(sd_lframe *p) {
   sd_L_sd_f_main *L = (sd_L_sd_f_main *)p;
   sd_list_release(L->l_rest);
@@ -50660,7 +57527,7 @@ static void sd_lr_sd_f_main(sd_lframe *p) {
   sd_rl_S5Build(L->l_rt);
   sd_rl_T2ie(L->_t45);
   sd_rl_T2ie(L->_t48);
-  sd_str_release(L->_t52);
+  sd_str_release(L->_t54);
 }
 static sd_err sd_f_main(sd_list * l_args) {
   sd_L_sd_f_main L = {{0}};
@@ -50911,10 +57778,18 @@ static sd_err sd_f_main(sd_list * l_args) {
     sd_int l_code = _t50;
     sd_f_os_exit(l_code);
   }
-  sd_str _t51[] = {SD_STR_LIT("seed: unknown command "), l_cmd, SD_STR_LIT("\012"), sd_c_usage()};
-  L._t52 = sd_str_concat_n(_t51, 4);
-  sd_f_fmt_eprint(L._t52);
-  sd_str_release(L._t52); L._t52 = NULL;
+  if (sd_str_eq(l_cmd, SD_STR_LIT("lsp"))) {
+    sd_err _t51 = sd_f_lspCommand(L.l_root);
+    sd_err _t52 = _t51;
+    SD_LF_LEAVE(L);
+    sd_str_release(L.l_root);
+    sd_list_release(L.l_rest);
+    return _t52;
+  }
+  sd_str _t53[] = {SD_STR_LIT("seed: unknown command "), l_cmd, SD_STR_LIT("\012"), sd_c_usage()};
+  L._t54 = sd_str_concat_n(_t53, 4);
+  sd_f_fmt_eprint(L._t54);
+  sd_str_release(L._t54); L._t54 = NULL;
   sd_f_os_exit(SD_INT(2));
   sd_crash("internal error: main reached its end without returning");
 }
@@ -51887,7 +58762,7 @@ static sd_T_T2be sd_f_buildProgram(sd_str l_root, sd_S_Build l_t, bool l_testMod
         SD_PREEMPT();
         if (!((l_k < SD_SMALL(sd_list_len(L.l_missing))))) break;
         {
-          { sd_g1_args a_ = {L.l_cache, (SD_LIST_GET(L.l_missing, sd_S_Unit, SD_INT_S(l_k))).f_text, (SD_LIST_GET(L.l_missing, sd_S_Unit, SD_INT_S(l_k))).f_path, l_opt}; sd_spawn(_t63, sd_g1, &sd_g1_type, &a_); }
+          { sd_g2_args a_ = {L.l_cache, (SD_LIST_GET(L.l_missing, sd_S_Unit, SD_INT_S(l_k))).f_text, (SD_LIST_GET(L.l_missing, sd_S_Unit, SD_INT_S(l_k))).f_path, l_opt}; sd_spawn(_t63, sd_g2, &sd_g2_type, &a_); }
         }
         _c64:;
         l_k++;
@@ -51897,7 +58772,7 @@ static sd_T_T2be sd_f_buildProgram(sd_str l_root, sd_S_Build l_t, bool l_testMod
     SD_LIST_PUSH(&L._t65, sd_str, SD_STR_LIT("-c"));
     L._t66 = sd_list_new(&sd_type_str, 1);
     SD_LIST_PUSH(&L._t66, sd_str, sd_str_retain(L.l_cfile));
-    { sd_g2_args a_ = {l_opt, L._t65, L._t66, L.l_rootObj, false}; sd_spawn(_t63, sd_g2, &sd_g2_type, &a_); }
+    { sd_g3_args a_ = {l_opt, L._t65, L._t66, L.l_rootObj, false}; sd_spawn(_t63, sd_g3, &sd_g3_type, &a_); }
     sd_list_release(L._t66); L._t66 = NULL;
     sd_list_release(L._t65); L._t65 = NULL;
     _t62 = sd_group_wait(_t63);
@@ -52494,7 +59369,7 @@ static sd_T_T2ie sd_f_testCommand(sd_str l_root, sd_list * l_args) {
         {
           int64_t l_j = ((int64_t)0);
           if (SD_LIKELY(((l_failed.w) & 1) == 0)) {
-            int64_t r_failed_3684 = SD_SMALL(l_failed);
+            int64_t r_failed_4330 = SD_SMALL(l_failed);
             for (;;) {
               SD_PREEMPT();
               if (!((l_j < SD_SMALL(sd_list_len(L.l_pkgs))))) break;
@@ -52550,22 +59425,22 @@ static sd_T_T2ie sd_f_testCommand(sd_str l_root, sd_list * l_args) {
                 sd_int _t52 = SD_LIST_GET(L.l_counts, sd_int, SD_INT(0));
                 { int64_t r_; if (SD_LIKELY((((l_passed).w | _t52.w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_passed).w, _t52.w, &r_))) (l_passed).w = r_; else { sd_int s_ = sd_int_add_slow((l_passed), _t52); sd_int_release((l_passed)); (l_passed) = s_; } }
                 sd_int _t53 = SD_LIST_GET(L.l_counts, sd_int, SD_INT(1));
-                int64_t _t54; if (SD_UNLIKELY((_t53.w & 1) != 0 || __builtin_add_overflow(r_failed_3684, _t53.w >> 1, &_t54))) {
-                  sd_int _t55 = sd_int_from_i64(r_failed_3684);
+                int64_t _t54; if (SD_UNLIKELY((_t53.w & 1) != 0 || __builtin_add_overflow(r_failed_4330, _t53.w >> 1, &_t54))) {
+                  sd_int _t55 = sd_int_from_i64(r_failed_4330);
                   l_failed = sd_int_add(_t55, _t53);
                   sd_int_release(_t55);
                   sd_list_release(L.l_counts); L.l_counts = NULL;
                   sd_str_release(L.l_work); L.l_work = NULL;
                   goto _c42;
                 }
-                r_failed_3684 = _t54;
+                r_failed_4330 = _t54;
                 sd_list_release(L.l_counts); L.l_counts = NULL;
                 sd_str_release(L.l_work); L.l_work = NULL;
               }
               _c43:;
               l_j++;
             }
-            l_failed = sd_int_from_i64(r_failed_3684);
+            l_failed = sd_int_from_i64(r_failed_4330);
             goto _d41;
           }
           for (;;) {
@@ -52699,7 +59574,7 @@ static void sd_lr_sd_f_testPackages(sd_lframe *p) {
   sd_str_release(L->l_sub);
   sd_rl_T2Lse(L->_t19);
 }
-static sd_T_T2Lse sd_f_testPackages(sd_str l_dir, sd_list * l_found) {
+SD_NO_TCE static sd_T_T2Lse sd_f_testPackages(sd_str l_dir, sd_list * l_found) {
   sd_L_sd_f_testPackages L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_f_testPackages);
   L.l_out = sd_list_retain(l_found);
@@ -53931,7 +60806,7 @@ static void sd_lr_sd_m_Parser__parseType(sd_lframe *p) {
   sd_L_sd_m_Parser__parseType *L = (sd_L_sd_m_Parser__parseType *)p;
   sd_rl_S8TypeExpr(L->l_o);
 }
-static sd_int sd_m_Parser__parseType(sd_S_Parser * l_p, bool l_named) {
+SD_NO_TCE static sd_int sd_m_Parser__parseType(sd_S_Parser * l_p, bool l_named) {
   sd_L_sd_m_Parser__parseType L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Parser__parseType);
   bool _t1 = l_named;
@@ -54041,7 +60916,7 @@ static void sd_lr_sd_m_Parser__parseBaseType(sd_lframe *p) {
   sd_str_release(L->_t86);
   sd_str_release(L->_t87);
 }
-static sd_int sd_m_Parser__parseBaseType(sd_S_Parser * l_p, bool l_named) {
+SD_NO_TCE static sd_int sd_m_Parser__parseBaseType(sd_S_Parser * l_p, bool l_named) {
   sd_L_sd_m_Parser__parseBaseType L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Parser__parseBaseType);
   sd_S_Token l_t = SD_LIST_GET(((*l_p)).f_toks, sd_S_Token, ((*l_p)).f_pos);
@@ -54741,7 +61616,7 @@ static sd_int sd_f_matchingOpener(sd_list * l_open, sd_box * l_k) {
   return _t5;
 }
 
-static sd_int sd_m_Parser__scanType(sd_S_Parser l_p, sd_int l_i, bool l_named) {
+SD_NO_TCE static sd_int sd_m_Parser__scanType(sd_S_Parser l_p, sd_int l_i, bool l_named) {
   SD_PREEMPT();
   sd_int _t1 = sd_m_Parser__scanBaseType(l_p, l_i, l_named);
   sd_int l_end = _t1;
@@ -54779,7 +61654,7 @@ static sd_int sd_m_Parser__scanType(sd_S_Parser l_p, sd_int l_i, bool l_named) {
   return l_end;
 }
 
-static sd_int sd_m_Parser__scanBaseType(sd_S_Parser l_p, sd_int l_i, bool l_named) {
+SD_NO_TCE static sd_int sd_m_Parser__scanBaseType(sd_S_Parser l_p, sd_int l_i, bool l_named) {
   sd_box * _t1 = sd_m_Parser__kindAt(l_p, l_i);
   sd_box * l_k = _t1;
   if ((SD_BOX_GET(l_k, sd_E_Tok).tag == 2)) {
@@ -55073,7 +61948,7 @@ static bool sd_m_Parser__atDeclaration(sd_S_Parser l_p) {
   return _t6;
 }
 
-static sd_int sd_m_Parser__parseBlock(sd_S_Parser * l_p, sd_str l_context) {
+SD_NO_TCE static sd_int sd_m_Parser__parseBlock(sd_S_Parser * l_p, sd_str l_context) {
   sd_S_Pos _t1 = sd_m_Parser__here((*l_p));
   sd_S_Pos l_start = _t1;
   bool _t2 = sd_m_Parser__enter(l_p);
@@ -55102,7 +61977,7 @@ static void sd_lr_sd_m_Parser__parseBlockBody(sd_lframe *p) {
   sd_L_sd_m_Parser__parseBlockBody *L = (sd_L_sd_m_Parser__parseBlockBody *)p;
   sd_list_release(L->l_stmts);
 }
-static sd_int sd_m_Parser__parseBlockBody(sd_S_Parser * l_p, sd_str l_context, sd_S_Pos l_start) {
+SD_NO_TCE static sd_int sd_m_Parser__parseBlockBody(sd_S_Parser * l_p, sd_str l_context, sd_S_Pos l_start) {
   sd_L_sd_m_Parser__parseBlockBody L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Parser__parseBlockBody);
   sd_box * _t1 = SD_BOX_REF(sd_k_Tok__LBrace);
@@ -55193,7 +62068,7 @@ static void sd_lr_sd_m_Parser__parseStmt(sd_lframe *p) {
   sd_str_release(L->_t79);
   sd_rl_S4Stmt(L->_t82);
 }
-static sd_int sd_m_Parser__parseStmt(sd_S_Parser * l_p) {
+SD_NO_TCE static sd_int sd_m_Parser__parseStmt(sd_S_Parser * l_p) {
   sd_L_sd_m_Parser__parseStmt L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Parser__parseStmt);
   sd_S_Token l_t = SD_LIST_GET(((*l_p)).f_toks, sd_S_Token, ((*l_p)).f_pos);
@@ -55453,7 +62328,7 @@ static void sd_lr_sd_m_Parser__parseSimple(sd_lframe *p) {
   sd_rl_S4Stmt(L->l_s2);
   sd_rl_S4Stmt(L->l_s3);
 }
-static sd_int sd_m_Parser__parseSimple(sd_S_Parser * l_p) {
+SD_NO_TCE static sd_int sd_m_Parser__parseSimple(sd_S_Parser * l_p) {
   sd_L_sd_m_Parser__parseSimple L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Parser__parseSimple);
   sd_S_Pos _t1 = sd_m_Parser__here((*l_p));
@@ -55676,7 +62551,7 @@ static void sd_lr_sd_m_Parser__parseIf(sd_lframe *p) {
   sd_rl_S5Token(L->_t1);
   sd_rl_S4Stmt(L->l_s);
 }
-static sd_int sd_m_Parser__parseIf(sd_S_Parser * l_p) {
+SD_NO_TCE static sd_int sd_m_Parser__parseIf(sd_S_Parser * l_p) {
   sd_L_sd_m_Parser__parseIf L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Parser__parseIf);
   L._t1 = sd_m_Parser__next(l_p);
@@ -55735,7 +62610,7 @@ static void sd_lr_sd_m_Parser__parseFor(sd_lframe *p) {
   sd_rl_S5Token(L->_t1);
   sd_rl_S4Stmt(L->l_s);
 }
-static sd_int sd_m_Parser__parseFor(sd_S_Parser * l_p) {
+SD_NO_TCE static sd_int sd_m_Parser__parseFor(sd_S_Parser * l_p) {
   sd_L_sd_m_Parser__parseFor L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Parser__parseFor);
   L._t1 = sd_m_Parser__next(l_p);
@@ -55818,7 +62693,7 @@ static void sd_lr_sd_m_Parser__parseSwitch(sd_lframe *p) {
   sd_rl_S5Token(L->l_ct);
   sd_list_release(L->l_labels);
 }
-static sd_int sd_m_Parser__parseSwitch(sd_S_Parser * l_p) {
+SD_NO_TCE static sd_int sd_m_Parser__parseSwitch(sd_S_Parser * l_p) {
   sd_L_sd_m_Parser__parseSwitch L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Parser__parseSwitch);
   L._t1 = sd_m_Parser__next(l_p);
@@ -55926,7 +62801,7 @@ static void sd_lr_sd_m_Parser__parseCaseBody(sd_lframe *p) {
   sd_L_sd_m_Parser__parseCaseBody *L = (sd_L_sd_m_Parser__parseCaseBody *)p;
   sd_list_release(L->l_stmts);
 }
-static sd_int sd_m_Parser__parseCaseBody(sd_S_Parser * l_p, sd_S_Pos l_start) {
+SD_NO_TCE static sd_int sd_m_Parser__parseCaseBody(sd_S_Parser * l_p, sd_S_Pos l_start) {
   sd_L_sd_m_Parser__parseCaseBody L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Parser__parseCaseBody);
   if (((*l_p)).f_failed) {
@@ -56112,7 +62987,7 @@ static void sd_lr_sd_m_Parser__parseLabel(sd_lframe *p) {
   sd_rl_S5Label(L->l_l);
   sd_list_release(L->l_params);
 }
-static sd_int sd_m_Parser__parseLabel(sd_S_Parser * l_p) {
+SD_NO_TCE static sd_int sd_m_Parser__parseLabel(sd_S_Parser * l_p) {
   sd_L_sd_m_Parser__parseLabel L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Parser__parseLabel);
   sd_S_Pos _t1 = sd_m_Parser__here((*l_p));
@@ -56328,7 +63203,7 @@ static void sd_lr_sd_m_Parser__parseSelect(sd_lframe *p) {
   sd_list_release(L->l_cases);
   sd_rl_S5Token(L->l_ct);
 }
-static sd_int sd_m_Parser__parseSelect(sd_S_Parser * l_p) {
+SD_NO_TCE static sd_int sd_m_Parser__parseSelect(sd_S_Parser * l_p) {
   sd_L_sd_m_Parser__parseSelect L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Parser__parseSelect);
   L._t1 = sd_m_Parser__next(l_p);
@@ -56424,7 +63299,7 @@ static sd_int sd_f_binaryPrecedence(sd_box * l_k) {
   return SD_INT(0);
 }
 
-static sd_int sd_m_Parser__parseExpr(sd_S_Parser * l_p) {
+SD_NO_TCE static sd_int sd_m_Parser__parseExpr(sd_S_Parser * l_p) {
   bool _t1 = sd_m_Parser__enter(l_p);
   if ((!_t1)) {
     sd_int *_t2 = (&(l_p)->f_nesting);
@@ -56469,7 +63344,7 @@ static void sd_lr_sd_m_Parser__parseBinary(sd_lframe *p) {
   sd_str_release(L->_t16);
   sd_rl_S4Expr(L->l_b);
 }
-static sd_int sd_m_Parser__parseBinary(sd_S_Parser * l_p, sd_int l_minPrec) {
+SD_NO_TCE static sd_int sd_m_Parser__parseBinary(sd_S_Parser * l_p, sd_int l_minPrec) {
   sd_L_sd_m_Parser__parseBinary L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Parser__parseBinary);
   SD_PREEMPT();
@@ -56568,7 +63443,7 @@ static void sd_lr_sd_m_Parser__parseUnary(sd_lframe *p) {
   sd_rl_S4Expr(L->l_u);
   sd_rl_S4Expr(L->l_tr);
 }
-static sd_int sd_m_Parser__parseUnary(sd_S_Parser * l_p) {
+SD_NO_TCE static sd_int sd_m_Parser__parseUnary(sd_S_Parser * l_p) {
   sd_L_sd_m_Parser__parseUnary L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Parser__parseUnary);
   sd_S_Token l_t = SD_LIST_GET(((*l_p)).f_toks, sd_S_Token, ((*l_p)).f_pos);
@@ -56710,7 +63585,7 @@ static void sd_lr_sd_m_Parser__parsePostfix(sd_lframe *p) {
   sd_rl_S4Expr(L->l_c);
   sd_list_release(L->l_args);
 }
-static sd_int sd_m_Parser__parsePostfix(sd_S_Parser * l_p) {
+SD_NO_TCE static sd_int sd_m_Parser__parsePostfix(sd_S_Parser * l_p) {
   sd_L_sd_m_Parser__parsePostfix L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Parser__parsePostfix);
   SD_PREEMPT();
@@ -56827,7 +63702,7 @@ static void sd_lr_sd_m_Parser__parseExprList(sd_lframe *p) {
   sd_L_sd_m_Parser__parseExprList *L = (sd_L_sd_m_Parser__parseExprList *)p;
   sd_list_release(L->l_xs);
 }
-static sd_list * sd_m_Parser__parseExprList(sd_S_Parser * l_p, sd_box * l_close, sd_str l_context) {
+SD_NO_TCE static sd_list * sd_m_Parser__parseExprList(sd_S_Parser * l_p, sd_box * l_close, sd_str l_context) {
   sd_L_sd_m_Parser__parseExprList L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Parser__parseExprList);
   sd_list * _t1 = sd_list_new(&sd_type_int, 0);
@@ -56880,7 +63755,7 @@ static void sd_lr_sd_m_Parser__parsePrimary(sd_lframe *p) {
   sd_str_release(L->_t110);
   sd_str_release(L->_t111);
 }
-static sd_int sd_m_Parser__parsePrimary(sd_S_Parser * l_p) {
+SD_NO_TCE static sd_int sd_m_Parser__parsePrimary(sd_S_Parser * l_p) {
   sd_L_sd_m_Parser__parsePrimary L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Parser__parsePrimary);
   sd_S_Token l_t = SD_LIST_GET(((*l_p)).f_toks, sd_S_Token, ((*l_p)).f_pos);
@@ -57174,7 +64049,7 @@ static void sd_lr_sd_m_Parser__parseMapLit(sd_lframe *p) {
   sd_list_release(L->l_entries);
   sd_rl_S4Expr(L->l_en);
 }
-static sd_int sd_m_Parser__parseMapLit(sd_S_Parser * l_p) {
+SD_NO_TCE static sd_int sd_m_Parser__parseMapLit(sd_S_Parser * l_p) {
   sd_L_sd_m_Parser__parseMapLit L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Parser__parseMapLit);
   sd_S_Pos _t1 = sd_m_Parser__here((*l_p));
@@ -57271,7 +64146,7 @@ static void sd_lr_sd_m_Parser__parseStructLit(sd_lframe *p) {
   sd_list_release(L->l_fields);
   sd_rl_S4Expr(L->l_f);
 }
-static sd_int sd_m_Parser__parseStructLit(sd_S_Parser * l_p, sd_S_Pos l_pos, sd_str l_pkg, sd_str l_name) {
+SD_NO_TCE static sd_int sd_m_Parser__parseStructLit(sd_S_Parser * l_p, sd_S_Pos l_pos, sd_str l_pkg, sd_str l_name) {
   sd_L_sd_m_Parser__parseStructLit L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Parser__parseStructLit);
   sd_S_Expr _t1 = sd_f_newExpr(SD_BOX_REF(sd_k_ExprKind__StructLit), l_pos);
@@ -58081,6 +64956,1800 @@ static sd_T_T2se sd_f_os_hostname(void) {
   r_.r0 = NULL;
   r_.r1 = sd_lib_os_hostname(&r_.r0);
   return r_;
+}
+
+static sd_T_T2Ose sd_f_io_readLine(void) {
+  sd_T_T2Ose r_;
+  r_.r0 = NULL;
+  r_.r1 = sd_lib_io_readLine(&r_.r0);
+  return r_;
+}
+
+static sd_T_T2Ose sd_f_io_read(sd_int l_max) {
+  sd_T_T2Ose r_;
+  r_.r0 = NULL;
+  r_.r1 = sd_lib_io_read(l_max, &r_.r0);
+  return r_;
+}
+
+static sd_T_T2se sd_f_io_readAll(void) {
+  sd_T_T2se r_;
+  r_.r0 = NULL;
+  r_.r1 = sd_lib_io_readAll(&r_.r0);
+  return r_;
+}
+
+typedef struct { sd_lframe h; sd_S_json_JsonParser l_p; sd_err _t2; sd_T_T2E10json_Valuee _t4; sd_box * l_v; sd_str _t7; sd_str _t9; sd_err _t10; } sd_L_sd_f_json_parse;
+static void sd_lr_sd_f_json_parse(sd_lframe *p) {
+  sd_L_sd_f_json_parse *L = (sd_L_sd_f_json_parse *)p;
+  sd_rl_S15json_JsonParser(L->l_p);
+  sd_iface_release(L->_t2);
+  sd_rl_T2E10json_Valuee(L->_t4);
+  sd_box_release(L->l_v);
+  sd_str_release(L->_t7);
+  sd_str_release(L->_t9);
+  sd_iface_release(L->_t10);
+}
+static sd_T_T2E10json_Valuee sd_f_json_parse(sd_str l_text) {
+  sd_L_sd_f_json_parse L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_json_parse);
+  sd_S_json_JsonParser _t1 = (sd_S_json_JsonParser){.f_text = sd_str_retain(l_text), .f_pos = SD_INT(0), .f_depth = SD_INT(0)};
+  L.l_p = _t1;
+  if (sd_str_starts_with(l_text, SD_STR_LIT("\357\273\277"))) {
+    L._t2 = sd_m_json_JsonParser__fail(L.l_p, SD_INT(0), SD_STR_LIT("byte-order mark is not allowed"));
+    if (sd_err_is_null(L._t2)) sd_crash("%s", "parse returned null as result 1 without an error");
+    sd_T_T2E10json_Valuee _t3 = (sd_T_T2E10json_Valuee){NULL, L._t2};
+    SD_LF_LEAVE(L);
+    sd_rl_S15json_JsonParser(L.l_p);
+    return _t3;
+  }
+  sd_m_json_JsonParser__skipSpace((&L.l_p));
+  L._t4 = sd_m_json_JsonParser__value((&L.l_p));
+  if (!sd_err_is_null(L._t4.r1)) {
+    sd_box_release(L._t4.r0);
+    sd_T_T2E10json_Valuee _t5 = (sd_T_T2E10json_Valuee){.r1 = L._t4.r1};
+    SD_LF_LEAVE(L);
+    sd_rl_S15json_JsonParser(L.l_p);
+    return _t5;
+  }
+  sd_box * _t6 = L._t4.r0;
+  L._t4 = ((sd_T_T2E10json_Valuee){0});
+  L.l_v = _t6;
+  sd_m_json_JsonParser__skipSpace((&L.l_p));
+  if (sd_int_lt((L.l_p).f_pos, sd_str_len(l_text))) {
+    L._t7 = sd_f_json_jsonDescribe(sd_str_at(l_text, (L.l_p).f_pos));
+    sd_str _t8[] = {SD_STR_LIT("unexpected "), L._t7, SD_STR_LIT(" after the value")};
+    L._t9 = sd_str_concat_n(_t8, 3);
+    L._t10 = sd_m_json_JsonParser__fail(L.l_p, (L.l_p).f_pos, L._t9);
+    if (sd_err_is_null(L._t10)) sd_crash("%s", "parse returned null as result 1 without an error");
+    sd_T_T2E10json_Valuee _t11 = (sd_T_T2E10json_Valuee){NULL, L._t10};
+    SD_LF_LEAVE(L);
+    sd_str_release(L._t9);
+    sd_str_release(L._t7);
+    sd_box_release(L.l_v);
+    sd_rl_S15json_JsonParser(L.l_p);
+    return _t11;
+  }
+  sd_T_T2E10json_Valuee _t12 = (sd_T_T2E10json_Valuee){L.l_v, SD_IFACE_NULL};
+  SD_LF_LEAVE(L);
+  sd_rl_S15json_JsonParser(L.l_p);
+  return _t12;
+}
+
+typedef struct { sd_lframe h; sd_str _t6; } sd_L_sd_m_json_JsonParser__fail;
+static void sd_lr_sd_m_json_JsonParser__fail(sd_lframe *p) {
+  sd_L_sd_m_json_JsonParser__fail *L = (sd_L_sd_m_json_JsonParser__fail *)p;
+  sd_str_release(L->_t6);
+}
+static sd_err sd_m_json_JsonParser__fail(sd_S_json_JsonParser l_p, sd_int l_at, sd_str l_reason) {
+  sd_L_sd_m_json_JsonParser__fail L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_m_json_JsonParser__fail);
+  sd_int l_line = SD_INT(1);
+  sd_int l_lineStart = SD_INT(0);
+  {
+    sd_int l_i = SD_INT(0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!((sd_int_lt(l_i, l_at) && sd_int_lt(l_i, sd_str_len((l_p).f_text))))) break;
+      {
+        if (((sd_str_at((l_p).f_text, l_i)) == (((uint8_t)10)))) {
+          { int64_t r_; if (SD_LIKELY((((l_line).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_line).w, SD_INT(1).w, &r_))) (l_line).w = r_; else { sd_int s_ = sd_int_add_slow((l_line), SD_INT(1)); sd_int_release((l_line)); (l_line) = s_; } }
+          sd_int _t2 = sd_int_add(l_i, SD_INT(1));
+          sd_int_release(l_lineStart);
+          l_lineStart = _t2;
+        }
+      }
+      _c1:;
+      { int64_t r_; if (SD_LIKELY((((l_i).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_i).w, SD_INT(1).w, &r_))) (l_i).w = r_; else { sd_int s_ = sd_int_add_slow((l_i), SD_INT(1)); sd_int_release((l_i)); (l_i) = s_; } }
+    }
+    sd_int_release(l_i);
+  }
+  sd_int _t3 = sd_int_sub(l_at, l_lineStart);
+  sd_int _t4 = sd_int_add(_t3, SD_INT(1));
+  sd_int l_col = _t4;
+  sd_int_release(_t3);
+  sd_str_part _t5[] = {{SD_STR_LIT("json.parse: line ")}, {NULL, l_line}, {SD_STR_LIT(", column ")}, {NULL, l_col}, {SD_STR_LIT(": ")}, {l_reason}};
+  L._t6 = sd_str_concat_parts(_t5, 6);
+  sd_err _t7 = sd_f_errors_new(L._t6);
+  sd_err _t8 = _t7;
+  SD_LF_LEAVE(L);
+  sd_str_release(L._t6);
+  sd_int_release(l_col);
+  sd_int_release(l_lineStart);
+  sd_int_release(l_line);
+  return _t8;
+}
+
+typedef struct { sd_lframe h; sd_str _t2; } sd_L_sd_m_json_JsonParser__expected;
+static void sd_lr_sd_m_json_JsonParser__expected(sd_lframe *p) {
+  sd_L_sd_m_json_JsonParser__expected *L = (sd_L_sd_m_json_JsonParser__expected *)p;
+  sd_str_release(L->_t2);
+}
+static sd_err sd_m_json_JsonParser__expected(sd_S_json_JsonParser l_p, sd_str l_want) {
+  sd_L_sd_m_json_JsonParser__expected L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_m_json_JsonParser__expected);
+  if (sd_int_ge((l_p).f_pos, sd_str_len((l_p).f_text))) {
+    sd_err _t1 = sd_m_json_JsonParser__fail(l_p, (l_p).f_pos, SD_STR_LIT("unexpected end of input"));
+    SD_LF_LEAVE(L);
+    return _t1;
+  }
+  L._t2 = sd_str_concat(SD_STR_LIT("expected "), l_want);
+  sd_err _t3 = sd_m_json_JsonParser__fail(l_p, (l_p).f_pos, L._t2);
+  sd_err _t4 = _t3;
+  SD_LF_LEAVE(L);
+  sd_str_release(L._t2);
+  return _t4;
+}
+
+static void sd_m_json_JsonParser__skipSpace(sd_S_json_JsonParser * l_p) {
+  {
+    for (;;) {
+      SD_PREEMPT();
+      if (!(sd_int_lt(((*l_p)).f_pos, sd_str_len(((*l_p)).f_text)))) break;
+      {
+        uint8_t l_c = sd_str_at(((*l_p)).f_text, ((*l_p)).f_pos);
+        if (((((!((l_c) == (((uint8_t)32)))) && (!((l_c) == (((uint8_t)9))))) && (!((l_c) == (((uint8_t)10))))) && (!((l_c) == (((uint8_t)13)))))) {
+          return;
+        }
+      }
+      _c1:;
+      sd_int *_t2 = (&(l_p)->f_pos);
+      { int64_t r_; if (SD_LIKELY((((*_t2).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((*_t2).w, SD_INT(1).w, &r_))) (*_t2).w = r_; else { sd_int s_ = sd_int_add_slow((*_t2), SD_INT(1)); sd_int_release((*_t2)); (*_t2) = s_; } }
+    }
+  }
+}
+
+typedef struct { sd_lframe h; sd_T_T2se _t4; sd_err _t8; sd_err _t11; sd_err _t14; } sd_L_sd_m_json_JsonParser__value;
+static void sd_lr_sd_m_json_JsonParser__value(sd_lframe *p) {
+  sd_L_sd_m_json_JsonParser__value *L = (sd_L_sd_m_json_JsonParser__value *)p;
+  sd_rl_T2se(L->_t4);
+  sd_iface_release(L->_t8);
+  sd_iface_release(L->_t11);
+  sd_iface_release(L->_t14);
+}
+SD_NO_TCE static sd_T_T2E10json_Valuee sd_m_json_JsonParser__value(sd_S_json_JsonParser * l_p) {
+  sd_L_sd_m_json_JsonParser__value L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_m_json_JsonParser__value);
+  if (sd_int_ge(((*l_p)).f_pos, sd_str_len(((*l_p)).f_text))) {
+    sd_T_T2E10json_Valuee _t1 = sd_m_json_JsonParser__failValue((*l_p), ((*l_p)).f_pos, SD_STR_LIT("unexpected end of input"));
+    SD_LF_LEAVE(L);
+    return _t1;
+  }
+  uint8_t l_c = sd_str_at(((*l_p)).f_text, ((*l_p)).f_pos);
+  {
+    if (((l_c) == (((uint8_t)123)))) {
+      SD_PREEMPT();
+      sd_T_T2E10json_Valuee _t2 = sd_m_json_JsonParser__object(l_p);
+      SD_LF_LEAVE(L);
+      return _t2;
+    } else if (((l_c) == (((uint8_t)91)))) {
+      SD_PREEMPT();
+      sd_T_T2E10json_Valuee _t3 = sd_m_json_JsonParser__array(l_p);
+      SD_LF_LEAVE(L);
+      return _t3;
+    } else if (((l_c) == (((uint8_t)34)))) {
+      L._t4 = sd_m_json_JsonParser__str(l_p);
+      if (!sd_err_is_null(L._t4.r1)) {
+        sd_str_release(L._t4.r0);
+        SD_LF_LEAVE(L);
+        return (sd_T_T2E10json_Valuee){.r1 = L._t4.r1};
+      }
+      sd_str _t5 = L._t4.r0;
+      L._t4 = ((sd_T_T2se){0});
+      sd_str l_s = _t5;
+      sd_box * _t6 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 3, .u.c_String = {l_s}});
+      SD_LF_LEAVE(L);
+      return (sd_T_T2E10json_Valuee){_t6, SD_IFACE_NULL};
+    } else if (((l_c) == (((uint8_t)116)))) {
+      sd_str _t7 = SD_STR_LIT("true");
+      L._t8 = sd_m_json_JsonParser__literal(l_p, _t7);
+      if (!sd_err_is_null(L._t8)) {
+        SD_LF_LEAVE(L);
+        return (sd_T_T2E10json_Valuee){.r1 = L._t8};
+      }
+      sd_box * _t9 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 1, .u.c_Bool = {true}});
+      L._t8 = SD_IFACE_NULL;
+      SD_LF_LEAVE(L);
+      return (sd_T_T2E10json_Valuee){_t9, SD_IFACE_NULL};
+    } else if (((l_c) == (((uint8_t)102)))) {
+      sd_str _t10 = SD_STR_LIT("false");
+      L._t11 = sd_m_json_JsonParser__literal(l_p, _t10);
+      if (!sd_err_is_null(L._t11)) {
+        SD_LF_LEAVE(L);
+        return (sd_T_T2E10json_Valuee){.r1 = L._t11};
+      }
+      sd_box * _t12 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 1, .u.c_Bool = {false}});
+      L._t11 = SD_IFACE_NULL;
+      SD_LF_LEAVE(L);
+      return (sd_T_T2E10json_Valuee){_t12, SD_IFACE_NULL};
+    } else if (((l_c) == (((uint8_t)110)))) {
+      sd_str _t13 = SD_STR_LIT("null");
+      L._t14 = sd_m_json_JsonParser__literal(l_p, _t13);
+      if (!sd_err_is_null(L._t14)) {
+        SD_LF_LEAVE(L);
+        return (sd_T_T2E10json_Valuee){.r1 = L._t14};
+      }
+      SD_LF_LEAVE(L);
+      return (sd_T_T2E10json_Valuee){SD_BOX_REF(sd_k_json_Value__Null), SD_IFACE_NULL};
+    } else if (((l_c) == (((uint8_t)45))) || ((l_c) == (((uint8_t)48))) || ((l_c) == (((uint8_t)49))) || ((l_c) == (((uint8_t)50))) || ((l_c) == (((uint8_t)51))) || ((l_c) == (((uint8_t)52))) || ((l_c) == (((uint8_t)53))) || ((l_c) == (((uint8_t)54))) || ((l_c) == (((uint8_t)55))) || ((l_c) == (((uint8_t)56))) || ((l_c) == (((uint8_t)57)))) {
+      sd_T_T2E10json_Valuee _t15 = sd_m_json_JsonParser__number(l_p);
+      SD_LF_LEAVE(L);
+      return _t15;
+    } else {
+      sd_T_T2E10json_Valuee _t16 = sd_m_json_JsonParser__unexpected((*l_p), l_c);
+      SD_LF_LEAVE(L);
+      return _t16;
+    }
+  }
+  sd_crash("internal error: value reached its end without returning");
+}
+
+typedef struct { sd_lframe h; sd_str _t3; sd_str _t4; } sd_L_sd_m_json_JsonParser__unexpected;
+static void sd_lr_sd_m_json_JsonParser__unexpected(sd_lframe *p) {
+  sd_L_sd_m_json_JsonParser__unexpected *L = (sd_L_sd_m_json_JsonParser__unexpected *)p;
+  sd_str_release(L->_t3);
+  sd_str_release(L->_t4);
+}
+static sd_T_T2E10json_Valuee sd_m_json_JsonParser__unexpected(sd_S_json_JsonParser l_p, uint8_t l_c) {
+  sd_L_sd_m_json_JsonParser__unexpected L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_m_json_JsonParser__unexpected);
+  if (((l_c) == (((uint8_t)47)))) {
+    sd_T_T2E10json_Valuee _t1 = sd_m_json_JsonParser__failValue(l_p, (l_p).f_pos, SD_STR_LIT("unexpected character '/' (comments are not allowed)"));
+    SD_LF_LEAVE(L);
+    return _t1;
+  }
+  if (((l_c) == (((uint8_t)39)))) {
+    sd_T_T2E10json_Valuee _t2 = sd_m_json_JsonParser__failValue(l_p, (l_p).f_pos, SD_STR_LIT("unexpected character ''' (strings use double quotes)"));
+    SD_LF_LEAVE(L);
+    return _t2;
+  }
+  L._t3 = sd_f_json_jsonDescribe(l_c);
+  L._t4 = sd_str_concat(SD_STR_LIT("unexpected "), L._t3);
+  sd_T_T2E10json_Valuee _t5 = sd_m_json_JsonParser__failValue(l_p, (l_p).f_pos, L._t4);
+  sd_T_T2E10json_Valuee _t6 = _t5;
+  SD_LF_LEAVE(L);
+  sd_str_release(L._t4);
+  sd_str_release(L._t3);
+  return _t6;
+}
+
+typedef struct { sd_lframe h; sd_err _t1; } sd_L_sd_m_json_JsonParser__failValue;
+static void sd_lr_sd_m_json_JsonParser__failValue(sd_lframe *p) {
+  sd_L_sd_m_json_JsonParser__failValue *L = (sd_L_sd_m_json_JsonParser__failValue *)p;
+  sd_iface_release(L->_t1);
+}
+static sd_T_T2E10json_Valuee sd_m_json_JsonParser__failValue(sd_S_json_JsonParser l_p, sd_int l_at, sd_str l_reason) {
+  sd_L_sd_m_json_JsonParser__failValue L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_m_json_JsonParser__failValue);
+  L._t1 = sd_m_json_JsonParser__fail(l_p, l_at, l_reason);
+  if (sd_err_is_null(L._t1)) sd_crash("%s", "failValue returned null as result 1 without an error");
+  SD_LF_LEAVE(L);
+  return (sd_T_T2E10json_Valuee){NULL, L._t1};
+}
+
+typedef struct { sd_lframe h; sd_str _t3; sd_str _t10; } sd_L_sd_m_json_JsonParser__literal;
+static void sd_lr_sd_m_json_JsonParser__literal(sd_lframe *p) {
+  sd_L_sd_m_json_JsonParser__literal *L = (sd_L_sd_m_json_JsonParser__literal *)p;
+  sd_str_release(L->_t3);
+  sd_str_release(L->_t10);
+}
+static sd_err sd_m_json_JsonParser__literal(sd_S_json_JsonParser * l_p, sd_str l_word) {
+  sd_L_sd_m_json_JsonParser__literal L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_m_json_JsonParser__literal);
+  sd_int _t1 = sd_int_add(((*l_p)).f_pos, sd_str_len(l_word));
+  sd_int l_end = _t1;
+  if (sd_int_gt(l_end, sd_str_len(((*l_p)).f_text))) {
+    sd_str _t2[] = {SD_STR_LIT("invalid literal (expected "), l_word, SD_STR_LIT(")")};
+    L._t3 = sd_str_concat_n(_t2, 3);
+    sd_err _t4 = sd_m_json_JsonParser__fail((*l_p), ((*l_p)).f_pos, L._t3);
+    sd_err _t5 = _t4;
+    SD_LF_LEAVE(L);
+    sd_str_release(L._t3);
+    sd_int_release(l_end);
+    return _t5;
+  }
+  {
+    int64_t l_i = ((int64_t)1);
+    for (;;) {
+      SD_PREEMPT();
+      if (!((l_i < SD_SMALL(sd_str_len(l_word))))) break;
+      {
+        sd_int _t7 = sd_int_add(((*l_p)).f_pos, SD_INT_S(l_i));
+        bool _t8 = (!((sd_str_at(((*l_p)).f_text, _t7)) == (sd_str_at(l_word, SD_INT_S(l_i)))));
+        sd_int_release(_t7);
+        if (_t8) {
+          sd_str _t9[] = {SD_STR_LIT("invalid literal (expected "), l_word, SD_STR_LIT(")")};
+          L._t10 = sd_str_concat_n(_t9, 3);
+          sd_err _t11 = sd_m_json_JsonParser__fail((*l_p), ((*l_p)).f_pos, L._t10);
+          sd_err _t12 = _t11;
+          SD_LF_LEAVE(L);
+          sd_str_release(L._t10);
+          sd_int_release(l_end);
+          return _t12;
+        }
+      }
+      _c6:;
+      l_i++;
+    }
+  }
+  sd_int _t13 = l_end;
+  sd_int *_t14 = (&(l_p)->f_pos);
+  sd_int_release(*_t14);
+  *_t14 = _t13;
+  SD_LF_LEAVE(L);
+  return SD_IFACE_NULL;
+}
+
+typedef struct { sd_lframe h; sd_str _t3; } sd_L_sd_m_json_JsonParser__enter;
+static void sd_lr_sd_m_json_JsonParser__enter(sd_lframe *p) {
+  sd_L_sd_m_json_JsonParser__enter *L = (sd_L_sd_m_json_JsonParser__enter *)p;
+  sd_str_release(L->_t3);
+}
+static sd_err sd_m_json_JsonParser__enter(sd_S_json_JsonParser * l_p) {
+  sd_L_sd_m_json_JsonParser__enter L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_m_json_JsonParser__enter);
+  sd_int *_t1 = (&(l_p)->f_depth);
+  { int64_t r_; if (SD_LIKELY((((*_t1).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((*_t1).w, SD_INT(1).w, &r_))) (*_t1).w = r_; else { sd_int s_ = sd_int_add_slow((*_t1), SD_INT(1)); sd_int_release((*_t1)); (*_t1) = s_; } }
+  if (sd_int_gt(((*l_p)).f_depth, sd_c_json_jsonMaxDepth())) {
+    sd_str_part _t2[] = {{SD_STR_LIT("nesting deeper than ")}, {NULL, sd_c_json_jsonMaxDepth()}, {SD_STR_LIT(" levels")}};
+    L._t3 = sd_str_concat_parts(_t2, 3);
+    sd_err _t4 = sd_m_json_JsonParser__fail((*l_p), ((*l_p)).f_pos, L._t3);
+    sd_err _t5 = _t4;
+    SD_LF_LEAVE(L);
+    sd_str_release(L._t3);
+    return _t5;
+  }
+  SD_LF_LEAVE(L);
+  return SD_IFACE_NULL;
+}
+
+typedef struct { sd_lframe h; sd_err _t1; sd_list * l_items; sd_T_T2E10json_Valuee _t8; sd_err _t16; sd_err _t19; } sd_L_sd_m_json_JsonParser__array;
+static void sd_lr_sd_m_json_JsonParser__array(sd_lframe *p) {
+  sd_L_sd_m_json_JsonParser__array *L = (sd_L_sd_m_json_JsonParser__array *)p;
+  sd_iface_release(L->_t1);
+  sd_list_release(L->l_items);
+  sd_rl_T2E10json_Valuee(L->_t8);
+  sd_iface_release(L->_t16);
+  sd_iface_release(L->_t19);
+}
+SD_NO_TCE static sd_T_T2E10json_Valuee sd_m_json_JsonParser__array(sd_S_json_JsonParser * l_p) {
+  sd_L_sd_m_json_JsonParser__array L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_m_json_JsonParser__array);
+  L._t1 = sd_m_json_JsonParser__enter(l_p);
+  if (!sd_err_is_null(L._t1)) {
+    SD_LF_LEAVE(L);
+    return (sd_T_T2E10json_Valuee){.r1 = L._t1};
+  }
+  sd_int *_t2 = (&(l_p)->f_pos);
+  L._t1 = SD_IFACE_NULL;
+  { int64_t r_; if (SD_LIKELY((((*_t2).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((*_t2).w, SD_INT(1).w, &r_))) (*_t2).w = r_; else { sd_int s_ = sd_int_add_slow((*_t2), SD_INT(1)); sd_int_release((*_t2)); (*_t2) = s_; } }
+  sd_list * _t3 = sd_list_new(&sd_type_box, 0);
+  L.l_items = _t3;
+  sd_m_json_JsonParser__skipSpace(l_p);
+  if ((sd_int_lt(((*l_p)).f_pos, sd_str_len(((*l_p)).f_text)) && ((sd_str_at(((*l_p)).f_text, ((*l_p)).f_pos)) == (((uint8_t)93))))) {
+    sd_int *_t4 = (&(l_p)->f_pos);
+    { int64_t r_; if (SD_LIKELY((((*_t4).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((*_t4).w, SD_INT(1).w, &r_))) (*_t4).w = r_; else { sd_int s_ = sd_int_add_slow((*_t4), SD_INT(1)); sd_int_release((*_t4)); (*_t4) = s_; } }
+    sd_int *_t5 = (&(l_p)->f_depth);
+    { int64_t r_; if (SD_LIKELY((((*_t5).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_sub_overflow((*_t5).w, SD_INT(1).w, &r_))) (*_t5).w = r_; else { sd_int s_ = sd_int_sub_slow((*_t5), SD_INT(1)); sd_int_release((*_t5)); (*_t5) = s_; } }
+    sd_box * _t6 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 4, .u.c_Array = {sd_list_retain(L.l_items)}});
+    sd_T_T2E10json_Valuee _t7 = (sd_T_T2E10json_Valuee){_t6, SD_IFACE_NULL};
+    SD_LF_LEAVE(L);
+    sd_list_release(L.l_items);
+    return _t7;
+  }
+  {
+    for (;;) {
+      SD_PREEMPT();
+      {
+        SD_PREEMPT();
+        L._t8 = sd_m_json_JsonParser__value(l_p);
+        if (!sd_err_is_null(L._t8.r1)) {
+          sd_box_release(L._t8.r0);
+          sd_T_T2E10json_Valuee _t9 = (sd_T_T2E10json_Valuee){.r1 = L._t8.r1};
+          SD_LF_LEAVE(L);
+          sd_list_release(L.l_items);
+          return _t9;
+        }
+        sd_box * _t10 = L._t8.r0;
+        L._t8 = ((sd_T_T2E10json_Valuee){0});
+        sd_box * l_v = _t10;
+        sd_box * _t11 = l_v;
+        SD_LIST_PUSH((&L.l_items), sd_box *, _t11);
+        sd_m_json_JsonParser__skipSpace(l_p);
+        if ((sd_int_lt(((*l_p)).f_pos, sd_str_len(((*l_p)).f_text)) && ((sd_str_at(((*l_p)).f_text, ((*l_p)).f_pos)) == (((uint8_t)93))))) {
+          sd_int *_t12 = (&(l_p)->f_pos);
+          { int64_t r_; if (SD_LIKELY((((*_t12).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((*_t12).w, SD_INT(1).w, &r_))) (*_t12).w = r_; else { sd_int s_ = sd_int_add_slow((*_t12), SD_INT(1)); sd_int_release((*_t12)); (*_t12) = s_; } }
+          sd_int *_t13 = (&(l_p)->f_depth);
+          { int64_t r_; if (SD_LIKELY((((*_t13).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_sub_overflow((*_t13).w, SD_INT(1).w, &r_))) (*_t13).w = r_; else { sd_int s_ = sd_int_sub_slow((*_t13), SD_INT(1)); sd_int_release((*_t13)); (*_t13) = s_; } }
+          sd_box * _t14 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 4, .u.c_Array = {sd_list_retain(L.l_items)}});
+          sd_T_T2E10json_Valuee _t15 = (sd_T_T2E10json_Valuee){_t14, SD_IFACE_NULL};
+          SD_LF_LEAVE(L);
+          sd_list_release(L.l_items);
+          return _t15;
+        }
+        if ((sd_int_ge(((*l_p)).f_pos, sd_str_len(((*l_p)).f_text)) || (!((sd_str_at(((*l_p)).f_text, ((*l_p)).f_pos)) == (((uint8_t)44)))))) {
+          L._t16 = sd_m_json_JsonParser__expected((*l_p), SD_STR_LIT("',' or ']'"));
+          if (sd_err_is_null(L._t16)) sd_crash("%s", "array returned null as result 1 without an error");
+          sd_T_T2E10json_Valuee _t17 = (sd_T_T2E10json_Valuee){NULL, L._t16};
+          SD_LF_LEAVE(L);
+          sd_list_release(L.l_items);
+          return _t17;
+        }
+        sd_int *_t18 = (&(l_p)->f_pos);
+        { int64_t r_; if (SD_LIKELY((((*_t18).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((*_t18).w, SD_INT(1).w, &r_))) (*_t18).w = r_; else { sd_int s_ = sd_int_add_slow((*_t18), SD_INT(1)); sd_int_release((*_t18)); (*_t18) = s_; } }
+        sd_m_json_JsonParser__skipSpace(l_p);
+        if ((sd_int_lt(((*l_p)).f_pos, sd_str_len(((*l_p)).f_text)) && ((sd_str_at(((*l_p)).f_text, ((*l_p)).f_pos)) == (((uint8_t)93))))) {
+          L._t19 = sd_m_json_JsonParser__fail((*l_p), ((*l_p)).f_pos, SD_STR_LIT("trailing comma"));
+          if (sd_err_is_null(L._t19)) sd_crash("%s", "array returned null as result 1 without an error");
+          sd_T_T2E10json_Valuee _t20 = (sd_T_T2E10json_Valuee){NULL, L._t19};
+          SD_LF_LEAVE(L);
+          sd_list_release(L.l_items);
+          return _t20;
+        }
+      }
+    }
+  }
+  sd_crash("internal error: array reached its end without returning");
+}
+
+typedef struct { sd_lframe h; sd_err _t1; sd_map * l_fields; sd_err _t8; sd_T_T2se _t10; sd_str l_key; sd_err _t13; sd_T_T2E10json_Valuee _t16; sd_box * _t19; sd_str _t20; sd_err _t25; sd_err _t28; } sd_L_sd_m_json_JsonParser__object;
+static void sd_lr_sd_m_json_JsonParser__object(sd_lframe *p) {
+  sd_L_sd_m_json_JsonParser__object *L = (sd_L_sd_m_json_JsonParser__object *)p;
+  sd_iface_release(L->_t1);
+  sd_map_release(L->l_fields);
+  sd_iface_release(L->_t8);
+  sd_rl_T2se(L->_t10);
+  sd_str_release(L->l_key);
+  sd_iface_release(L->_t13);
+  sd_rl_T2E10json_Valuee(L->_t16);
+  sd_box_release(L->_t19);
+  sd_str_release(L->_t20);
+  sd_iface_release(L->_t25);
+  sd_iface_release(L->_t28);
+}
+SD_NO_TCE static sd_T_T2E10json_Valuee sd_m_json_JsonParser__object(sd_S_json_JsonParser * l_p) {
+  sd_L_sd_m_json_JsonParser__object L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_m_json_JsonParser__object);
+  L._t1 = sd_m_json_JsonParser__enter(l_p);
+  if (!sd_err_is_null(L._t1)) {
+    SD_LF_LEAVE(L);
+    return (sd_T_T2E10json_Valuee){.r1 = L._t1};
+  }
+  sd_int *_t2 = (&(l_p)->f_pos);
+  L._t1 = SD_IFACE_NULL;
+  { int64_t r_; if (SD_LIKELY((((*_t2).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((*_t2).w, SD_INT(1).w, &r_))) (*_t2).w = r_; else { sd_int s_ = sd_int_add_slow((*_t2), SD_INT(1)); sd_int_release((*_t2)); (*_t2) = s_; } }
+  sd_map * _t3 = sd_map_new(&sd_type_str, &sd_type_box);
+  L.l_fields = _t3;
+  sd_m_json_JsonParser__skipSpace(l_p);
+  if ((sd_int_lt(((*l_p)).f_pos, sd_str_len(((*l_p)).f_text)) && ((sd_str_at(((*l_p)).f_text, ((*l_p)).f_pos)) == (((uint8_t)125))))) {
+    sd_int *_t4 = (&(l_p)->f_pos);
+    { int64_t r_; if (SD_LIKELY((((*_t4).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((*_t4).w, SD_INT(1).w, &r_))) (*_t4).w = r_; else { sd_int s_ = sd_int_add_slow((*_t4), SD_INT(1)); sd_int_release((*_t4)); (*_t4) = s_; } }
+    sd_int *_t5 = (&(l_p)->f_depth);
+    { int64_t r_; if (SD_LIKELY((((*_t5).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_sub_overflow((*_t5).w, SD_INT(1).w, &r_))) (*_t5).w = r_; else { sd_int s_ = sd_int_sub_slow((*_t5), SD_INT(1)); sd_int_release((*_t5)); (*_t5) = s_; } }
+    sd_box * _t6 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 5, .u.c_Object = {sd_map_retain(L.l_fields)}});
+    sd_T_T2E10json_Valuee _t7 = (sd_T_T2E10json_Valuee){_t6, SD_IFACE_NULL};
+    SD_LF_LEAVE(L);
+    sd_map_release(L.l_fields);
+    return _t7;
+  }
+  {
+    for (;;) {
+      SD_PREEMPT();
+      {
+        if ((sd_int_ge(((*l_p)).f_pos, sd_str_len(((*l_p)).f_text)) || (!((sd_str_at(((*l_p)).f_text, ((*l_p)).f_pos)) == (((uint8_t)34)))))) {
+          L._t8 = sd_m_json_JsonParser__expected((*l_p), SD_STR_LIT("a string key"));
+          if (sd_err_is_null(L._t8)) sd_crash("%s", "object returned null as result 1 without an error");
+          sd_T_T2E10json_Valuee _t9 = (sd_T_T2E10json_Valuee){NULL, L._t8};
+          SD_LF_LEAVE(L);
+          sd_map_release(L.l_fields);
+          return _t9;
+        }
+        L._t10 = sd_m_json_JsonParser__str(l_p);
+        if (!sd_err_is_null(L._t10.r1)) {
+          sd_str_release(L._t10.r0);
+          sd_T_T2E10json_Valuee _t11 = (sd_T_T2E10json_Valuee){.r1 = L._t10.r1};
+          SD_LF_LEAVE(L);
+          sd_map_release(L.l_fields);
+          return _t11;
+        }
+        sd_str _t12 = L._t10.r0;
+        L._t10 = ((sd_T_T2se){0});
+        L.l_key = _t12;
+        sd_m_json_JsonParser__skipSpace(l_p);
+        if ((sd_int_ge(((*l_p)).f_pos, sd_str_len(((*l_p)).f_text)) || (!((sd_str_at(((*l_p)).f_text, ((*l_p)).f_pos)) == (((uint8_t)58)))))) {
+          L._t13 = sd_m_json_JsonParser__expected((*l_p), SD_STR_LIT("':'"));
+          if (sd_err_is_null(L._t13)) sd_crash("%s", "object returned null as result 1 without an error");
+          sd_T_T2E10json_Valuee _t14 = (sd_T_T2E10json_Valuee){NULL, L._t13};
+          SD_LF_LEAVE(L);
+          sd_str_release(L.l_key);
+          sd_map_release(L.l_fields);
+          return _t14;
+        }
+        sd_int *_t15 = (&(l_p)->f_pos);
+        { int64_t r_; if (SD_LIKELY((((*_t15).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((*_t15).w, SD_INT(1).w, &r_))) (*_t15).w = r_; else { sd_int s_ = sd_int_add_slow((*_t15), SD_INT(1)); sd_int_release((*_t15)); (*_t15) = s_; } }
+        sd_m_json_JsonParser__skipSpace(l_p);
+        SD_PREEMPT();
+        L._t16 = sd_m_json_JsonParser__value(l_p);
+        if (!sd_err_is_null(L._t16.r1)) {
+          sd_box_release(L._t16.r0);
+          sd_T_T2E10json_Valuee _t17 = (sd_T_T2E10json_Valuee){.r1 = L._t16.r1};
+          SD_LF_LEAVE(L);
+          sd_str_release(L.l_key);
+          sd_map_release(L.l_fields);
+          return _t17;
+        }
+        sd_box * _t18 = L._t16.r0;
+        L._t16 = ((sd_T_T2E10json_Valuee){0});
+        sd_box * l_v = _t18;
+        L._t19 = l_v;
+        L._t20 = L.l_key;
+        L.l_key = NULL;
+        sd_map_set((&L.l_fields), &L._t20, &L._t19);
+        L._t20 = NULL;
+        L._t19 = NULL;
+        sd_m_json_JsonParser__skipSpace(l_p);
+        if ((sd_int_lt(((*l_p)).f_pos, sd_str_len(((*l_p)).f_text)) && ((sd_str_at(((*l_p)).f_text, ((*l_p)).f_pos)) == (((uint8_t)125))))) {
+          sd_int *_t21 = (&(l_p)->f_pos);
+          { int64_t r_; if (SD_LIKELY((((*_t21).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((*_t21).w, SD_INT(1).w, &r_))) (*_t21).w = r_; else { sd_int s_ = sd_int_add_slow((*_t21), SD_INT(1)); sd_int_release((*_t21)); (*_t21) = s_; } }
+          sd_int *_t22 = (&(l_p)->f_depth);
+          { int64_t r_; if (SD_LIKELY((((*_t22).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_sub_overflow((*_t22).w, SD_INT(1).w, &r_))) (*_t22).w = r_; else { sd_int s_ = sd_int_sub_slow((*_t22), SD_INT(1)); sd_int_release((*_t22)); (*_t22) = s_; } }
+          sd_box * _t23 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 5, .u.c_Object = {sd_map_retain(L.l_fields)}});
+          sd_T_T2E10json_Valuee _t24 = (sd_T_T2E10json_Valuee){_t23, SD_IFACE_NULL};
+          SD_LF_LEAVE(L);
+          sd_map_release(L.l_fields);
+          return _t24;
+        }
+        if ((sd_int_ge(((*l_p)).f_pos, sd_str_len(((*l_p)).f_text)) || (!((sd_str_at(((*l_p)).f_text, ((*l_p)).f_pos)) == (((uint8_t)44)))))) {
+          L._t25 = sd_m_json_JsonParser__expected((*l_p), SD_STR_LIT("',' or '}'"));
+          if (sd_err_is_null(L._t25)) sd_crash("%s", "object returned null as result 1 without an error");
+          sd_T_T2E10json_Valuee _t26 = (sd_T_T2E10json_Valuee){NULL, L._t25};
+          SD_LF_LEAVE(L);
+          sd_map_release(L.l_fields);
+          return _t26;
+        }
+        sd_int *_t27 = (&(l_p)->f_pos);
+        { int64_t r_; if (SD_LIKELY((((*_t27).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((*_t27).w, SD_INT(1).w, &r_))) (*_t27).w = r_; else { sd_int s_ = sd_int_add_slow((*_t27), SD_INT(1)); sd_int_release((*_t27)); (*_t27) = s_; } }
+        sd_m_json_JsonParser__skipSpace(l_p);
+        if ((sd_int_lt(((*l_p)).f_pos, sd_str_len(((*l_p)).f_text)) && ((sd_str_at(((*l_p)).f_text, ((*l_p)).f_pos)) == (((uint8_t)125))))) {
+          L._t28 = sd_m_json_JsonParser__fail((*l_p), ((*l_p)).f_pos, SD_STR_LIT("trailing comma"));
+          if (sd_err_is_null(L._t28)) sd_crash("%s", "object returned null as result 1 without an error");
+          sd_T_T2E10json_Valuee _t29 = (sd_T_T2E10json_Valuee){NULL, L._t28};
+          SD_LF_LEAVE(L);
+          sd_map_release(L.l_fields);
+          return _t29;
+        }
+      }
+    }
+  }
+  sd_crash("internal error: object reached its end without returning");
+}
+
+typedef struct { sd_lframe h; sd_err _t4; sd_err _t10; sd_err _t15; sd_err _t21; sd_str _t23; sd_err l_err; sd_err _t25; sd_err _t27; } sd_L_sd_m_json_JsonParser__number;
+static void sd_lr_sd_m_json_JsonParser__number(sd_lframe *p) {
+  sd_L_sd_m_json_JsonParser__number *L = (sd_L_sd_m_json_JsonParser__number *)p;
+  sd_iface_release(L->_t4);
+  sd_iface_release(L->_t10);
+  sd_iface_release(L->_t15);
+  sd_iface_release(L->_t21);
+  sd_str_release(L->_t23);
+  sd_iface_release(L->l_err);
+  sd_iface_release(L->_t25);
+  sd_iface_release(L->_t27);
+}
+static sd_T_T2E10json_Valuee sd_m_json_JsonParser__number(sd_S_json_JsonParser * l_p) {
+  sd_L_sd_m_json_JsonParser__number L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_m_json_JsonParser__number);
+  sd_int l_start = sd_int_retain(((*l_p)).f_pos);
+  int64_t l_n = SD_SMALL(sd_str_len(((*l_p)).f_text));
+  if (((sd_str_at(((*l_p)).f_text, ((*l_p)).f_pos)) == (((uint8_t)45)))) {
+    sd_int *_t1 = (&(l_p)->f_pos);
+    { int64_t r_; if (SD_LIKELY((((*_t1).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((*_t1).w, SD_INT(1).w, &r_))) (*_t1).w = r_; else { sd_int s_ = sd_int_add_slow((*_t1), SD_INT(1)); sd_int_release((*_t1)); (*_t1) = s_; } }
+  }
+  bool _t3 = sd_int_ge(((*l_p)).f_pos, SD_INT_S(l_n));
+  if (!_t3) {
+    bool _t2 = sd_f_json_jsonIsDigit(sd_str_at(((*l_p)).f_text, ((*l_p)).f_pos));
+    _t3 = (!_t2);
+  }
+  if (_t3) {
+    L._t4 = sd_m_json_JsonParser__expected((*l_p), SD_STR_LIT("a digit"));
+    if (sd_err_is_null(L._t4)) sd_crash("%s", "number returned null as result 1 without an error");
+    sd_T_T2E10json_Valuee _t5 = (sd_T_T2E10json_Valuee){NULL, L._t4};
+    SD_LF_LEAVE(L);
+    sd_int_release(l_start);
+    return _t5;
+  }
+  if (((sd_str_at(((*l_p)).f_text, ((*l_p)).f_pos)) == (((uint8_t)48)))) {
+    sd_int *_t6 = (&(l_p)->f_pos);
+    { int64_t r_; if (SD_LIKELY((((*_t6).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((*_t6).w, SD_INT(1).w, &r_))) (*_t6).w = r_; else { sd_int s_ = sd_int_add_slow((*_t6), SD_INT(1)); sd_int_release((*_t6)); (*_t6) = s_; } }
+    bool _t8 = sd_int_lt(((*l_p)).f_pos, SD_INT_S(l_n));
+    if (_t8) {
+      bool _t7 = sd_f_json_jsonIsDigit(sd_str_at(((*l_p)).f_text, ((*l_p)).f_pos));
+      _t8 = _t7;
+    }
+    if (_t8) {
+      sd_int _t9 = sd_int_sub(((*l_p)).f_pos, SD_INT(1));
+      L._t10 = sd_m_json_JsonParser__fail((*l_p), _t9, SD_STR_LIT("leading zeros are not allowed"));
+      if (sd_err_is_null(L._t10)) sd_crash("%s", "number returned null as result 1 without an error");
+      sd_T_T2E10json_Valuee _t11 = (sd_T_T2E10json_Valuee){NULL, L._t10};
+      SD_LF_LEAVE(L);
+      sd_int_release(_t9);
+      sd_int_release(l_start);
+      return _t11;
+    }
+  } else {
+    sd_m_json_JsonParser__skipDigits(l_p);
+  }
+  if ((sd_int_lt(((*l_p)).f_pos, SD_INT_S(l_n)) && ((sd_str_at(((*l_p)).f_text, ((*l_p)).f_pos)) == (((uint8_t)46))))) {
+    sd_int *_t12 = (&(l_p)->f_pos);
+    { int64_t r_; if (SD_LIKELY((((*_t12).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((*_t12).w, SD_INT(1).w, &r_))) (*_t12).w = r_; else { sd_int s_ = sd_int_add_slow((*_t12), SD_INT(1)); sd_int_release((*_t12)); (*_t12) = s_; } }
+    bool _t14 = sd_int_ge(((*l_p)).f_pos, SD_INT_S(l_n));
+    if (!_t14) {
+      bool _t13 = sd_f_json_jsonIsDigit(sd_str_at(((*l_p)).f_text, ((*l_p)).f_pos));
+      _t14 = (!_t13);
+    }
+    if (_t14) {
+      L._t15 = sd_m_json_JsonParser__expected((*l_p), SD_STR_LIT("a digit after '.'"));
+      if (sd_err_is_null(L._t15)) sd_crash("%s", "number returned null as result 1 without an error");
+      sd_T_T2E10json_Valuee _t16 = (sd_T_T2E10json_Valuee){NULL, L._t15};
+      SD_LF_LEAVE(L);
+      sd_int_release(l_start);
+      return _t16;
+    }
+    sd_m_json_JsonParser__skipDigits(l_p);
+  }
+  if ((sd_int_lt(((*l_p)).f_pos, SD_INT_S(l_n)) && (((sd_str_at(((*l_p)).f_text, ((*l_p)).f_pos)) == (((uint8_t)101))) || ((sd_str_at(((*l_p)).f_text, ((*l_p)).f_pos)) == (((uint8_t)69)))))) {
+    sd_int *_t17 = (&(l_p)->f_pos);
+    { int64_t r_; if (SD_LIKELY((((*_t17).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((*_t17).w, SD_INT(1).w, &r_))) (*_t17).w = r_; else { sd_int s_ = sd_int_add_slow((*_t17), SD_INT(1)); sd_int_release((*_t17)); (*_t17) = s_; } }
+    if ((sd_int_lt(((*l_p)).f_pos, SD_INT_S(l_n)) && (((sd_str_at(((*l_p)).f_text, ((*l_p)).f_pos)) == (((uint8_t)43))) || ((sd_str_at(((*l_p)).f_text, ((*l_p)).f_pos)) == (((uint8_t)45)))))) {
+      sd_int *_t18 = (&(l_p)->f_pos);
+      { int64_t r_; if (SD_LIKELY((((*_t18).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((*_t18).w, SD_INT(1).w, &r_))) (*_t18).w = r_; else { sd_int s_ = sd_int_add_slow((*_t18), SD_INT(1)); sd_int_release((*_t18)); (*_t18) = s_; } }
+    }
+    bool _t20 = sd_int_ge(((*l_p)).f_pos, SD_INT_S(l_n));
+    if (!_t20) {
+      bool _t19 = sd_f_json_jsonIsDigit(sd_str_at(((*l_p)).f_text, ((*l_p)).f_pos));
+      _t20 = (!_t19);
+    }
+    if (_t20) {
+      L._t21 = sd_m_json_JsonParser__expected((*l_p), SD_STR_LIT("a digit in the exponent"));
+      if (sd_err_is_null(L._t21)) sd_crash("%s", "number returned null as result 1 without an error");
+      sd_T_T2E10json_Valuee _t22 = (sd_T_T2E10json_Valuee){NULL, L._t21};
+      SD_LF_LEAVE(L);
+      sd_int_release(l_start);
+      return _t22;
+    }
+    sd_m_json_JsonParser__skipDigits(l_p);
+  }
+  L._t23 = sd_str_slice(((*l_p)).f_text, l_start, ((*l_p)).f_pos);
+  sd_T_T2fe _t24 = ({ double o_; sd_err e_ = sd_str_to_float(L._t23, &o_); (sd_T_T2fe){o_, e_}; });
+  double l_f = _t24.r0;
+  L.l_err = _t24.r1;
+  _t24.r1 = SD_IFACE_NULL;
+  sd_str_release(L._t23); L._t23 = NULL;
+  if ((!sd_iface_is_null(L.l_err))) {
+    L._t25 = sd_m_json_JsonParser__fail((*l_p), l_start, SD_STR_LIT("invalid number"));
+    if (sd_err_is_null(L._t25)) sd_crash("%s", "number returned null as result 1 without an error");
+    sd_T_T2E10json_Valuee _t26 = (sd_T_T2E10json_Valuee){NULL, L._t25};
+    SD_LF_LEAVE(L);
+    sd_iface_release(L.l_err);
+    sd_int_release(l_start);
+    return _t26;
+  }
+  if ((!((((l_f) - (l_f))) == (0.0)))) {
+    L._t27 = sd_m_json_JsonParser__fail((*l_p), l_start, SD_STR_LIT("number out of range"));
+    if (sd_err_is_null(L._t27)) sd_crash("%s", "number returned null as result 1 without an error");
+    sd_T_T2E10json_Valuee _t28 = (sd_T_T2E10json_Valuee){NULL, L._t27};
+    SD_LF_LEAVE(L);
+    sd_iface_release(L.l_err);
+    sd_int_release(l_start);
+    return _t28;
+  }
+  sd_box * _t29 = sd_box_new(&sd_D_json_Value, &(sd_E_json_Value){.tag = 2, .u.c_Number = {l_f}});
+  sd_T_T2E10json_Valuee _t30 = (sd_T_T2E10json_Valuee){_t29, SD_IFACE_NULL};
+  SD_LF_LEAVE(L);
+  sd_iface_release(L.l_err);
+  sd_int_release(l_start);
+  return _t30;
+}
+
+static void sd_m_json_JsonParser__skipDigits(sd_S_json_JsonParser * l_p) {
+  {
+    for (;;) {
+      SD_PREEMPT();
+      bool _t2 = sd_int_lt(((*l_p)).f_pos, sd_str_len(((*l_p)).f_text));
+      if (_t2) {
+        bool _t1 = sd_f_json_jsonIsDigit(sd_str_at(((*l_p)).f_text, ((*l_p)).f_pos));
+        _t2 = _t1;
+      }
+      if (!(_t2)) break;
+      {
+        sd_int *_t3 = (&(l_p)->f_pos);
+        { int64_t r_; if (SD_LIKELY((((*_t3).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((*_t3).w, SD_INT(1).w, &r_))) (*_t3).w = r_; else { sd_int s_ = sd_int_add_slow((*_t3), SD_INT(1)); sd_int_release((*_t3)); (*_t3) = s_; } }
+      }
+    }
+  }
+}
+
+static sd_T_T2se sd_m_json_JsonParser__str(sd_S_json_JsonParser * l_p) {
+  int64_t l_n = SD_SMALL(sd_str_len(((*l_p)).f_text));
+  sd_int _t1 = sd_int_add(((*l_p)).f_pos, SD_INT(1));
+  sd_int l_start = _t1;
+  {
+    sd_int l_i = sd_int_retain(l_start);
+    for (;;) {
+      SD_PREEMPT();
+      if (!(sd_int_lt(l_i, SD_INT_S(l_n)))) break;
+      {
+        uint8_t l_c = sd_str_at(((*l_p)).f_text, l_i);
+        if (((l_c) == (((uint8_t)34)))) {
+          sd_int _t3 = sd_int_add(l_i, SD_INT(1));
+          sd_int *_t4 = (&(l_p)->f_pos);
+          sd_int_release(*_t4);
+          *_t4 = _t3;
+          sd_str _t5 = sd_str_slice(((*l_p)).f_text, l_start, l_i);
+          sd_T_T2se _t6 = (sd_T_T2se){_t5, SD_IFACE_NULL};
+          sd_int_release(l_i);
+          sd_int_release(l_start);
+          return _t6;
+        }
+        if (((((l_c) == (((uint8_t)92))) || ((l_c) < (((uint8_t)32)))) || ((l_c) >= (((uint8_t)128))))) {
+          sd_T_T2se _t7 = sd_m_json_JsonParser__strRest(l_p, l_i);
+          sd_T_T2se _t8 = _t7;
+          sd_int_release(l_i);
+          sd_int_release(l_start);
+          return _t8;
+        }
+      }
+      _c2:;
+      { int64_t r_; if (SD_LIKELY((((l_i).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_i).w, SD_INT(1).w, &r_))) (l_i).w = r_; else { sd_int s_ = sd_int_add_slow((l_i), SD_INT(1)); sd_int_release((l_i)); (l_i) = s_; } }
+    }
+    sd_int_release(l_i);
+  }
+  sd_T_T2se _t9 = sd_m_json_JsonParser__strRest(l_p, SD_INT_S(l_n));
+  sd_T_T2se _t10 = _t9;
+  sd_int_release(l_start);
+  return _t10;
+}
+
+typedef struct { sd_lframe h; sd_str l_out; sd_str _t6; sd_str _t8; sd_err _t9; sd_err _t12; sd_err _t23; sd_err _t42; sd_list * _t44; sd_str _t45; sd_str _t47; sd_err _t48; sd_err _t52; } sd_L_sd_m_json_JsonParser__strRest;
+static void sd_lr_sd_m_json_JsonParser__strRest(sd_lframe *p) {
+  sd_L_sd_m_json_JsonParser__strRest *L = (sd_L_sd_m_json_JsonParser__strRest *)p;
+  sd_str_release(L->l_out);
+  sd_str_release(L->_t6);
+  sd_str_release(L->_t8);
+  sd_iface_release(L->_t9);
+  sd_iface_release(L->_t12);
+  sd_iface_release(L->_t23);
+  sd_iface_release(L->_t42);
+  sd_list_release(L->_t44);
+  sd_str_release(L->_t45);
+  sd_str_release(L->_t47);
+  sd_iface_release(L->_t48);
+  sd_iface_release(L->_t52);
+}
+static sd_T_T2se sd_m_json_JsonParser__strRest(sd_S_json_JsonParser * l_p, sd_int l_from) {
+  sd_L_sd_m_json_JsonParser__strRest L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_m_json_JsonParser__strRest);
+  sd_int l_open = sd_int_retain(((*l_p)).f_pos);
+  int64_t l_n = SD_SMALL(sd_str_len(((*l_p)).f_text));
+  sd_int *_t1 = (&(l_p)->f_pos);
+  { int64_t r_; if (SD_LIKELY((((*_t1).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((*_t1).w, SD_INT(1).w, &r_))) (*_t1).w = r_; else { sd_int s_ = sd_int_add_slow((*_t1), SD_INT(1)); sd_int_release((*_t1)); (*_t1) = s_; } }
+  sd_int l_i = sd_int_retain(l_from);
+  L.l_out = SD_STR_LIT("");
+  sd_int l_runStart = sd_int_retain(((*l_p)).f_pos);
+  {
+    for (;;) {
+      SD_PREEMPT();
+      if (!(sd_int_lt(l_i, SD_INT_S(l_n)))) break;
+      {
+        uint8_t l_c = sd_str_at(((*l_p)).f_text, l_i);
+        if (((l_c) == (((uint8_t)34)))) {
+          sd_str _t2 = sd_str_slice(((*l_p)).f_text, l_runStart, l_i);
+          L.l_out = sd_str_append(L.l_out, _t2);
+          sd_str_release(_t2); 
+          sd_int _t3 = sd_int_add(l_i, SD_INT(1));
+          sd_int *_t4 = (&(l_p)->f_pos);
+          sd_int_release(*_t4);
+          *_t4 = _t3;
+          sd_T_T2se _t5 = (sd_T_T2se){L.l_out, SD_IFACE_NULL};
+          SD_LF_LEAVE(L);
+          sd_int_release(l_runStart);
+          sd_int_release(l_i);
+          sd_int_release(l_open);
+          return _t5;
+        }
+        if (((l_c) < (((uint8_t)32)))) {
+          L._t6 = sd_f_json_jsonDescribe(l_c);
+          sd_str _t7[] = {SD_STR_LIT("unescaped control character "), L._t6, SD_STR_LIT(" in string")};
+          L._t8 = sd_str_concat_n(_t7, 3);
+          L._t9 = sd_m_json_JsonParser__fail((*l_p), l_i, L._t8);
+          if (sd_err_is_null(L._t9)) sd_crash("%s", "strRest returned null as result 1 without an error");
+          sd_T_T2se _t10 = (sd_T_T2se){NULL, L._t9};
+          SD_LF_LEAVE(L);
+          sd_str_release(L._t8);
+          sd_str_release(L._t6);
+          sd_int_release(l_runStart);
+          sd_str_release(L.l_out);
+          sd_int_release(l_i);
+          sd_int_release(l_open);
+          return _t10;
+        }
+        if (((l_c) >= (((uint8_t)128)))) {
+          sd_int _t11 = sd_f_json_jsonUtf8Len(((*l_p)).f_text, l_i);
+          sd_int l_k = _t11;
+          if (sd_int_eq(l_k, SD_INT(0))) {
+            L._t12 = sd_m_json_JsonParser__fail((*l_p), l_i, SD_STR_LIT("invalid UTF-8 in string"));
+            if (sd_err_is_null(L._t12)) sd_crash("%s", "strRest returned null as result 1 without an error");
+            sd_T_T2se _t13 = (sd_T_T2se){NULL, L._t12};
+            SD_LF_LEAVE(L);
+            sd_int_release(l_k);
+            sd_int_release(l_runStart);
+            sd_str_release(L.l_out);
+            sd_int_release(l_i);
+            sd_int_release(l_open);
+            return _t13;
+          }
+          { int64_t r_; if (SD_LIKELY((((l_i).w | l_k.w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_i).w, l_k.w, &r_))) (l_i).w = r_; else { sd_int s_ = sd_int_add_slow((l_i), l_k); sd_int_release((l_i)); (l_i) = s_; } }
+          sd_int_release(l_k);
+          continue;
+        }
+        if ((!((l_c) == (((uint8_t)92))))) {
+          { int64_t r_; if (SD_LIKELY((((l_i).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_i).w, SD_INT(1).w, &r_))) (l_i).w = r_; else { sd_int s_ = sd_int_add_slow((l_i), SD_INT(1)); sd_int_release((l_i)); (l_i) = s_; } }
+          continue;
+        }
+        sd_str _t14 = sd_str_slice(((*l_p)).f_text, l_runStart, l_i);
+        L.l_out = sd_str_append(L.l_out, _t14);
+        sd_str_release(_t14); 
+        sd_int _t15 = sd_int_add(l_i, SD_INT(1));
+        bool _t16 = sd_int_ge(_t15, SD_INT_S(l_n));
+        sd_int_release(_t15);
+        if (_t16) {
+          break;
+        }
+        sd_int _t17 = sd_int_add(l_i, SD_INT(1));
+        uint8_t l_esc = sd_str_at(((*l_p)).f_text, _t17);
+        sd_int_release(_t17);
+        {
+          if (((l_esc) == (((uint8_t)34))) || ((l_esc) == (((uint8_t)92))) || ((l_esc) == (((uint8_t)47)))) {
+            sd_int _t18 = sd_int_add(l_i, SD_INT(1));
+            sd_int _t19 = sd_int_add(l_i, SD_INT(2));
+            sd_str _t20 = sd_str_slice(((*l_p)).f_text, _t18, _t19);
+            L.l_out = sd_str_append(L.l_out, _t20);
+            sd_str_release(_t20); 
+            sd_int_release(_t19);
+            sd_int_release(_t18);
+          } else if (((l_esc) == (((uint8_t)98)))) {
+            L.l_out = sd_str_append(L.l_out, SD_STR_LIT("\010"));
+          } else if (((l_esc) == (((uint8_t)102)))) {
+            L.l_out = sd_str_append(L.l_out, SD_STR_LIT("\014"));
+          } else if (((l_esc) == (((uint8_t)110)))) {
+            L.l_out = sd_str_append(L.l_out, SD_STR_LIT("\012"));
+          } else if (((l_esc) == (((uint8_t)114)))) {
+            L.l_out = sd_str_append(L.l_out, SD_STR_LIT("\015"));
+          } else if (((l_esc) == (((uint8_t)116)))) {
+            L.l_out = sd_str_append(L.l_out, SD_STR_LIT("\011"));
+          } else if (((l_esc) == (((uint8_t)117)))) {
+            sd_int _t21 = sd_int_add(l_i, SD_INT(2));
+            sd_int _t22 = sd_f_json_jsonHex4(((*l_p)).f_text, _t21);
+            sd_int l_cp = _t22;
+            sd_int_release(_t21);
+            if (sd_int_lt(l_cp, SD_INT(0))) {
+              L._t23 = sd_m_json_JsonParser__fail((*l_p), l_i, SD_STR_LIT("invalid \\u escape (expected 4 hex digits)"));
+              if (sd_err_is_null(L._t23)) sd_crash("%s", "strRest returned null as result 1 without an error");
+              sd_T_T2se _t24 = (sd_T_T2se){NULL, L._t23};
+              SD_LF_LEAVE(L);
+              sd_int_release(l_cp);
+              sd_int_release(l_runStart);
+              sd_str_release(L.l_out);
+              sd_int_release(l_i);
+              sd_int_release(l_open);
+              return _t24;
+            }
+            sd_int _t25 = SD_INT_S((((int64_t)6)));
+            { int64_t r_; if (SD_LIKELY((((l_i).w | _t25.w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_i).w, _t25.w, &r_))) (l_i).w = r_; else { sd_int s_ = sd_int_add_slow((l_i), _t25); sd_int_release((l_i)); (l_i) = s_; } }
+            if ((sd_int_ge(l_cp, SD_INT(55296)) && sd_int_le(l_cp, SD_INT(56319)))) {
+              sd_int l_lo = SD_INT(-1);
+              sd_int _t26 = sd_int_add(l_i, SD_INT(1));
+              bool _t28 = (sd_int_lt(_t26, SD_INT_S(l_n)) && ((sd_str_at(((*l_p)).f_text, l_i)) == (((uint8_t)92))));
+              if (_t28) {
+                sd_int _t27 = sd_int_add(l_i, SD_INT(1));
+                _t28 = ((sd_str_at(((*l_p)).f_text, _t27)) == (((uint8_t)117)));
+                sd_int_release(_t27);
+              }
+              bool _t29 = _t28;
+              sd_int_release(_t26);
+              if (_t29) {
+                sd_int _t30 = sd_int_add(l_i, SD_INT(2));
+                sd_int _t31 = sd_f_json_jsonHex4(((*l_p)).f_text, _t30);
+                sd_int_release(l_lo);
+                l_lo = _t31;
+                sd_int_release(_t30);
+              }
+              if ((sd_int_ge(l_lo, SD_INT(56320)) && sd_int_le(l_lo, SD_INT(57343)))) {
+                sd_int _t32 = sd_int_sub(l_cp, SD_INT(55296));
+                sd_int _t33 = sd_int_shl(_t32, SD_INT(10));
+                sd_int _t34 = sd_int_add(SD_INT(65536), _t33);
+                sd_int _t35 = sd_int_sub(l_lo, SD_INT(56320));
+                sd_int _t36 = sd_int_add(_t34, _t35);
+                sd_int_release(l_cp);
+                l_cp = _t36;
+                sd_int_release(_t35);
+                sd_int_release(_t34);
+                sd_int_release(_t33);
+                sd_int_release(_t32);
+                sd_int _t37 = SD_INT_S((((int64_t)6)));
+                { int64_t r_; if (SD_LIKELY((((l_i).w | _t37.w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_i).w, _t37.w, &r_))) (l_i).w = r_; else { sd_int s_ = sd_int_add_slow((l_i), _t37); sd_int_release((l_i)); (l_i) = s_; } }
+              } else {
+                sd_int _t38 = SD_INT(65533);
+                sd_int_release(l_cp);
+                l_cp = _t38;
+              }
+              sd_int_release(l_lo);
+            } else {
+              if ((sd_int_ge(l_cp, SD_INT(56320)) && sd_int_le(l_cp, SD_INT(57343)))) {
+                sd_int _t39 = SD_INT(65533);
+                sd_int_release(l_cp);
+                l_cp = _t39;
+              }
+            }
+            sd_str _t40 = sd_f_json_jsonUtf8Encode(l_cp);
+            L.l_out = sd_str_append(L.l_out, _t40);
+            sd_str_release(_t40); 
+            sd_int _t41 = sd_int_retain(l_i);
+            sd_int_release(l_runStart);
+            l_runStart = _t41;
+            sd_int_release(l_cp);
+            continue;
+          } else {
+            if ((((l_esc) < (((uint8_t)32))) || ((l_esc) >= (((uint8_t)128))))) {
+              L._t42 = sd_m_json_JsonParser__fail((*l_p), l_i, SD_STR_LIT("invalid escape"));
+              if (sd_err_is_null(L._t42)) sd_crash("%s", "strRest returned null as result 1 without an error");
+              sd_T_T2se _t43 = (sd_T_T2se){NULL, L._t42};
+              SD_LF_LEAVE(L);
+              sd_int_release(l_runStart);
+              sd_str_release(L.l_out);
+              sd_int_release(l_i);
+              sd_int_release(l_open);
+              return _t43;
+            }
+            L._t44 = sd_list_new(&sd_type_byte, 1);
+            SD_LIST_PUSH(&L._t44, uint8_t, l_esc);
+            L._t45 = sd_str_from_bytes(L._t44);
+            sd_str _t46[] = {SD_STR_LIT("invalid escape '\\"), L._t45, SD_STR_LIT("'")};
+            L._t47 = sd_str_concat_n(_t46, 3);
+            L._t48 = sd_m_json_JsonParser__fail((*l_p), l_i, L._t47);
+            if (sd_err_is_null(L._t48)) sd_crash("%s", "strRest returned null as result 1 without an error");
+            sd_T_T2se _t49 = (sd_T_T2se){NULL, L._t48};
+            SD_LF_LEAVE(L);
+            sd_str_release(L._t47);
+            sd_str_release(L._t45);
+            sd_list_release(L._t44);
+            sd_int_release(l_runStart);
+            sd_str_release(L.l_out);
+            sd_int_release(l_i);
+            sd_int_release(l_open);
+            return _t49;
+          }
+        }
+        sd_int _t50 = SD_INT_S((((int64_t)2)));
+        { int64_t r_; if (SD_LIKELY((((l_i).w | _t50.w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_i).w, _t50.w, &r_))) (l_i).w = r_; else { sd_int s_ = sd_int_add_slow((l_i), _t50); sd_int_release((l_i)); (l_i) = s_; } }
+        sd_int _t51 = sd_int_retain(l_i);
+        sd_int_release(l_runStart);
+        l_runStart = _t51;
+      }
+    }
+  }
+  L._t52 = sd_m_json_JsonParser__fail((*l_p), l_open, SD_STR_LIT("unterminated string"));
+  if (sd_err_is_null(L._t52)) sd_crash("%s", "strRest returned null as result 1 without an error");
+  sd_T_T2se _t53 = (sd_T_T2se){NULL, L._t52};
+  SD_LF_LEAVE(L);
+  sd_int_release(l_runStart);
+  sd_str_release(L.l_out);
+  sd_int_release(l_i);
+  sd_int_release(l_open);
+  return _t53;
+}
+
+static sd_int sd_f_json_jsonHex4(sd_str l_text, sd_int l_i) {
+  sd_int _t1 = sd_int_add(l_i, SD_INT(4));
+  bool _t2 = sd_int_gt(_t1, sd_str_len(l_text));
+  sd_int_release(_t1);
+  if (_t2) {
+    return SD_INT(-1);
+  }
+  sd_int l_v = SD_INT(0);
+  {
+    sd_int l_j = sd_int_retain(l_i);
+    for (;;) {
+      SD_PREEMPT();
+      sd_int _t4 = sd_int_add(l_i, SD_INT(4));
+      bool _t5 = sd_int_lt(l_j, _t4);
+      sd_int_release(_t4);
+      if (!(_t5)) break;
+      {
+        uint8_t l_c = sd_str_at(l_text, l_j);
+        int64_t l_d = ((int64_t)-1);
+        if ((((l_c) >= (((uint8_t)48))) && ((l_c) <= (((uint8_t)57))))) {
+          l_d = (SD_SMALL(sd_byte_to_int(l_c)) - SD_SMALL(sd_byte_to_int(((uint8_t)48))));
+        } else {
+          if ((((l_c) >= (((uint8_t)97))) && ((l_c) <= (((uint8_t)102))))) {
+            l_d = ((SD_SMALL(sd_byte_to_int(l_c)) - SD_SMALL(sd_byte_to_int(((uint8_t)97)))) + ((int64_t)10));
+          } else {
+            if ((((l_c) >= (((uint8_t)65))) && ((l_c) <= (((uint8_t)70))))) {
+              l_d = ((SD_SMALL(sd_byte_to_int(l_c)) - SD_SMALL(sd_byte_to_int(((uint8_t)65)))) + ((int64_t)10));
+            }
+          }
+        }
+        if ((l_d < ((int64_t)0))) {
+          sd_int _t6 = SD_INT(-1);
+          sd_int_release(l_j);
+          sd_int_release(l_v);
+          return _t6;
+        }
+        sd_int _t7 = sd_int_mul(l_v, SD_INT(16));
+        sd_int _t8 = sd_int_add(_t7, SD_INT_S(l_d));
+        sd_int_release(l_v);
+        l_v = _t8;
+        sd_int_release(_t7);
+      }
+      _c3:;
+      { int64_t r_; if (SD_LIKELY((((l_j).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_j).w, SD_INT(1).w, &r_))) (l_j).w = r_; else { sd_int s_ = sd_int_add_slow((l_j), SD_INT(1)); sd_int_release((l_j)); (l_j) = s_; } }
+    }
+    sd_int_release(l_j);
+  }
+  return l_v;
+}
+
+static bool sd_f_json_jsonIsDigit(uint8_t l_c) {
+  return (((l_c) >= (((uint8_t)48))) && ((l_c) <= (((uint8_t)57))));
+}
+
+static sd_int sd_f_json_jsonUtf8Len(sd_str l_s, sd_int l_i) {
+  int64_t l_n = SD_SMALL(sd_str_len(l_s));
+  int64_t l_c = SD_SMALL(sd_int_retain(sd_byte_to_int(sd_str_at(l_s, l_i))));
+  if ((l_c < ((int64_t)128))) {
+    return SD_INT(1);
+  }
+  int64_t l_need = ((int64_t)0);
+  int64_t l_lo = ((int64_t)128);
+  int64_t l_hi = ((int64_t)191);
+  if (((l_c >= ((int64_t)194)) && (l_c <= ((int64_t)223)))) {
+    l_need = ((int64_t)1);
+  } else {
+    if ((l_c == ((int64_t)224))) {
+      l_need = ((int64_t)2);
+      l_lo = ((int64_t)160);
+    } else {
+      if (((l_c >= ((int64_t)225)) && (l_c <= ((int64_t)236)))) {
+        l_need = ((int64_t)2);
+      } else {
+        if ((l_c == ((int64_t)237))) {
+          l_need = ((int64_t)2);
+          l_hi = ((int64_t)159);
+        } else {
+          if (((l_c >= ((int64_t)238)) && (l_c <= ((int64_t)239)))) {
+            l_need = ((int64_t)2);
+          } else {
+            if ((l_c == ((int64_t)240))) {
+              l_need = ((int64_t)3);
+              l_lo = ((int64_t)144);
+            } else {
+              if (((l_c >= ((int64_t)241)) && (l_c <= ((int64_t)243)))) {
+                l_need = ((int64_t)3);
+              } else {
+                if ((l_c == ((int64_t)244))) {
+                  l_need = ((int64_t)3);
+                  l_hi = ((int64_t)143);
+                } else {
+                  return SD_INT(0);
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  sd_int _t1 = sd_int_add(l_i, SD_INT_S(l_need));
+  bool _t2 = sd_int_ge(_t1, SD_INT_S(l_n));
+  sd_int_release(_t1);
+  if (_t2) {
+    return SD_INT(0);
+  }
+  sd_int _t3 = sd_int_add(l_i, SD_INT(1));
+  int64_t l_second = SD_SMALL(sd_int_retain(sd_byte_to_int(sd_str_at(l_s, _t3))));
+  sd_int_release(_t3);
+  if (((l_second < l_lo) || (l_second > l_hi))) {
+    return SD_INT(0);
+  }
+  {
+    sd_int _t4 = sd_int_add(l_i, SD_INT(2));
+    sd_int l_j = _t4;
+    for (;;) {
+      SD_PREEMPT();
+      sd_int _t6 = sd_int_add(l_i, SD_INT_S(l_need));
+      bool _t7 = sd_int_le(l_j, _t6);
+      sd_int_release(_t6);
+      if (!(_t7)) break;
+      {
+        int64_t l_x = SD_SMALL(sd_int_retain(sd_byte_to_int(sd_str_at(l_s, l_j))));
+        if (((l_x < ((int64_t)128)) || (l_x > ((int64_t)191)))) {
+          sd_int _t8 = SD_INT(0);
+          sd_int_release(l_j);
+          return _t8;
+        }
+      }
+      _c5:;
+      { int64_t r_; if (SD_LIKELY((((l_j).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_j).w, SD_INT(1).w, &r_))) (l_j).w = r_; else { sd_int s_ = sd_int_add_slow((l_j), SD_INT(1)); sd_int_release((l_j)); (l_j) = s_; } }
+    }
+    sd_int_release(l_j);
+  }
+  return SD_INT_S((l_need + ((int64_t)1)));
+}
+
+typedef struct { sd_lframe h; sd_list * _t1; sd_list * _t8; sd_list * _t18; sd_list * _t31; } sd_L_sd_f_json_jsonUtf8Encode;
+static void sd_lr_sd_f_json_jsonUtf8Encode(sd_lframe *p) {
+  sd_L_sd_f_json_jsonUtf8Encode *L = (sd_L_sd_f_json_jsonUtf8Encode *)p;
+  sd_list_release(L->_t1);
+  sd_list_release(L->_t8);
+  sd_list_release(L->_t18);
+  sd_list_release(L->_t31);
+}
+static sd_str sd_f_json_jsonUtf8Encode(sd_int l_cp) {
+  sd_L_sd_f_json_jsonUtf8Encode L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_json_jsonUtf8Encode);
+  if (sd_int_lt(l_cp, SD_INT(128))) {
+    L._t1 = sd_list_new(&sd_type_byte, 1);
+    SD_LIST_PUSH(&L._t1, uint8_t, sd_int_to_byte(l_cp));
+    sd_str _t2 = sd_str_from_bytes(L._t1);
+    sd_str _t3 = _t2;
+    SD_LF_LEAVE(L);
+    sd_list_release(L._t1);
+    return _t3;
+  }
+  if (sd_int_lt(l_cp, SD_INT(2048))) {
+    sd_int _t4 = sd_int_shr(l_cp, SD_INT(6));
+    sd_int _t5 = sd_int_or(SD_INT(192), _t4);
+    sd_int _t6 = sd_int_and(l_cp, SD_INT(63));
+    sd_int _t7 = sd_int_or(SD_INT(128), _t6);
+    L._t8 = sd_list_new(&sd_type_byte, 2);
+    SD_LIST_PUSH(&L._t8, uint8_t, sd_int_to_byte(_t5));
+    SD_LIST_PUSH(&L._t8, uint8_t, sd_int_to_byte(_t7));
+    sd_str _t9 = sd_str_from_bytes(L._t8);
+    sd_str _t10 = _t9;
+    SD_LF_LEAVE(L);
+    sd_list_release(L._t8);
+    sd_int_release(_t7);
+    sd_int_release(_t6);
+    sd_int_release(_t5);
+    sd_int_release(_t4);
+    return _t10;
+  }
+  if (sd_int_lt(l_cp, SD_INT(65536))) {
+    sd_int _t11 = sd_int_shr(l_cp, SD_INT(12));
+    sd_int _t12 = sd_int_or(SD_INT(224), _t11);
+    sd_int _t13 = sd_int_shr(l_cp, SD_INT(6));
+    sd_int _t14 = sd_int_and(_t13, SD_INT(63));
+    sd_int _t15 = sd_int_or(SD_INT(128), _t14);
+    sd_int _t16 = sd_int_and(l_cp, SD_INT(63));
+    sd_int _t17 = sd_int_or(SD_INT(128), _t16);
+    L._t18 = sd_list_new(&sd_type_byte, 3);
+    SD_LIST_PUSH(&L._t18, uint8_t, sd_int_to_byte(_t12));
+    SD_LIST_PUSH(&L._t18, uint8_t, sd_int_to_byte(_t15));
+    SD_LIST_PUSH(&L._t18, uint8_t, sd_int_to_byte(_t17));
+    sd_str _t19 = sd_str_from_bytes(L._t18);
+    sd_str _t20 = _t19;
+    SD_LF_LEAVE(L);
+    sd_list_release(L._t18);
+    sd_int_release(_t17);
+    sd_int_release(_t16);
+    sd_int_release(_t15);
+    sd_int_release(_t14);
+    sd_int_release(_t13);
+    sd_int_release(_t12);
+    sd_int_release(_t11);
+    return _t20;
+  }
+  sd_int _t21 = sd_int_shr(l_cp, SD_INT(18));
+  sd_int _t22 = sd_int_or(SD_INT(240), _t21);
+  sd_int _t23 = sd_int_shr(l_cp, SD_INT(12));
+  sd_int _t24 = sd_int_and(_t23, SD_INT(63));
+  sd_int _t25 = sd_int_or(SD_INT(128), _t24);
+  sd_int _t26 = sd_int_shr(l_cp, SD_INT(6));
+  sd_int _t27 = sd_int_and(_t26, SD_INT(63));
+  sd_int _t28 = sd_int_or(SD_INT(128), _t27);
+  sd_int _t29 = sd_int_and(l_cp, SD_INT(63));
+  sd_int _t30 = sd_int_or(SD_INT(128), _t29);
+  L._t31 = sd_list_new(&sd_type_byte, 4);
+  SD_LIST_PUSH(&L._t31, uint8_t, sd_int_to_byte(_t22));
+  SD_LIST_PUSH(&L._t31, uint8_t, sd_int_to_byte(_t25));
+  SD_LIST_PUSH(&L._t31, uint8_t, sd_int_to_byte(_t28));
+  SD_LIST_PUSH(&L._t31, uint8_t, sd_int_to_byte(_t30));
+  sd_str _t32 = sd_str_from_bytes(L._t31);
+  sd_str _t33 = _t32;
+  SD_LF_LEAVE(L);
+  sd_list_release(L._t31);
+  sd_int_release(_t30);
+  sd_int_release(_t29);
+  sd_int_release(_t28);
+  sd_int_release(_t27);
+  sd_int_release(_t26);
+  sd_int_release(_t25);
+  sd_int_release(_t24);
+  sd_int_release(_t23);
+  sd_int_release(_t22);
+  sd_int_release(_t21);
+  return _t33;
+}
+
+typedef struct { sd_lframe h; sd_list * _t1; sd_str _t2; sd_str l_digits; sd_list * _t7; sd_str _t8; } sd_L_sd_f_json_jsonDescribe;
+static void sd_lr_sd_f_json_jsonDescribe(sd_lframe *p) {
+  sd_L_sd_f_json_jsonDescribe *L = (sd_L_sd_f_json_jsonDescribe *)p;
+  sd_list_release(L->_t1);
+  sd_str_release(L->_t2);
+  sd_str_release(L->l_digits);
+  sd_list_release(L->_t7);
+  sd_str_release(L->_t8);
+}
+static sd_str sd_f_json_jsonDescribe(uint8_t l_c) {
+  sd_L_sd_f_json_jsonDescribe L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_json_jsonDescribe);
+  if ((((l_c) >= (((uint8_t)32))) && ((l_c) <= (((uint8_t)126))))) {
+    L._t1 = sd_list_new(&sd_type_byte, 1);
+    SD_LIST_PUSH(&L._t1, uint8_t, l_c);
+    L._t2 = sd_str_from_bytes(L._t1);
+    sd_str _t3[] = {SD_STR_LIT("character '"), L._t2, SD_STR_LIT("'")};
+    sd_str _t4 = sd_str_concat_n(_t3, 3);
+    sd_str _t5 = _t4;
+    SD_LF_LEAVE(L);
+    sd_str_release(L._t2);
+    sd_list_release(L._t1);
+    return _t5;
+  }
+  L.l_digits = SD_STR_LIT("0123456789abcdef");
+  sd_int _t6 = sd_int_shr(sd_byte_to_int(l_c), SD_INT(4));
+  L._t7 = sd_list_new(&sd_type_byte, 2);
+  SD_LIST_PUSH(&L._t7, uint8_t, sd_str_at(L.l_digits, _t6));
+  SD_LIST_PUSH(&L._t7, uint8_t, sd_str_at(L.l_digits, SD_INT_S((SD_SMALL(sd_byte_to_int(l_c)) & ((int64_t)15)))));
+  L._t8 = sd_str_from_bytes(L._t7);
+  sd_str _t9 = sd_str_concat(SD_STR_LIT("byte 0x"), L._t8);
+  sd_str _t10 = _t9;
+  SD_LF_LEAVE(L);
+  sd_str_release(L._t8);
+  sd_list_release(L._t7);
+  sd_int_release(_t6);
+  sd_str_release(L.l_digits);
+  return _t10;
+}
+
+typedef struct { sd_lframe h; sd_S_json_JsonWriter l_w; } sd_L_sd_m_json_Value__string;
+static void sd_lr_sd_m_json_Value__string(sd_lframe *p) {
+  sd_L_sd_m_json_Value__string *L = (sd_L_sd_m_json_Value__string *)p;
+  sd_rl_S15json_JsonWriter(L->l_w);
+}
+static sd_str sd_m_json_Value__string(sd_box * l_v) {
+  sd_L_sd_m_json_Value__string L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_m_json_Value__string);
+  sd_S_json_JsonWriter _t1 = (sd_S_json_JsonWriter){.f_out = SD_STR_LIT(""), .f_pretty = false, .f_method = SD_STR_LIT("json.Value.string")};
+  L.l_w = _t1;
+  sd_int _t2 = SD_INT(0);
+  sd_m_json_JsonWriter__write((&L.l_w), l_v, _t2);
+  sd_str _t3 = sd_str_retain((L.l_w).f_out);
+  SD_LF_LEAVE(L);
+  sd_rl_S15json_JsonWriter(L.l_w);
+  return _t3;
+}
+
+typedef struct { sd_lframe h; sd_S_json_JsonWriter l_w; } sd_L_sd_m_json_Value__pretty;
+static void sd_lr_sd_m_json_Value__pretty(sd_lframe *p) {
+  sd_L_sd_m_json_Value__pretty *L = (sd_L_sd_m_json_Value__pretty *)p;
+  sd_rl_S15json_JsonWriter(L->l_w);
+}
+static sd_str sd_m_json_Value__pretty(sd_box * l_v) {
+  sd_L_sd_m_json_Value__pretty L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_m_json_Value__pretty);
+  sd_S_json_JsonWriter _t1 = (sd_S_json_JsonWriter){.f_out = SD_STR_LIT(""), .f_pretty = true, .f_method = SD_STR_LIT("json.Value.pretty")};
+  L.l_w = _t1;
+  sd_int _t2 = SD_INT(0);
+  sd_m_json_JsonWriter__write((&L.l_w), l_v, _t2);
+  sd_str _t3 = sd_str_retain((L.l_w).f_out);
+  SD_LF_LEAVE(L);
+  sd_rl_S15json_JsonWriter(L.l_w);
+  return _t3;
+}
+
+static void sd_m_json_JsonWriter__newline(sd_S_json_JsonWriter * l_w, sd_int l_indent) {
+  if (((*l_w)).f_pretty) {
+    sd_str *_t1 = (&(l_w)->f_out);
+    *_t1 = sd_str_append(*_t1, SD_STR_LIT("\012"));
+    {
+      sd_int l_i = SD_INT(0);
+      for (;;) {
+        SD_PREEMPT();
+        if (!(sd_int_lt(l_i, l_indent))) break;
+        {
+          sd_str *_t3 = (&(l_w)->f_out);
+          *_t3 = sd_str_append(*_t3, SD_STR_LIT("  "));
+        }
+        _c2:;
+        { int64_t r_; if (SD_LIKELY((((l_i).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_i).w, SD_INT(1).w, &r_))) (l_i).w = r_; else { sd_int s_ = sd_int_add_slow((l_i), SD_INT(1)); sd_int_release((l_i)); (l_i) = s_; } }
+      }
+      sd_int_release(l_i);
+    }
+  }
+}
+
+typedef struct { sd_lframe h; sd_str l_s; sd_list * l_items; sd_box * _t11; sd_map * l_fields; sd_list * l_keys; sd_str _t20; sd_box * l_field; } sd_L_sd_m_json_JsonWriter__write;
+static void sd_lr_sd_m_json_JsonWriter__write(sd_lframe *p) {
+  sd_L_sd_m_json_JsonWriter__write *L = (sd_L_sd_m_json_JsonWriter__write *)p;
+  sd_str_release(L->l_s);
+  sd_list_release(L->l_items);
+  sd_box_release(L->_t11);
+  sd_map_release(L->l_fields);
+  sd_list_release(L->l_keys);
+  sd_str_release(L->_t20);
+  sd_box_release(L->l_field);
+}
+SD_NO_TCE static void sd_m_json_JsonWriter__write(sd_S_json_JsonWriter * l_w, sd_box * l_v, sd_int l_indent) {
+  sd_L_sd_m_json_JsonWriter__write L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_m_json_JsonWriter__write);
+  {
+    int32_t _t1 = SD_BOX_GET(l_v, sd_E_json_Value).tag;
+    if (_t1 == 0) {
+      sd_str *_t2 = (&(l_w)->f_out);
+      *_t2 = sd_str_append(*_t2, SD_STR_LIT("null"));
+    } else if (_t1 == 1) {
+      bool l_b = SD_BOX_GET(l_v, sd_E_json_Value).u.c_Bool.f0;
+      sd_str _t3 = sd_bool_to_str(l_b);
+      sd_str *_t4 = (&(l_w)->f_out);
+      *_t4 = sd_str_append(*_t4, _t3);
+      sd_str_release(_t3); 
+    } else if (_t1 == 2) {
+      double l_n = SD_BOX_GET(l_v, sd_E_json_Value).u.c_Number.f0;
+      double _t5 = l_n;
+      sd_m_json_JsonWriter__number(l_w, _t5);
+    } else if (_t1 == 3) {
+      L.l_s = sd_str_retain(SD_BOX_GET(l_v, sd_E_json_Value).u.c_String.f0);
+      sd_m_json_JsonWriter__quote(l_w, L.l_s);
+      sd_str_release(L.l_s); L.l_s = NULL;
+    } else if (_t1 == 4) {
+      L.l_items = sd_list_retain(SD_BOX_GET(l_v, sd_E_json_Value).u.c_Array.f0);
+      if ((SD_SMALL(sd_list_len(L.l_items)) == ((int64_t)0))) {
+        sd_str *_t6 = (&(l_w)->f_out);
+        *_t6 = sd_str_append(*_t6, SD_STR_LIT("[]"));
+        SD_LF_LEAVE(L);
+        sd_list_release(L.l_items);
+        return;
+      }
+      sd_str *_t7 = (&(l_w)->f_out);
+      *_t7 = sd_str_append(*_t7, SD_STR_LIT("["));
+      {
+        int64_t l_i = ((int64_t)0);
+        for (;;) {
+          SD_PREEMPT();
+          if (!((l_i < SD_SMALL(sd_list_len(L.l_items))))) break;
+          {
+            if ((l_i > ((int64_t)0))) {
+              sd_str *_t9 = (&(l_w)->f_out);
+              *_t9 = sd_str_append(*_t9, SD_STR_LIT(","));
+            }
+            sd_int _t10 = sd_int_add(l_indent, SD_INT(1));
+            sd_m_json_JsonWriter__newline(l_w, _t10);
+            sd_int_release(_t10);
+            L._t11 = sd_box_retain(SD_LIST_GET(L.l_items, sd_box *, SD_INT_S(l_i)));
+            sd_int _t12 = sd_int_add(l_indent, SD_INT(1));
+            SD_PREEMPT();
+            sd_m_json_JsonWriter__write(l_w, L._t11, _t12);
+            sd_int_release(_t12);
+            sd_box_release(L._t11); L._t11 = NULL;
+          }
+          _c8:;
+          l_i++;
+        }
+      }
+      sd_m_json_JsonWriter__newline(l_w, l_indent);
+      sd_str *_t13 = (&(l_w)->f_out);
+      *_t13 = sd_str_append(*_t13, SD_STR_LIT("]"));
+      sd_list_release(L.l_items); L.l_items = NULL;
+    } else if (_t1 == 5) {
+      L.l_fields = sd_map_retain(SD_BOX_GET(l_v, sd_E_json_Value).u.c_Object.f0);
+      if ((SD_SMALL(sd_map_len(L.l_fields)) == ((int64_t)0))) {
+        sd_str *_t14 = (&(l_w)->f_out);
+        *_t14 = sd_str_append(*_t14, SD_STR_LIT("{}"));
+        SD_LF_LEAVE(L);
+        sd_map_release(L.l_fields);
+        return;
+      }
+      sd_str *_t15 = (&(l_w)->f_out);
+      *_t15 = sd_str_append(*_t15, SD_STR_LIT("{"));
+      sd_list * _t16 = sd_map_keys(L.l_fields);
+      L.l_keys = _t16;
+      {
+        int64_t l_i = ((int64_t)0);
+        for (;;) {
+          SD_PREEMPT();
+          if (!((l_i < SD_SMALL(sd_list_len(L.l_keys))))) break;
+          {
+            if ((l_i > ((int64_t)0))) {
+              sd_str *_t18 = (&(l_w)->f_out);
+              *_t18 = sd_str_append(*_t18, SD_STR_LIT(","));
+            }
+            sd_int _t19 = sd_int_add(l_indent, SD_INT(1));
+            sd_m_json_JsonWriter__newline(l_w, _t19);
+            sd_int_release(_t19);
+            L._t20 = sd_str_retain(SD_LIST_GET(L.l_keys, sd_str, SD_INT_S(l_i)));
+            sd_m_json_JsonWriter__quote(l_w, L._t20);
+            sd_str_release(L._t20); L._t20 = NULL;
+            if (((*l_w)).f_pretty) {
+              sd_str *_t21 = (&(l_w)->f_out);
+              *_t21 = sd_str_append(*_t21, SD_STR_LIT(": "));
+            } else {
+              sd_str *_t22 = (&(l_w)->f_out);
+              *_t22 = sd_str_append(*_t22, SD_STR_LIT(":"));
+            }
+            sd_str _t23 = SD_LIST_GET(L.l_keys, sd_str, SD_INT_S(l_i));
+            sd_box * *_t24 = sd_map_get(L.l_fields, &_t23);
+            L.l_field = sd_box_retain((_t24 ? *_t24 : NULL));
+            if ((!((L.l_field) == NULL))) {
+              sd_int _t25 = sd_int_add(l_indent, SD_INT(1));
+              SD_PREEMPT();
+              sd_m_json_JsonWriter__write(l_w, L.l_field, _t25);
+              sd_int_release(_t25);
+            }
+            sd_box_release(L.l_field); L.l_field = NULL;
+          }
+          _c17:;
+          l_i++;
+        }
+      }
+      sd_m_json_JsonWriter__newline(l_w, l_indent);
+      sd_str *_t26 = (&(l_w)->f_out);
+      *_t26 = sd_str_append(*_t26, SD_STR_LIT("}"));
+      sd_list_release(L.l_keys); L.l_keys = NULL;
+      sd_map_release(L.l_fields); L.l_fields = NULL;
+    }
+  }
+  SD_LF_LEAVE(L);
+}
+
+typedef struct { sd_lframe h; sd_str _t1; sd_str _t2; sd_str _t4; } sd_L_sd_m_json_JsonWriter__number;
+static void sd_lr_sd_m_json_JsonWriter__number(sd_lframe *p) {
+  sd_L_sd_m_json_JsonWriter__number *L = (sd_L_sd_m_json_JsonWriter__number *)p;
+  sd_str_release(L->_t1);
+  sd_str_release(L->_t2);
+  sd_str_release(L->_t4);
+}
+static void sd_m_json_JsonWriter__number(sd_S_json_JsonWriter * l_w, double l_n) {
+  sd_L_sd_m_json_JsonWriter__number L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_m_json_JsonWriter__number);
+  if ((!((l_n) == (l_n)))) {
+    L._t1 = sd_str_concat(((*l_w)).f_method, SD_STR_LIT(": nan cannot be written in JSON"));
+    sd_f_os_crash(L._t1);
+    sd_str_release(L._t1); L._t1 = NULL;
+  }
+  if ((!((((l_n) - (l_n))) == (0.0)))) {
+    L._t2 = sd_float_to_str(l_n);
+    sd_str _t3[] = {((*l_w)).f_method, SD_STR_LIT(": "), L._t2, SD_STR_LIT(" cannot be written in JSON")};
+    L._t4 = sd_str_concat_n(_t3, 4);
+    sd_f_os_crash(L._t4);
+    sd_str_release(L._t4); L._t4 = NULL;
+    sd_str_release(L._t2); L._t2 = NULL;
+  }
+  if ((((l_n) > ((-(1.0e21)))) && ((l_n) < (1.0e21)))) {
+    sd_int _t5 = sd_float_to_int(l_n);
+    sd_int l_i = _t5;
+    if (((sd_int_to_float(l_i)) == (l_n))) {
+      if ((sd_int_eq(l_i, SD_INT(0)) && ((((1.0) / (l_n))) < (0.0)))) {
+        sd_str *_t6 = (&(l_w)->f_out);
+        *_t6 = sd_str_append(*_t6, SD_STR_LIT("-0"));
+      } else {
+        sd_str *_t7 = (&(l_w)->f_out);
+        sd_str_part _t8[] = {{NULL, l_i}};
+        *_t7 = sd_str_append_parts(*_t7, _t8, 1);
+      }
+      SD_LF_LEAVE(L);
+      sd_int_release(l_i);
+      return;
+    }
+    sd_int_release(l_i);
+  }
+  sd_str _t9 = sd_float_to_str(l_n);
+  sd_str *_t10 = (&(l_w)->f_out);
+  *_t10 = sd_str_append(*_t10, _t9);
+  sd_str_release(_t9); 
+  SD_LF_LEAVE(L);
+}
+
+static void sd_m_json_JsonWriter__quote(sd_S_json_JsonWriter * l_w, sd_str l_s) {
+  int64_t l_n = SD_SMALL(sd_str_len(l_s));
+  sd_int l_i = SD_INT(0);
+  {
+    for (;;) {
+      SD_PREEMPT();
+      if (!(sd_int_lt(l_i, SD_INT_S(l_n)))) break;
+      {
+        uint8_t l_c = sd_str_at(l_s, l_i);
+        if ((((((l_c) < (((uint8_t)32))) || ((l_c) == (((uint8_t)34)))) || ((l_c) == (((uint8_t)92)))) || ((l_c) >= (((uint8_t)128))))) {
+          break;
+        }
+      }
+      _c1:;
+      { int64_t r_; if (SD_LIKELY((((l_i).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_i).w, SD_INT(1).w, &r_))) (l_i).w = r_; else { sd_int s_ = sd_int_add_slow((l_i), SD_INT(1)); sd_int_release((l_i)); (l_i) = s_; } }
+    }
+  }
+  if (sd_int_eq(l_i, SD_INT_S(l_n))) {
+    sd_str *_t2 = (&(l_w)->f_out);
+    sd_str_part _t3[] = {{SD_STR_LIT("\"")}, {l_s}, {SD_STR_LIT("\"")}};
+    *_t2 = sd_str_append_parts(*_t2, _t3, 3);
+    sd_int_release(l_i);
+    return;
+  }
+  sd_str _t4 = sd_str_slice(l_s, SD_INT(0), l_i);
+  sd_str *_t5 = (&(l_w)->f_out);
+  sd_str_part _t6[] = {{SD_STR_LIT("\"")}, {_t4}};
+  *_t5 = sd_str_append_parts(*_t5, _t6, 2);
+  sd_str_release(_t4); 
+  sd_int l_run = sd_int_retain(l_i);
+  {
+    for (;;) {
+      SD_PREEMPT();
+      if (!(sd_int_lt(l_i, SD_INT_S(l_n)))) break;
+      {
+        uint8_t l_c = sd_str_at(l_s, l_i);
+        if ((((((l_c) >= (((uint8_t)32))) && (!((l_c) == (((uint8_t)34))))) && (!((l_c) == (((uint8_t)92))))) && ((l_c) < (((uint8_t)128))))) {
+          { int64_t r_; if (SD_LIKELY((((l_i).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_i).w, SD_INT(1).w, &r_))) (l_i).w = r_; else { sd_int s_ = sd_int_add_slow((l_i), SD_INT(1)); sd_int_release((l_i)); (l_i) = s_; } }
+          continue;
+        }
+        sd_int l_k = SD_INT(0);
+        if (((l_c) >= (((uint8_t)128)))) {
+          sd_int _t7 = sd_f_json_jsonUtf8Len(l_s, l_i);
+          sd_int_release(l_k);
+          l_k = _t7;
+          if (sd_int_gt(l_k, SD_INT(0))) {
+            { int64_t r_; if (SD_LIKELY((((l_i).w | l_k.w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_i).w, l_k.w, &r_))) (l_i).w = r_; else { sd_int s_ = sd_int_add_slow((l_i), l_k); sd_int_release((l_i)); (l_i) = s_; } }
+            sd_int_release(l_k);
+            continue;
+          }
+        }
+        if (sd_int_gt(l_i, l_run)) {
+          sd_str _t8 = sd_str_slice(l_s, l_run, l_i);
+          sd_str *_t9 = (&(l_w)->f_out);
+          *_t9 = sd_str_append(*_t9, _t8);
+          sd_str_release(_t8); 
+        }
+        sd_str _t10 = sd_f_json_jsonEscape(l_c);
+        sd_str *_t11 = (&(l_w)->f_out);
+        *_t11 = sd_str_append(*_t11, _t10);
+        sd_str_release(_t10); 
+        { int64_t r_; if (SD_LIKELY((((l_i).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_i).w, SD_INT(1).w, &r_))) (l_i).w = r_; else { sd_int s_ = sd_int_add_slow((l_i), SD_INT(1)); sd_int_release((l_i)); (l_i) = s_; } }
+        sd_int _t12 = sd_int_retain(l_i);
+        sd_int_release(l_run);
+        l_run = _t12;
+        sd_int_release(l_k);
+      }
+    }
+  }
+  sd_str _t13 = sd_str_slice(l_s, l_run, SD_INT_S(l_n));
+  sd_str *_t14 = (&(l_w)->f_out);
+  sd_str_part _t15[] = {{_t13}, {SD_STR_LIT("\"")}};
+  *_t14 = sd_str_append_parts(*_t14, _t15, 2);
+  sd_str_release(_t13); 
+  sd_int_release(l_run);
+  sd_int_release(l_i);
+}
+
+typedef struct { sd_lframe h; sd_str l_digits; sd_list * _t2; sd_str _t3; } sd_L_sd_f_json_jsonEscape;
+static void sd_lr_sd_f_json_jsonEscape(sd_lframe *p) {
+  sd_L_sd_f_json_jsonEscape *L = (sd_L_sd_f_json_jsonEscape *)p;
+  sd_str_release(L->l_digits);
+  sd_list_release(L->_t2);
+  sd_str_release(L->_t3);
+}
+static sd_str sd_f_json_jsonEscape(uint8_t l_c) {
+  sd_L_sd_f_json_jsonEscape L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_f_json_jsonEscape);
+  {
+    if (((l_c) == (((uint8_t)34)))) {
+      SD_LF_LEAVE(L);
+      return SD_STR_LIT("\\\"");
+    } else if (((l_c) == (((uint8_t)92)))) {
+      SD_LF_LEAVE(L);
+      return SD_STR_LIT("\\\\");
+    } else if (((l_c) == (((uint8_t)10)))) {
+      SD_LF_LEAVE(L);
+      return SD_STR_LIT("\\n");
+    } else if (((l_c) == (((uint8_t)9)))) {
+      SD_LF_LEAVE(L);
+      return SD_STR_LIT("\\t");
+    } else if (((l_c) == (((uint8_t)13)))) {
+      SD_LF_LEAVE(L);
+      return SD_STR_LIT("\\r");
+    } else if (((l_c) == (((uint8_t)8)))) {
+      SD_LF_LEAVE(L);
+      return SD_STR_LIT("\\b");
+    } else if (((l_c) == (((uint8_t)12)))) {
+      SD_LF_LEAVE(L);
+      return SD_STR_LIT("\\f");
+    } else {
+      if (((l_c) >= (((uint8_t)128)))) {
+        SD_LF_LEAVE(L);
+        return SD_STR_LIT("\357\277\275");
+      }
+      L.l_digits = SD_STR_LIT("0123456789abcdef");
+      sd_int _t1 = sd_int_shr(sd_byte_to_int(l_c), SD_INT(4));
+      L._t2 = sd_list_new(&sd_type_byte, 2);
+      SD_LIST_PUSH(&L._t2, uint8_t, sd_str_at(L.l_digits, _t1));
+      SD_LIST_PUSH(&L._t2, uint8_t, sd_str_at(L.l_digits, SD_INT_S((SD_SMALL(sd_byte_to_int(l_c)) & ((int64_t)15)))));
+      L._t3 = sd_str_from_bytes(L._t2);
+      sd_str _t4 = sd_str_concat(SD_STR_LIT("\\u00"), L._t3);
+      sd_str _t5 = _t4;
+      SD_LF_LEAVE(L);
+      sd_str_release(L._t3);
+      sd_list_release(L._t2);
+      sd_int_release(_t1);
+      sd_str_release(L.l_digits);
+      return _t5;
+    }
+  }
+  sd_crash("internal error: jsonEscape reached its end without returning");
+}
+
+typedef struct { sd_lframe h; sd_map * l_fields; sd_box * l_field; } sd_L_sd_m_json_Value__get;
+static void sd_lr_sd_m_json_Value__get(sd_lframe *p) {
+  sd_L_sd_m_json_Value__get *L = (sd_L_sd_m_json_Value__get *)p;
+  sd_map_release(L->l_fields);
+  sd_box_release(L->l_field);
+}
+static sd_box * sd_m_json_Value__get(sd_box * l_v, sd_str l_key) {
+  sd_L_sd_m_json_Value__get L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_m_json_Value__get);
+  sd_map * _t1 = sd_m_json_Value__asObject(l_v);
+  L.l_fields = _t1;
+  if (((L.l_fields) == NULL)) {
+    sd_box * _t2 = SD_BOX_REF(sd_k_json_Value__Null);
+    SD_LF_LEAVE(L);
+    sd_map_release(L.l_fields);
+    return _t2;
+  }
+  sd_box * *_t3 = sd_map_get(L.l_fields, &l_key);
+  L.l_field = sd_box_retain((_t3 ? *_t3 : NULL));
+  if (((L.l_field) == NULL)) {
+    sd_box * _t4 = SD_BOX_REF(sd_k_json_Value__Null);
+    SD_LF_LEAVE(L);
+    sd_box_release(L.l_field);
+    sd_map_release(L.l_fields);
+    return _t4;
+  }
+  sd_box * _t5 = L.l_field;
+  SD_LF_LEAVE(L);
+  sd_map_release(L.l_fields);
+  return _t5;
+}
+
+typedef struct { sd_lframe h; sd_list * l_items; } sd_L_sd_m_json_Value__at;
+static void sd_lr_sd_m_json_Value__at(sd_lframe *p) {
+  sd_L_sd_m_json_Value__at *L = (sd_L_sd_m_json_Value__at *)p;
+  sd_list_release(L->l_items);
+}
+static sd_box * sd_m_json_Value__at(sd_box * l_v, sd_int l_i) {
+  sd_L_sd_m_json_Value__at L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_m_json_Value__at);
+  sd_list * _t1 = sd_m_json_Value__asArray(l_v);
+  L.l_items = _t1;
+  if (((((L.l_items) == NULL) || sd_int_lt(l_i, SD_INT(0))) || sd_int_ge(l_i, sd_list_len(L.l_items)))) {
+    sd_box * _t2 = SD_BOX_REF(sd_k_json_Value__Null);
+    SD_LF_LEAVE(L);
+    sd_list_release(L.l_items);
+    return _t2;
+  }
+  sd_box * _t3 = sd_box_retain(SD_LIST_GET(L.l_items, sd_box *, l_i));
+  SD_LF_LEAVE(L);
+  sd_list_release(L.l_items);
+  return _t3;
+}
+
+static sd_str sd_m_json_Value__asString(sd_box * l_v) {
+  {
+    int32_t _t1 = SD_BOX_GET(l_v, sd_E_json_Value).tag;
+    if (_t1 == 3) {
+      sd_str l_s = sd_str_retain(SD_BOX_GET(l_v, sd_E_json_Value).u.c_String.f0);
+      return l_s;
+    } else if (_t1 == 0 || _t1 == 1 || _t1 == 2 || _t1 == 4 || _t1 == 5) {
+      return NULL;
+    }
+  }
+  sd_crash("internal error: asString reached its end without returning");
+}
+
+static sd_opt_float sd_m_json_Value__asFloat(sd_box * l_v) {
+  {
+    int32_t _t1 = SD_BOX_GET(l_v, sd_E_json_Value).tag;
+    if (_t1 == 2) {
+      double l_n = SD_BOX_GET(l_v, sd_E_json_Value).u.c_Number.f0;
+      return ((sd_opt_float){true, l_n});
+    } else if (_t1 == 0 || _t1 == 1 || _t1 == 3 || _t1 == 4 || _t1 == 5) {
+      return ((sd_opt_float){false, 0});
+    }
+  }
+  sd_crash("internal error: asFloat reached its end without returning");
+}
+
+static sd_int sd_m_json_Value__asInt(sd_box * l_v) {
+  sd_opt_float _t1 = sd_m_json_Value__asFloat(l_v);
+  sd_opt_float l_n = _t1;
+  if ((((!(l_n).has) || (((l_n).v) < ((-(9007199254740992.0))))) || (((l_n).v) > (9007199254740992.0)))) {
+    return SD_INT_NULL;
+  }
+  sd_int _t2 = sd_float_to_int((l_n).v);
+  sd_int l_i = _t2;
+  if ((!((sd_int_to_float(l_i)) == ((l_n).v)))) {
+    sd_int _t3 = SD_INT_NULL;
+    sd_int_release(l_i);
+    return _t3;
+  }
+  return l_i;
+}
+
+static sd_opt_bool sd_m_json_Value__asBool(sd_box * l_v) {
+  {
+    int32_t _t1 = SD_BOX_GET(l_v, sd_E_json_Value).tag;
+    if (_t1 == 1) {
+      bool l_b = SD_BOX_GET(l_v, sd_E_json_Value).u.c_Bool.f0;
+      return ((sd_opt_bool){true, l_b});
+    } else if (_t1 == 0 || _t1 == 2 || _t1 == 3 || _t1 == 4 || _t1 == 5) {
+      return ((sd_opt_bool){false, 0});
+    }
+  }
+  sd_crash("internal error: asBool reached its end without returning");
+}
+
+static sd_list * sd_m_json_Value__asArray(sd_box * l_v) {
+  {
+    int32_t _t1 = SD_BOX_GET(l_v, sd_E_json_Value).tag;
+    if (_t1 == 4) {
+      sd_list * l_items = sd_list_retain(SD_BOX_GET(l_v, sd_E_json_Value).u.c_Array.f0);
+      return l_items;
+    } else if (_t1 == 0 || _t1 == 1 || _t1 == 2 || _t1 == 3 || _t1 == 5) {
+      return NULL;
+    }
+  }
+  sd_crash("internal error: asArray reached its end without returning");
+}
+
+static sd_map * sd_m_json_Value__asObject(sd_box * l_v) {
+  {
+    int32_t _t1 = SD_BOX_GET(l_v, sd_E_json_Value).tag;
+    if (_t1 == 5) {
+      sd_map * l_fields = sd_map_retain(SD_BOX_GET(l_v, sd_E_json_Value).u.c_Object.f0);
+      return l_fields;
+    } else if (_t1 == 0 || _t1 == 1 || _t1 == 2 || _t1 == 3 || _t1 == 4) {
+      return NULL;
+    }
+  }
+  sd_crash("internal error: asObject reached its end without returning");
+}
+
+static bool sd_m_json_Value__isNull(sd_box * l_v) {
+  return (SD_BOX_GET(l_v, sd_E_json_Value).tag == 0);
 }
 
 static sd_str sd_f_crypto_sha256(sd_str l_data) { return sd_lib_crypto_sha256(l_data); }

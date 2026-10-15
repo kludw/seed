@@ -1447,7 +1447,7 @@ fn (Gen g) mut fnSig(int f) string {
     if (ps.len() == 0) {
         ps.push("void")
     }
-    return g.linkage() + g.ctype(g.c.fnRet[f]) + " " + g.c.fnCName[f] + "(" + ps.join(", ") + ")"
+    return g.noTailCalls(f) + g.linkage() + g.ctype(g.c.fnRet[f]) + " " + g.c.fnCName[f] + "(" + ps.join(", ") + ")"
 }
 
 // The prototypes of the program's functions (with the fast and general
