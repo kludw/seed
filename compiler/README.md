@@ -199,6 +199,7 @@ never return (`isNoReturn`).
 | `gen_unit.sd` | gen | the program as one C unit per package (for the object cache of build, run and test) |
 | `gen_fast.sd` | gen | small-int versions of pure int functions, and the functions that choose between them and the general ones |
 | `gen_preempt.sd` | gen | where the generated code checks for preemption: the direct call graph's strongly connected components |
+| `gen_acc.sd` | gen | loop accumulators: a fast copy of a loop with raw `int64_t` accumulators that spills into the general copy; each loop iteration's preemption check |
 
 ## Data structures
 
@@ -705,8 +706,15 @@ branch not taken; the runtime sets the word when a goroutine has computed
 for 10 ms while others wait, and the slow path yields if it was this one.
 A goroutine runs for long only in a loop or a recursion, so the points are:
 
-- at the top of every loop iteration, before the condition (`genFor`, and
-  `fastStmt` in fast versions);
+- at the top of every loop iteration, before the condition (`genFor` and
+  `loopCheck`, and `fastStmt` in fast versions). A *counted* loop (its post
+  statement is `i++` or `i--` of an unboxed local that nothing else in the
+  loop assigns) whose body is pure small-int code (arithmetic on unboxed
+  locals and raw accumulators, comparisons, `if`, `break`, `continue`; in a
+  fast version, any body) checks every 1024th iteration instead:
+  `if (SD_UNLIKELY((l_i & 1023) == 0)) SD_PREEMPT();` (`& 2046` on a fast
+  version's word), a test of a register instead of a load, since each
+  iteration takes a short, bounded time;
 - before every call that may close a cycle of calls (`preemptCall`): a
   call of a function or method by name (or a deferred one, in its thunk)
   whose callee is in the caller's own strongly connected component of the
@@ -726,14 +734,45 @@ doubling fib's time. A function checks at most once on each path through
 its top-level statements (`preemptLine`): a check made while a top-level
 statement that runs straight through (an expression, assignment,
 declaration, `++`/`--` or `return`, outside the right side of `&&`/`||`)
-is generated covers the calls after it (`pcSeen`), so `fib(n - 1) + fib(n - 2)` checks once. Direct calls only go
+is generated covers the calls after it (`pcSeen`), so `fib(n - 1) +
+fib(n - 2)` checks once (loops do not count: their first check may be
+masked). Direct calls only go
 from a package to itself or to those it imports, so a package's checks do
 not depend on the packages that import it (the object cache relies on a
 unit's text depending only on its package and its imports). A preemption
 point is not a stop point and crashes nothing, so `SD_PREEMPT` is in
 `safeCallSet`: a value held in a C local across one is not lost (nothing
-unwinds there), and it needs no frame field. The compiler's own C has 513 loop
-points and 570 call and entry points.
+unwinds there), and it needs no frame field. The compiler's own C has
+551 loop checks (2 of them masked) and 626 call and entry checks.
+
+*Loop accumulators* (gen_acc.sd): an int local that a loop only adds to
+(`sum = sum + e1 + e2`, `sum = sum - e`, `sum++`, `sum--`), such as
+`intloop`'s `sum`, grows without bound, so `analyzeInts` cannot unbox it.
+`accVars` finds such locals of a `for` loop: declared before the loop,
+every mention of them in the loop (condition, post statement and body) is
+in an update in *tail position* (`accTail`: the last statement of the body,
+or of a branch of an `if` or a case of a `switch` in tail position), and
+the body is small (at most 64 statements) without `defer`, `spawn`,
+`select` or `group`. Then `genFor` emits a *fast copy* of the loop
+(`genAccLoop`), entered when all the accumulators are small, in which each
+is a raw `int64_t` (`r_<name>_<var>`) and each update is one
+overflow-checked add in place (`genAccUpdate`); the loop's end and `break`
+make them general ints again (`sd_int_from_i64`). An update that
+overflows `int64_t` (or adds a big int) *spills*: it computes the exact
+result as a general int (the old raw value is the wrapped one minus the
+increment, modulo 2^64), releases what `continue` would, and jumps to the
+continue label of the *general copy*, the loop as before, which runs the
+post statement and the following iterations. That is exact because an
+update in tail position is the last thing its iteration does, and no other
+code in the loop reads the accumulator (a `return` or a crash leaves the
+variable holding its small entry value, which owns nothing). In the
+general copy, an empty `asm` that may change the counter (`spillBarrier`)
+follows the continue label: otherwise GCC hoists the post statement `i++`,
+which both copies' paths run next, above the overflow jump, and keeps the
+overflow flag across it with `seto`/`test`/`jne`. tests/full/
+int_accumulators.sd crosses 2^63 and -2^63, the small range both ways,
+starts big, and uses `++`, `--`, `continue`, `break`, `return`, nested
+loops and `switch`.
 
 Per-type helpers (`sd_rt_`/`sd_rl_` retain and release for structs and
 tuples, `sd_eq_` for struct `==`, `sd_less_` sortBy adapters) are requested

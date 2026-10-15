@@ -1,0 +1,706 @@
+// The C generator, continued: loop accumulators and the loops' preemption
+// checks.
+//
+// An int local that a loop only adds to, such as sum in
+//
+//   for (int i = 0; i < n; i++) {
+//       sum = sum + (i * i) % 7 + (i & 3)
+//   }
+//
+// grows without bound, so the interval analysis (gen_int.sd) cannot unbox
+// it, and every update tests its tag and checks for overflow on the word
+// (genIntUpdate). The loop gets a second copy instead, in which sum is a
+// raw int64_t (r_sum_N) updated with one overflow-checked add:
+//
+//   { init
+//     if (SD_LIKELY(((l_sum.w) & 1) == 0)) {     sum is small: the fast copy
+//       int64_t r_sum_N = SD_SMALL(l_sum);
+//       for (;;) { check; if (!(cond)) break;
+//         { ... int64_t _tE = <the rest, in C>;
+//           if (SD_UNLIKELY(__builtin_add_overflow(r_sum_N, _tE, &r_sum_N))) {
+//             l_sum = sd_int_add(<r_sum_N - _tE, modulo 2^64, as an sd_int>,
+//                                SD_INT_S(_tE));
+//             <release what continue would>; goto _cG;      the spill
+//           } }
+//         _cF:; post }
+//       l_sum = sd_int_from_i64(r_sum_N);         the loop ended
+//       goto _dN;
+//     }
+//     for (;;) { check; if (!(cond)) break; { the general body }
+//       _cG:; <spillBarrier>; post }
+//     _dN:; }
+//
+// On x86-64 the update is one add and a jo: intloop's loop is 20
+// instructions, from 27 (24 without its preemption check).
+//
+// When an update overflows int64_t (or adds a big int), the spill makes
+// sum a general int holding the exact result and continues with the next
+// iteration of the general copy, which is the same loop on the general
+// representation. That is exact because an update is only unboxed when it
+// is the last thing its iteration does (accTail: the last statement of the
+// body, or of a branch of an if or a case of a switch that is), so a spill
+// leaves nothing of the iteration undone but the post statement, which the
+// general copy runs; and because the loop does nothing else with sum (no
+// read, no other assignment: accVars), so the stale l_sum is never seen
+// before the loop materialises it. A break or the condition leaves the
+// fast copy into the materialisation; a return or a crash leaves l_sum
+// holding the small value it had (which owns nothing) and never reads it.
+//
+// The loop is only copied when its body is small and has no defer, spawn,
+// select or group (accBodyOk), so the code grows little. Several
+// accumulators may share a loop (if (c) { a++ } else { b++ }).
+//
+// loopCheck chooses each loop iteration's preemption check (gen_preempt.sd):
+// a counted loop (the post statement is i++ or i-- of an unboxed local that
+// nothing else in the loop assigns) whose body is pure small-int code (only
+// arithmetic on unboxed locals and raw accumulators, comparisons, if, break
+// and continue: each iteration takes a bounded, short time) checks every
+// 1024th iteration, with a test of i's low bits instead of a load.
+package main
+
+// An accumulator update: v = v + e1 + e2 ... (rest e1, e2, ...),
+// v = v - e (sub, rest e), v++ or v-- (rest empty); var is -1 for a
+// statement that is not one.
+type AccUpdate struct {
+    int var
+    bool sub
+    []int rest
+}
+
+fn noAccUpdate() AccUpdate {
+    return AccUpdate{var: -1, sub: false, rest: []int{}}
+}
+
+// Whether statement s updates an int local that is not unboxed, the way an
+// accumulator does (see AccUpdate); the rest does not mention it.
+fn (Gen g) accUpdate(int s) AccUpdate {
+    if (s < 0) {
+        return noAccUpdate()
+    }
+    Stmt st = g.c.ast.stmts[s]
+    if (st.kind == StmtKind.IncDec) {
+        int iv = g.accLocal(st.expr)
+        if (iv < 0) {
+            return noAccUpdate()
+        }
+        return AccUpdate{var: iv, sub: !st.inc, rest: []int{}}
+    }
+    if (st.kind != StmtKind.Assign || st.count != 1) {
+        return noAccUpdate()
+    }
+    Target tg = g.c.ast.targets[g.c.ast.at(st.list, 0)]
+    if (tg.kind != TargetKind.Place) {
+        return noAccUpdate()
+    }
+    int v = g.accLocal(tg.expr)
+    Expr rx = g.c.ast.exprs[st.expr]
+    ExprInfo ri = g.c.info[st.expr]
+    if (v < 0 || rx.kind != ExprKind.Binary || ri.ty != tyInt || ri.wrap || ri.narrowed) {
+        return noAccUpdate()
+    }
+    []int rest = []int{}
+    bool sub = false
+    if (rx.op == Tok.Plus) {
+        []int leaves = g.plusLeaves(st.expr, []int{})
+        if (g.intLocal(leaves[0]) != v) {
+            return noAccUpdate()
+        }
+        rest = leaves.slice(1, leaves.len())
+    } else if (rx.op == Tok.Minus && g.intLocal(rx.a) == v) {
+        rest = []int{rx.b}
+        sub = true
+    } else {
+        return noAccUpdate()
+    }
+    for (int i = 0; i < rest.len(); i++) {
+        if (g.mentionsVar(rest[i], v)) {
+            return noAccUpdate()
+        }
+    }
+    return AccUpdate{var: v, sub: sub, rest: rest}
+}
+
+// The int local (declared by a statement, not a parameter) that place e is,
+// when it is not unboxed; else -1.
+fn (Gen g) accLocal(int e) int {
+    int v = g.intLocal(e)
+    if (v < 0 || g.c.vars[v].kind != VarKind.Local || g.isUnboxed(v)) {
+        return -1
+    }
+    return v
+}
+
+// The accumulators of loop st (see above), or none.
+fn (Gen g) accVars(Stmt st) []int {
+    if (st.body < 0 || g.accSize(st.body) > 64 || !g.accBodyOk(st.body)) {
+        return []int{}
+    }
+    []int sites = g.accTail(st.body, []int{})
+    []int vars = []int{}
+    for (int i = 0; i < sites.len(); i++) {
+        int v = g.accUpdate(sites[i]).var
+        if (v >= 0 && !vars.contains(v) && !g.declaredIn(v, st)) {
+            vars.push(v)
+        }
+    }
+    []int out = []int{}
+    for (int k = 0; k < vars.len(); k++) {
+        int v2 = vars[k]
+        // Every mention of v2 in the loop is in one of its tail updates.
+        int want = 0
+        for (int j = 0; j < sites.len(); j++) {
+            AccUpdate u = g.accUpdate(sites[j])
+            if (u.var == v2) {
+                Stmt us = g.c.ast.stmts[sites[j]]
+                if (us.kind == StmtKind.IncDec) {
+                    want = want + 1
+                } else {
+                    want = want + 2
+                }
+            }
+        }
+        int have = g.countVarExpr(st.expr, v2) + g.countVarStmt(st.init, v2) + g.countVarStmt(st.post, v2) + g.countVarBlock(st.body, v2)
+        if (have == want) {
+            out.push(v2)
+        }
+    }
+    return out
+}
+
+// Whether variable v is declared inside loop st (in its init or body).
+fn (Gen g) declaredIn(int v, Stmt st) bool {
+    Pos p = g.c.vars[v].pos
+    Pos end = g.c.ast.blocks[st.body].end
+    if (p.file != st.pos.file) {
+        return false
+    }
+    bool after = p.line > st.pos.line || (p.line == st.pos.line && p.col >= st.pos.col)
+    bool before = p.line < end.line || (p.line == end.line && p.col <= end.col)
+    return after && before
+}
+
+// The statements in tail position in block b (which is in tail position):
+// its last statement, and the tail statements of that statement's branches.
+fn (Gen g) accTail(int b, []int acc) []int {
+    []int out = acc
+    if (b < 0) {
+        return out
+    }
+    Block bl = g.c.ast.blocks[b]
+    if (bl.count == 0) {
+        return out
+    }
+    return g.accTailStmt(g.c.ast.at(bl.list, bl.count - 1), out)
+}
+
+fn (Gen g) accTailStmt(int s, []int acc) []int {
+    []int out = acc
+    if (s < 0) {
+        return out
+    }
+    Stmt st = g.c.ast.stmts[s]
+    switch (st.kind) {
+    case StmtKind.If:
+        out = g.accTail(st.body, out)
+        out = g.accTailStmt(st.elseIf, out)
+        return g.accTail(st.els, out)
+    case StmtKind.Switch:
+        for (int k = 0; k < st.count; k++) {
+            out = g.accTail(g.c.ast.cases[g.c.ast.at(st.list, k)].body, out)
+        }
+        return out
+    case StmtKind.Assign, StmtKind.IncDec:
+        out.push(s)
+        return out
+    case StmtKind.Bad, StmtKind.ExprStmt, StmtKind.For, StmtKind.Select, StmtKind.Return, StmtKind.Defer, StmtKind.Spawn:
+        return out
+    case StmtKind.Break, StmtKind.Continue, StmtKind.Assert, StmtKind.Const:
+        return out
+    }
+}
+
+// The number of statements in block b, nested ones included.
+fn (Gen g) accSize(int b) int {
+    if (b < 0) {
+        return 0
+    }
+    int n = 0
+    Block bl = g.c.ast.blocks[b]
+    for (int i = 0; i < bl.count; i++) {
+        n = n + g.accSizeStmt(g.c.ast.at(bl.list, i))
+    }
+    return n
+}
+
+fn (Gen g) accSizeStmt(int s) int {
+    if (s < 0) {
+        return 0
+    }
+    Stmt st = g.c.ast.stmts[s]
+    int n = 1
+    switch (st.kind) {
+    case StmtKind.If:
+        n = n + g.accSize(st.body) + g.accSizeStmt(st.elseIf) + g.accSize(st.els)
+    case StmtKind.For:
+        n = n + g.accSize(st.body) + g.accSizeStmt(st.init) + g.accSizeStmt(st.post)
+    case StmtKind.Switch, StmtKind.Select:
+        for (int k = 0; k < st.count; k++) {
+            n = n + g.accSize(g.c.ast.cases[g.c.ast.at(st.list, k)].body)
+        }
+    case StmtKind.Bad, StmtKind.ExprStmt, StmtKind.Assign, StmtKind.IncDec, StmtKind.Return, StmtKind.Defer, StmtKind.Spawn:
+        return n
+    case StmtKind.Break, StmtKind.Continue, StmtKind.Assert, StmtKind.Const:
+        return n
+    }
+    return n
+}
+
+// Whether block b may be generated twice: no defer, spawn or select (they
+// make thunks and trampolines), and no group.
+fn (Gen g) accBodyOk(int b) bool {
+    if (b < 0) {
+        return true
+    }
+    Block bl = g.c.ast.blocks[b]
+    for (int i = 0; i < bl.count; i++) {
+        if (!g.accStmtOk(g.c.ast.at(bl.list, i))) {
+            return false
+        }
+    }
+    return true
+}
+
+fn (Gen g) accStmtOk(int s) bool {
+    if (s < 0) {
+        return true
+    }
+    Stmt st = g.c.ast.stmts[s]
+    if (g.hasGroup(st.expr)) {
+        return false
+    }
+    switch (st.kind) {
+    case StmtKind.Defer, StmtKind.Spawn, StmtKind.Select, StmtKind.Bad:
+        return false
+    case StmtKind.If:
+        return g.accBodyOk(st.body) && g.accStmtOk(st.elseIf) && g.accBodyOk(st.els)
+    case StmtKind.For:
+        return g.accStmtOk(st.init) && g.accStmtOk(st.post) && g.accBodyOk(st.body)
+    case StmtKind.Switch:
+        for (int k = 0; k < st.count; k++) {
+            if (!g.accBodyOk(g.c.ast.cases[g.c.ast.at(st.list, k)].body)) {
+                return false
+            }
+        }
+        return true
+    case StmtKind.Return:
+        for (int j = 0; j < st.count; j++) {
+            if (g.hasGroup(g.c.ast.at(st.list, j))) {
+                return false
+            }
+        }
+        return true
+    case StmtKind.ExprStmt, StmtKind.Assign, StmtKind.IncDec, StmtKind.Break, StmtKind.Continue, StmtKind.Assert, StmtKind.Const:
+        return true
+    }
+}
+
+// Whether expression e contains a group.
+fn (Gen g) hasGroup(int e) bool {
+    if (e < 0) {
+        return false
+    }
+    Expr x = g.c.ast.exprs[e]
+    if (x.kind == ExprKind.Group) {
+        return true
+    }
+    if (g.hasGroup(x.a) || g.hasGroup(x.b)) {
+        return true
+    }
+    for (int k = 0; k < x.count; k++) {
+        if (g.hasGroup(g.c.ast.at(x.list, k))) {
+            return true
+        }
+    }
+    return false
+}
+
+// The number of mentions of variable v in an expression, statement or
+// block.
+fn (Gen g) countVarExpr(int e, int v) int {
+    if (e < 0) {
+        return 0
+    }
+    Expr x = g.c.ast.exprs[e]
+    int n = 0
+    if (x.kind == ExprKind.Ident && g.c.info[e].res == Res.Local && g.c.info[e].ref == v) {
+        n = 1
+    }
+    if (x.kind == ExprKind.Group) {
+        return n + g.countVarBlock(x.block, v)
+    }
+    n = n + g.countVarExpr(x.a, v) + g.countVarExpr(x.b, v)
+    for (int k = 0; k < x.count; k++) {
+        n = n + g.countVarExpr(g.c.ast.at(x.list, k), v)
+    }
+    return n
+}
+
+fn (Gen g) countVarBlock(int b, int v) int {
+    if (b < 0) {
+        return 0
+    }
+    int n = 0
+    Block bl = g.c.ast.blocks[b]
+    for (int i = 0; i < bl.count; i++) {
+        n = n + g.countVarStmt(g.c.ast.at(bl.list, i), v)
+    }
+    return n
+}
+
+fn (Gen g) countVarStmt(int s, int v) int {
+    if (s < 0) {
+        return 0
+    }
+    Stmt st = g.c.ast.stmts[s]
+    int n = g.countVarExpr(st.expr, v)
+    switch (st.kind) {
+    case StmtKind.Assign:
+        for (int i = 0; i < st.count; i++) {
+            n = n + g.countVarExpr(g.c.ast.targets[g.c.ast.at(st.list, i)].expr, v)
+        }
+    case StmtKind.Return:
+        for (int j = 0; j < st.count; j++) {
+            n = n + g.countVarExpr(g.c.ast.at(st.list, j), v)
+        }
+    case StmtKind.If:
+        n = n + g.countVarBlock(st.body, v) + g.countVarStmt(st.elseIf, v) + g.countVarBlock(st.els, v)
+    case StmtKind.For:
+        n = n + g.countVarStmt(st.init, v) + g.countVarBlock(st.body, v) + g.countVarStmt(st.post, v)
+    case StmtKind.Switch, StmtKind.Select:
+        for (int k = 0; k < st.count; k++) {
+            Case cs = g.c.ast.cases[g.c.ast.at(st.list, k)]
+            for (int l = 0; l < cs.labelCount; l++) {
+                n = n + g.countVarExpr(g.c.ast.labels[g.c.ast.at(cs.labels, l)].expr, v)
+            }
+            n = n + g.countVarStmt(cs.comm, v) + g.countVarBlock(cs.body, v)
+        }
+    case StmtKind.Bad, StmtKind.ExprStmt, StmtKind.IncDec, StmtKind.Defer, StmtKind.Spawn:
+        return n
+    case StmtKind.Break, StmtKind.Continue, StmtKind.Assert, StmtKind.Const:
+        return n
+    }
+    return n
+}
+
+// ---- generating ----
+
+// The C name of accumulator v's raw value in the fast copy.
+fn (Gen g) rawName(int v) string {
+    return "r_" + g.c.vars[v].name + "_" + v.string()
+}
+
+// The fast copy of loop st with accumulators acc (see above): entered when
+// they are all small, it leaves to label _dN (done) when the loop ends and
+// to the general copy's continue label _cN (general) when an update
+// spills.
+fn (Gen g) mut genAccLoop(Stmt st, []int acc, int general, int done) {
+    []string words = []string{}
+    for (int i = 0; i < acc.len(); i++) {
+        words.push(g.lname(acc[i]) + ".w")
+    }
+    g.emit("if (SD_LIKELY(((" + words.join(" | ") + ") & 1) == 0)) {")
+    g.indent++
+    for (int j = 0; j < acc.len(); j++) {
+        g.emit("int64_t " + g.rawName(acc[j]) + " = SD_SMALL(" + g.lname(acc[j]) + ");")
+    }
+    g.ntmp++
+    g.genLoopCopy(st, g.ntmp, acc, general, false)
+    g.emitMaterialise(acc, -1)
+    g.emit("goto _d" + done.string() + ";")
+    g.indent--
+    g.emit("}")
+}
+
+// Makes the accumulators but skip (-1: none) general ints again, from their
+// raw values. Their sd_int variables held small ints, which own nothing.
+fn (Gen g) mut emitMaterialise([]int acc, int skip) {
+    for (int i = 0; i < acc.len(); i++) {
+        if (acc[i] != skip) {
+            g.emit(g.lname(acc[i]) + " = sd_int_from_i64(" + g.rawName(acc[i]) + ");")
+        }
+    }
+}
+
+// Statement s in the fast copy of a loop, when it updates one of the
+// loop's accumulators: the raw update, and the spill (see above).
+fn (Gen g) mut genAccUpdate(int s) bool {
+    if (g.loops.len() == 0) {
+        return false
+    }
+    LoopCtx lc = g.loops[g.loops.len() - 1]
+    if (lc.acc.len() == 0) {
+        return false
+    }
+    AccUpdate u = g.accUpdate(s)
+    if (u.var < 0 || !lc.acc.contains(u.var)) {
+        return false
+    }
+    string op = "add"
+    if (u.sub) {
+        op = "sub"
+    }
+    string r = g.rawName(u.var)
+    // The rest: raw (in C, when it is made of simple small operands whose
+    // total is small) or a general sd_int b.
+    string raw = ""
+    string b = ""
+    if (u.rest.len() == 0) {
+        raw = "((int64_t)1)"
+    } else {
+        bool simple = true
+        IntRange total = knownRange(0, 0)
+        for (int i = 0; i < u.rest.len(); i++) {
+            if (!g.isSimpleSmall(u.rest[i])) {
+                simple = false
+            } else {
+                total = binRange(Tok.Plus, total, g.smallRange(u.rest[i]))
+            }
+        }
+        if (simple && isSmallRange(total)) {
+            []string terms = []string{}
+            for (int k = 0; k < u.rest.len(); k++) {
+                terms.push(smallOf(g.gexpr(u.rest[k])))
+            }
+            raw = g.newTmp()
+            g.emit("int64_t " + raw + " = " + terms.join(" + ") + ";")
+        } else {
+            b = g.sumOf(u.rest)
+            if (!isIdent(b) && !b.startsWith("SD_INT(")) {
+                b = g.alias(tyInt, b)
+            }
+        }
+    }
+    string old = r
+    string t = ""
+    if (raw != "") {
+        // The add writes the raw value in place (one add and a jump on
+        // overflow); after an overflow it holds the result modulo 2^64, from
+        // which the old value comes back exactly.
+        g.emit("if (SD_UNLIKELY(__builtin_" + op + "_overflow(" + r + ", " + raw + ", &" + r + "))) {")
+        string undo = " - "
+        if (u.sub) {
+            undo = " + "
+        }
+        old = "(int64_t)((uint64_t)" + r + undo + "(uint64_t)" + raw + ")"
+        b = "SD_INT_S(" + raw + ")"
+    } else {
+        t = g.newTmp()
+        g.emit("int64_t " + t + "; if (SD_UNLIKELY((" + b + ".w & 1) != 0 || __builtin_" + op + "_overflow(" + r + ", " + b + ".w >> 1, &" + t + "))) {")
+    }
+    g.indent++
+    string a = g.newTmp()
+    g.emit("sd_int " + a + " = sd_int_from_i64(" + old + ");")
+    g.emitMaterialise(lc.acc, u.var)
+    g.emit(g.lname(u.var) + " = sd_int_" + op + "(" + a + ", " + b + ");")
+    g.emit("sd_int_release(" + a + ");")
+    g.releaseAbove(lc.mark, []string{})
+    g.emit("goto _c" + lc.accTo.string() + ";")
+    g.indent--
+    g.emit("}")
+    if (t != "") {
+        g.emit(r + " = " + t + ";")
+    }
+    return true
+}
+
+// The line after the general copy's continue label, where the spills of
+// the fast copy arrive: when the post statement is i++ (or i--) on an
+// unboxed counter, an empty asm that may change i. Both the fast copy's
+// next iteration and a spill then run the post statement, and GCC hoists
+// it above the overflow test (code hoisting), which then keeps the
+// overflow flag in a register across it (seto, test, jne instead of jo);
+// with i changed by the asm on the spill's path, the two increments are
+// not the same computation. "" otherwise.
+fn (Gen g) spillBarrier(Stmt st) string {
+    if (st.post < 0) {
+        return ""
+    }
+    Stmt post = g.c.ast.stmts[st.post]
+    int v = g.intLocal(post.expr)
+    if (post.kind != StmtKind.IncDec || v < 0 || !g.isUnboxed(v)) {
+        return ""
+    }
+    return "__asm__ __volatile__(\"\" : \"+r\"(l_" + g.c.vars[v].name + "));"
+}
+
+// ---- the preemption check of a loop iteration ----
+
+// The check at the top of each iteration of loop st, in a copy whose raw
+// accumulators are acc (see above).
+fn (Gen g) loopCheck(Stmt st, []int acc) string {
+    int i = g.countedVar(st)
+    if (i >= 0 && g.isUnboxed(i) && (st.expr < 0 || g.pureCond(st.expr)) && g.pureBlock(st.body, acc)) {
+        return "if (SD_UNLIKELY((l_" + g.c.vars[i].name + " & 1023) == 0)) SD_PREEMPT();"
+    }
+    return "SD_PREEMPT();"
+}
+
+// The counter of a counted loop: the int local its post statement
+// increments or decrements, when neither the condition nor the body assigns
+// it (so it changes by one per iteration); else -1.
+fn (Gen g) countedVar(Stmt st) int {
+    if (st.post < 0) {
+        return -1
+    }
+    Stmt post = g.c.ast.stmts[st.post]
+    if (post.kind != StmtKind.IncDec) {
+        return -1
+    }
+    int v = g.intLocal(post.expr)
+    // Only a group's statements can assign a local in an expression.
+    if (v < 0 || g.hasGroup(st.expr) || g.blockAssigns(st.body, v)) {
+        return -1
+    }
+    return v
+}
+
+// Whether block b assigns (or increments, or decrements) local v.
+fn (Gen g) blockAssigns(int b, int v) bool {
+    if (b < 0) {
+        return false
+    }
+    Block bl = g.c.ast.blocks[b]
+    for (int i = 0; i < bl.count; i++) {
+        if (g.stmtAssigns(g.c.ast.at(bl.list, i), v)) {
+            return true
+        }
+    }
+    return false
+}
+
+fn (Gen g) stmtAssigns(int s, int v) bool {
+    if (s < 0) {
+        return false
+    }
+    Stmt st = g.c.ast.stmts[s]
+    if (g.hasGroup(st.expr)) {
+        return true
+    }
+    switch (st.kind) {
+    case StmtKind.Assign:
+        for (int i = 0; i < st.count; i++) {
+            Target tg = g.c.ast.targets[g.c.ast.at(st.list, i)]
+            if (tg.kind == TargetKind.Place && g.intLocal(tg.expr) == v) {
+                return true
+            }
+        }
+        return false
+    case StmtKind.IncDec:
+        return g.intLocal(st.expr) == v
+    case StmtKind.If:
+        return g.blockAssigns(st.body, v) || g.stmtAssigns(st.elseIf, v) || g.blockAssigns(st.els, v)
+    case StmtKind.For:
+        return g.stmtAssigns(st.init, v) || g.blockAssigns(st.body, v) || g.stmtAssigns(st.post, v)
+    case StmtKind.Switch, StmtKind.Select:
+        for (int k = 0; k < st.count; k++) {
+            Case cs = g.c.ast.cases[g.c.ast.at(st.list, k)]
+            if (g.stmtAssigns(cs.comm, v) || g.blockAssigns(cs.body, v)) {
+                return true
+            }
+        }
+        return false
+    case StmtKind.Return:
+        for (int j = 0; j < st.count; j++) {
+            if (g.hasGroup(g.c.ast.at(st.list, j))) {
+                return true
+            }
+        }
+        return false
+    case StmtKind.Bad, StmtKind.ExprStmt, StmtKind.Defer, StmtKind.Spawn:
+        return false
+    case StmtKind.Break, StmtKind.Continue, StmtKind.Assert, StmtKind.Const:
+        return false
+    }
+}
+
+// Whether block b is pure small-int code (see above), where the locals in
+// acc are raw accumulators.
+fn (Gen g) pureBlock(int b, []int acc) bool {
+    if (b < 0) {
+        return true
+    }
+    Block bl = g.c.ast.blocks[b]
+    for (int i = 0; i < bl.count; i++) {
+        if (!g.pureStmt(g.c.ast.at(bl.list, i), acc)) {
+            return false
+        }
+    }
+    return true
+}
+
+fn (Gen g) pureStmt(int s, []int acc) bool {
+    if (s < 0) {
+        return true
+    }
+    Stmt st = g.c.ast.stmts[s]
+    AccUpdate u = g.accUpdate(s)
+    if (u.var >= 0 && acc.contains(u.var)) {
+        for (int i = 0; i < u.rest.len(); i++) {
+            if (!g.isSimpleSmall(u.rest[i])) {
+                return false
+            }
+        }
+        return true
+    }
+    switch (st.kind) {
+    case StmtKind.Assign:
+        if (st.count != 1 || !g.isSimpleSmall(st.expr)) {
+            return false
+        }
+        int ti = g.c.ast.at(st.list, 0)
+        Target tg = g.c.ast.targets[ti]
+        if (tg.kind == TargetKind.Decl) {
+            int dv = g.c.targetVar[ti]
+            return dv >= 0 && g.isUnboxed(dv)
+        }
+        int pv = g.intLocal(tg.expr)
+        return tg.kind == TargetKind.Place && pv >= 0 && g.isUnboxed(pv)
+    case StmtKind.Const:
+        int cv = g.c.stmtVar[s]
+        return cv >= 0 && g.isUnboxed(cv) && g.isSimpleSmall(st.expr)
+    case StmtKind.IncDec:
+        int iv = g.intLocal(st.expr)
+        return iv >= 0 && g.isUnboxed(iv)
+    case StmtKind.If:
+        return g.pureCond(st.expr) && g.pureBlock(st.body, acc) && g.pureStmt(st.elseIf, acc) && g.pureBlock(st.els, acc)
+    case StmtKind.Break, StmtKind.Continue:
+        return true
+    case StmtKind.Bad, StmtKind.ExprStmt, StmtKind.For, StmtKind.Switch, StmtKind.Select, StmtKind.Return, StmtKind.Defer:
+        return false
+    case StmtKind.Spawn, StmtKind.Assert:
+        return false
+    }
+}
+
+// Whether condition e is a comparison of simple small ints, or a boolean
+// combination of such comparisons and bool literals.
+fn (Gen g) pureCond(int e) bool {
+    Expr x = g.c.ast.exprs[e]
+    ExprInfo i = g.c.info[e]
+    if (i.ty != tyBool || i.wrap || i.narrowed) {
+        return false
+    }
+    if (x.kind == ExprKind.BoolLit) {
+        return true
+    }
+    if (x.kind == ExprKind.Unary) {
+        return x.op == Tok.Not && g.pureCond(x.a)
+    }
+    if (x.kind != ExprKind.Binary) {
+        return false
+    }
+    if (x.op == Tok.AndAnd || x.op == Tok.OrOr) {
+        return g.pureCond(x.a) && g.pureCond(x.b)
+    }
+    return isComparison(x.op) && g.typeOf(x.a) == tyInt && g.isSimpleSmall(x.a) && g.isSimpleSmall(x.b)
+}

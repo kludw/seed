@@ -411,8 +411,9 @@ the dividend is not negative (GCC already proves it and emits the same
 code). Not done: intervals for parameters and fields (a parameter can hold
 any int; bounding it needs every call site, which exported functions and
 function values do not have; the fast versions check the arguments at run
-time instead), and unboxing an unbounded accumulator like `sum` (it needs
-a second copy of the loop to continue in when it overflows).
+time instead). Unboxing an unbounded accumulator like `sum`, which needs a
+second copy of the loop to continue in when it overflows, came later
+(section "Loop accumulators").
 
 Interleaved runs (best of 9) against the code before these changes, and Go
 on the same machine:
@@ -536,6 +537,94 @@ with the checks, and 0.58 s and 0.64 s with the assembler told to avoid
 the boundaries (GNU as's `-mbranches-within-32B-boundaries`, which
 `seed build` does not pass). The instruction counts above do not depend on
 it.
+
+## Loop accumulators
+
+`intloop` was 1.6x Go on Linux x86_64: its counter is unboxed (the interval
+analysis bounds it), but `sum` grows without bound, so each iteration
+tested its tag, added the words with an overflow check, and shifted the
+small part into a word first; with the preemption check, the loop was 27
+instructions against Go's 17. Now a loop whose int local is only ever
+updated by `sum = sum + ...`, `sum = sum - ...`, `sum++` or `sum--` as the
+last thing an iteration does gets a fast copy in which `sum` is a raw
+`int64_t` (compiler/README.md, "Loop accumulators"):
+
+```c
+for (;;) {
+  if (SD_UNLIKELY((l_i & 1023) == 0)) SD_PREEMPT();
+  if (!((l_i < l_n))) break;
+  {
+    int64_t _t4 = ((l_i * l_i) % ((int64_t)7)) + (l_i & ((int64_t)3));
+    if (SD_UNLIKELY(__builtin_add_overflow(r_sum_2, _t4, &r_sum_2))) {
+      sd_int _t6 = sd_int_from_i64((int64_t)((uint64_t)r_sum_2 - (uint64_t)_t4));
+      l_sum = sd_int_add(_t6, SD_INT_S(_t4));    /* exact, then on in the */
+      sd_int_release(_t6);                       /* general copy of the loop */
+      goto _c2;
+    }
+  }
+  _c3:;
+  l_i++;
+}
+l_sum = sd_int_from_i64(r_sum_2);
+```
+
+On overflow (past 2^63, or adding a big int) the update computes the exact
+result as a general int and continues with the next iteration in the
+general copy of the loop, so results beyond 64 bits are the same as
+before (tests/full/int_accumulators.sd, and 100 random programs of 25
+accumulator loops each, starting near the edges of the small and 64-bit
+ranges, compared with the previous compiler's output: 80 at `-O1`, 20 at
+`-O2`). Three details made the loop 20 instructions:
+
+- **The add in place.** After an overflow, `__builtin_add_overflow` leaves
+  the result modulo 2^64 in `r_sum_2`, from which the old value comes back
+  by a subtraction; keeping the old value apart cost two moves per
+  iteration.
+- **No hoisting across the overflow jump.** Both the fast path and the
+  spill's path run `i++` next (in the fast copy, and after the general
+  copy's continue label), so GCC hoisted it above the jump and kept the
+  overflow flag with `seto`, `test`, `jne`; an empty `asm` that may change
+  `i` after the general copy's label stops it (0.61 s to 0.57 s on its
+  own, built with the JCC mitigation below).
+- **A cheaper preemption check.** A counted loop (`i++` on an unboxed
+  counter nothing else assigns) whose body is only small-int arithmetic,
+  comparisons and `if` checks every 1024th iteration, with
+  `test $0x3ff, %ebx` instead of a load: each iteration takes a short,
+  bounded time, so a request waits at most 1024 of them.
+
+| `intloop` | Instructions | Mean time (perf stat, 20 runs) | Built with the JCC mitigation |
+|---|---|---|---|
+| before preemption | 7,200 M (24 per iteration) | 0.680 s | 0.59 s |
+| with preemption | 8,100 M (27) | 0.781 s | 0.62 s |
+| with loop accumulators | 6,301 M (21) | 0.516 s | 0.51 s |
+| Go | (17 per iteration) | 0.41 s | |
+
+`bench/run.sh` (best of 5) now gives `intloop` 0.486 s against Go's
+0.409 s: 1.2x (was 1.6x). What is left is the overflow jump on `sum` and
+the sign correction of `% 7`, which GCC keeps because it cannot see that
+`i * i` is not negative (Go does). The other benchmarks have no such loop
+in their hot paths except `strings`, whose `if (s.contains("99")) { n++ }`
+loop gets a fast copy and the same instructions within 0.2%.
+
+Code size: the compiler has 11 such loops; its binary grew by 3.4%
+(1.73 MB to 1.79 MB) and compiling itself takes 0.5% more instructions
+(the analysis included). Of the full benchmark set, against the code
+before both changes (mean of 20 runs; instructions where measured):
+
+| Benchmark | Before | Preemption | Accumulators too | Instructions, final / before |
+|---|---|---|---|---|
+| `fib` | 0.443 | 0.438 | 0.461 | 0.985 (same C as with preemption alone) |
+| `intloop` | 0.680 | 0.782 | 0.516 | 0.875 |
+| `json` | 1.095 | 1.087 | 1.079 | 1.029 |
+| `maps` | 1.140 | 1.138 | 1.146 | 1.004 |
+| `pingpong` | 0.139 | 0.142 | 0.138 | |
+| `sort` | 0.597 | 0.591 | 0.588 | 1.003 |
+| `spawn` | 0.107 | 0.106 | 0.091 | |
+| `strings` | 0.733 | 0.762 | 0.796 | 1.009 |
+
+`fib`'s C is the same with and without the accumulators (only the
+packages' C around it changed), so its 5% is layout, as is most of the
+`strings` and `spawn` movement.
 
 ## Build speed
 

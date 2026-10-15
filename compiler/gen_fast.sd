@@ -400,7 +400,14 @@ fn (Gen g) mut fastStmt(int s) {
         int label = g.ntmp
         g.emit("for (;;) {")
         g.indent++
-        g.emit("SD_PREEMPT();")
+        // A counted loop checks every 1024th iteration (its counter's word
+        // is 2i): each iteration takes a bounded time (gen_acc.sd).
+        int cv = g.countedVar(st)
+        if (cv >= 0) {
+            g.emit("if (SD_UNLIKELY((l_" + g.c.vars[cv].name + " & 2046) == 0)) SD_PREEMPT();")
+        } else {
+            g.emit("SD_PREEMPT();")
+        }
         if (st.expr >= 0) {
             string fc = g.fastExpr(st.expr)
             g.emit("if (!(" + fc + ")) break;")

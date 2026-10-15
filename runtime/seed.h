@@ -668,8 +668,8 @@ void sd_block_begin(void);
 void sd_block_end(void);
 
 /* Preemption points (runtime/README.md, "The scheduler"): the compiler puts
- * SD_PREEMPT() at the top of every loop iteration and on entry to every
- * function that may recurse. sd_preempt_req_[0] is not zero while the
+ * SD_PREEMPT() at the top of every loop iteration and before every call
+ * that may recurse. sd_preempt_req_[0] is not zero while the
  * scheduler asks some goroutine to yield; then sd_preempt_ yields the
  * caller if it is the one. A preemption point is not a stop point: the
  * goroutine is neither cancelled nor unwound there (it may continue on

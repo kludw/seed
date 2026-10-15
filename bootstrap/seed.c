@@ -669,8 +669,8 @@ void sd_block_begin(void);
 void sd_block_end(void);
 
 /* Preemption points (runtime/README.md, "The scheduler"): the compiler puts
- * SD_PREEMPT() at the top of every loop iteration and on entry to every
- * function that may recurse. sd_preempt_req_[0] is not zero while the
+ * SD_PREEMPT() at the top of every loop iteration and before every call
+ * that may recurse. sd_preempt_req_[0] is not zero while the
  * scheduler asks some goroutine to yield; then sd_preempt_ yields the
  * caller if it is the one. A preemption point is not a stop point: the
  * goroutine is neither cancelled nor unwound there (it may continue on
@@ -4568,10 +4568,10 @@ static sd_task *globrunq_get_locked(sd_p *p, int max) {
 /* ------------------------------------------------------- preemption
  *
  * Generated code checks sd_preempt_req_[0] at the top of every loop
- * iteration and on entry to every function that may recurse (SD_PREEMPT in
- * seed.h): one relaxed load and a branch not taken. It counts the Ps whose
- * goroutine sysmon asked to yield (p->preempt): sysmon asks when a P has run
- * the same goroutine for SD_PREEMPT_NS while other goroutines wait to run.
+ * iteration and before every call that may recurse (SD_PREEMPT in seed.h):
+ * one relaxed load and a branch not taken. It counts the Ps whose goroutine
+ * sysmon asked to yield (p->preempt): sysmon asks when a P has run the same
+ * goroutine for SD_PREEMPT_NS while other goroutines wait to run.
  * While it is not zero, every check calls sd_preempt_, which yields the
  * calling goroutine if its own P was asked (to the global queue's tail, as
  * Go does) and returns at once otherwise. A request is withdrawn when the P
@@ -7520,6 +7520,7 @@ typedef struct sd_E_Tok sd_E_Tok;
 typedef struct sd_E_TopKind sd_E_TopKind;
 typedef struct sd_E_TypeExprKind sd_E_TypeExprKind;
 typedef struct sd_E_VarKind sd_E_VarKind;
+typedef struct sd_S_AccUpdate sd_S_AccUpdate;
 typedef struct sd_S_Ast sd_S_Ast;
 typedef struct sd_S_Block sd_S_Block;
 typedef struct sd_S_BorrowCand sd_S_BorrowCand;
@@ -7589,6 +7590,7 @@ typedef struct sd_T_T2ie sd_T_T2ie;
 typedef struct sd_T_T2se sd_T_T2se;
 typedef struct sd_T_T3sie sd_T_T3sie;
 typedef sd_str (*sd_fn_F0_s)(void);
+struct sd_S_AccUpdate { sd_int f_var; bool f_sub; sd_list * f_rest; };
 struct sd_S_Ast { sd_list * f_files; sd_list * f_exprs; sd_list * f_stmts; sd_list * f_blocks; sd_list * f_targets; sd_list * f_cases; sd_list * f_labels; sd_list * f_typeExprs; sd_list * f_params; sd_list * f_fns; sd_list * f_typeDecls; sd_list * f_enumCases; sd_list * f_methodSigs; sd_list * f_consts; sd_list * f_tests; sd_list * f_imports; sd_list * f_pkgs; sd_list * f_tops; sd_list * f_comments; sd_list * f_lists; };
 struct sd_S_BorrowCand { sd_int f_var; sd_int f_root; sd_str f_path; sd_int f_start; sd_int f_end; };
 struct sd_S_Build { sd_list * f_files; sd_str f_dir; sd_str f_projectRoot; sd_str f_name; };
@@ -7604,7 +7606,7 @@ struct sd_S_Impl { sd_int f_decl; sd_int f_iface; };
 struct sd_S_IntEvent { sd_int f_var; sd_int f_expr; bool f_top; sd_int f_bound; bool f_inc; bool f_incl; };
 struct sd_S_IntRange { sd_int f_state; sd_int f_lo; sd_int f_hi; };
 struct sd_S_Lexer { sd_int f_file; sd_str f_src; sd_int f_i; sd_int f_line; sd_int f_col; sd_box * f_last; bool f_lineHasToken; sd_list * f_tokens; sd_list * f_comments; sd_list * f_errors; };
-struct sd_S_LoopCtx { sd_int f_mark; sd_int f_label; };
+struct sd_S_LoopCtx { sd_int f_mark; sd_int f_label; sd_list * f_acc; sd_int f_accTo; };
 struct sd_S_MutEvent { sd_int f_root; sd_str f_path; sd_int f_method; };
 struct sd_S_Narrow { sd_str f_key; bool f_dead; };
 struct sd_S_Package { sd_str f_path; sd_str f_name; sd_str f_dir; sd_str f_cprefix; bool f_isLib; };
@@ -7673,6 +7675,7 @@ struct sd_T_T2ib { sd_int r0; bool r1; };
 struct sd_T_T2ie { sd_int r0; sd_err r1; };
 struct sd_T_T2se { sd_str r0; sd_err r1; };
 struct sd_T_T3sie { sd_str r0; sd_int r1; sd_err r2; };
+static const sd_type sd_D_AccUpdate;
 static const sd_type sd_D_Ast;
 static const sd_type sd_D_Block;
 static const sd_type sd_D_BorrowCand;
@@ -7744,6 +7747,8 @@ static const sd_type sd_D_VarKind;
 static const sd_type sd_D_errors_TextError;
 static const sd_type sd_D_fs_File;
 static const sd_type sd_D_fs_Info;
+static const sd_field sd_F_AccUpdate[] = {SD_FIELD(sd_S_AccUpdate, f_var, &sd_type_int), SD_FIELD(sd_S_AccUpdate, f_sub, &sd_type_bool), SD_FIELD(sd_S_AccUpdate, f_rest, &sd_type_list)};
+static const sd_type sd_D_AccUpdate = SD_STRUCT_TYPE("AccUpdate", sd_S_AccUpdate, sd_F_AccUpdate);
 static const sd_field sd_F_Ast[] = {SD_FIELD(sd_S_Ast, f_files, &sd_type_list), SD_FIELD(sd_S_Ast, f_exprs, &sd_type_list), SD_FIELD(sd_S_Ast, f_stmts, &sd_type_list), SD_FIELD(sd_S_Ast, f_blocks, &sd_type_list), SD_FIELD(sd_S_Ast, f_targets, &sd_type_list), SD_FIELD(sd_S_Ast, f_cases, &sd_type_list), SD_FIELD(sd_S_Ast, f_labels, &sd_type_list), SD_FIELD(sd_S_Ast, f_typeExprs, &sd_type_list), SD_FIELD(sd_S_Ast, f_params, &sd_type_list), SD_FIELD(sd_S_Ast, f_fns, &sd_type_list), SD_FIELD(sd_S_Ast, f_typeDecls, &sd_type_list), SD_FIELD(sd_S_Ast, f_enumCases, &sd_type_list), SD_FIELD(sd_S_Ast, f_methodSigs, &sd_type_list), SD_FIELD(sd_S_Ast, f_consts, &sd_type_list), SD_FIELD(sd_S_Ast, f_tests, &sd_type_list), SD_FIELD(sd_S_Ast, f_imports, &sd_type_list), SD_FIELD(sd_S_Ast, f_pkgs, &sd_type_list), SD_FIELD(sd_S_Ast, f_tops, &sd_type_list), SD_FIELD(sd_S_Ast, f_comments, &sd_type_list), SD_FIELD(sd_S_Ast, f_lists, &sd_type_list)};
 static const sd_type sd_D_Ast = SD_STRUCT_TYPE("Ast", sd_S_Ast, sd_F_Ast);
 static const sd_field sd_F_Block[] = {SD_FIELD(sd_S_Block, f_pos, &sd_D_Pos), SD_FIELD(sd_S_Block, f_end, &sd_D_Pos), SD_FIELD(sd_S_Block, f_list, &sd_type_int), SD_FIELD(sd_S_Block, f_count, &sd_type_int)};
@@ -7822,7 +7827,7 @@ static const sd_field sd_F_Lexer[] = {SD_FIELD(sd_S_Lexer, f_file, &sd_type_int)
 static const sd_type sd_D_Lexer = SD_STRUCT_TYPE("Lexer", sd_S_Lexer, sd_F_Lexer);
 static const sd_field sd_F_Loader[] = {SD_FIELD(sd_S_Loader, f_p, &sd_D_Parser), SD_FIELD(sd_S_Loader, f_seedRoot, &sd_type_str), SD_FIELD(sd_S_Loader, f_projectRoot, &sd_type_str), SD_FIELD(sd_S_Loader, f_libDir, &sd_type_str), SD_FIELD(sd_S_Loader, f_byDir, &sd_type_map), SD_FIELD(sd_S_Loader, f_unformatted, &sd_type_list)};
 static const sd_type sd_D_Loader = SD_STRUCT_TYPE("Loader", sd_S_Loader, sd_F_Loader);
-static const sd_field sd_F_LoopCtx[] = {SD_FIELD(sd_S_LoopCtx, f_mark, &sd_type_int), SD_FIELD(sd_S_LoopCtx, f_label, &sd_type_int)};
+static const sd_field sd_F_LoopCtx[] = {SD_FIELD(sd_S_LoopCtx, f_mark, &sd_type_int), SD_FIELD(sd_S_LoopCtx, f_label, &sd_type_int), SD_FIELD(sd_S_LoopCtx, f_acc, &sd_type_list), SD_FIELD(sd_S_LoopCtx, f_accTo, &sd_type_int)};
 static const sd_type sd_D_LoopCtx = SD_STRUCT_TYPE("LoopCtx", sd_S_LoopCtx, sd_F_LoopCtx);
 static const sd_field sd_F_MethodSig[] = {SD_FIELD(sd_S_MethodSig, f_pos, &sd_D_Pos), SD_FIELD(sd_S_MethodSig, f_isMut, &sd_type_bool), SD_FIELD(sd_S_MethodSig, f_name, &sd_type_str), SD_FIELD(sd_S_MethodSig, f_params, &sd_type_int), SD_FIELD(sd_S_MethodSig, f_paramCount, &sd_type_int), SD_FIELD(sd_S_MethodSig, f_results, &sd_type_int), SD_FIELD(sd_S_MethodSig, f_resultCount, &sd_type_int)};
 static const sd_type sd_D_MethodSig = SD_STRUCT_TYPE("MethodSig", sd_S_MethodSig, sd_F_MethodSig);
@@ -8262,6 +8267,7 @@ static sd_S_Stmt sd_f_newStmt(sd_box * l_kind, sd_S_Pos l_pos);
 static sd_S_Suggest sd_f_newSuggest(sd_str l_name);
 static sd_S_TypeExpr sd_f_newTypeExpr(sd_box * l_kind, sd_S_Pos l_pos);
 static sd_S_Types sd_f_newTypes(void);
+static sd_S_AccUpdate sd_f_noAccUpdate(void);
 static sd_S_IntRange sd_f_noRange(void);
 static sd_str sd_f_nullMark(sd_str l_v);
 static void sd_f_os_crash(sd_str l_message);
@@ -8537,6 +8543,15 @@ static sd_int sd_m_Formatter__skipBaseType(sd_S_Formatter l_f, sd_int l_i);
 static bool sd_m_Formatter__statementFrame(sd_S_Formatter l_f, sd_int l_s);
 static bool sd_m_Formatter__structural(sd_S_Formatter l_f, sd_int l_s);
 static bool sd_m_Formatter__topBlank(sd_S_Formatter l_f, sd_int l_i, sd_int l_line);
+static bool sd_m_Gen__accBodyOk(sd_S_Gen l_g, sd_int l_b);
+static sd_int sd_m_Gen__accLocal(sd_S_Gen l_g, sd_int l_e);
+static sd_int sd_m_Gen__accSize(sd_S_Gen l_g, sd_int l_b);
+static sd_int sd_m_Gen__accSizeStmt(sd_S_Gen l_g, sd_int l_s);
+static bool sd_m_Gen__accStmtOk(sd_S_Gen l_g, sd_int l_s);
+static sd_list * sd_m_Gen__accTail(sd_S_Gen l_g, sd_int l_b, sd_list * l_acc);
+static sd_list * sd_m_Gen__accTailStmt(sd_S_Gen l_g, sd_int l_s, sd_list * l_acc);
+static sd_S_AccUpdate sd_m_Gen__accUpdate(sd_S_Gen l_g, sd_int l_s);
+static sd_list * sd_m_Gen__accVars(sd_S_Gen l_g, sd_S_Stmt l_st);
 static void sd_m_Gen__addDecls(sd_S_Gen * l_g, sd_map * l_byKey);
 static void sd_m_Gen__addRefs(sd_S_Gen * l_g, sd_str l_text);
 static sd_str sd_m_Gen__addr(sd_S_Gen * l_g, sd_int l_t, sd_str l_v);
@@ -8547,6 +8562,7 @@ static void sd_m_Gen__analyzeMoves(sd_S_Gen * l_g, sd_int l_b);
 static sd_int sd_m_Gen__arg(sd_S_Gen l_g, sd_int l_e, sd_int l_i);
 static sd_list * sd_m_Gen__argList(sd_S_Gen l_g, sd_int l_e);
 static sd_str sd_m_Gen__binaryOp(sd_S_Gen * l_g, sd_box * l_op, sd_int l_t, sd_str l_a, sd_str l_b);
+static bool sd_m_Gen__blockAssigns(sd_S_Gen l_g, sd_int l_b, sd_int l_v);
 static bool sd_m_Gen__blockHasDefer(sd_S_Gen l_g, sd_int l_b);
 static void sd_m_Gen__bwBlock(sd_S_Gen * l_g, sd_int l_b);
 static void sd_m_Gen__bwCandidate(sd_S_Gen * l_g, sd_int l_s);
@@ -8567,14 +8583,20 @@ static sd_list * sd_m_Gen__conjuncts(sd_S_Gen l_g, sd_int l_e, sd_list * l_acc);
 static sd_str sd_m_Gen__constCName(sd_S_Gen l_g, sd_int l_i);
 static void sd_m_Gen__consume(sd_S_Gen * l_g, sd_str l_v);
 static sd_int sd_m_Gen__coreType(sd_S_Gen l_g, sd_int l_e);
+static sd_int sd_m_Gen__countVarBlock(sd_S_Gen l_g, sd_int l_b, sd_int l_v);
+static sd_int sd_m_Gen__countVarExpr(sd_S_Gen l_g, sd_int l_e, sd_int l_v);
+static sd_int sd_m_Gen__countVarStmt(sd_S_Gen l_g, sd_int l_s, sd_int l_v);
 static bool sd_m_Gen__counted(sd_S_Gen * l_g, sd_int l_t);
+static sd_int sd_m_Gen__countedVar(sd_S_Gen l_g, sd_S_Stmt l_st);
 static sd_str sd_m_Gen__ctype(sd_S_Gen l_g, sd_int l_t);
 static sd_str sd_m_Gen__declName(sd_S_Gen l_g, sd_int l_t);
 static void sd_m_Gen__declareLocal(sd_S_Gen * l_g, sd_int l_v, sd_int l_t, sd_str l_value);
+static bool sd_m_Gen__declaredIn(sd_S_Gen l_g, sd_int l_v, sd_S_Stmt l_st);
 static sd_str sd_m_Gen__desc(sd_S_Gen l_g, sd_int l_t);
 static sd_str sd_m_Gen__descriptorText(sd_S_Gen * l_g, sd_int l_d);
 static sd_int sd_m_Gen__elemOf(sd_S_Gen l_g, sd_int l_t);
 static void sd_m_Gen__emit(sd_S_Gen * l_g, sd_str l_line);
+static void sd_m_Gen__emitMaterialise(sd_S_Gen * l_g, sd_list * l_acc, sd_int l_skip);
 static void sd_m_Gen__emitReturn(sd_S_Gen * l_g, sd_str l_value, sd_list * l_keep);
 static sd_str sd_m_Gen__enumDefText(sd_S_Gen l_g, sd_int l_d);
 static sd_str sd_m_Gen__eqExpr(sd_S_Gen * l_g, sd_int l_t, sd_str l_a, sd_str l_b);
@@ -8612,6 +8634,8 @@ static sd_str sd_m_Gen__gcall(sd_S_Gen * l_g, sd_int l_e);
 static sd_str sd_m_Gen__gconcat(sd_S_Gen * l_g, sd_int l_e);
 static sd_str sd_m_Gen__gconv(sd_S_Gen * l_g, sd_int l_e);
 static sd_str sd_m_Gen__gcore(sd_S_Gen * l_g, sd_int l_e);
+static void sd_m_Gen__genAccLoop(sd_S_Gen * l_g, sd_S_Stmt l_st, sd_list * l_acc, sd_int l_general, sd_int l_done);
+static bool sd_m_Gen__genAccUpdate(sd_S_Gen * l_g, sd_int l_s);
 static bool sd_m_Gen__genAppend(sd_S_Gen * l_g, sd_S_Stmt l_st, sd_S_Target l_tg);
 static void sd_m_Gen__genAssert(sd_S_Gen * l_g, sd_S_Stmt l_st);
 static void sd_m_Gen__genAssign(sd_S_Gen * l_g, sd_int l_s);
@@ -8625,8 +8649,9 @@ static void sd_m_Gen__genFns(sd_S_Gen * l_g, sd_int l_unit);
 static void sd_m_Gen__genFor(sd_S_Gen * l_g, sd_S_Stmt l_st);
 static void sd_m_Gen__genHelper(sd_S_Gen * l_g, sd_int l_t, sd_int l_kind);
 static void sd_m_Gen__genIf(sd_S_Gen * l_g, sd_S_Stmt l_st);
-static void sd_m_Gen__genIncDec(sd_S_Gen * l_g, sd_S_Stmt l_st);
+static void sd_m_Gen__genIncDec(sd_S_Gen * l_g, sd_int l_s);
 static bool sd_m_Gen__genIntUpdate(sd_S_Gen * l_g, sd_S_Stmt l_st, sd_S_Target l_tg);
+static void sd_m_Gen__genLoopCopy(sd_S_Gen * l_g, sd_S_Stmt l_st, sd_int l_label, sd_list * l_acc, sd_int l_accTo, bool l_spills);
 static void sd_m_Gen__genMultiAssign(sd_S_Gen * l_g, sd_int l_s);
 static void sd_m_Gen__genNative(sd_S_Gen * l_g, sd_int l_f);
 static sd_str sd_m_Gen__genProgram(sd_S_Gen * l_g, sd_str l_natives);
@@ -8660,6 +8685,7 @@ static sd_str sd_m_Gen__gstruct(sd_S_Gen * l_g, sd_int l_e);
 static sd_str sd_m_Gen__gsumSmall(sd_S_Gen * l_g, sd_int l_e);
 static sd_str sd_m_Gen__gtry(sd_S_Gen * l_g, sd_int l_e);
 static bool sd_m_Gen__hasEffects(sd_S_Gen l_g, sd_int l_e);
+static bool sd_m_Gen__hasGroup(sd_S_Gen l_g, sd_int l_e);
 static bool sd_m_Gen__hasMutEffects(sd_S_Gen l_g, sd_int l_e);
 static sd_str sd_m_Gen__helper(sd_S_Gen * l_g, sd_int l_t, sd_int l_kind, sd_str l_prefix);
 static sd_str sd_m_Gen__ifaceName(sd_S_Gen l_g, sd_int l_iface);
@@ -8690,6 +8716,7 @@ static sd_str sd_m_Gen__linkage(sd_S_Gen l_g);
 static sd_str sd_m_Gen__lname(sd_S_Gen l_g, sd_int l_v);
 static sd_str sd_m_Gen__localDecl(sd_S_Gen * l_g, sd_int l_v, sd_int l_t);
 static sd_str sd_m_Gen__localInit(sd_S_Gen l_g, sd_int l_v, sd_str l_val);
+static sd_str sd_m_Gen__loopCheck(sd_S_Gen l_g, sd_S_Stmt l_st, sd_list * l_acc);
 static sd_str sd_m_Gen__mainText(sd_S_Gen l_g);
 static bool sd_m_Gen__mayCrash(sd_S_Gen l_g, sd_int l_e);
 static bool sd_m_Gen__mentionsVar(sd_S_Gen l_g, sd_int l_e, sd_int l_v);
@@ -8730,10 +8757,14 @@ static void sd_m_Gen__popScope(sd_S_Gen * l_g, bool l_release);
 static void sd_m_Gen__preemptCall(sd_S_Gen * l_g, sd_int l_e);
 static void sd_m_Gen__preemptLine(sd_S_Gen * l_g);
 static bool sd_m_Gen__preemptsOnEntry(sd_S_Gen l_g, sd_int l_f);
+static bool sd_m_Gen__pureBlock(sd_S_Gen l_g, sd_int l_b, sd_list * l_acc);
+static bool sd_m_Gen__pureCond(sd_S_Gen l_g, sd_int l_e);
+static bool sd_m_Gen__pureStmt(sd_S_Gen l_g, sd_int l_s, sd_list * l_acc);
 static void sd_m_Gen__pushLocal(sd_S_Gen * l_g, sd_int l_v, sd_int l_t);
 static void sd_m_Gen__pushScope(sd_S_Gen * l_g);
 static void sd_m_Gen__pushSlot(sd_S_Gen * l_g, sd_str l_name, sd_int l_t, bool l_temp);
 static sd_S_IntRange sd_m_Gen__rangeIn(sd_S_Gen l_g, sd_int l_e, sd_map * l_vars);
+static sd_str sd_m_Gen__rawName(sd_S_Gen l_g, sd_int l_v);
 static sd_str sd_m_Gen__rawPath(sd_S_Gen l_g, sd_int l_e);
 static sd_int sd_m_Gen__recvOf(sd_S_Gen l_g, sd_int l_e);
 static void sd_m_Gen__releaseAbove(sd_S_Gen * l_g, sd_int l_mark, sd_list * l_keep);
@@ -8746,6 +8777,8 @@ static sd_str sd_m_Gen__showVal(sd_S_Gen l_g, sd_int l_t, sd_str l_v);
 static void sd_m_Gen__slotEnd(sd_S_Gen * l_g, sd_S_Slot l_s);
 static sd_str sd_m_Gen__smallBinary(sd_S_Gen l_g, sd_int l_e, sd_list * l_vals);
 static sd_S_IntRange sd_m_Gen__smallRange(sd_S_Gen l_g, sd_int l_e);
+static sd_str sd_m_Gen__spillBarrier(sd_S_Gen l_g, sd_S_Stmt l_st);
+static bool sd_m_Gen__stmtAssigns(sd_S_Gen l_g, sd_int l_s, sd_int l_v);
 static bool sd_m_Gen__stmtHasDefer(sd_S_Gen l_g, sd_int l_s);
 static sd_str sd_m_Gen__structDefText(sd_S_Gen l_g, sd_int l_d);
 static sd_int sd_m_Gen__structRank(sd_S_Gen l_g, sd_int l_d);
@@ -8949,13 +8982,16 @@ static inline __attribute__((unused)) sd_S_Block sd_rt_S5Block(sd_S_Block v);
 static inline __attribute__((unused)) void sd_rl_S5Block(sd_S_Block v);
 static inline __attribute__((unused)) void sd_rl_S6FnDecl(sd_S_FnDecl v);
 static inline __attribute__((unused)) void sd_rl_T2Lse(sd_T_T2Lse v);
+static inline __attribute__((unused)) void sd_rl_S9AccUpdate(sd_S_AccUpdate v);
+static inline __attribute__((unused)) sd_S_LoopCtx sd_rt_S7LoopCtx(sd_S_LoopCtx v);
+static inline __attribute__((unused)) void sd_rl_S7LoopCtx(sd_S_LoopCtx v);
+static inline __attribute__((unused)) void sd_rl_S8IntRange(sd_S_IntRange v);
 static inline __attribute__((unused)) sd_S_ExprInfo sd_rt_S8ExprInfo(sd_S_ExprInfo v);
 static inline __attribute__((unused)) void sd_rl_S8ExprInfo(sd_S_ExprInfo v);
 static inline __attribute__((unused)) void sd_rl_S4Expr(sd_S_Expr v);
 static inline __attribute__((unused)) sd_S_Gen sd_rt_S3Gen(sd_S_Gen v);
 static inline __attribute__((unused)) void sd_rl_S3Gen(sd_S_Gen v);
 static inline __attribute__((unused)) sd_S_IntRange sd_rt_S8IntRange(sd_S_IntRange v);
-static inline __attribute__((unused)) void sd_rl_S8IntRange(sd_S_IntRange v);
 static inline __attribute__((unused)) void sd_rl_S4Stmt(sd_S_Stmt v);
 static inline __attribute__((unused)) sd_S_Target sd_rt_S6Target(sd_S_Target v);
 static inline __attribute__((unused)) void sd_rl_S6Target(sd_S_Target v);
@@ -10221,6 +10257,28 @@ static inline __attribute__((unused)) void sd_rl_T2Lse(sd_T_T2Lse v) {
   sd_list_release(v.r0);
   sd_iface_release(v.r1);
 }
+static inline __attribute__((unused)) void sd_rl_S9AccUpdate(sd_S_AccUpdate v) {
+  sd_int_release(v.f_var);
+  sd_list_release(v.f_rest);
+}
+static inline __attribute__((unused)) sd_S_LoopCtx sd_rt_S7LoopCtx(sd_S_LoopCtx v) {
+  v.f_mark = sd_int_retain(v.f_mark);
+  v.f_label = sd_int_retain(v.f_label);
+  v.f_acc = sd_list_retain(v.f_acc);
+  v.f_accTo = sd_int_retain(v.f_accTo);
+  return v;
+}
+static inline __attribute__((unused)) void sd_rl_S7LoopCtx(sd_S_LoopCtx v) {
+  sd_int_release(v.f_mark);
+  sd_int_release(v.f_label);
+  sd_list_release(v.f_acc);
+  sd_int_release(v.f_accTo);
+}
+static inline __attribute__((unused)) void sd_rl_S8IntRange(sd_S_IntRange v) {
+  sd_int_release(v.f_state);
+  sd_int_release(v.f_lo);
+  sd_int_release(v.f_hi);
+}
 static inline __attribute__((unused)) sd_S_ExprInfo sd_rt_S8ExprInfo(sd_S_ExprInfo v) {
   v.f_ty = sd_int_retain(v.f_ty);
   v.f_inner = sd_int_retain(v.f_inner);
@@ -10380,11 +10438,6 @@ static inline __attribute__((unused)) sd_S_IntRange sd_rt_S8IntRange(sd_S_IntRan
   v.f_lo = sd_int_retain(v.f_lo);
   v.f_hi = sd_int_retain(v.f_hi);
   return v;
-}
-static inline __attribute__((unused)) void sd_rl_S8IntRange(sd_S_IntRange v) {
-  sd_int_release(v.f_state);
-  sd_int_release(v.f_lo);
-  sd_int_release(v.f_hi);
 }
 static inline __attribute__((unused)) void sd_rl_S4Stmt(sd_S_Stmt v) {
   sd_box_release(v.f_kind);
@@ -27573,7 +27626,7 @@ static sd_map * sd_f_safeCallSet(void) {
   SD_LF_ENTER(L, sd_lr_sd_f_safeCallSet);
   sd_map * _t1 = sd_map_new(&sd_type_str, &sd_type_bool);
   L.l_m = _t1;
-  sd_list * _t2 = sd_list_new(&sd_type_str, 68);
+  sd_list * _t2 = sd_list_new(&sd_type_str, 69);
   SD_LIST_PUSH(&_t2, sd_str, SD_STR_LIT("sd_int_retain"));
   SD_LIST_PUSH(&_t2, sd_str, SD_STR_LIT("sd_int_release"));
   SD_LIST_PUSH(&_t2, sd_str, SD_STR_LIT("sd_str_retain"));
@@ -27642,6 +27695,7 @@ static sd_map * sd_f_safeCallSet(void) {
   SD_LIST_PUSH(&_t2, sd_str, SD_STR_LIT("__builtin_add_overflow"));
   SD_LIST_PUSH(&_t2, sd_str, SD_STR_LIT("__builtin_sub_overflow"));
   SD_LIST_PUSH(&_t2, sd_str, SD_STR_LIT("SD_PREEMPT"));
+  SD_LIST_PUSH(&_t2, sd_str, SD_STR_LIT("__volatile__"));
   L.l_names = _t2;
   {
     int64_t l_i = ((int64_t)0);
@@ -31994,6 +32048,1919 @@ static sd_T_T2se sd_f_readRuntimeFiles(sd_str l_root, sd_list * l_files) {
   SD_LF_LEAVE(L);
   sd_list_release(L.l_parts);
   return _t21;
+}
+
+static sd_S_AccUpdate sd_f_noAccUpdate(void) {
+  sd_list * _t1 = sd_list_new(&sd_type_int, 0);
+  sd_S_AccUpdate _t2 = (sd_S_AccUpdate){.f_var = SD_INT(-1), .f_sub = false, .f_rest = _t1};
+  return _t2;
+}
+
+typedef struct { sd_lframe h; sd_list * l_rest; sd_list * _t14; sd_list * l_leaves; } sd_L_sd_m_Gen__accUpdate;
+static void sd_lr_sd_m_Gen__accUpdate(sd_lframe *p) {
+  sd_L_sd_m_Gen__accUpdate *L = (sd_L_sd_m_Gen__accUpdate *)p;
+  sd_list_release(L->l_rest);
+  sd_list_release(L->_t14);
+  sd_list_release(L->l_leaves);
+}
+static sd_S_AccUpdate sd_m_Gen__accUpdate(sd_S_Gen l_g, sd_int l_s) {
+  sd_L_sd_m_Gen__accUpdate L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_m_Gen__accUpdate);
+  if (sd_int_lt(l_s, SD_INT(0))) {
+    sd_S_AccUpdate _t1 = sd_f_noAccUpdate();
+    SD_LF_LEAVE(L);
+    return _t1;
+  }
+  sd_S_Stmt l_st = SD_LIST_GET((((l_g).f_c).f_ast).f_stmts, sd_S_Stmt, l_s);
+  if ((SD_BOX_GET((l_st).f_kind, sd_E_StmtKind).tag == 3)) {
+    sd_int _t2 = sd_m_Gen__accLocal(l_g, (l_st).f_expr);
+    sd_int l_iv = _t2;
+    if (sd_int_lt(l_iv, SD_INT(0))) {
+      sd_S_AccUpdate _t3 = sd_f_noAccUpdate();
+      sd_S_AccUpdate _t4 = _t3;
+      SD_LF_LEAVE(L);
+      sd_int_release(l_iv);
+      return _t4;
+    }
+    sd_list * _t5 = sd_list_new(&sd_type_int, 0);
+    sd_S_AccUpdate _t6 = (sd_S_AccUpdate){.f_var = l_iv, .f_sub = (!(l_st).f_inc), .f_rest = _t5};
+    SD_LF_LEAVE(L);
+    return _t6;
+  }
+  if (((!(SD_BOX_GET((l_st).f_kind, sd_E_StmtKind).tag == 2)) || (!sd_int_eq((l_st).f_count, SD_INT(1))))) {
+    sd_S_AccUpdate _t7 = sd_f_noAccUpdate();
+    SD_LF_LEAVE(L);
+    return _t7;
+  }
+  sd_int _t8 = sd_m_Ast__at(((l_g).f_c).f_ast, (l_st).f_list, SD_INT(0));
+  sd_S_Target l_tg = SD_LIST_GET((((l_g).f_c).f_ast).f_targets, sd_S_Target, _t8);
+  sd_int_release(_t8);
+  if ((!(SD_BOX_GET((l_tg).f_kind, sd_E_TargetKind).tag == 1))) {
+    sd_S_AccUpdate _t9 = sd_f_noAccUpdate();
+    SD_LF_LEAVE(L);
+    return _t9;
+  }
+  sd_int _t10 = sd_m_Gen__accLocal(l_g, (l_tg).f_expr);
+  sd_int l_v = _t10;
+  sd_S_Expr l_rx = SD_LIST_GET((((l_g).f_c).f_ast).f_exprs, sd_S_Expr, (l_st).f_expr);
+  sd_S_ExprInfo l_ri = SD_LIST_GET(((l_g).f_c).f_info, sd_S_ExprInfo, (l_st).f_expr);
+  if (((((sd_int_lt(l_v, SD_INT(0)) || (!(SD_BOX_GET((l_rx).f_kind, sd_E_ExprKind).tag == 12))) || (!sd_int_eq((l_ri).f_ty, sd_c_tyInt()))) || (l_ri).f_wrap) || (l_ri).f_narrowed)) {
+    sd_S_AccUpdate _t11 = sd_f_noAccUpdate();
+    sd_S_AccUpdate _t12 = _t11;
+    SD_LF_LEAVE(L);
+    sd_int_release(l_v);
+    return _t12;
+  }
+  sd_list * _t13 = sd_list_new(&sd_type_int, 0);
+  L.l_rest = _t13;
+  bool l_sub = false;
+  if ((SD_BOX_GET((l_rx).f_op, sd_E_Tok).tag == 39)) {
+    L._t14 = sd_list_new(&sd_type_int, 0);
+    sd_list * _t15 = sd_m_Gen__plusLeaves(l_g, (l_st).f_expr, L._t14);
+    L.l_leaves = _t15;
+    sd_list_release(L._t14); L._t14 = NULL;
+    sd_int _t16 = sd_m_Gen__intLocal(l_g, SD_LIST_GET(L.l_leaves, sd_int, SD_INT(0)));
+    bool _t17 = (!sd_int_eq(_t16, l_v));
+    sd_int_release(_t16);
+    if (_t17) {
+      sd_S_AccUpdate _t18 = sd_f_noAccUpdate();
+      sd_S_AccUpdate _t19 = _t18;
+      SD_LF_LEAVE(L);
+      sd_list_release(L.l_leaves);
+      sd_list_release(L.l_rest);
+      sd_int_release(l_v);
+      return _t19;
+    }
+    sd_list * _t20 = sd_list_slice(L.l_leaves, SD_INT(1), sd_list_len(L.l_leaves));
+    sd_list_release(L.l_rest);
+    L.l_rest = _t20;
+    sd_list_release(L.l_leaves); L.l_leaves = NULL;
+  } else {
+    bool _t22 = (SD_BOX_GET((l_rx).f_op, sd_E_Tok).tag == 40);
+    if (_t22) {
+      sd_int _t21 = sd_m_Gen__intLocal(l_g, (l_rx).f_a);
+      _t22 = sd_int_eq(_t21, l_v);
+      sd_int_release(_t21);
+    }
+    if (_t22) {
+      sd_list * _t23 = sd_list_new(&sd_type_int, 1);
+      SD_LIST_PUSH(&_t23, sd_int, sd_int_retain((l_rx).f_b));
+      sd_list_release(L.l_rest);
+      L.l_rest = _t23;
+      bool _t24 = true;
+      l_sub = _t24;
+    } else {
+      sd_S_AccUpdate _t25 = sd_f_noAccUpdate();
+      sd_S_AccUpdate _t26 = _t25;
+      SD_LF_LEAVE(L);
+      sd_list_release(L.l_rest);
+      sd_int_release(l_v);
+      return _t26;
+    }
+  }
+  {
+    int64_t l_i = ((int64_t)0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!((l_i < SD_SMALL(sd_list_len(L.l_rest))))) break;
+      {
+        bool _t28 = sd_m_Gen__mentionsVar(l_g, SD_LIST_GET(L.l_rest, sd_int, SD_INT_S(l_i)), l_v);
+        if (_t28) {
+          sd_S_AccUpdate _t29 = sd_f_noAccUpdate();
+          sd_S_AccUpdate _t30 = _t29;
+          SD_LF_LEAVE(L);
+          sd_list_release(L.l_rest);
+          sd_int_release(l_v);
+          return _t30;
+        }
+      }
+      _c27:;
+      l_i++;
+    }
+  }
+  sd_S_AccUpdate _t31 = (sd_S_AccUpdate){.f_var = l_v, .f_sub = l_sub, .f_rest = L.l_rest};
+  L.l_rest = NULL;
+  SD_LF_LEAVE(L);
+  return _t31;
+}
+
+static sd_int sd_m_Gen__accLocal(sd_S_Gen l_g, sd_int l_e) {
+  sd_int _t1 = sd_m_Gen__intLocal(l_g, l_e);
+  sd_int l_v = _t1;
+  bool _t3 = (sd_int_lt(l_v, SD_INT(0)) || (!(SD_BOX_GET((SD_LIST_GET(((l_g).f_c).f_vars, sd_S_Var, l_v)).f_kind, sd_E_VarKind).tag == 0)));
+  if (!_t3) {
+    bool _t2 = sd_m_Gen__isUnboxed(l_g, l_v);
+    _t3 = _t2;
+  }
+  if (_t3) {
+    sd_int _t4 = SD_INT(-1);
+    sd_int_release(l_v);
+    return _t4;
+  }
+  return l_v;
+}
+
+typedef struct { sd_lframe h; sd_list * _t6; sd_list * l_sites; sd_list * l_vars; sd_list * l_out; sd_S_AccUpdate l_u; } sd_L_sd_m_Gen__accVars;
+static void sd_lr_sd_m_Gen__accVars(sd_lframe *p) {
+  sd_L_sd_m_Gen__accVars *L = (sd_L_sd_m_Gen__accVars *)p;
+  sd_list_release(L->_t6);
+  sd_list_release(L->l_sites);
+  sd_list_release(L->l_vars);
+  sd_list_release(L->l_out);
+  sd_rl_S9AccUpdate(L->l_u);
+}
+static sd_list * sd_m_Gen__accVars(sd_S_Gen l_g, sd_S_Stmt l_st) {
+  sd_L_sd_m_Gen__accVars L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_m_Gen__accVars);
+  bool _t2 = sd_int_lt((l_st).f_body, SD_INT(0));
+  if (!_t2) {
+    sd_int _t1 = sd_m_Gen__accSize(l_g, (l_st).f_body);
+    _t2 = sd_int_gt(_t1, SD_INT(64));
+    sd_int_release(_t1);
+  }
+  bool _t4 = _t2;
+  if (!_t4) {
+    bool _t3 = sd_m_Gen__accBodyOk(l_g, (l_st).f_body);
+    _t4 = (!_t3);
+  }
+  if (_t4) {
+    sd_list * _t5 = sd_list_new(&sd_type_int, 0);
+    SD_LF_LEAVE(L);
+    return _t5;
+  }
+  L._t6 = sd_list_new(&sd_type_int, 0);
+  sd_list * _t7 = sd_m_Gen__accTail(l_g, (l_st).f_body, L._t6);
+  L.l_sites = _t7;
+  sd_list_release(L._t6); L._t6 = NULL;
+  sd_list * _t8 = sd_list_new(&sd_type_int, 0);
+  L.l_vars = _t8;
+  {
+    int64_t l_i = ((int64_t)0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!((l_i < SD_SMALL(sd_list_len(L.l_sites))))) break;
+      {
+        sd_S_AccUpdate _t10 = sd_m_Gen__accUpdate(l_g, SD_LIST_GET(L.l_sites, sd_int, SD_INT_S(l_i)));
+        sd_int l_v = sd_int_retain((_t10).f_var);
+        sd_rl_S9AccUpdate(_t10); 
+        bool _t12 = (sd_int_ge(l_v, SD_INT(0)) && (!sd_list_contains(L.l_vars, &l_v)));
+        if (_t12) {
+          bool _t11 = sd_m_Gen__declaredIn(l_g, l_v, l_st);
+          _t12 = (!_t11);
+        }
+        if (_t12) {
+          sd_int _t13 = sd_int_retain(l_v);
+          SD_LIST_PUSH((&L.l_vars), sd_int, _t13);
+        }
+        sd_int_release(l_v);
+      }
+      _c9:;
+      l_i++;
+    }
+  }
+  sd_list * _t14 = sd_list_new(&sd_type_int, 0);
+  L.l_out = _t14;
+  {
+    int64_t l_k = ((int64_t)0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!((l_k < SD_SMALL(sd_list_len(L.l_vars))))) break;
+      {
+        sd_int l_v2 = SD_LIST_GET(L.l_vars, sd_int, SD_INT_S(l_k));
+        sd_int l_want = SD_INT(0);
+        {
+          int64_t l_j = ((int64_t)0);
+          if (SD_LIKELY(((l_want.w) & 1) == 0)) {
+            int64_t r_want_1900 = SD_SMALL(l_want);
+            for (;;) {
+              SD_PREEMPT();
+              if (!((l_j < SD_SMALL(sd_list_len(L.l_sites))))) break;
+              {
+                sd_S_AccUpdate _t19 = sd_m_Gen__accUpdate(l_g, SD_LIST_GET(L.l_sites, sd_int, SD_INT_S(l_j)));
+                L.l_u = _t19;
+                if (sd_int_eq((L.l_u).f_var, l_v2)) {
+                  sd_S_Stmt l_us = SD_LIST_GET((((l_g).f_c).f_ast).f_stmts, sd_S_Stmt, SD_LIST_GET(L.l_sites, sd_int, SD_INT_S(l_j)));
+                  if ((SD_BOX_GET((l_us).f_kind, sd_E_StmtKind).tag == 3)) {
+                    int64_t _t20 = ((int64_t)1);
+                    if (SD_UNLIKELY(__builtin_add_overflow(r_want_1900, _t20, &r_want_1900))) {
+                      sd_int _t21 = sd_int_from_i64((int64_t)((uint64_t)r_want_1900 - (uint64_t)_t20));
+                      l_want = sd_int_add(_t21, SD_INT_S(_t20));
+                      sd_int_release(_t21);
+                      sd_rl_S9AccUpdate(L.l_u); L.l_u = ((sd_S_AccUpdate){0});
+                      goto _c17;
+                    }
+                  } else {
+                    int64_t _t22 = ((int64_t)2);
+                    if (SD_UNLIKELY(__builtin_add_overflow(r_want_1900, _t22, &r_want_1900))) {
+                      sd_int _t23 = sd_int_from_i64((int64_t)((uint64_t)r_want_1900 - (uint64_t)_t22));
+                      l_want = sd_int_add(_t23, SD_INT_S(_t22));
+                      sd_int_release(_t23);
+                      sd_rl_S9AccUpdate(L.l_u); L.l_u = ((sd_S_AccUpdate){0});
+                      goto _c17;
+                    }
+                  }
+                }
+                sd_rl_S9AccUpdate(L.l_u); L.l_u = ((sd_S_AccUpdate){0});
+              }
+              _c18:;
+              l_j++;
+            }
+            l_want = sd_int_from_i64(r_want_1900);
+            goto _d16;
+          }
+          for (;;) {
+            SD_PREEMPT();
+            if (!((l_j < SD_SMALL(sd_list_len(L.l_sites))))) break;
+            {
+              sd_S_AccUpdate _t24 = sd_m_Gen__accUpdate(l_g, SD_LIST_GET(L.l_sites, sd_int, SD_INT_S(l_j)));
+              L.l_u = _t24;
+              if (sd_int_eq((L.l_u).f_var, l_v2)) {
+                sd_S_Stmt l_us = SD_LIST_GET((((l_g).f_c).f_ast).f_stmts, sd_S_Stmt, SD_LIST_GET(L.l_sites, sd_int, SD_INT_S(l_j)));
+                if ((SD_BOX_GET((l_us).f_kind, sd_E_StmtKind).tag == 3)) {
+                  sd_int _t25 = SD_INT_S((((int64_t)1)));
+                  { int64_t r_; if (SD_LIKELY((((l_want).w | _t25.w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_want).w, _t25.w, &r_))) (l_want).w = r_; else { sd_int s_ = sd_int_add_slow((l_want), _t25); sd_int_release((l_want)); (l_want) = s_; } }
+                } else {
+                  sd_int _t26 = SD_INT_S((((int64_t)2)));
+                  { int64_t r_; if (SD_LIKELY((((l_want).w | _t26.w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_want).w, _t26.w, &r_))) (l_want).w = r_; else { sd_int s_ = sd_int_add_slow((l_want), _t26); sd_int_release((l_want)); (l_want) = s_; } }
+                }
+              }
+              sd_rl_S9AccUpdate(L.l_u); L.l_u = ((sd_S_AccUpdate){0});
+            }
+            _c17:;
+            __asm__ __volatile__("" : "+r"(l_j));
+            l_j++;
+          }
+          _d16:;
+        }
+        sd_int _t27 = sd_m_Gen__countVarExpr(l_g, (l_st).f_expr, l_v2);
+        sd_int _t28 = sd_m_Gen__countVarStmt(l_g, (l_st).f_init, l_v2);
+        sd_int _t29 = sd_int_add(_t27, _t28);
+        sd_int _t30 = sd_m_Gen__countVarStmt(l_g, (l_st).f_post, l_v2);
+        sd_int _t31 = sd_int_add(_t29, _t30);
+        sd_int _t32 = sd_m_Gen__countVarBlock(l_g, (l_st).f_body, l_v2);
+        sd_int _t33 = sd_int_add(_t31, _t32);
+        sd_int l_have = _t33;
+        sd_int_release(_t32);
+        sd_int_release(_t31);
+        sd_int_release(_t30);
+        sd_int_release(_t29);
+        sd_int_release(_t28);
+        sd_int_release(_t27);
+        if (sd_int_eq(l_have, l_want)) {
+          sd_int _t34 = sd_int_retain(l_v2);
+          SD_LIST_PUSH((&L.l_out), sd_int, _t34);
+        }
+        sd_int_release(l_have);
+        sd_int_release(l_want);
+      }
+      _c15:;
+      l_k++;
+    }
+  }
+  sd_list * _t35 = L.l_out;
+  SD_LF_LEAVE(L);
+  sd_list_release(L.l_vars);
+  sd_list_release(L.l_sites);
+  return _t35;
+}
+
+static bool sd_m_Gen__declaredIn(sd_S_Gen l_g, sd_int l_v, sd_S_Stmt l_st) {
+  sd_S_Pos l_p = (SD_LIST_GET(((l_g).f_c).f_vars, sd_S_Var, l_v)).f_pos;
+  sd_S_Pos l_end = (SD_LIST_GET((((l_g).f_c).f_ast).f_blocks, sd_S_Block, (l_st).f_body)).f_end;
+  if ((!sd_int_eq((l_p).f_file, ((l_st).f_pos).f_file))) {
+    return false;
+  }
+  bool l_after = (sd_int_gt((l_p).f_line, ((l_st).f_pos).f_line) || (sd_int_eq((l_p).f_line, ((l_st).f_pos).f_line) && sd_int_ge((l_p).f_col, ((l_st).f_pos).f_col)));
+  bool l_before = (sd_int_lt((l_p).f_line, (l_end).f_line) || (sd_int_eq((l_p).f_line, (l_end).f_line) && sd_int_le((l_p).f_col, (l_end).f_col)));
+  return (l_after && l_before);
+}
+
+static sd_list * sd_m_Gen__accTail(sd_S_Gen l_g, sd_int l_b, sd_list * l_acc) {
+  sd_list * l_out = l_acc;
+  if (sd_int_lt(l_b, SD_INT(0))) {
+    return sd_list_retain(l_out);
+  }
+  sd_S_Block l_bl = SD_LIST_GET((((l_g).f_c).f_ast).f_blocks, sd_S_Block, l_b);
+  if (sd_int_eq((l_bl).f_count, SD_INT(0))) {
+    return sd_list_retain(l_out);
+  }
+  sd_int _t1 = sd_int_sub((l_bl).f_count, SD_INT(1));
+  sd_int _t2 = sd_m_Ast__at(((l_g).f_c).f_ast, (l_bl).f_list, _t1);
+  SD_PREEMPT();
+  sd_list * _t3 = sd_m_Gen__accTailStmt(l_g, _t2, l_out);
+  sd_list * _t4 = _t3;
+  sd_int_release(_t2);
+  sd_int_release(_t1);
+  return _t4;
+}
+
+typedef struct { sd_lframe h; sd_list * l_out; } sd_L_sd_m_Gen__accTailStmt;
+static void sd_lr_sd_m_Gen__accTailStmt(sd_lframe *p) {
+  sd_L_sd_m_Gen__accTailStmt *L = (sd_L_sd_m_Gen__accTailStmt *)p;
+  sd_list_release(L->l_out);
+}
+static sd_list * sd_m_Gen__accTailStmt(sd_S_Gen l_g, sd_int l_s, sd_list * l_acc) {
+  sd_L_sd_m_Gen__accTailStmt L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_m_Gen__accTailStmt);
+  L.l_out = sd_list_retain(l_acc);
+  if (sd_int_lt(l_s, SD_INT(0))) {
+    SD_LF_LEAVE(L);
+    return L.l_out;
+  }
+  sd_S_Stmt l_st = SD_LIST_GET((((l_g).f_c).f_ast).f_stmts, sd_S_Stmt, l_s);
+  {
+    sd_box * _t1 = (l_st).f_kind;
+    int32_t _t2 = SD_BOX_GET(_t1, sd_E_StmtKind).tag;
+    if (_t2 == 4) {
+      SD_PREEMPT();
+      sd_list * _t3 = sd_m_Gen__accTail(l_g, (l_st).f_body, L.l_out);
+      sd_list_release(L.l_out);
+      L.l_out = _t3;
+      SD_PREEMPT();
+      sd_list * _t4 = sd_m_Gen__accTailStmt(l_g, (l_st).f_elseIf, L.l_out);
+      sd_list_release(L.l_out);
+      L.l_out = _t4;
+      SD_PREEMPT();
+      sd_list * _t5 = sd_m_Gen__accTail(l_g, (l_st).f_els, L.l_out);
+      sd_list * _t6 = _t5;
+      SD_LF_LEAVE(L);
+      sd_list_release(L.l_out);
+      return _t6;
+    } else if (_t2 == 6) {
+      {
+        sd_int l_k = SD_INT(0);
+        for (;;) {
+          SD_PREEMPT();
+          if (!(sd_int_lt(l_k, (l_st).f_count))) break;
+          {
+            sd_int _t8 = sd_m_Ast__at(((l_g).f_c).f_ast, (l_st).f_list, l_k);
+            SD_PREEMPT();
+            sd_list * _t9 = sd_m_Gen__accTail(l_g, (SD_LIST_GET((((l_g).f_c).f_ast).f_cases, sd_S_Case, _t8)).f_body, L.l_out);
+            sd_list_release(L.l_out);
+            L.l_out = _t9;
+            sd_int_release(_t8);
+          }
+          _c7:;
+          { int64_t r_; if (SD_LIKELY((((l_k).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_k).w, SD_INT(1).w, &r_))) (l_k).w = r_; else { sd_int s_ = sd_int_add_slow((l_k), SD_INT(1)); sd_int_release((l_k)); (l_k) = s_; } }
+        }
+        sd_int_release(l_k);
+      }
+      SD_LF_LEAVE(L);
+      return L.l_out;
+    } else if (_t2 == 2 || _t2 == 3) {
+      sd_int _t10 = sd_int_retain(l_s);
+      SD_LIST_PUSH((&L.l_out), sd_int, _t10);
+      SD_LF_LEAVE(L);
+      return L.l_out;
+    } else if (_t2 == 0 || _t2 == 1 || _t2 == 5 || _t2 == 7 || _t2 == 8 || _t2 == 9 || _t2 == 10) {
+      SD_LF_LEAVE(L);
+      return L.l_out;
+    } else if (_t2 == 11 || _t2 == 12 || _t2 == 13 || _t2 == 14) {
+      SD_LF_LEAVE(L);
+      return L.l_out;
+    }
+  }
+  sd_crash("internal error: accTailStmt reached its end without returning");
+}
+
+static sd_int sd_m_Gen__accSize(sd_S_Gen l_g, sd_int l_b) {
+  if (sd_int_lt(l_b, SD_INT(0))) {
+    return SD_INT(0);
+  }
+  sd_int l_n = SD_INT(0);
+  sd_S_Block l_bl = SD_LIST_GET((((l_g).f_c).f_ast).f_blocks, sd_S_Block, l_b);
+  {
+    sd_int l_i = SD_INT(0);
+    if (SD_LIKELY(((l_n.w) & 1) == 0)) {
+      int64_t r_n_1925 = SD_SMALL(l_n);
+      for (;;) {
+        SD_PREEMPT();
+        if (!(sd_int_lt(l_i, (l_bl).f_count))) break;
+        {
+          sd_int _t4 = sd_m_Ast__at(((l_g).f_c).f_ast, (l_bl).f_list, l_i);
+          SD_PREEMPT();
+          sd_int _t5 = sd_m_Gen__accSizeStmt(l_g, _t4);
+          int64_t _t6; if (SD_UNLIKELY((_t5.w & 1) != 0 || __builtin_add_overflow(r_n_1925, _t5.w >> 1, &_t6))) {
+            sd_int _t7 = sd_int_from_i64(r_n_1925);
+            l_n = sd_int_add(_t7, _t5);
+            sd_int_release(_t7);
+            sd_int_release(_t5);
+            sd_int_release(_t4);
+            goto _c2;
+          }
+          r_n_1925 = _t6;
+          sd_int_release(_t5);
+          sd_int_release(_t4);
+        }
+        _c3:;
+        { int64_t r_; if (SD_LIKELY((((l_i).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_i).w, SD_INT(1).w, &r_))) (l_i).w = r_; else { sd_int s_ = sd_int_add_slow((l_i), SD_INT(1)); sd_int_release((l_i)); (l_i) = s_; } }
+      }
+      l_n = sd_int_from_i64(r_n_1925);
+      goto _d1;
+    }
+    for (;;) {
+      SD_PREEMPT();
+      if (!(sd_int_lt(l_i, (l_bl).f_count))) break;
+      {
+        sd_int _t8 = sd_m_Ast__at(((l_g).f_c).f_ast, (l_bl).f_list, l_i);
+        SD_PREEMPT();
+        sd_int _t9 = sd_m_Gen__accSizeStmt(l_g, _t8);
+        { int64_t r_; if (SD_LIKELY((((l_n).w | _t9.w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_n).w, _t9.w, &r_))) (l_n).w = r_; else { sd_int s_ = sd_int_add_slow((l_n), _t9); sd_int_release((l_n)); (l_n) = s_; } }
+        sd_int_release(_t9);
+        sd_int_release(_t8);
+      }
+      _c2:;
+      { int64_t r_; if (SD_LIKELY((((l_i).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_i).w, SD_INT(1).w, &r_))) (l_i).w = r_; else { sd_int s_ = sd_int_add_slow((l_i), SD_INT(1)); sd_int_release((l_i)); (l_i) = s_; } }
+    }
+    _d1:;
+    sd_int_release(l_i);
+  }
+  return l_n;
+}
+
+static sd_int sd_m_Gen__accSizeStmt(sd_S_Gen l_g, sd_int l_s) {
+  if (sd_int_lt(l_s, SD_INT(0))) {
+    return SD_INT(0);
+  }
+  sd_S_Stmt l_st = SD_LIST_GET((((l_g).f_c).f_ast).f_stmts, sd_S_Stmt, l_s);
+  sd_int l_n = SD_INT(1);
+  {
+    sd_box * _t1 = (l_st).f_kind;
+    int32_t _t2 = SD_BOX_GET(_t1, sd_E_StmtKind).tag;
+    if (_t2 == 4) {
+      SD_PREEMPT();
+      sd_int _t3 = sd_m_Gen__accSize(l_g, (l_st).f_body);
+      SD_PREEMPT();
+      sd_int _t4 = sd_m_Gen__accSizeStmt(l_g, (l_st).f_elseIf);
+      SD_PREEMPT();
+      sd_int _t5 = sd_m_Gen__accSize(l_g, (l_st).f_els);
+      sd_int _t6 = sd_int_add(_t3, _t4);
+      sd_int _t7 = sd_int_add(_t6, _t5);
+      { int64_t r_; if (SD_LIKELY((((l_n).w | _t7.w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_n).w, _t7.w, &r_))) (l_n).w = r_; else { sd_int s_ = sd_int_add_slow((l_n), _t7); sd_int_release((l_n)); (l_n) = s_; } }
+      sd_int_release(_t7);
+      sd_int_release(_t6);
+      sd_int_release(_t5);
+      sd_int_release(_t4);
+      sd_int_release(_t3);
+    } else if (_t2 == 5) {
+      SD_PREEMPT();
+      sd_int _t8 = sd_m_Gen__accSize(l_g, (l_st).f_body);
+      SD_PREEMPT();
+      sd_int _t9 = sd_m_Gen__accSizeStmt(l_g, (l_st).f_init);
+      SD_PREEMPT();
+      sd_int _t10 = sd_m_Gen__accSizeStmt(l_g, (l_st).f_post);
+      sd_int _t11 = sd_int_add(_t8, _t9);
+      sd_int _t12 = sd_int_add(_t11, _t10);
+      { int64_t r_; if (SD_LIKELY((((l_n).w | _t12.w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_n).w, _t12.w, &r_))) (l_n).w = r_; else { sd_int s_ = sd_int_add_slow((l_n), _t12); sd_int_release((l_n)); (l_n) = s_; } }
+      sd_int_release(_t12);
+      sd_int_release(_t11);
+      sd_int_release(_t10);
+      sd_int_release(_t9);
+      sd_int_release(_t8);
+    } else if (_t2 == 6 || _t2 == 7) {
+      {
+        sd_int l_k = SD_INT(0);
+        if (SD_LIKELY(((l_n.w) & 1) == 0)) {
+          int64_t r_n_1931 = SD_SMALL(l_n);
+          for (;;) {
+            SD_PREEMPT();
+            if (!(sd_int_lt(l_k, (l_st).f_count))) break;
+            {
+              sd_int _t16 = sd_m_Ast__at(((l_g).f_c).f_ast, (l_st).f_list, l_k);
+              SD_PREEMPT();
+              sd_int _t17 = sd_m_Gen__accSize(l_g, (SD_LIST_GET((((l_g).f_c).f_ast).f_cases, sd_S_Case, _t16)).f_body);
+              int64_t _t18; if (SD_UNLIKELY((_t17.w & 1) != 0 || __builtin_add_overflow(r_n_1931, _t17.w >> 1, &_t18))) {
+                sd_int _t19 = sd_int_from_i64(r_n_1931);
+                l_n = sd_int_add(_t19, _t17);
+                sd_int_release(_t19);
+                sd_int_release(_t17);
+                sd_int_release(_t16);
+                goto _c14;
+              }
+              r_n_1931 = _t18;
+              sd_int_release(_t17);
+              sd_int_release(_t16);
+            }
+            _c15:;
+            { int64_t r_; if (SD_LIKELY((((l_k).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_k).w, SD_INT(1).w, &r_))) (l_k).w = r_; else { sd_int s_ = sd_int_add_slow((l_k), SD_INT(1)); sd_int_release((l_k)); (l_k) = s_; } }
+          }
+          l_n = sd_int_from_i64(r_n_1931);
+          goto _d13;
+        }
+        for (;;) {
+          SD_PREEMPT();
+          if (!(sd_int_lt(l_k, (l_st).f_count))) break;
+          {
+            sd_int _t20 = sd_m_Ast__at(((l_g).f_c).f_ast, (l_st).f_list, l_k);
+            SD_PREEMPT();
+            sd_int _t21 = sd_m_Gen__accSize(l_g, (SD_LIST_GET((((l_g).f_c).f_ast).f_cases, sd_S_Case, _t20)).f_body);
+            { int64_t r_; if (SD_LIKELY((((l_n).w | _t21.w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_n).w, _t21.w, &r_))) (l_n).w = r_; else { sd_int s_ = sd_int_add_slow((l_n), _t21); sd_int_release((l_n)); (l_n) = s_; } }
+            sd_int_release(_t21);
+            sd_int_release(_t20);
+          }
+          _c14:;
+          { int64_t r_; if (SD_LIKELY((((l_k).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_k).w, SD_INT(1).w, &r_))) (l_k).w = r_; else { sd_int s_ = sd_int_add_slow((l_k), SD_INT(1)); sd_int_release((l_k)); (l_k) = s_; } }
+        }
+        _d13:;
+        sd_int_release(l_k);
+      }
+    } else if (_t2 == 0 || _t2 == 1 || _t2 == 2 || _t2 == 3 || _t2 == 8 || _t2 == 9 || _t2 == 10) {
+      return l_n;
+    } else if (_t2 == 11 || _t2 == 12 || _t2 == 13 || _t2 == 14) {
+      return l_n;
+    }
+  }
+  return l_n;
+}
+
+static bool sd_m_Gen__accBodyOk(sd_S_Gen l_g, sd_int l_b) {
+  if (sd_int_lt(l_b, SD_INT(0))) {
+    return true;
+  }
+  sd_S_Block l_bl = SD_LIST_GET((((l_g).f_c).f_ast).f_blocks, sd_S_Block, l_b);
+  {
+    sd_int l_i = SD_INT(0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!(sd_int_lt(l_i, (l_bl).f_count))) break;
+      {
+        sd_int _t2 = sd_m_Ast__at(((l_g).f_c).f_ast, (l_bl).f_list, l_i);
+        SD_PREEMPT();
+        bool _t3 = sd_m_Gen__accStmtOk(l_g, _t2);
+        bool _t4 = (!_t3);
+        sd_int_release(_t2);
+        if (_t4) {
+          bool _t5 = false;
+          sd_int_release(l_i);
+          return _t5;
+        }
+      }
+      _c1:;
+      { int64_t r_; if (SD_LIKELY((((l_i).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_i).w, SD_INT(1).w, &r_))) (l_i).w = r_; else { sd_int s_ = sd_int_add_slow((l_i), SD_INT(1)); sd_int_release((l_i)); (l_i) = s_; } }
+    }
+    sd_int_release(l_i);
+  }
+  return true;
+}
+
+static bool sd_m_Gen__accStmtOk(sd_S_Gen l_g, sd_int l_s) {
+  if (sd_int_lt(l_s, SD_INT(0))) {
+    return true;
+  }
+  sd_S_Stmt l_st = SD_LIST_GET((((l_g).f_c).f_ast).f_stmts, sd_S_Stmt, l_s);
+  bool _t1 = sd_m_Gen__hasGroup(l_g, (l_st).f_expr);
+  if (_t1) {
+    return false;
+  }
+  {
+    sd_box * _t2 = (l_st).f_kind;
+    int32_t _t3 = SD_BOX_GET(_t2, sd_E_StmtKind).tag;
+    if (_t3 == 9 || _t3 == 10 || _t3 == 7 || _t3 == 0) {
+      return false;
+    } else if (_t3 == 4) {
+      SD_PREEMPT();
+      bool _t4 = sd_m_Gen__accBodyOk(l_g, (l_st).f_body);
+      bool _t6 = _t4;
+      if (_t6) {
+        SD_PREEMPT();
+        bool _t5 = sd_m_Gen__accStmtOk(l_g, (l_st).f_elseIf);
+        _t6 = _t5;
+      }
+      bool _t8 = _t6;
+      if (_t8) {
+        SD_PREEMPT();
+        bool _t7 = sd_m_Gen__accBodyOk(l_g, (l_st).f_els);
+        _t8 = _t7;
+      }
+      return _t8;
+    } else if (_t3 == 5) {
+      SD_PREEMPT();
+      bool _t9 = sd_m_Gen__accStmtOk(l_g, (l_st).f_init);
+      bool _t11 = _t9;
+      if (_t11) {
+        SD_PREEMPT();
+        bool _t10 = sd_m_Gen__accStmtOk(l_g, (l_st).f_post);
+        _t11 = _t10;
+      }
+      bool _t13 = _t11;
+      if (_t13) {
+        SD_PREEMPT();
+        bool _t12 = sd_m_Gen__accBodyOk(l_g, (l_st).f_body);
+        _t13 = _t12;
+      }
+      return _t13;
+    } else if (_t3 == 6) {
+      {
+        sd_int l_k = SD_INT(0);
+        for (;;) {
+          SD_PREEMPT();
+          if (!(sd_int_lt(l_k, (l_st).f_count))) break;
+          {
+            sd_int _t15 = sd_m_Ast__at(((l_g).f_c).f_ast, (l_st).f_list, l_k);
+            SD_PREEMPT();
+            bool _t16 = sd_m_Gen__accBodyOk(l_g, (SD_LIST_GET((((l_g).f_c).f_ast).f_cases, sd_S_Case, _t15)).f_body);
+            bool _t17 = (!_t16);
+            sd_int_release(_t15);
+            if (_t17) {
+              bool _t18 = false;
+              sd_int_release(l_k);
+              return _t18;
+            }
+          }
+          _c14:;
+          { int64_t r_; if (SD_LIKELY((((l_k).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_k).w, SD_INT(1).w, &r_))) (l_k).w = r_; else { sd_int s_ = sd_int_add_slow((l_k), SD_INT(1)); sd_int_release((l_k)); (l_k) = s_; } }
+        }
+        sd_int_release(l_k);
+      }
+      return true;
+    } else if (_t3 == 8) {
+      {
+        sd_int l_j = SD_INT(0);
+        for (;;) {
+          SD_PREEMPT();
+          if (!(sd_int_lt(l_j, (l_st).f_count))) break;
+          {
+            sd_int _t20 = sd_m_Ast__at(((l_g).f_c).f_ast, (l_st).f_list, l_j);
+            bool _t21 = sd_m_Gen__hasGroup(l_g, _t20);
+            bool _t22 = _t21;
+            sd_int_release(_t20);
+            if (_t22) {
+              bool _t23 = false;
+              sd_int_release(l_j);
+              return _t23;
+            }
+          }
+          _c19:;
+          { int64_t r_; if (SD_LIKELY((((l_j).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_j).w, SD_INT(1).w, &r_))) (l_j).w = r_; else { sd_int s_ = sd_int_add_slow((l_j), SD_INT(1)); sd_int_release((l_j)); (l_j) = s_; } }
+        }
+        sd_int_release(l_j);
+      }
+      return true;
+    } else if (_t3 == 1 || _t3 == 2 || _t3 == 3 || _t3 == 11 || _t3 == 12 || _t3 == 13 || _t3 == 14) {
+      return true;
+    }
+  }
+  sd_crash("internal error: accStmtOk reached its end without returning");
+}
+
+static bool sd_m_Gen__hasGroup(sd_S_Gen l_g, sd_int l_e) {
+  if (sd_int_lt(l_e, SD_INT(0))) {
+    return false;
+  }
+  sd_S_Expr l_x = SD_LIST_GET((((l_g).f_c).f_ast).f_exprs, sd_S_Expr, l_e);
+  if ((SD_BOX_GET((l_x).f_kind, sd_E_ExprKind).tag == 20)) {
+    return true;
+  }
+  SD_PREEMPT();
+  bool _t1 = sd_m_Gen__hasGroup(l_g, (l_x).f_a);
+  bool _t3 = _t1;
+  if (!_t3) {
+    SD_PREEMPT();
+    bool _t2 = sd_m_Gen__hasGroup(l_g, (l_x).f_b);
+    _t3 = _t2;
+  }
+  if (_t3) {
+    return true;
+  }
+  {
+    sd_int l_k = SD_INT(0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!(sd_int_lt(l_k, (l_x).f_count))) break;
+      {
+        sd_int _t5 = sd_m_Ast__at(((l_g).f_c).f_ast, (l_x).f_list, l_k);
+        SD_PREEMPT();
+        bool _t6 = sd_m_Gen__hasGroup(l_g, _t5);
+        bool _t7 = _t6;
+        sd_int_release(_t5);
+        if (_t7) {
+          bool _t8 = true;
+          sd_int_release(l_k);
+          return _t8;
+        }
+      }
+      _c4:;
+      { int64_t r_; if (SD_LIKELY((((l_k).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_k).w, SD_INT(1).w, &r_))) (l_k).w = r_; else { sd_int s_ = sd_int_add_slow((l_k), SD_INT(1)); sd_int_release((l_k)); (l_k) = s_; } }
+    }
+    sd_int_release(l_k);
+  }
+  return false;
+}
+
+static sd_int sd_m_Gen__countVarExpr(sd_S_Gen l_g, sd_int l_e, sd_int l_v) {
+  if (sd_int_lt(l_e, SD_INT(0))) {
+    return SD_INT(0);
+  }
+  sd_S_Expr l_x = SD_LIST_GET((((l_g).f_c).f_ast).f_exprs, sd_S_Expr, l_e);
+  sd_int l_n = SD_INT(0);
+  if ((((SD_BOX_GET((l_x).f_kind, sd_E_ExprKind).tag == 7) && (SD_BOX_GET((SD_LIST_GET(((l_g).f_c).f_info, sd_S_ExprInfo, l_e)).f_res, sd_E_Res).tag == 1)) && sd_int_eq((SD_LIST_GET(((l_g).f_c).f_info, sd_S_ExprInfo, l_e)).f_ref, l_v))) {
+    sd_int _t1 = SD_INT(1);
+    sd_int_release(l_n);
+    l_n = _t1;
+  }
+  if ((SD_BOX_GET((l_x).f_kind, sd_E_ExprKind).tag == 20)) {
+    SD_PREEMPT();
+    sd_int _t2 = sd_m_Gen__countVarBlock(l_g, (l_x).f_block, l_v);
+    sd_int _t3 = sd_int_add(l_n, _t2);
+    sd_int _t4 = _t3;
+    sd_int_release(_t2);
+    sd_int_release(l_n);
+    return _t4;
+  }
+  SD_PREEMPT();
+  sd_int _t5 = sd_m_Gen__countVarExpr(l_g, (l_x).f_a, l_v);
+  sd_int _t6 = sd_m_Gen__countVarExpr(l_g, (l_x).f_b, l_v);
+  sd_int _t7 = sd_int_add(_t5, _t6);
+  { int64_t r_; if (SD_LIKELY((((l_n).w | _t7.w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_n).w, _t7.w, &r_))) (l_n).w = r_; else { sd_int s_ = sd_int_add_slow((l_n), _t7); sd_int_release((l_n)); (l_n) = s_; } }
+  sd_int_release(_t7);
+  sd_int_release(_t6);
+  sd_int_release(_t5);
+  {
+    sd_int l_k = SD_INT(0);
+    if (SD_LIKELY(((l_n.w) & 1) == 0)) {
+      int64_t r_n_1950 = SD_SMALL(l_n);
+      for (;;) {
+        SD_PREEMPT();
+        if (!(sd_int_lt(l_k, (l_x).f_count))) break;
+        {
+          sd_int _t11 = sd_m_Ast__at(((l_g).f_c).f_ast, (l_x).f_list, l_k);
+          sd_int _t12 = sd_m_Gen__countVarExpr(l_g, _t11, l_v);
+          int64_t _t13; if (SD_UNLIKELY((_t12.w & 1) != 0 || __builtin_add_overflow(r_n_1950, _t12.w >> 1, &_t13))) {
+            sd_int _t14 = sd_int_from_i64(r_n_1950);
+            l_n = sd_int_add(_t14, _t12);
+            sd_int_release(_t14);
+            sd_int_release(_t12);
+            sd_int_release(_t11);
+            goto _c9;
+          }
+          r_n_1950 = _t13;
+          sd_int_release(_t12);
+          sd_int_release(_t11);
+        }
+        _c10:;
+        { int64_t r_; if (SD_LIKELY((((l_k).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_k).w, SD_INT(1).w, &r_))) (l_k).w = r_; else { sd_int s_ = sd_int_add_slow((l_k), SD_INT(1)); sd_int_release((l_k)); (l_k) = s_; } }
+      }
+      l_n = sd_int_from_i64(r_n_1950);
+      goto _d8;
+    }
+    for (;;) {
+      SD_PREEMPT();
+      if (!(sd_int_lt(l_k, (l_x).f_count))) break;
+      {
+        sd_int _t15 = sd_m_Ast__at(((l_g).f_c).f_ast, (l_x).f_list, l_k);
+        sd_int _t16 = sd_m_Gen__countVarExpr(l_g, _t15, l_v);
+        { int64_t r_; if (SD_LIKELY((((l_n).w | _t16.w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_n).w, _t16.w, &r_))) (l_n).w = r_; else { sd_int s_ = sd_int_add_slow((l_n), _t16); sd_int_release((l_n)); (l_n) = s_; } }
+        sd_int_release(_t16);
+        sd_int_release(_t15);
+      }
+      _c9:;
+      { int64_t r_; if (SD_LIKELY((((l_k).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_k).w, SD_INT(1).w, &r_))) (l_k).w = r_; else { sd_int s_ = sd_int_add_slow((l_k), SD_INT(1)); sd_int_release((l_k)); (l_k) = s_; } }
+    }
+    _d8:;
+    sd_int_release(l_k);
+  }
+  return l_n;
+}
+
+static sd_int sd_m_Gen__countVarBlock(sd_S_Gen l_g, sd_int l_b, sd_int l_v) {
+  if (sd_int_lt(l_b, SD_INT(0))) {
+    return SD_INT(0);
+  }
+  sd_int l_n = SD_INT(0);
+  sd_S_Block l_bl = SD_LIST_GET((((l_g).f_c).f_ast).f_blocks, sd_S_Block, l_b);
+  {
+    sd_int l_i = SD_INT(0);
+    if (SD_LIKELY(((l_n.w) & 1) == 0)) {
+      int64_t r_n_1955 = SD_SMALL(l_n);
+      for (;;) {
+        SD_PREEMPT();
+        if (!(sd_int_lt(l_i, (l_bl).f_count))) break;
+        {
+          sd_int _t4 = sd_m_Ast__at(((l_g).f_c).f_ast, (l_bl).f_list, l_i);
+          SD_PREEMPT();
+          sd_int _t5 = sd_m_Gen__countVarStmt(l_g, _t4, l_v);
+          int64_t _t6; if (SD_UNLIKELY((_t5.w & 1) != 0 || __builtin_add_overflow(r_n_1955, _t5.w >> 1, &_t6))) {
+            sd_int _t7 = sd_int_from_i64(r_n_1955);
+            l_n = sd_int_add(_t7, _t5);
+            sd_int_release(_t7);
+            sd_int_release(_t5);
+            sd_int_release(_t4);
+            goto _c2;
+          }
+          r_n_1955 = _t6;
+          sd_int_release(_t5);
+          sd_int_release(_t4);
+        }
+        _c3:;
+        { int64_t r_; if (SD_LIKELY((((l_i).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_i).w, SD_INT(1).w, &r_))) (l_i).w = r_; else { sd_int s_ = sd_int_add_slow((l_i), SD_INT(1)); sd_int_release((l_i)); (l_i) = s_; } }
+      }
+      l_n = sd_int_from_i64(r_n_1955);
+      goto _d1;
+    }
+    for (;;) {
+      SD_PREEMPT();
+      if (!(sd_int_lt(l_i, (l_bl).f_count))) break;
+      {
+        sd_int _t8 = sd_m_Ast__at(((l_g).f_c).f_ast, (l_bl).f_list, l_i);
+        SD_PREEMPT();
+        sd_int _t9 = sd_m_Gen__countVarStmt(l_g, _t8, l_v);
+        { int64_t r_; if (SD_LIKELY((((l_n).w | _t9.w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_n).w, _t9.w, &r_))) (l_n).w = r_; else { sd_int s_ = sd_int_add_slow((l_n), _t9); sd_int_release((l_n)); (l_n) = s_; } }
+        sd_int_release(_t9);
+        sd_int_release(_t8);
+      }
+      _c2:;
+      { int64_t r_; if (SD_LIKELY((((l_i).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_i).w, SD_INT(1).w, &r_))) (l_i).w = r_; else { sd_int s_ = sd_int_add_slow((l_i), SD_INT(1)); sd_int_release((l_i)); (l_i) = s_; } }
+    }
+    _d1:;
+    sd_int_release(l_i);
+  }
+  return l_n;
+}
+
+static sd_int sd_m_Gen__countVarStmt(sd_S_Gen l_g, sd_int l_s, sd_int l_v) {
+  if (sd_int_lt(l_s, SD_INT(0))) {
+    return SD_INT(0);
+  }
+  sd_S_Stmt l_st = SD_LIST_GET((((l_g).f_c).f_ast).f_stmts, sd_S_Stmt, l_s);
+  SD_PREEMPT();
+  sd_int _t1 = sd_m_Gen__countVarExpr(l_g, (l_st).f_expr, l_v);
+  sd_int l_n = _t1;
+  {
+    sd_box * _t2 = (l_st).f_kind;
+    int32_t _t3 = SD_BOX_GET(_t2, sd_E_StmtKind).tag;
+    if (_t3 == 2) {
+      {
+        sd_int l_i = SD_INT(0);
+        if (SD_LIKELY(((l_n.w) & 1) == 0)) {
+          int64_t r_n_1962 = SD_SMALL(l_n);
+          for (;;) {
+            SD_PREEMPT();
+            if (!(sd_int_lt(l_i, (l_st).f_count))) break;
+            {
+              sd_int _t7 = sd_m_Ast__at(((l_g).f_c).f_ast, (l_st).f_list, l_i);
+              sd_int _t8 = sd_m_Gen__countVarExpr(l_g, (SD_LIST_GET((((l_g).f_c).f_ast).f_targets, sd_S_Target, _t7)).f_expr, l_v);
+              int64_t _t9; if (SD_UNLIKELY((_t8.w & 1) != 0 || __builtin_add_overflow(r_n_1962, _t8.w >> 1, &_t9))) {
+                sd_int _t10 = sd_int_from_i64(r_n_1962);
+                l_n = sd_int_add(_t10, _t8);
+                sd_int_release(_t10);
+                sd_int_release(_t8);
+                sd_int_release(_t7);
+                goto _c5;
+              }
+              r_n_1962 = _t9;
+              sd_int_release(_t8);
+              sd_int_release(_t7);
+            }
+            _c6:;
+            { int64_t r_; if (SD_LIKELY((((l_i).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_i).w, SD_INT(1).w, &r_))) (l_i).w = r_; else { sd_int s_ = sd_int_add_slow((l_i), SD_INT(1)); sd_int_release((l_i)); (l_i) = s_; } }
+          }
+          l_n = sd_int_from_i64(r_n_1962);
+          goto _d4;
+        }
+        for (;;) {
+          SD_PREEMPT();
+          if (!(sd_int_lt(l_i, (l_st).f_count))) break;
+          {
+            sd_int _t11 = sd_m_Ast__at(((l_g).f_c).f_ast, (l_st).f_list, l_i);
+            sd_int _t12 = sd_m_Gen__countVarExpr(l_g, (SD_LIST_GET((((l_g).f_c).f_ast).f_targets, sd_S_Target, _t11)).f_expr, l_v);
+            { int64_t r_; if (SD_LIKELY((((l_n).w | _t12.w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_n).w, _t12.w, &r_))) (l_n).w = r_; else { sd_int s_ = sd_int_add_slow((l_n), _t12); sd_int_release((l_n)); (l_n) = s_; } }
+            sd_int_release(_t12);
+            sd_int_release(_t11);
+          }
+          _c5:;
+          { int64_t r_; if (SD_LIKELY((((l_i).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_i).w, SD_INT(1).w, &r_))) (l_i).w = r_; else { sd_int s_ = sd_int_add_slow((l_i), SD_INT(1)); sd_int_release((l_i)); (l_i) = s_; } }
+        }
+        _d4:;
+        sd_int_release(l_i);
+      }
+    } else if (_t3 == 8) {
+      {
+        sd_int l_j = SD_INT(0);
+        if (SD_LIKELY(((l_n.w) & 1) == 0)) {
+          int64_t r_n_1962 = SD_SMALL(l_n);
+          for (;;) {
+            SD_PREEMPT();
+            if (!(sd_int_lt(l_j, (l_st).f_count))) break;
+            {
+              sd_int _t16 = sd_m_Ast__at(((l_g).f_c).f_ast, (l_st).f_list, l_j);
+              sd_int _t17 = sd_m_Gen__countVarExpr(l_g, _t16, l_v);
+              int64_t _t18; if (SD_UNLIKELY((_t17.w & 1) != 0 || __builtin_add_overflow(r_n_1962, _t17.w >> 1, &_t18))) {
+                sd_int _t19 = sd_int_from_i64(r_n_1962);
+                l_n = sd_int_add(_t19, _t17);
+                sd_int_release(_t19);
+                sd_int_release(_t17);
+                sd_int_release(_t16);
+                goto _c14;
+              }
+              r_n_1962 = _t18;
+              sd_int_release(_t17);
+              sd_int_release(_t16);
+            }
+            _c15:;
+            { int64_t r_; if (SD_LIKELY((((l_j).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_j).w, SD_INT(1).w, &r_))) (l_j).w = r_; else { sd_int s_ = sd_int_add_slow((l_j), SD_INT(1)); sd_int_release((l_j)); (l_j) = s_; } }
+          }
+          l_n = sd_int_from_i64(r_n_1962);
+          goto _d13;
+        }
+        for (;;) {
+          SD_PREEMPT();
+          if (!(sd_int_lt(l_j, (l_st).f_count))) break;
+          {
+            sd_int _t20 = sd_m_Ast__at(((l_g).f_c).f_ast, (l_st).f_list, l_j);
+            sd_int _t21 = sd_m_Gen__countVarExpr(l_g, _t20, l_v);
+            { int64_t r_; if (SD_LIKELY((((l_n).w | _t21.w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_n).w, _t21.w, &r_))) (l_n).w = r_; else { sd_int s_ = sd_int_add_slow((l_n), _t21); sd_int_release((l_n)); (l_n) = s_; } }
+            sd_int_release(_t21);
+            sd_int_release(_t20);
+          }
+          _c14:;
+          { int64_t r_; if (SD_LIKELY((((l_j).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_j).w, SD_INT(1).w, &r_))) (l_j).w = r_; else { sd_int s_ = sd_int_add_slow((l_j), SD_INT(1)); sd_int_release((l_j)); (l_j) = s_; } }
+        }
+        _d13:;
+        sd_int_release(l_j);
+      }
+    } else if (_t3 == 4) {
+      sd_int _t22 = sd_m_Gen__countVarBlock(l_g, (l_st).f_body, l_v);
+      sd_int _t23 = sd_m_Gen__countVarStmt(l_g, (l_st).f_elseIf, l_v);
+      sd_int _t24 = sd_m_Gen__countVarBlock(l_g, (l_st).f_els, l_v);
+      sd_int _t25 = sd_int_add(_t22, _t23);
+      sd_int _t26 = sd_int_add(_t25, _t24);
+      { int64_t r_; if (SD_LIKELY((((l_n).w | _t26.w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_n).w, _t26.w, &r_))) (l_n).w = r_; else { sd_int s_ = sd_int_add_slow((l_n), _t26); sd_int_release((l_n)); (l_n) = s_; } }
+      sd_int_release(_t26);
+      sd_int_release(_t25);
+      sd_int_release(_t24);
+      sd_int_release(_t23);
+      sd_int_release(_t22);
+    } else if (_t3 == 5) {
+      sd_int _t27 = sd_m_Gen__countVarStmt(l_g, (l_st).f_init, l_v);
+      sd_int _t28 = sd_m_Gen__countVarBlock(l_g, (l_st).f_body, l_v);
+      sd_int _t29 = sd_m_Gen__countVarStmt(l_g, (l_st).f_post, l_v);
+      sd_int _t30 = sd_int_add(_t27, _t28);
+      sd_int _t31 = sd_int_add(_t30, _t29);
+      { int64_t r_; if (SD_LIKELY((((l_n).w | _t31.w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_n).w, _t31.w, &r_))) (l_n).w = r_; else { sd_int s_ = sd_int_add_slow((l_n), _t31); sd_int_release((l_n)); (l_n) = s_; } }
+      sd_int_release(_t31);
+      sd_int_release(_t30);
+      sd_int_release(_t29);
+      sd_int_release(_t28);
+      sd_int_release(_t27);
+    } else if (_t3 == 6 || _t3 == 7) {
+      {
+        sd_int l_k = SD_INT(0);
+        for (;;) {
+          SD_PREEMPT();
+          if (!(sd_int_lt(l_k, (l_st).f_count))) break;
+          {
+            sd_int _t33 = sd_m_Ast__at(((l_g).f_c).f_ast, (l_st).f_list, l_k);
+            sd_S_Case l_cs = SD_LIST_GET((((l_g).f_c).f_ast).f_cases, sd_S_Case, _t33);
+            sd_int_release(_t33);
+            {
+              sd_int l_l = SD_INT(0);
+              if (SD_LIKELY(((l_n.w) & 1) == 0)) {
+                int64_t r_n_1962 = SD_SMALL(l_n);
+                for (;;) {
+                  SD_PREEMPT();
+                  if (!(sd_int_lt(l_l, (l_cs).f_labelCount))) break;
+                  {
+                    sd_int _t37 = sd_m_Ast__at(((l_g).f_c).f_ast, (l_cs).f_labels, l_l);
+                    sd_int _t38 = sd_m_Gen__countVarExpr(l_g, (SD_LIST_GET((((l_g).f_c).f_ast).f_labels, sd_S_Label, _t37)).f_expr, l_v);
+                    int64_t _t39; if (SD_UNLIKELY((_t38.w & 1) != 0 || __builtin_add_overflow(r_n_1962, _t38.w >> 1, &_t39))) {
+                      sd_int _t40 = sd_int_from_i64(r_n_1962);
+                      l_n = sd_int_add(_t40, _t38);
+                      sd_int_release(_t40);
+                      sd_int_release(_t38);
+                      sd_int_release(_t37);
+                      goto _c35;
+                    }
+                    r_n_1962 = _t39;
+                    sd_int_release(_t38);
+                    sd_int_release(_t37);
+                  }
+                  _c36:;
+                  { int64_t r_; if (SD_LIKELY((((l_l).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_l).w, SD_INT(1).w, &r_))) (l_l).w = r_; else { sd_int s_ = sd_int_add_slow((l_l), SD_INT(1)); sd_int_release((l_l)); (l_l) = s_; } }
+                }
+                l_n = sd_int_from_i64(r_n_1962);
+                goto _d34;
+              }
+              for (;;) {
+                SD_PREEMPT();
+                if (!(sd_int_lt(l_l, (l_cs).f_labelCount))) break;
+                {
+                  sd_int _t41 = sd_m_Ast__at(((l_g).f_c).f_ast, (l_cs).f_labels, l_l);
+                  sd_int _t42 = sd_m_Gen__countVarExpr(l_g, (SD_LIST_GET((((l_g).f_c).f_ast).f_labels, sd_S_Label, _t41)).f_expr, l_v);
+                  { int64_t r_; if (SD_LIKELY((((l_n).w | _t42.w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_n).w, _t42.w, &r_))) (l_n).w = r_; else { sd_int s_ = sd_int_add_slow((l_n), _t42); sd_int_release((l_n)); (l_n) = s_; } }
+                  sd_int_release(_t42);
+                  sd_int_release(_t41);
+                }
+                _c35:;
+                { int64_t r_; if (SD_LIKELY((((l_l).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_l).w, SD_INT(1).w, &r_))) (l_l).w = r_; else { sd_int s_ = sd_int_add_slow((l_l), SD_INT(1)); sd_int_release((l_l)); (l_l) = s_; } }
+              }
+              _d34:;
+              sd_int_release(l_l);
+            }
+            sd_int _t43 = sd_m_Gen__countVarStmt(l_g, (l_cs).f_comm, l_v);
+            sd_int _t44 = sd_m_Gen__countVarBlock(l_g, (l_cs).f_body, l_v);
+            sd_int _t45 = sd_int_add(_t43, _t44);
+            { int64_t r_; if (SD_LIKELY((((l_n).w | _t45.w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_n).w, _t45.w, &r_))) (l_n).w = r_; else { sd_int s_ = sd_int_add_slow((l_n), _t45); sd_int_release((l_n)); (l_n) = s_; } }
+            sd_int_release(_t45);
+            sd_int_release(_t44);
+            sd_int_release(_t43);
+          }
+          _c32:;
+          { int64_t r_; if (SD_LIKELY((((l_k).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_k).w, SD_INT(1).w, &r_))) (l_k).w = r_; else { sd_int s_ = sd_int_add_slow((l_k), SD_INT(1)); sd_int_release((l_k)); (l_k) = s_; } }
+        }
+        sd_int_release(l_k);
+      }
+    } else if (_t3 == 0 || _t3 == 1 || _t3 == 3 || _t3 == 9 || _t3 == 10) {
+      return l_n;
+    } else if (_t3 == 11 || _t3 == 12 || _t3 == 13 || _t3 == 14) {
+      return l_n;
+    }
+  }
+  return l_n;
+}
+
+static sd_str sd_m_Gen__rawName(sd_S_Gen l_g, sd_int l_v) {
+  sd_str_part _t1[] = {{SD_STR_LIT("r_")}, {(SD_LIST_GET(((l_g).f_c).f_vars, sd_S_Var, l_v)).f_name}, {SD_STR_LIT("_")}, {NULL, l_v}};
+  sd_str _t2 = sd_str_concat_parts(_t1, 4);
+  return _t2;
+}
+
+typedef struct { sd_lframe h; sd_list * l_words; sd_str _t5; sd_str _t7; sd_str _t10; sd_str _t11; sd_str _t13; sd_str _t19; } sd_L_sd_m_Gen__genAccLoop;
+static void sd_lr_sd_m_Gen__genAccLoop(sd_lframe *p) {
+  sd_L_sd_m_Gen__genAccLoop *L = (sd_L_sd_m_Gen__genAccLoop *)p;
+  sd_list_release(L->l_words);
+  sd_str_release(L->_t5);
+  sd_str_release(L->_t7);
+  sd_str_release(L->_t10);
+  sd_str_release(L->_t11);
+  sd_str_release(L->_t13);
+  sd_str_release(L->_t19);
+}
+static void sd_m_Gen__genAccLoop(sd_S_Gen * l_g, sd_S_Stmt l_st, sd_list * l_acc, sd_int l_general, sd_int l_done) {
+  sd_L_sd_m_Gen__genAccLoop L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_m_Gen__genAccLoop);
+  sd_list * _t1 = sd_list_new(&sd_type_str, 0);
+  L.l_words = _t1;
+  {
+    int64_t l_i = ((int64_t)0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!((l_i < SD_SMALL(sd_list_len(l_acc))))) break;
+      {
+        sd_str _t3 = sd_m_Gen__lname((*l_g), SD_LIST_GET(l_acc, sd_int, SD_INT_S(l_i)));
+        sd_str _t4 = sd_str_concat(_t3, SD_STR_LIT(".w"));
+        SD_LIST_PUSH((&L.l_words), sd_str, _t4);
+        sd_str_release(_t3); 
+      }
+      _c2:;
+      l_i++;
+    }
+  }
+  L._t5 = sd_list_join(L.l_words, SD_STR_LIT(" | "));
+  sd_str _t6[] = {SD_STR_LIT("if (SD_LIKELY((("), L._t5, SD_STR_LIT(") & 1) == 0)) {")};
+  L._t7 = sd_str_concat_n(_t6, 3);
+  sd_m_Gen__emit(l_g, L._t7);
+  sd_str_release(L._t7); L._t7 = NULL;
+  sd_str_release(L._t5); L._t5 = NULL;
+  sd_int *_t8 = (&(l_g)->f_indent);
+  { int64_t r_; if (SD_LIKELY((((*_t8).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((*_t8).w, SD_INT(1).w, &r_))) (*_t8).w = r_; else { sd_int s_ = sd_int_add_slow((*_t8), SD_INT(1)); sd_int_release((*_t8)); (*_t8) = s_; } }
+  {
+    int64_t l_j = ((int64_t)0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!((l_j < SD_SMALL(sd_list_len(l_acc))))) break;
+      {
+        L._t10 = sd_m_Gen__rawName((*l_g), SD_LIST_GET(l_acc, sd_int, SD_INT_S(l_j)));
+        L._t11 = sd_m_Gen__lname((*l_g), SD_LIST_GET(l_acc, sd_int, SD_INT_S(l_j)));
+        sd_str _t12[] = {SD_STR_LIT("int64_t "), L._t10, SD_STR_LIT(" = SD_SMALL("), L._t11, SD_STR_LIT(");")};
+        L._t13 = sd_str_concat_n(_t12, 5);
+        sd_m_Gen__emit(l_g, L._t13);
+        sd_str_release(L._t13); L._t13 = NULL;
+        sd_str_release(L._t11); L._t11 = NULL;
+        sd_str_release(L._t10); L._t10 = NULL;
+      }
+      _c9:;
+      l_j++;
+    }
+  }
+  sd_int *_t14 = (&(l_g)->f_ntmp);
+  { int64_t r_; if (SD_LIKELY((((*_t14).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((*_t14).w, SD_INT(1).w, &r_))) (*_t14).w = r_; else { sd_int s_ = sd_int_add_slow((*_t14), SD_INT(1)); sd_int_release((*_t14)); (*_t14) = s_; } }
+  sd_int _t15 = sd_int_retain(((*l_g)).f_ntmp);
+  bool _t16 = false;
+  SD_PREEMPT();
+  sd_m_Gen__genLoopCopy(l_g, l_st, _t15, l_acc, l_general, _t16);
+  sd_int_release(_t15);
+  sd_int _t17 = SD_INT(-1);
+  sd_m_Gen__emitMaterialise(l_g, l_acc, _t17);
+  sd_str_part _t18[] = {{SD_STR_LIT("goto _d")}, {NULL, l_done}, {SD_STR_LIT(";")}};
+  L._t19 = sd_str_concat_parts(_t18, 3);
+  sd_m_Gen__emit(l_g, L._t19);
+  sd_str_release(L._t19); L._t19 = NULL;
+  sd_int *_t20 = (&(l_g)->f_indent);
+  { int64_t r_; if (SD_LIKELY((((*_t20).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_sub_overflow((*_t20).w, SD_INT(1).w, &r_))) (*_t20).w = r_; else { sd_int s_ = sd_int_sub_slow((*_t20), SD_INT(1)); sd_int_release((*_t20)); (*_t20) = s_; } }
+  sd_str _t21 = SD_STR_LIT("}");
+  sd_m_Gen__emit(l_g, _t21);
+  sd_list_release(L.l_words); L.l_words = NULL;
+  SD_LF_LEAVE(L);
+}
+
+typedef struct { sd_lframe h; sd_str _t2; sd_str _t3; sd_str _t5; } sd_L_sd_m_Gen__emitMaterialise;
+static void sd_lr_sd_m_Gen__emitMaterialise(sd_lframe *p) {
+  sd_L_sd_m_Gen__emitMaterialise *L = (sd_L_sd_m_Gen__emitMaterialise *)p;
+  sd_str_release(L->_t2);
+  sd_str_release(L->_t3);
+  sd_str_release(L->_t5);
+}
+static void sd_m_Gen__emitMaterialise(sd_S_Gen * l_g, sd_list * l_acc, sd_int l_skip) {
+  sd_L_sd_m_Gen__emitMaterialise L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_m_Gen__emitMaterialise);
+  {
+    int64_t l_i = ((int64_t)0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!((l_i < SD_SMALL(sd_list_len(l_acc))))) break;
+      {
+        if ((!sd_int_eq(SD_LIST_GET(l_acc, sd_int, SD_INT_S(l_i)), l_skip))) {
+          L._t2 = sd_m_Gen__lname((*l_g), SD_LIST_GET(l_acc, sd_int, SD_INT_S(l_i)));
+          L._t3 = sd_m_Gen__rawName((*l_g), SD_LIST_GET(l_acc, sd_int, SD_INT_S(l_i)));
+          sd_str _t4[] = {L._t2, SD_STR_LIT(" = sd_int_from_i64("), L._t3, SD_STR_LIT(");")};
+          L._t5 = sd_str_concat_n(_t4, 4);
+          sd_m_Gen__emit(l_g, L._t5);
+          sd_str_release(L._t5); L._t5 = NULL;
+          sd_str_release(L._t3); L._t3 = NULL;
+          sd_str_release(L._t2); L._t2 = NULL;
+        }
+      }
+      _c1:;
+      l_i++;
+    }
+  }
+  SD_LF_LEAVE(L);
+}
+
+typedef struct { sd_lframe h; sd_S_LoopCtx l_lc; sd_S_AccUpdate l_u; sd_str l_op; sd_str l_r; sd_str l_raw; sd_str l_b; sd_list * l_terms; sd_str _t20; sd_str _t23; sd_str _t25; sd_str l_old; sd_str l_t; sd_str _t31; sd_str l_undo; sd_str _t39; sd_str l_a; sd_str _t43; sd_str _t44; sd_str _t46; sd_str _t48; sd_list * _t49; sd_str _t51; sd_str _t55; } sd_L_sd_m_Gen__genAccUpdate;
+static void sd_lr_sd_m_Gen__genAccUpdate(sd_lframe *p) {
+  sd_L_sd_m_Gen__genAccUpdate *L = (sd_L_sd_m_Gen__genAccUpdate *)p;
+  sd_rl_S7LoopCtx(L->l_lc);
+  sd_rl_S9AccUpdate(L->l_u);
+  sd_str_release(L->l_op);
+  sd_str_release(L->l_r);
+  sd_str_release(L->l_raw);
+  sd_str_release(L->l_b);
+  sd_list_release(L->l_terms);
+  sd_str_release(L->_t20);
+  sd_str_release(L->_t23);
+  sd_str_release(L->_t25);
+  sd_str_release(L->l_old);
+  sd_str_release(L->l_t);
+  sd_str_release(L->_t31);
+  sd_str_release(L->l_undo);
+  sd_str_release(L->_t39);
+  sd_str_release(L->l_a);
+  sd_str_release(L->_t43);
+  sd_str_release(L->_t44);
+  sd_str_release(L->_t46);
+  sd_str_release(L->_t48);
+  sd_list_release(L->_t49);
+  sd_str_release(L->_t51);
+  sd_str_release(L->_t55);
+}
+static bool sd_m_Gen__genAccUpdate(sd_S_Gen * l_g, sd_int l_s) {
+  sd_L_sd_m_Gen__genAccUpdate L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_m_Gen__genAccUpdate);
+  if ((SD_SMALL(sd_list_len(((*l_g)).f_loops)) == ((int64_t)0))) {
+    SD_LF_LEAVE(L);
+    return false;
+  }
+  L.l_lc = sd_rt_S7LoopCtx(SD_LIST_GET(((*l_g)).f_loops, sd_S_LoopCtx, SD_INT_S((SD_SMALL(sd_list_len(((*l_g)).f_loops)) - ((int64_t)1)))));
+  if ((SD_SMALL(sd_list_len((L.l_lc).f_acc)) == ((int64_t)0))) {
+    bool _t1 = false;
+    SD_LF_LEAVE(L);
+    sd_rl_S7LoopCtx(L.l_lc);
+    return _t1;
+  }
+  sd_S_AccUpdate _t2 = sd_m_Gen__accUpdate((*l_g), l_s);
+  L.l_u = _t2;
+  bool _t4 = sd_int_lt((L.l_u).f_var, SD_INT(0));
+  if (!_t4) {
+    sd_int _t3 = (L.l_u).f_var;
+    _t4 = (!sd_list_contains((L.l_lc).f_acc, &_t3));
+  }
+  if (_t4) {
+    bool _t5 = false;
+    SD_LF_LEAVE(L);
+    sd_rl_S9AccUpdate(L.l_u);
+    sd_rl_S7LoopCtx(L.l_lc);
+    return _t5;
+  }
+  L.l_op = SD_STR_LIT("add");
+  if ((L.l_u).f_sub) {
+    sd_str _t6 = SD_STR_LIT("sub");
+    sd_str_release(L.l_op);
+    L.l_op = _t6;
+  }
+  sd_str _t7 = sd_m_Gen__rawName((*l_g), (L.l_u).f_var);
+  L.l_r = _t7;
+  L.l_raw = SD_STR_LIT("");
+  L.l_b = SD_STR_LIT("");
+  if ((SD_SMALL(sd_list_len((L.l_u).f_rest)) == ((int64_t)0))) {
+    sd_str _t8 = SD_STR_LIT("((int64_t)1)");
+    sd_str_release(L.l_raw);
+    L.l_raw = _t8;
+  } else {
+    bool l_simple = true;
+    sd_S_IntRange _t9 = sd_f_knownRange(SD_INT(0), SD_INT(0));
+    sd_S_IntRange l_total = _t9;
+    {
+      int64_t l_i = ((int64_t)0);
+      for (;;) {
+        SD_PREEMPT();
+        if (!((l_i < SD_SMALL(sd_list_len((L.l_u).f_rest))))) break;
+        {
+          bool _t11 = sd_m_Gen__isSimpleSmall((*l_g), SD_LIST_GET((L.l_u).f_rest, sd_int, SD_INT_S(l_i)));
+          if ((!_t11)) {
+            bool _t12 = false;
+            l_simple = _t12;
+          } else {
+            sd_S_IntRange _t13 = sd_m_Gen__smallRange((*l_g), SD_LIST_GET((L.l_u).f_rest, sd_int, SD_INT_S(l_i)));
+            sd_S_IntRange _t14 = sd_f_binRange(SD_BOX_REF(sd_k_Tok__Plus), l_total, _t13);
+            sd_rl_S8IntRange(l_total);
+            l_total = _t14;
+            sd_rl_S8IntRange(_t13);
+          }
+        }
+        _c10:;
+        l_i++;
+      }
+    }
+    bool _t16 = l_simple;
+    if (_t16) {
+      bool _t15 = sd_f_isSmallRange(l_total);
+      _t16 = _t15;
+    }
+    if (_t16) {
+      sd_list * _t17 = sd_list_new(&sd_type_str, 0);
+      L.l_terms = _t17;
+      {
+        int64_t l_k = ((int64_t)0);
+        for (;;) {
+          SD_PREEMPT();
+          if (!((l_k < SD_SMALL(sd_list_len((L.l_u).f_rest))))) break;
+          {
+            sd_int _t19 = sd_int_retain(SD_LIST_GET((L.l_u).f_rest, sd_int, SD_INT_S(l_k)));
+            SD_PREEMPT();
+            L._t20 = sd_m_Gen__gexpr(l_g, _t19);
+            sd_str _t21 = sd_f_smallOf(L._t20);
+            SD_LIST_PUSH((&L.l_terms), sd_str, _t21);
+            sd_str_release(L._t20); L._t20 = NULL;
+            sd_int_release(_t19);
+          }
+          _c18:;
+          l_k++;
+        }
+      }
+      sd_str _t22 = sd_m_Gen__newTmp(l_g);
+      sd_str_release(L.l_raw);
+      L.l_raw = _t22;
+      L._t23 = sd_list_join(L.l_terms, SD_STR_LIT(" + "));
+      sd_str _t24[] = {SD_STR_LIT("int64_t "), L.l_raw, SD_STR_LIT(" = "), L._t23, SD_STR_LIT(";")};
+      L._t25 = sd_str_concat_n(_t24, 5);
+      sd_m_Gen__emit(l_g, L._t25);
+      sd_str_release(L._t25); L._t25 = NULL;
+      sd_str_release(L._t23); L._t23 = NULL;
+      sd_list_release(L.l_terms); L.l_terms = NULL;
+    } else {
+      SD_PREEMPT();
+      sd_str _t26 = sd_m_Gen__sumOf(l_g, (L.l_u).f_rest);
+      sd_str_release(L.l_b);
+      L.l_b = _t26;
+      bool _t27 = sd_f_isIdent(L.l_b);
+      if (((!_t27) && (!sd_str_starts_with(L.l_b, SD_STR_LIT("SD_INT("))))) {
+        sd_int _t28 = sd_int_retain(sd_c_tyInt());
+        sd_str _t29 = sd_m_Gen__alias(l_g, _t28, L.l_b);
+        sd_str_release(L.l_b);
+        L.l_b = _t29;
+        sd_int_release(_t28);
+      }
+    }
+    sd_rl_S8IntRange(l_total);
+  }
+  L.l_old = sd_str_retain(L.l_r);
+  L.l_t = SD_STR_LIT("");
+  if ((!sd_str_eq(L.l_raw, SD_STR_LIT("")))) {
+    sd_str _t30[] = {SD_STR_LIT("if (SD_UNLIKELY(__builtin_"), L.l_op, SD_STR_LIT("_overflow("), L.l_r, SD_STR_LIT(", "), L.l_raw, SD_STR_LIT(", &"), L.l_r, SD_STR_LIT("))) {")};
+    L._t31 = sd_str_concat_n(_t30, 9);
+    sd_m_Gen__emit(l_g, L._t31);
+    sd_str_release(L._t31); L._t31 = NULL;
+    L.l_undo = SD_STR_LIT(" - ");
+    if ((L.l_u).f_sub) {
+      sd_str _t32 = SD_STR_LIT(" + ");
+      sd_str_release(L.l_undo);
+      L.l_undo = _t32;
+    }
+    sd_str _t33[] = {SD_STR_LIT("(int64_t)((uint64_t)"), L.l_r, L.l_undo, SD_STR_LIT("(uint64_t)"), L.l_raw, SD_STR_LIT(")")};
+    sd_str _t34 = sd_str_concat_n(_t33, 6);
+    sd_str_release(L.l_old);
+    L.l_old = _t34;
+    sd_str _t35[] = {SD_STR_LIT("SD_INT_S("), L.l_raw, SD_STR_LIT(")")};
+    sd_str _t36 = sd_str_concat_n(_t35, 3);
+    sd_str_release(L.l_b);
+    L.l_b = _t36;
+    sd_str_release(L.l_undo); L.l_undo = NULL;
+  } else {
+    sd_str _t37 = sd_m_Gen__newTmp(l_g);
+    sd_str_release(L.l_t);
+    L.l_t = _t37;
+    sd_str _t38[] = {SD_STR_LIT("int64_t "), L.l_t, SD_STR_LIT("; if (SD_UNLIKELY(("), L.l_b, SD_STR_LIT(".w & 1) != 0 || __builtin_"), L.l_op, SD_STR_LIT("_overflow("), L.l_r, SD_STR_LIT(", "), L.l_b, SD_STR_LIT(".w >> 1, &"), L.l_t, SD_STR_LIT("))) {")};
+    L._t39 = sd_str_concat_n(_t38, 13);
+    sd_m_Gen__emit(l_g, L._t39);
+    sd_str_release(L._t39); L._t39 = NULL;
+  }
+  sd_int *_t40 = (&(l_g)->f_indent);
+  { int64_t r_; if (SD_LIKELY((((*_t40).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((*_t40).w, SD_INT(1).w, &r_))) (*_t40).w = r_; else { sd_int s_ = sd_int_add_slow((*_t40), SD_INT(1)); sd_int_release((*_t40)); (*_t40) = s_; } }
+  sd_str _t41 = sd_m_Gen__newTmp(l_g);
+  L.l_a = _t41;
+  sd_str _t42[] = {SD_STR_LIT("sd_int "), L.l_a, SD_STR_LIT(" = sd_int_from_i64("), L.l_old, SD_STR_LIT(");")};
+  L._t43 = sd_str_concat_n(_t42, 5);
+  sd_m_Gen__emit(l_g, L._t43);
+  sd_str_release(L._t43); L._t43 = NULL;
+  sd_m_Gen__emitMaterialise(l_g, (L.l_lc).f_acc, (L.l_u).f_var);
+  L._t44 = sd_m_Gen__lname((*l_g), (L.l_u).f_var);
+  sd_str _t45[] = {L._t44, SD_STR_LIT(" = sd_int_"), L.l_op, SD_STR_LIT("("), L.l_a, SD_STR_LIT(", "), L.l_b, SD_STR_LIT(");")};
+  L._t46 = sd_str_concat_n(_t45, 8);
+  sd_m_Gen__emit(l_g, L._t46);
+  sd_str_release(L._t46); L._t46 = NULL;
+  sd_str_release(L._t44); L._t44 = NULL;
+  sd_str _t47[] = {SD_STR_LIT("sd_int_release("), L.l_a, SD_STR_LIT(");")};
+  L._t48 = sd_str_concat_n(_t47, 3);
+  sd_m_Gen__emit(l_g, L._t48);
+  sd_str_release(L._t48); L._t48 = NULL;
+  L._t49 = sd_list_new(&sd_type_str, 0);
+  sd_m_Gen__releaseAbove(l_g, (L.l_lc).f_mark, L._t49);
+  sd_list_release(L._t49); L._t49 = NULL;
+  sd_str_part _t50[] = {{SD_STR_LIT("goto _c")}, {NULL, (L.l_lc).f_accTo}, {SD_STR_LIT(";")}};
+  L._t51 = sd_str_concat_parts(_t50, 3);
+  sd_m_Gen__emit(l_g, L._t51);
+  sd_str_release(L._t51); L._t51 = NULL;
+  sd_int *_t52 = (&(l_g)->f_indent);
+  { int64_t r_; if (SD_LIKELY((((*_t52).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_sub_overflow((*_t52).w, SD_INT(1).w, &r_))) (*_t52).w = r_; else { sd_int s_ = sd_int_sub_slow((*_t52), SD_INT(1)); sd_int_release((*_t52)); (*_t52) = s_; } }
+  sd_str _t53 = SD_STR_LIT("}");
+  sd_m_Gen__emit(l_g, _t53);
+  if ((!sd_str_eq(L.l_t, SD_STR_LIT("")))) {
+    sd_str _t54[] = {L.l_r, SD_STR_LIT(" = "), L.l_t, SD_STR_LIT(";")};
+    L._t55 = sd_str_concat_n(_t54, 4);
+    sd_m_Gen__emit(l_g, L._t55);
+    sd_str_release(L._t55); L._t55 = NULL;
+  }
+  bool _t56 = true;
+  SD_LF_LEAVE(L);
+  sd_str_release(L.l_a);
+  sd_str_release(L.l_t);
+  sd_str_release(L.l_old);
+  sd_str_release(L.l_b);
+  sd_str_release(L.l_raw);
+  sd_str_release(L.l_r);
+  sd_str_release(L.l_op);
+  sd_rl_S9AccUpdate(L.l_u);
+  sd_rl_S7LoopCtx(L.l_lc);
+  return _t56;
+}
+
+static sd_str sd_m_Gen__spillBarrier(sd_S_Gen l_g, sd_S_Stmt l_st) {
+  if (sd_int_lt((l_st).f_post, SD_INT(0))) {
+    return SD_STR_LIT("");
+  }
+  sd_S_Stmt l_post = SD_LIST_GET((((l_g).f_c).f_ast).f_stmts, sd_S_Stmt, (l_st).f_post);
+  sd_int _t1 = sd_m_Gen__intLocal(l_g, (l_post).f_expr);
+  sd_int l_v = _t1;
+  bool _t3 = ((!(SD_BOX_GET((l_post).f_kind, sd_E_StmtKind).tag == 3)) || sd_int_lt(l_v, SD_INT(0)));
+  if (!_t3) {
+    bool _t2 = sd_m_Gen__isUnboxed(l_g, l_v);
+    _t3 = (!_t2);
+  }
+  if (_t3) {
+    sd_str _t4 = SD_STR_LIT("");
+    sd_int_release(l_v);
+    return _t4;
+  }
+  sd_str _t5[] = {SD_STR_LIT("__asm__ __volatile__(\"\" : \"+r\"(l_"), (SD_LIST_GET(((l_g).f_c).f_vars, sd_S_Var, l_v)).f_name, SD_STR_LIT("));")};
+  sd_str _t6 = sd_str_concat_n(_t5, 3);
+  sd_str _t7 = _t6;
+  sd_int_release(l_v);
+  return _t7;
+}
+
+static sd_str sd_m_Gen__loopCheck(sd_S_Gen l_g, sd_S_Stmt l_st, sd_list * l_acc) {
+  sd_int _t1 = sd_m_Gen__countedVar(l_g, l_st);
+  sd_int l_i = _t1;
+  bool _t3 = sd_int_ge(l_i, SD_INT(0));
+  if (_t3) {
+    bool _t2 = sd_m_Gen__isUnboxed(l_g, l_i);
+    _t3 = _t2;
+  }
+  bool _t6 = _t3;
+  if (_t6) {
+    bool _t5 = sd_int_lt((l_st).f_expr, SD_INT(0));
+    if (!_t5) {
+      bool _t4 = sd_m_Gen__pureCond(l_g, (l_st).f_expr);
+      _t5 = _t4;
+    }
+    _t6 = _t5;
+  }
+  bool _t8 = _t6;
+  if (_t8) {
+    bool _t7 = sd_m_Gen__pureBlock(l_g, (l_st).f_body, l_acc);
+    _t8 = _t7;
+  }
+  if (_t8) {
+    sd_str _t9[] = {SD_STR_LIT("if (SD_UNLIKELY((l_"), (SD_LIST_GET(((l_g).f_c).f_vars, sd_S_Var, l_i)).f_name, SD_STR_LIT(" & 1023) == 0)) SD_PREEMPT();")};
+    sd_str _t10 = sd_str_concat_n(_t9, 3);
+    sd_str _t11 = _t10;
+    sd_int_release(l_i);
+    return _t11;
+  }
+  sd_str _t12 = SD_STR_LIT("SD_PREEMPT();");
+  sd_int_release(l_i);
+  return _t12;
+}
+
+static sd_int sd_m_Gen__countedVar(sd_S_Gen l_g, sd_S_Stmt l_st) {
+  if (sd_int_lt((l_st).f_post, SD_INT(0))) {
+    return SD_INT(-1);
+  }
+  sd_S_Stmt l_post = SD_LIST_GET((((l_g).f_c).f_ast).f_stmts, sd_S_Stmt, (l_st).f_post);
+  if ((!(SD_BOX_GET((l_post).f_kind, sd_E_StmtKind).tag == 3))) {
+    return SD_INT(-1);
+  }
+  sd_int _t1 = sd_m_Gen__intLocal(l_g, (l_post).f_expr);
+  sd_int l_v = _t1;
+  bool _t3 = sd_int_lt(l_v, SD_INT(0));
+  if (!_t3) {
+    bool _t2 = sd_m_Gen__hasGroup(l_g, (l_st).f_expr);
+    _t3 = _t2;
+  }
+  bool _t5 = _t3;
+  if (!_t5) {
+    bool _t4 = sd_m_Gen__blockAssigns(l_g, (l_st).f_body, l_v);
+    _t5 = _t4;
+  }
+  if (_t5) {
+    sd_int _t6 = SD_INT(-1);
+    sd_int_release(l_v);
+    return _t6;
+  }
+  return l_v;
+}
+
+static bool sd_m_Gen__blockAssigns(sd_S_Gen l_g, sd_int l_b, sd_int l_v) {
+  if (sd_int_lt(l_b, SD_INT(0))) {
+    return false;
+  }
+  sd_S_Block l_bl = SD_LIST_GET((((l_g).f_c).f_ast).f_blocks, sd_S_Block, l_b);
+  {
+    sd_int l_i = SD_INT(0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!(sd_int_lt(l_i, (l_bl).f_count))) break;
+      {
+        sd_int _t2 = sd_m_Ast__at(((l_g).f_c).f_ast, (l_bl).f_list, l_i);
+        SD_PREEMPT();
+        bool _t3 = sd_m_Gen__stmtAssigns(l_g, _t2, l_v);
+        bool _t4 = _t3;
+        sd_int_release(_t2);
+        if (_t4) {
+          bool _t5 = true;
+          sd_int_release(l_i);
+          return _t5;
+        }
+      }
+      _c1:;
+      { int64_t r_; if (SD_LIKELY((((l_i).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_i).w, SD_INT(1).w, &r_))) (l_i).w = r_; else { sd_int s_ = sd_int_add_slow((l_i), SD_INT(1)); sd_int_release((l_i)); (l_i) = s_; } }
+    }
+    sd_int_release(l_i);
+  }
+  return false;
+}
+
+static bool sd_m_Gen__stmtAssigns(sd_S_Gen l_g, sd_int l_s, sd_int l_v) {
+  if (sd_int_lt(l_s, SD_INT(0))) {
+    return false;
+  }
+  sd_S_Stmt l_st = SD_LIST_GET((((l_g).f_c).f_ast).f_stmts, sd_S_Stmt, l_s);
+  bool _t1 = sd_m_Gen__hasGroup(l_g, (l_st).f_expr);
+  if (_t1) {
+    return true;
+  }
+  {
+    sd_box * _t2 = (l_st).f_kind;
+    int32_t _t3 = SD_BOX_GET(_t2, sd_E_StmtKind).tag;
+    if (_t3 == 2) {
+      {
+        sd_int l_i = SD_INT(0);
+        for (;;) {
+          SD_PREEMPT();
+          if (!(sd_int_lt(l_i, (l_st).f_count))) break;
+          {
+            sd_int _t5 = sd_m_Ast__at(((l_g).f_c).f_ast, (l_st).f_list, l_i);
+            sd_S_Target l_tg = SD_LIST_GET((((l_g).f_c).f_ast).f_targets, sd_S_Target, _t5);
+            sd_int_release(_t5);
+            bool _t7 = (SD_BOX_GET((l_tg).f_kind, sd_E_TargetKind).tag == 1);
+            if (_t7) {
+              sd_int _t6 = sd_m_Gen__intLocal(l_g, (l_tg).f_expr);
+              _t7 = sd_int_eq(_t6, l_v);
+              sd_int_release(_t6);
+            }
+            if (_t7) {
+              bool _t8 = true;
+              sd_int_release(l_i);
+              return _t8;
+            }
+          }
+          _c4:;
+          { int64_t r_; if (SD_LIKELY((((l_i).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_i).w, SD_INT(1).w, &r_))) (l_i).w = r_; else { sd_int s_ = sd_int_add_slow((l_i), SD_INT(1)); sd_int_release((l_i)); (l_i) = s_; } }
+        }
+        sd_int_release(l_i);
+      }
+      return false;
+    } else if (_t3 == 3) {
+      sd_int _t9 = sd_m_Gen__intLocal(l_g, (l_st).f_expr);
+      bool _t10 = sd_int_eq(_t9, l_v);
+      sd_int_release(_t9);
+      return _t10;
+    } else if (_t3 == 4) {
+      SD_PREEMPT();
+      bool _t11 = sd_m_Gen__blockAssigns(l_g, (l_st).f_body, l_v);
+      bool _t13 = _t11;
+      if (!_t13) {
+        SD_PREEMPT();
+        bool _t12 = sd_m_Gen__stmtAssigns(l_g, (l_st).f_elseIf, l_v);
+        _t13 = _t12;
+      }
+      bool _t15 = _t13;
+      if (!_t15) {
+        SD_PREEMPT();
+        bool _t14 = sd_m_Gen__blockAssigns(l_g, (l_st).f_els, l_v);
+        _t15 = _t14;
+      }
+      return _t15;
+    } else if (_t3 == 5) {
+      SD_PREEMPT();
+      bool _t16 = sd_m_Gen__stmtAssigns(l_g, (l_st).f_init, l_v);
+      bool _t18 = _t16;
+      if (!_t18) {
+        SD_PREEMPT();
+        bool _t17 = sd_m_Gen__blockAssigns(l_g, (l_st).f_body, l_v);
+        _t18 = _t17;
+      }
+      bool _t20 = _t18;
+      if (!_t20) {
+        SD_PREEMPT();
+        bool _t19 = sd_m_Gen__stmtAssigns(l_g, (l_st).f_post, l_v);
+        _t20 = _t19;
+      }
+      return _t20;
+    } else if (_t3 == 6 || _t3 == 7) {
+      {
+        sd_int l_k = SD_INT(0);
+        for (;;) {
+          SD_PREEMPT();
+          if (!(sd_int_lt(l_k, (l_st).f_count))) break;
+          {
+            sd_int _t22 = sd_m_Ast__at(((l_g).f_c).f_ast, (l_st).f_list, l_k);
+            sd_S_Case l_cs = SD_LIST_GET((((l_g).f_c).f_ast).f_cases, sd_S_Case, _t22);
+            sd_int_release(_t22);
+            SD_PREEMPT();
+            bool _t23 = sd_m_Gen__stmtAssigns(l_g, (l_cs).f_comm, l_v);
+            bool _t25 = _t23;
+            if (!_t25) {
+              SD_PREEMPT();
+              bool _t24 = sd_m_Gen__blockAssigns(l_g, (l_cs).f_body, l_v);
+              _t25 = _t24;
+            }
+            if (_t25) {
+              bool _t26 = true;
+              sd_int_release(l_k);
+              return _t26;
+            }
+          }
+          _c21:;
+          { int64_t r_; if (SD_LIKELY((((l_k).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_k).w, SD_INT(1).w, &r_))) (l_k).w = r_; else { sd_int s_ = sd_int_add_slow((l_k), SD_INT(1)); sd_int_release((l_k)); (l_k) = s_; } }
+        }
+        sd_int_release(l_k);
+      }
+      return false;
+    } else if (_t3 == 8) {
+      {
+        sd_int l_j = SD_INT(0);
+        for (;;) {
+          SD_PREEMPT();
+          if (!(sd_int_lt(l_j, (l_st).f_count))) break;
+          {
+            sd_int _t28 = sd_m_Ast__at(((l_g).f_c).f_ast, (l_st).f_list, l_j);
+            bool _t29 = sd_m_Gen__hasGroup(l_g, _t28);
+            bool _t30 = _t29;
+            sd_int_release(_t28);
+            if (_t30) {
+              bool _t31 = true;
+              sd_int_release(l_j);
+              return _t31;
+            }
+          }
+          _c27:;
+          { int64_t r_; if (SD_LIKELY((((l_j).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_j).w, SD_INT(1).w, &r_))) (l_j).w = r_; else { sd_int s_ = sd_int_add_slow((l_j), SD_INT(1)); sd_int_release((l_j)); (l_j) = s_; } }
+        }
+        sd_int_release(l_j);
+      }
+      return false;
+    } else if (_t3 == 0 || _t3 == 1 || _t3 == 9 || _t3 == 10) {
+      return false;
+    } else if (_t3 == 11 || _t3 == 12 || _t3 == 13 || _t3 == 14) {
+      return false;
+    }
+  }
+  sd_crash("internal error: stmtAssigns reached its end without returning");
+}
+
+static bool sd_m_Gen__pureBlock(sd_S_Gen l_g, sd_int l_b, sd_list * l_acc) {
+  if (sd_int_lt(l_b, SD_INT(0))) {
+    return true;
+  }
+  sd_S_Block l_bl = SD_LIST_GET((((l_g).f_c).f_ast).f_blocks, sd_S_Block, l_b);
+  {
+    sd_int l_i = SD_INT(0);
+    for (;;) {
+      SD_PREEMPT();
+      if (!(sd_int_lt(l_i, (l_bl).f_count))) break;
+      {
+        sd_int _t2 = sd_m_Ast__at(((l_g).f_c).f_ast, (l_bl).f_list, l_i);
+        SD_PREEMPT();
+        bool _t3 = sd_m_Gen__pureStmt(l_g, _t2, l_acc);
+        bool _t4 = (!_t3);
+        sd_int_release(_t2);
+        if (_t4) {
+          bool _t5 = false;
+          sd_int_release(l_i);
+          return _t5;
+        }
+      }
+      _c1:;
+      { int64_t r_; if (SD_LIKELY((((l_i).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_i).w, SD_INT(1).w, &r_))) (l_i).w = r_; else { sd_int s_ = sd_int_add_slow((l_i), SD_INT(1)); sd_int_release((l_i)); (l_i) = s_; } }
+    }
+    sd_int_release(l_i);
+  }
+  return true;
+}
+
+typedef struct { sd_lframe h; sd_S_AccUpdate l_u; } sd_L_sd_m_Gen__pureStmt;
+static void sd_lr_sd_m_Gen__pureStmt(sd_lframe *p) {
+  sd_L_sd_m_Gen__pureStmt *L = (sd_L_sd_m_Gen__pureStmt *)p;
+  sd_rl_S9AccUpdate(L->l_u);
+}
+static bool sd_m_Gen__pureStmt(sd_S_Gen l_g, sd_int l_s, sd_list * l_acc) {
+  sd_L_sd_m_Gen__pureStmt L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_m_Gen__pureStmt);
+  if (sd_int_lt(l_s, SD_INT(0))) {
+    SD_LF_LEAVE(L);
+    return true;
+  }
+  sd_S_Stmt l_st = SD_LIST_GET((((l_g).f_c).f_ast).f_stmts, sd_S_Stmt, l_s);
+  sd_S_AccUpdate _t1 = sd_m_Gen__accUpdate(l_g, l_s);
+  L.l_u = _t1;
+  bool _t3 = sd_int_ge((L.l_u).f_var, SD_INT(0));
+  if (_t3) {
+    sd_int _t2 = (L.l_u).f_var;
+    _t3 = sd_list_contains(l_acc, &_t2);
+  }
+  if (_t3) {
+    {
+      int64_t l_i = ((int64_t)0);
+      for (;;) {
+        SD_PREEMPT();
+        if (!((l_i < SD_SMALL(sd_list_len((L.l_u).f_rest))))) break;
+        {
+          bool _t5 = sd_m_Gen__isSimpleSmall(l_g, SD_LIST_GET((L.l_u).f_rest, sd_int, SD_INT_S(l_i)));
+          if ((!_t5)) {
+            bool _t6 = false;
+            SD_LF_LEAVE(L);
+            sd_rl_S9AccUpdate(L.l_u);
+            return _t6;
+          }
+        }
+        _c4:;
+        l_i++;
+      }
+    }
+    bool _t7 = true;
+    SD_LF_LEAVE(L);
+    sd_rl_S9AccUpdate(L.l_u);
+    return _t7;
+  }
+  {
+    sd_box * _t8 = (l_st).f_kind;
+    int32_t _t9 = SD_BOX_GET(_t8, sd_E_StmtKind).tag;
+    if (_t9 == 2) {
+      bool _t11 = (!sd_int_eq((l_st).f_count, SD_INT(1)));
+      if (!_t11) {
+        bool _t10 = sd_m_Gen__isSimpleSmall(l_g, (l_st).f_expr);
+        _t11 = (!_t10);
+      }
+      if (_t11) {
+        bool _t12 = false;
+        SD_LF_LEAVE(L);
+        sd_rl_S9AccUpdate(L.l_u);
+        return _t12;
+      }
+      sd_int _t13 = sd_m_Ast__at(((l_g).f_c).f_ast, (l_st).f_list, SD_INT(0));
+      sd_int l_ti = _t13;
+      sd_S_Target l_tg = SD_LIST_GET((((l_g).f_c).f_ast).f_targets, sd_S_Target, l_ti);
+      if ((SD_BOX_GET((l_tg).f_kind, sd_E_TargetKind).tag == 0)) {
+        sd_int l_dv = SD_LIST_GET(((l_g).f_c).f_targetVar, sd_int, l_ti);
+        bool _t15 = sd_int_ge(l_dv, SD_INT(0));
+        if (_t15) {
+          bool _t14 = sd_m_Gen__isUnboxed(l_g, l_dv);
+          _t15 = _t14;
+        }
+        bool _t16 = _t15;
+        SD_LF_LEAVE(L);
+        sd_int_release(l_ti);
+        sd_rl_S9AccUpdate(L.l_u);
+        return _t16;
+      }
+      sd_int _t17 = sd_m_Gen__intLocal(l_g, (l_tg).f_expr);
+      sd_int l_pv = _t17;
+      bool _t19 = ((SD_BOX_GET((l_tg).f_kind, sd_E_TargetKind).tag == 1) && sd_int_ge(l_pv, SD_INT(0)));
+      if (_t19) {
+        bool _t18 = sd_m_Gen__isUnboxed(l_g, l_pv);
+        _t19 = _t18;
+      }
+      bool _t20 = _t19;
+      SD_LF_LEAVE(L);
+      sd_int_release(l_pv);
+      sd_int_release(l_ti);
+      sd_rl_S9AccUpdate(L.l_u);
+      return _t20;
+    } else if (_t9 == 14) {
+      sd_int l_cv = SD_LIST_GET(((l_g).f_c).f_stmtVar, sd_int, l_s);
+      bool _t22 = sd_int_ge(l_cv, SD_INT(0));
+      if (_t22) {
+        bool _t21 = sd_m_Gen__isUnboxed(l_g, l_cv);
+        _t22 = _t21;
+      }
+      bool _t24 = _t22;
+      if (_t24) {
+        bool _t23 = sd_m_Gen__isSimpleSmall(l_g, (l_st).f_expr);
+        _t24 = _t23;
+      }
+      bool _t25 = _t24;
+      SD_LF_LEAVE(L);
+      sd_rl_S9AccUpdate(L.l_u);
+      return _t25;
+    } else if (_t9 == 3) {
+      sd_int _t26 = sd_m_Gen__intLocal(l_g, (l_st).f_expr);
+      sd_int l_iv = _t26;
+      bool _t28 = sd_int_ge(l_iv, SD_INT(0));
+      if (_t28) {
+        bool _t27 = sd_m_Gen__isUnboxed(l_g, l_iv);
+        _t28 = _t27;
+      }
+      bool _t29 = _t28;
+      SD_LF_LEAVE(L);
+      sd_int_release(l_iv);
+      sd_rl_S9AccUpdate(L.l_u);
+      return _t29;
+    } else if (_t9 == 4) {
+      bool _t30 = sd_m_Gen__pureCond(l_g, (l_st).f_expr);
+      bool _t32 = _t30;
+      if (_t32) {
+        SD_PREEMPT();
+        bool _t31 = sd_m_Gen__pureBlock(l_g, (l_st).f_body, l_acc);
+        _t32 = _t31;
+      }
+      bool _t34 = _t32;
+      if (_t34) {
+        SD_PREEMPT();
+        bool _t33 = sd_m_Gen__pureStmt(l_g, (l_st).f_elseIf, l_acc);
+        _t34 = _t33;
+      }
+      bool _t36 = _t34;
+      if (_t36) {
+        SD_PREEMPT();
+        bool _t35 = sd_m_Gen__pureBlock(l_g, (l_st).f_els, l_acc);
+        _t36 = _t35;
+      }
+      bool _t37 = _t36;
+      SD_LF_LEAVE(L);
+      sd_rl_S9AccUpdate(L.l_u);
+      return _t37;
+    } else if (_t9 == 11 || _t9 == 12) {
+      bool _t38 = true;
+      SD_LF_LEAVE(L);
+      sd_rl_S9AccUpdate(L.l_u);
+      return _t38;
+    } else if (_t9 == 0 || _t9 == 1 || _t9 == 5 || _t9 == 6 || _t9 == 7 || _t9 == 8 || _t9 == 9) {
+      bool _t39 = false;
+      SD_LF_LEAVE(L);
+      sd_rl_S9AccUpdate(L.l_u);
+      return _t39;
+    } else if (_t9 == 10 || _t9 == 13) {
+      bool _t40 = false;
+      SD_LF_LEAVE(L);
+      sd_rl_S9AccUpdate(L.l_u);
+      return _t40;
+    }
+  }
+  sd_crash("internal error: pureStmt reached its end without returning");
+}
+
+static bool sd_m_Gen__pureCond(sd_S_Gen l_g, sd_int l_e) {
+  sd_S_Expr l_x = SD_LIST_GET((((l_g).f_c).f_ast).f_exprs, sd_S_Expr, l_e);
+  sd_S_ExprInfo l_i = SD_LIST_GET(((l_g).f_c).f_info, sd_S_ExprInfo, l_e);
+  if ((((!sd_int_eq((l_i).f_ty, sd_c_tyBool())) || (l_i).f_wrap) || (l_i).f_narrowed)) {
+    return false;
+  }
+  if ((SD_BOX_GET((l_x).f_kind, sd_E_ExprKind).tag == 5)) {
+    return true;
+  }
+  if ((SD_BOX_GET((l_x).f_kind, sd_E_ExprKind).tag == 11)) {
+    bool _t2 = (SD_BOX_GET((l_x).f_op, sd_E_Tok).tag == 57);
+    if (_t2) {
+      SD_PREEMPT();
+      bool _t1 = sd_m_Gen__pureCond(l_g, (l_x).f_a);
+      _t2 = _t1;
+    }
+    return _t2;
+  }
+  if ((!(SD_BOX_GET((l_x).f_kind, sd_E_ExprKind).tag == 12))) {
+    return false;
+  }
+  if (((SD_BOX_GET((l_x).f_op, sd_E_Tok).tag == 55) || (SD_BOX_GET((l_x).f_op, sd_E_Tok).tag == 56))) {
+    SD_PREEMPT();
+    bool _t3 = sd_m_Gen__pureCond(l_g, (l_x).f_a);
+    bool _t5 = _t3;
+    if (_t5) {
+      SD_PREEMPT();
+      bool _t4 = sd_m_Gen__pureCond(l_g, (l_x).f_b);
+      _t5 = _t4;
+    }
+    return _t5;
+  }
+  bool _t6 = sd_f_isComparison((l_x).f_op);
+  bool _t8 = _t6;
+  if (_t8) {
+    sd_int _t7 = sd_m_Gen__typeOf(l_g, (l_x).f_a);
+    _t8 = sd_int_eq(_t7, sd_c_tyInt());
+    sd_int_release(_t7);
+  }
+  bool _t10 = _t8;
+  if (_t10) {
+    bool _t9 = sd_m_Gen__isSimpleSmall(l_g, (l_x).f_a);
+    _t10 = _t9;
+  }
+  bool _t12 = _t10;
+  if (_t12) {
+    bool _t11 = sd_m_Gen__isSimpleSmall(l_g, (l_x).f_b);
+    _t12 = _t11;
+  }
+  return _t12;
 }
 
 static sd_str sd_m_Gen__gcall(sd_S_Gen * l_g, sd_int l_e) {
@@ -37223,7 +39190,7 @@ static sd_str sd_f_fastCType(sd_int l_t) {
   return SD_STR_LIT("int64_t");
 }
 
-typedef struct { sd_lframe h; sd_str l_v; sd_str _t5; sd_str _t7; sd_str _t9; sd_str _t11; sd_str l_cvv; sd_str _t13; sd_str _t15; sd_str l_name; sd_str l_op; sd_str _t19; sd_str l_c; sd_str _t22; sd_str l_fc; sd_str _t40; sd_str _t50; sd_str l_r; sd_str _t58; sd_str _t60; sd_str _t63; } sd_L_sd_m_Gen__fastStmt;
+typedef struct { sd_lframe h; sd_str l_v; sd_str _t5; sd_str _t7; sd_str _t9; sd_str _t11; sd_str l_cvv; sd_str _t13; sd_str _t15; sd_str l_name; sd_str l_op; sd_str _t19; sd_str l_c; sd_str _t22; sd_str _t39; sd_str l_fc; sd_str _t43; sd_str _t53; sd_str l_r; sd_str _t61; sd_str _t63; sd_str _t66; } sd_L_sd_m_Gen__fastStmt;
 static void sd_lr_sd_m_Gen__fastStmt(sd_lframe *p) {
   sd_L_sd_m_Gen__fastStmt *L = (sd_L_sd_m_Gen__fastStmt *)p;
   sd_str_release(L->l_v);
@@ -37239,13 +39206,14 @@ static void sd_lr_sd_m_Gen__fastStmt(sd_lframe *p) {
   sd_str_release(L->_t19);
   sd_str_release(L->l_c);
   sd_str_release(L->_t22);
+  sd_str_release(L->_t39);
   sd_str_release(L->l_fc);
-  sd_str_release(L->_t40);
-  sd_str_release(L->_t50);
+  sd_str_release(L->_t43);
+  sd_str_release(L->_t53);
   sd_str_release(L->l_r);
-  sd_str_release(L->_t58);
-  sd_str_release(L->_t60);
+  sd_str_release(L->_t61);
   sd_str_release(L->_t63);
+  sd_str_release(L->_t66);
 }
 static void sd_m_Gen__fastStmt(sd_S_Gen * l_g, sd_int l_s) {
   sd_L_sd_m_Gen__fastStmt L = {{0}};
@@ -37364,79 +39332,89 @@ static void sd_m_Gen__fastStmt(sd_S_Gen * l_g, sd_int l_s) {
       sd_m_Gen__emit(l_g, _t35);
       sd_int *_t36 = (&(l_g)->f_indent);
       { int64_t r_; if (SD_LIKELY((((*_t36).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((*_t36).w, SD_INT(1).w, &r_))) (*_t36).w = r_; else { sd_int s_ = sd_int_add_slow((*_t36), SD_INT(1)); sd_int_release((*_t36)); (*_t36) = s_; } }
-      sd_str _t37 = SD_STR_LIT("SD_PREEMPT();");
-      sd_m_Gen__emit(l_g, _t37);
+      sd_int _t37 = sd_m_Gen__countedVar((*l_g), l_st);
+      sd_int l_cv = _t37;
+      if (sd_int_ge(l_cv, SD_INT(0))) {
+        sd_str _t38[] = {SD_STR_LIT("if (SD_UNLIKELY((l_"), (SD_LIST_GET((((*l_g)).f_c).f_vars, sd_S_Var, l_cv)).f_name, SD_STR_LIT(" & 2046) == 0)) SD_PREEMPT();")};
+        L._t39 = sd_str_concat_n(_t38, 3);
+        sd_m_Gen__emit(l_g, L._t39);
+        sd_str_release(L._t39); L._t39 = NULL;
+      } else {
+        sd_str _t40 = SD_STR_LIT("SD_PREEMPT();");
+        sd_m_Gen__emit(l_g, _t40);
+      }
       if (sd_int_ge((l_st).f_expr, SD_INT(0))) {
-        sd_str _t38 = sd_m_Gen__fastExpr(l_g, (l_st).f_expr);
-        L.l_fc = _t38;
-        sd_str _t39[] = {SD_STR_LIT("if (!("), L.l_fc, SD_STR_LIT(")) break;")};
-        L._t40 = sd_str_concat_n(_t39, 3);
-        sd_m_Gen__emit(l_g, L._t40);
-        sd_str_release(L._t40); L._t40 = NULL;
+        sd_str _t41 = sd_m_Gen__fastExpr(l_g, (l_st).f_expr);
+        L.l_fc = _t41;
+        sd_str _t42[] = {SD_STR_LIT("if (!("), L.l_fc, SD_STR_LIT(")) break;")};
+        L._t43 = sd_str_concat_n(_t42, 3);
+        sd_m_Gen__emit(l_g, L._t43);
+        sd_str_release(L._t43); L._t43 = NULL;
         sd_str_release(L.l_fc); L.l_fc = NULL;
       }
-      sd_int _t41 = sd_int_retain(l_label);
-      sd_list ** _t42 = (&(l_g)->f_fastLoops);
-      SD_LIST_PUSH(_t42, sd_int, _t41);
-      sd_str _t43 = SD_STR_LIT("{");
-      sd_m_Gen__emit(l_g, _t43);
-      sd_int *_t44 = (&(l_g)->f_indent);
-      { int64_t r_; if (SD_LIKELY((((*_t44).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((*_t44).w, SD_INT(1).w, &r_))) (*_t44).w = r_; else { sd_int s_ = sd_int_add_slow((*_t44), SD_INT(1)); sd_int_release((*_t44)); (*_t44) = s_; } }
+      sd_int _t44 = sd_int_retain(l_label);
+      sd_list ** _t45 = (&(l_g)->f_fastLoops);
+      SD_LIST_PUSH(_t45, sd_int, _t44);
+      sd_str _t46 = SD_STR_LIT("{");
+      sd_m_Gen__emit(l_g, _t46);
+      sd_int *_t47 = (&(l_g)->f_indent);
+      { int64_t r_; if (SD_LIKELY((((*_t47).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((*_t47).w, SD_INT(1).w, &r_))) (*_t47).w = r_; else { sd_int s_ = sd_int_add_slow((*_t47), SD_INT(1)); sd_int_release((*_t47)); (*_t47) = s_; } }
       SD_PREEMPT();
       sd_m_Gen__fastBlock(l_g, (l_st).f_body);
-      sd_int *_t45 = (&(l_g)->f_indent);
-      { int64_t r_; if (SD_LIKELY((((*_t45).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_sub_overflow((*_t45).w, SD_INT(1).w, &r_))) (*_t45).w = r_; else { sd_int s_ = sd_int_sub_slow((*_t45), SD_INT(1)); sd_int_release((*_t45)); (*_t45) = s_; } }
-      sd_str _t46 = SD_STR_LIT("}");
-      sd_m_Gen__emit(l_g, _t46);
-      sd_list * _t47 = sd_list_slice(((*l_g)).f_fastLoops, SD_INT(0), SD_INT_S((SD_SMALL(sd_list_len(((*l_g)).f_fastLoops)) - ((int64_t)1))));
-      sd_list * *_t48 = (&(l_g)->f_fastLoops);
-      sd_list_release(*_t48);
-      *_t48 = _t47;
-      sd_str_part _t49[] = {{SD_STR_LIT("_c")}, {NULL, l_label}, {SD_STR_LIT(":;")}};
-      L._t50 = sd_str_concat_parts(_t49, 3);
-      sd_m_Gen__emit(l_g, L._t50);
-      sd_str_release(L._t50); L._t50 = NULL;
+      sd_int *_t48 = (&(l_g)->f_indent);
+      { int64_t r_; if (SD_LIKELY((((*_t48).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_sub_overflow((*_t48).w, SD_INT(1).w, &r_))) (*_t48).w = r_; else { sd_int s_ = sd_int_sub_slow((*_t48), SD_INT(1)); sd_int_release((*_t48)); (*_t48) = s_; } }
+      sd_str _t49 = SD_STR_LIT("}");
+      sd_m_Gen__emit(l_g, _t49);
+      sd_list * _t50 = sd_list_slice(((*l_g)).f_fastLoops, SD_INT(0), SD_INT_S((SD_SMALL(sd_list_len(((*l_g)).f_fastLoops)) - ((int64_t)1))));
+      sd_list * *_t51 = (&(l_g)->f_fastLoops);
+      sd_list_release(*_t51);
+      *_t51 = _t50;
+      sd_str_part _t52[] = {{SD_STR_LIT("_c")}, {NULL, l_label}, {SD_STR_LIT(":;")}};
+      L._t53 = sd_str_concat_parts(_t52, 3);
+      sd_m_Gen__emit(l_g, L._t53);
+      sd_str_release(L._t53); L._t53 = NULL;
       if (sd_int_ge((l_st).f_post, SD_INT(0))) {
         SD_PREEMPT();
         sd_m_Gen__fastStmt(l_g, (l_st).f_post);
       }
-      sd_int *_t51 = (&(l_g)->f_indent);
-      { int64_t r_; if (SD_LIKELY((((*_t51).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_sub_overflow((*_t51).w, SD_INT(1).w, &r_))) (*_t51).w = r_; else { sd_int s_ = sd_int_sub_slow((*_t51), SD_INT(1)); sd_int_release((*_t51)); (*_t51) = s_; } }
-      sd_str _t52 = SD_STR_LIT("}");
-      sd_m_Gen__emit(l_g, _t52);
-      sd_int *_t53 = (&(l_g)->f_indent);
-      { int64_t r_; if (SD_LIKELY((((*_t53).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_sub_overflow((*_t53).w, SD_INT(1).w, &r_))) (*_t53).w = r_; else { sd_int s_ = sd_int_sub_slow((*_t53), SD_INT(1)); sd_int_release((*_t53)); (*_t53) = s_; } }
-      sd_str _t54 = SD_STR_LIT("}");
-      sd_m_Gen__emit(l_g, _t54);
+      sd_int *_t54 = (&(l_g)->f_indent);
+      { int64_t r_; if (SD_LIKELY((((*_t54).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_sub_overflow((*_t54).w, SD_INT(1).w, &r_))) (*_t54).w = r_; else { sd_int s_ = sd_int_sub_slow((*_t54), SD_INT(1)); sd_int_release((*_t54)); (*_t54) = s_; } }
+      sd_str _t55 = SD_STR_LIT("}");
+      sd_m_Gen__emit(l_g, _t55);
+      sd_int *_t56 = (&(l_g)->f_indent);
+      { int64_t r_; if (SD_LIKELY((((*_t56).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_sub_overflow((*_t56).w, SD_INT(1).w, &r_))) (*_t56).w = r_; else { sd_int s_ = sd_int_sub_slow((*_t56), SD_INT(1)); sd_int_release((*_t56)); (*_t56) = s_; } }
+      sd_str _t57 = SD_STR_LIT("}");
+      sd_m_Gen__emit(l_g, _t57);
+      sd_int_release(l_cv);
       sd_int_release(l_label);
     } else if (_t2 == 8) {
-      sd_int _t55 = sd_m_Ast__at((((*l_g)).f_c).f_ast, (l_st).f_list, SD_INT(0));
-      sd_str _t56 = sd_m_Gen__fastExpr(l_g, _t55);
-      L.l_r = _t56;
-      sd_int_release(_t55);
+      sd_int _t58 = sd_m_Ast__at((((*l_g)).f_c).f_ast, (l_st).f_list, SD_INT(0));
+      sd_str _t59 = sd_m_Gen__fastExpr(l_g, _t58);
+      L.l_r = _t59;
+      sd_int_release(_t58);
       if (sd_int_eq(SD_LIST_GET((((*l_g)).f_c).f_fnRet, sd_int, ((*l_g)).f_curFn), sd_c_tyBool())) {
-        sd_str _t57[] = {SD_STR_LIT("return ("), L.l_r, SD_STR_LIT(") \? 2 : 0;")};
-        L._t58 = sd_str_concat_n(_t57, 3);
-        sd_m_Gen__emit(l_g, L._t58);
-        sd_str_release(L._t58); L._t58 = NULL;
+        sd_str _t60[] = {SD_STR_LIT("return ("), L.l_r, SD_STR_LIT(") \? 2 : 0;")};
+        L._t61 = sd_str_concat_n(_t60, 3);
+        sd_m_Gen__emit(l_g, L._t61);
+        sd_str_release(L._t61); L._t61 = NULL;
       } else {
-        sd_str _t59[] = {SD_STR_LIT("return "), L.l_r, SD_STR_LIT(";")};
-        L._t60 = sd_str_concat_n(_t59, 3);
-        sd_m_Gen__emit(l_g, L._t60);
-        sd_str_release(L._t60); L._t60 = NULL;
+        sd_str _t62[] = {SD_STR_LIT("return "), L.l_r, SD_STR_LIT(";")};
+        L._t63 = sd_str_concat_n(_t62, 3);
+        sd_m_Gen__emit(l_g, L._t63);
+        sd_str_release(L._t63); L._t63 = NULL;
       }
       sd_str_release(L.l_r); L.l_r = NULL;
     } else if (_t2 == 11) {
-      sd_str _t61 = SD_STR_LIT("break;");
-      sd_m_Gen__emit(l_g, _t61);
-    } else if (_t2 == 12) {
-      sd_str_part _t62[] = {{SD_STR_LIT("goto _c")}, {NULL, SD_LIST_GET(((*l_g)).f_fastLoops, sd_int, SD_INT_S((SD_SMALL(sd_list_len(((*l_g)).f_fastLoops)) - ((int64_t)1))))}, {SD_STR_LIT(";")}};
-      L._t63 = sd_str_concat_parts(_t62, 3);
-      sd_m_Gen__emit(l_g, L._t63);
-      sd_str_release(L._t63); L._t63 = NULL;
-    } else if (_t2 == 1 || _t2 == 6 || _t2 == 7 || _t2 == 9 || _t2 == 10 || _t2 == 13 || _t2 == 0) {
-      sd_str _t64 = SD_STR_LIT("return 1;");
+      sd_str _t64 = SD_STR_LIT("break;");
       sd_m_Gen__emit(l_g, _t64);
+    } else if (_t2 == 12) {
+      sd_str_part _t65[] = {{SD_STR_LIT("goto _c")}, {NULL, SD_LIST_GET(((*l_g)).f_fastLoops, sd_int, SD_INT_S((SD_SMALL(sd_list_len(((*l_g)).f_fastLoops)) - ((int64_t)1))))}, {SD_STR_LIT(";")}};
+      L._t66 = sd_str_concat_parts(_t65, 3);
+      sd_m_Gen__emit(l_g, L._t66);
+      sd_str_release(L._t66); L._t66 = NULL;
+    } else if (_t2 == 1 || _t2 == 6 || _t2 == 7 || _t2 == 9 || _t2 == 10 || _t2 == 13 || _t2 == 0) {
+      sd_str _t67 = SD_STR_LIT("return 1;");
+      sd_m_Gen__emit(l_g, _t67);
     }
   }
   SD_LF_LEAVE(L);
@@ -41557,7 +43535,7 @@ static void sd_m_Gen__genStmt(sd_S_Gen * l_g, sd_int l_s) {
       sd_m_Gen__genAssign(l_g, l_s);
     } else if (_t2 == 3) {
       SD_PREEMPT();
-      sd_m_Gen__genIncDec(l_g, L.l_st);
+      sd_m_Gen__genIncDec(l_g, l_s);
       sd_m_Gen__releaseTo(l_g, SD_INT_S(l_mark));
     } else if (_t2 == 14) {
       sd_int l_cv = sd_int_retain(SD_LIST_GET((((*l_g)).f_c).f_stmtVar, sd_int, l_s));
@@ -41951,7 +43929,7 @@ static sd_str sd_m_Gen__showVal(sd_S_Gen l_g, sd_int l_t, sd_str l_v) {
   sd_crash("internal error: showVal reached its end without returning");
 }
 
-typedef struct { sd_lframe h; sd_S_Stmt l_st; sd_S_Target l_tg; sd_str l_ignored; sd_str _t12; sd_str _t14; sd_str _t15; sd_str _t16; sd_str _t18; sd_str _t19; sd_str l_val; sd_str _t21; sd_str _t22; sd_str _t24; sd_str l_d; sd_str _t33; sd_str _t37; sd_str _t38; sd_str _t39; sd_str _t41; sd_str _t46; } sd_L_sd_m_Gen__genAssign;
+typedef struct { sd_lframe h; sd_S_Stmt l_st; sd_S_Target l_tg; sd_str l_ignored; sd_str _t12; sd_str _t14; sd_str _t15; sd_str _t16; sd_str _t18; sd_str _t19; sd_str l_val; sd_str _t21; sd_str _t22; sd_str _t24; sd_str l_d; sd_str _t33; sd_str _t38; sd_str _t39; sd_str _t40; sd_str _t42; sd_str _t47; } sd_L_sd_m_Gen__genAssign;
 static void sd_lr_sd_m_Gen__genAssign(sd_lframe *p) {
   sd_L_sd_m_Gen__genAssign *L = (sd_L_sd_m_Gen__genAssign *)p;
   sd_rl_S4Stmt(L->l_st);
@@ -41969,11 +43947,11 @@ static void sd_lr_sd_m_Gen__genAssign(sd_lframe *p) {
   sd_str_release(L->_t24);
   sd_str_release(L->l_d);
   sd_str_release(L->_t33);
-  sd_str_release(L->_t37);
   sd_str_release(L->_t38);
   sd_str_release(L->_t39);
-  sd_str_release(L->_t41);
-  sd_str_release(L->_t46);
+  sd_str_release(L->_t40);
+  sd_str_release(L->_t42);
+  sd_str_release(L->_t47);
 }
 static void sd_m_Gen__genAssign(sd_S_Gen * l_g, sd_int l_s) {
   sd_L_sd_m_Gen__genAssign L = {{0}};
@@ -42102,40 +44080,51 @@ static void sd_m_Gen__genAssign(sd_S_Gen * l_g, sd_int l_s) {
     } else if (_t3 == 1) {
       sd_int _t34 = sd_m_Gen__intLocal((*l_g), (L.l_tg).f_expr);
       sd_int l_uv = _t34;
-      bool _t36 = sd_int_ge(l_uv, SD_INT(0));
-      if (_t36) {
-        bool _t35 = sd_m_Gen__isUnboxed((*l_g), l_uv);
-        _t36 = _t35;
+      SD_PREEMPT();
+      bool _t35 = sd_m_Gen__genAccUpdate(l_g, l_s);
+      if (_t35) {
+        sd_m_Gen__releaseTo(l_g, SD_INT_S(l_mark));
+        SD_LF_LEAVE(L);
+        sd_int_release(l_uv);
+        sd_rl_S6Target(L.l_tg);
+        sd_int_release(l_ti);
+        sd_rl_S4Stmt(L.l_st);
+        return;
       }
-      if (_t36) {
-        L._t37 = sd_str_retain((SD_LIST_GET((((*l_g)).f_c).f_vars, sd_S_Var, l_uv)).f_name);
+      bool _t37 = sd_int_ge(l_uv, SD_INT(0));
+      if (_t37) {
+        bool _t36 = sd_m_Gen__isUnboxed((*l_g), l_uv);
+        _t37 = _t36;
+      }
+      if (_t37) {
+        L._t38 = sd_str_retain((SD_LIST_GET((((*l_g)).f_c).f_vars, sd_S_Var, l_uv)).f_name);
         SD_PREEMPT();
-        L._t38 = sd_m_Gen__gexpr(l_g, (L.l_st).f_expr);
-        L._t39 = sd_f_smallOf(L._t38);
-        sd_str _t40[] = {SD_STR_LIT("l_"), L._t37, SD_STR_LIT(" = "), L._t39, SD_STR_LIT(";")};
-        L._t41 = sd_str_concat_n(_t40, 5);
-        sd_m_Gen__emit(l_g, L._t41);
-        sd_str_release(L._t41); L._t41 = NULL;
+        L._t39 = sd_m_Gen__gexpr(l_g, (L.l_st).f_expr);
+        L._t40 = sd_f_smallOf(L._t39);
+        sd_str _t41[] = {SD_STR_LIT("l_"), L._t38, SD_STR_LIT(" = "), L._t40, SD_STR_LIT(";")};
+        L._t42 = sd_str_concat_n(_t41, 5);
+        sd_m_Gen__emit(l_g, L._t42);
+        sd_str_release(L._t42); L._t42 = NULL;
+        sd_str_release(L._t40); L._t40 = NULL;
         sd_str_release(L._t39); L._t39 = NULL;
         sd_str_release(L._t38); L._t38 = NULL;
-        sd_str_release(L._t37); L._t37 = NULL;
       } else {
         SD_PREEMPT();
-        bool _t42 = sd_m_Gen__genAppend(l_g, L.l_st, L.l_tg);
-        bool _t44 = (!_t42);
-        if (_t44) {
+        bool _t43 = sd_m_Gen__genAppend(l_g, L.l_st, L.l_tg);
+        bool _t45 = (!_t43);
+        if (_t45) {
           SD_PREEMPT();
-          bool _t43 = sd_m_Gen__genIntUpdate(l_g, L.l_st, L.l_tg);
-          _t44 = (!_t43);
+          bool _t44 = sd_m_Gen__genIntUpdate(l_g, L.l_st, L.l_tg);
+          _t45 = (!_t44);
         }
-        if (_t44) {
-          sd_int _t45 = sd_int_retain((L.l_tg).f_expr);
+        if (_t45) {
+          sd_int _t46 = sd_int_retain((L.l_tg).f_expr);
           SD_PREEMPT();
-          L._t46 = sd_m_Gen__ownedTemp(l_g, (L.l_st).f_expr);
+          L._t47 = sd_m_Gen__ownedTemp(l_g, (L.l_st).f_expr);
           SD_PREEMPT();
-          sd_m_Gen__gstore(l_g, _t45, L._t46);
-          sd_str_release(L._t46); L._t46 = NULL;
-          sd_int_release(_t45);
+          sd_m_Gen__gstore(l_g, _t46, L._t47);
+          sd_str_release(L._t47); L._t47 = NULL;
+          sd_int_release(_t46);
         }
       }
       sd_m_Gen__releaseTo(l_g, SD_INT_S(l_mark));
@@ -42780,106 +44769,118 @@ static sd_str sd_m_Gen__wrapOwned(sd_S_Gen l_g, sd_int l_opt, sd_str l_v) {
   return sd_str_retain(l_v);
 }
 
-typedef struct { sd_lframe h; sd_S_Expr l_x; sd_str l_target; sd_str l_op; sd_str _t5; sd_str l_pt; sd_str _t8; sd_str _t9; sd_str _t10; sd_str _t12; sd_str l_f; sd_str _t15; sd_str _t18; } sd_L_sd_m_Gen__genIncDec;
+typedef struct { sd_lframe h; sd_S_Stmt l_st; sd_S_Expr l_x; sd_str l_target; sd_str l_op; sd_str _t6; sd_str l_pt; sd_str _t9; sd_str _t10; sd_str _t11; sd_str _t13; sd_str l_f; sd_str _t16; sd_str _t19; } sd_L_sd_m_Gen__genIncDec;
 static void sd_lr_sd_m_Gen__genIncDec(sd_lframe *p) {
   sd_L_sd_m_Gen__genIncDec *L = (sd_L_sd_m_Gen__genIncDec *)p;
+  sd_rl_S4Stmt(L->l_st);
   sd_rl_S4Expr(L->l_x);
   sd_str_release(L->l_target);
   sd_str_release(L->l_op);
-  sd_str_release(L->_t5);
+  sd_str_release(L->_t6);
   sd_str_release(L->l_pt);
-  sd_str_release(L->_t8);
   sd_str_release(L->_t9);
   sd_str_release(L->_t10);
-  sd_str_release(L->_t12);
+  sd_str_release(L->_t11);
+  sd_str_release(L->_t13);
   sd_str_release(L->l_f);
-  sd_str_release(L->_t15);
-  sd_str_release(L->_t18);
+  sd_str_release(L->_t16);
+  sd_str_release(L->_t19);
 }
-static void sd_m_Gen__genIncDec(sd_S_Gen * l_g, sd_S_Stmt l_st) {
+static void sd_m_Gen__genIncDec(sd_S_Gen * l_g, sd_int l_s) {
   sd_L_sd_m_Gen__genIncDec L = {{0}};
   SD_LF_ENTER(L, sd_lr_sd_m_Gen__genIncDec);
-  sd_int l_lv = (l_st).f_expr;
+  L.l_st = sd_rt_S4Stmt(SD_LIST_GET(((((*l_g)).f_c).f_ast).f_stmts, sd_S_Stmt, l_s));
+  SD_PREEMPT();
+  bool _t1 = sd_m_Gen__genAccUpdate(l_g, l_s);
+  if (_t1) {
+    SD_LF_LEAVE(L);
+    sd_rl_S4Stmt(L.l_st);
+    return;
+  }
+  sd_int l_lv = (L.l_st).f_expr;
   sd_S_ExprInfo l_i = sd_rt_S8ExprInfo(SD_LIST_GET((((*l_g)).f_c).f_info, sd_S_ExprInfo, l_lv));
   L.l_x = sd_rt_S4Expr(SD_LIST_GET(((((*l_g)).f_c).f_ast).f_exprs, sd_S_Expr, l_lv));
   L.l_target = SD_STR_LIT("");
-  bool _t2 = (SD_BOX_GET((L.l_x).f_kind, sd_E_ExprKind).tag == 7);
-  if (_t2) {
-    bool _t1 = sd_m_Gen__isUnboxed((*l_g), (l_i).f_ref);
-    _t2 = _t1;
+  bool _t3 = (SD_BOX_GET((L.l_x).f_kind, sd_E_ExprKind).tag == 7);
+  if (_t3) {
+    bool _t2 = sd_m_Gen__isUnboxed((*l_g), (l_i).f_ref);
+    _t3 = _t2;
   }
-  if (_t2) {
+  if (_t3) {
     L.l_op = SD_STR_LIT("--");
-    if ((l_st).f_inc) {
-      sd_str _t3 = SD_STR_LIT("++");
+    if ((L.l_st).f_inc) {
+      sd_str _t4 = SD_STR_LIT("++");
       sd_str_release(L.l_op);
-      L.l_op = _t3;
+      L.l_op = _t4;
     }
-    sd_str _t4[] = {SD_STR_LIT("l_"), (SD_LIST_GET((((*l_g)).f_c).f_vars, sd_S_Var, (l_i).f_ref)).f_name, L.l_op, SD_STR_LIT(";")};
-    L._t5 = sd_str_concat_n(_t4, 4);
-    sd_m_Gen__emit(l_g, L._t5);
-    sd_str_release(L._t5); L._t5 = NULL;
+    sd_str _t5[] = {SD_STR_LIT("l_"), (SD_LIST_GET((((*l_g)).f_c).f_vars, sd_S_Var, (l_i).f_ref)).f_name, L.l_op, SD_STR_LIT(";")};
+    L._t6 = sd_str_concat_n(_t5, 4);
+    sd_m_Gen__emit(l_g, L._t6);
+    sd_str_release(L._t6); L._t6 = NULL;
     SD_LF_LEAVE(L);
     sd_str_release(L.l_op);
     sd_str_release(L.l_target);
     sd_rl_S4Expr(L.l_x);
     sd_rl_S8ExprInfo(l_i);
+    sd_rl_S4Stmt(L.l_st);
     return;
   }
   if (((SD_BOX_GET((L.l_x).f_kind, sd_E_ExprKind).tag == 7) && (!(SD_BOX_GET((SD_LIST_GET((((*l_g)).f_c).f_vars, sd_S_Var, (l_i).f_ref)).f_kind, sd_E_VarKind).tag == 3)))) {
-    sd_str _t6 = sd_m_Gen__lname((*l_g), (l_i).f_ref);
+    sd_str _t7 = sd_m_Gen__lname((*l_g), (l_i).f_ref);
     sd_str_release(L.l_target);
-    L.l_target = _t6;
+    L.l_target = _t7;
   } else {
-    sd_str _t7 = sd_m_Gen__newTmp(l_g);
-    L.l_pt = _t7;
-    L._t8 = sd_m_Gen__ctype((*l_g), (l_i).f_ty);
-    L._t9 = sd_str_retain(L.l_pt);
+    sd_str _t8 = sd_m_Gen__newTmp(l_g);
+    L.l_pt = _t8;
+    L._t9 = sd_m_Gen__ctype((*l_g), (l_i).f_ty);
+    L._t10 = sd_str_retain(L.l_pt);
     SD_PREEMPT();
-    L._t10 = sd_m_Gen__gplace(l_g, l_lv);
-    sd_str _t11[] = {L._t8, SD_STR_LIT(" *"), L._t9, SD_STR_LIT(" = "), L._t10, SD_STR_LIT(";")};
-    L._t12 = sd_str_concat_n(_t11, 6);
-    sd_m_Gen__emit(l_g, L._t12);
-    sd_str_release(L._t12); L._t12 = NULL;
+    L._t11 = sd_m_Gen__gplace(l_g, l_lv);
+    sd_str _t12[] = {L._t9, SD_STR_LIT(" *"), L._t10, SD_STR_LIT(" = "), L._t11, SD_STR_LIT(";")};
+    L._t13 = sd_str_concat_n(_t12, 6);
+    sd_m_Gen__emit(l_g, L._t13);
+    sd_str_release(L._t13); L._t13 = NULL;
+    sd_str_release(L._t11); L._t11 = NULL;
     sd_str_release(L._t10); L._t10 = NULL;
     sd_str_release(L._t9); L._t9 = NULL;
-    sd_str_release(L._t8); L._t8 = NULL;
-    sd_str _t13 = sd_str_concat(SD_STR_LIT("*"), L.l_pt);
+    sd_str _t14 = sd_str_concat(SD_STR_LIT("*"), L.l_pt);
     sd_str_release(L.l_target);
-    L.l_target = _t13;
+    L.l_target = _t14;
     sd_str_release(L.l_pt); L.l_pt = NULL;
   }
   if (sd_int_eq((l_i).f_ty, sd_c_tyInt())) {
     L.l_f = SD_STR_LIT("sub");
-    if ((l_st).f_inc) {
-      sd_str _t14 = SD_STR_LIT("add");
+    if ((L.l_st).f_inc) {
+      sd_str _t15 = SD_STR_LIT("add");
       sd_str_release(L.l_f);
-      L.l_f = _t14;
+      L.l_f = _t15;
     }
-    L._t15 = sd_f_intUpdate(L.l_target, L.l_f, SD_STR_LIT("SD_INT(1)"));
-    sd_m_Gen__emit(l_g, L._t15);
-    sd_str_release(L._t15); L._t15 = NULL;
+    L._t16 = sd_f_intUpdate(L.l_target, L.l_f, SD_STR_LIT("SD_INT(1)"));
+    sd_m_Gen__emit(l_g, L._t16);
+    sd_str_release(L._t16); L._t16 = NULL;
     SD_LF_LEAVE(L);
     sd_str_release(L.l_f);
     sd_str_release(L.l_target);
     sd_rl_S4Expr(L.l_x);
     sd_rl_S8ExprInfo(l_i);
+    sd_rl_S4Stmt(L.l_st);
     return;
   }
   L.l_op = SD_STR_LIT("-");
-  if ((l_st).f_inc) {
-    sd_str _t16 = SD_STR_LIT("+");
+  if ((L.l_st).f_inc) {
+    sd_str _t17 = SD_STR_LIT("+");
     sd_str_release(L.l_op);
-    L.l_op = _t16;
+    L.l_op = _t17;
   }
-  sd_str _t17[] = {L.l_target, SD_STR_LIT(" = "), L.l_target, SD_STR_LIT(" "), L.l_op, SD_STR_LIT(" 1.0;")};
-  L._t18 = sd_str_concat_n(_t17, 6);
-  sd_m_Gen__emit(l_g, L._t18);
-  sd_str_release(L._t18); L._t18 = NULL;
+  sd_str _t18[] = {L.l_target, SD_STR_LIT(" = "), L.l_target, SD_STR_LIT(" "), L.l_op, SD_STR_LIT(" 1.0;")};
+  L._t19 = sd_str_concat_n(_t18, 6);
+  sd_m_Gen__emit(l_g, L._t19);
+  sd_str_release(L._t19); L._t19 = NULL;
   sd_str_release(L.l_op); L.l_op = NULL;
   sd_str_release(L.l_target); L.l_target = NULL;
   sd_rl_S4Expr(L.l_x); L.l_x = ((sd_S_Expr){0});
   sd_rl_S8ExprInfo(l_i);
+  sd_rl_S4Stmt(L.l_st); L.l_st = ((sd_S_Stmt){0});
   SD_LF_LEAVE(L);
 }
 
@@ -42933,13 +44934,12 @@ static void sd_m_Gen__genIf(sd_S_Gen * l_g, sd_S_Stmt l_st) {
   SD_LF_LEAVE(L);
 }
 
-typedef struct { sd_lframe h; sd_str _t8; sd_str l_c; sd_str _t11; sd_str _t21; } sd_L_sd_m_Gen__genFor;
+typedef struct { sd_lframe h; sd_list * l_acc; sd_list * _t10; sd_str _t14; } sd_L_sd_m_Gen__genFor;
 static void sd_lr_sd_m_Gen__genFor(sd_lframe *p) {
   sd_L_sd_m_Gen__genFor *L = (sd_L_sd_m_Gen__genFor *)p;
-  sd_str_release(L->_t8);
-  sd_str_release(L->l_c);
-  sd_str_release(L->_t11);
-  sd_str_release(L->_t21);
+  sd_list_release(L->l_acc);
+  sd_list_release(L->_t10);
+  sd_str_release(L->_t14);
 }
 static void sd_m_Gen__genFor(sd_S_Gen * l_g, sd_S_Stmt l_st) {
   sd_L_sd_m_Gen__genFor L = {{0}};
@@ -42953,68 +44953,130 @@ static void sd_m_Gen__genFor(sd_S_Gen * l_g, sd_S_Stmt l_st) {
     SD_PREEMPT();
     sd_m_Gen__genStmt(l_g, (l_st).f_init);
   }
+  sd_list * _t3 = sd_m_Gen__accVars((*l_g), l_st);
+  L.l_acc = _t3;
+  sd_int l_done = SD_INT(-1);
   sd_int l_label = SD_INT(-1);
-  if (sd_int_ge((l_st).f_post, SD_INT(0))) {
-    sd_int *_t3 = (&(l_g)->f_ntmp);
-    { int64_t r_; if (SD_LIKELY((((*_t3).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((*_t3).w, SD_INT(1).w, &r_))) (*_t3).w = r_; else { sd_int s_ = sd_int_add_slow((*_t3), SD_INT(1)); sd_int_release((*_t3)); (*_t3) = s_; } }
-    sd_int _t4 = sd_int_retain(((*l_g)).f_ntmp);
+  if ((SD_SMALL(sd_list_len(L.l_acc)) > ((int64_t)0))) {
+    sd_int *_t4 = (&(l_g)->f_ntmp);
+    { int64_t r_; if (SD_LIKELY((((*_t4).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((*_t4).w, SD_INT(1).w, &r_))) (*_t4).w = r_; else { sd_int s_ = sd_int_add_slow((*_t4), SD_INT(1)); sd_int_release((*_t4)); (*_t4) = s_; } }
+    sd_int _t5 = sd_int_retain(((*l_g)).f_ntmp);
+    sd_int_release(l_done);
+    l_done = _t5;
+    sd_int *_t6 = (&(l_g)->f_ntmp);
+    { int64_t r_; if (SD_LIKELY((((*_t6).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((*_t6).w, SD_INT(1).w, &r_))) (*_t6).w = r_; else { sd_int s_ = sd_int_add_slow((*_t6), SD_INT(1)); sd_int_release((*_t6)); (*_t6) = s_; } }
+    sd_int _t7 = sd_int_retain(((*l_g)).f_ntmp);
     sd_int_release(l_label);
-    l_label = _t4;
-  }
-  sd_str _t5 = SD_STR_LIT("for (;;) {");
-  sd_m_Gen__emit(l_g, _t5);
-  sd_int *_t6 = (&(l_g)->f_indent);
-  { int64_t r_; if (SD_LIKELY((((*_t6).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((*_t6).w, SD_INT(1).w, &r_))) (*_t6).w = r_; else { sd_int s_ = sd_int_add_slow((*_t6), SD_INT(1)); sd_int_release((*_t6)); (*_t6) = s_; } }
-  sd_str _t7 = SD_STR_LIT("SD_PREEMPT();");
-  sd_m_Gen__emit(l_g, _t7);
-  if (sd_int_ge((l_st).f_expr, SD_INT(0))) {
-    int64_t l_mark = SD_SMALL(sd_list_len(((*l_g)).f_slots));
+    l_label = _t7;
     SD_PREEMPT();
-    L._t8 = sd_m_Gen__gexpr(l_g, (l_st).f_expr);
-    sd_str _t9 = sd_m_Gen__condVal(l_g, L._t8, SD_INT_S(l_mark));
-    L.l_c = _t9;
-    sd_str_release(L._t8); L._t8 = NULL;
-    sd_str _t10[] = {SD_STR_LIT("if (!("), L.l_c, SD_STR_LIT(")) break;")};
-    L._t11 = sd_str_concat_n(_t10, 3);
-    sd_m_Gen__emit(l_g, L._t11);
-    sd_str_release(L._t11); L._t11 = NULL;
-    sd_str_release(L.l_c); L.l_c = NULL;
+    sd_m_Gen__genAccLoop(l_g, l_st, L.l_acc, l_label, l_done);
+  } else {
+    if (sd_int_ge((l_st).f_post, SD_INT(0))) {
+      sd_int *_t8 = (&(l_g)->f_ntmp);
+      { int64_t r_; if (SD_LIKELY((((*_t8).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((*_t8).w, SD_INT(1).w, &r_))) (*_t8).w = r_; else { sd_int s_ = sd_int_add_slow((*_t8), SD_INT(1)); sd_int_release((*_t8)); (*_t8) = s_; } }
+      sd_int _t9 = sd_int_retain(((*l_g)).f_ntmp);
+      sd_int_release(l_label);
+      l_label = _t9;
+    }
   }
-  sd_S_LoopCtx _t12 = (sd_S_LoopCtx){.f_mark = sd_list_len(((*l_g)).f_slots), .f_label = sd_int_retain(l_label)};
-  sd_list ** _t13 = (&(l_g)->f_loops);
-  SD_LIST_PUSH(_t13, sd_S_LoopCtx, _t12);
-  sd_str _t14 = SD_STR_LIT("{");
-  sd_m_Gen__emit(l_g, _t14);
-  sd_int *_t15 = (&(l_g)->f_indent);
-  { int64_t r_; if (SD_LIKELY((((*_t15).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((*_t15).w, SD_INT(1).w, &r_))) (*_t15).w = r_; else { sd_int s_ = sd_int_add_slow((*_t15), SD_INT(1)); sd_int_release((*_t15)); (*_t15) = s_; } }
+  L._t10 = sd_list_new(&sd_type_int, 0);
+  sd_int _t11 = SD_INT(-1);
+  bool _t12 = sd_int_ge(l_done, SD_INT(0));
   SD_PREEMPT();
-  sd_m_Gen__genBody(l_g, (l_st).f_body);
+  sd_m_Gen__genLoopCopy(l_g, l_st, l_label, L._t10, _t11, _t12);
+  sd_list_release(L._t10); L._t10 = NULL;
+  if (sd_int_ge(l_done, SD_INT(0))) {
+    sd_str_part _t13[] = {{SD_STR_LIT("_d")}, {NULL, l_done}, {SD_STR_LIT(":;")}};
+    L._t14 = sd_str_concat_parts(_t13, 3);
+    sd_m_Gen__emit(l_g, L._t14);
+    sd_str_release(L._t14); L._t14 = NULL;
+  }
+  bool _t15 = true;
+  sd_m_Gen__popScope(l_g, _t15);
   sd_int *_t16 = (&(l_g)->f_indent);
   { int64_t r_; if (SD_LIKELY((((*_t16).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_sub_overflow((*_t16).w, SD_INT(1).w, &r_))) (*_t16).w = r_; else { sd_int s_ = sd_int_sub_slow((*_t16), SD_INT(1)); sd_int_release((*_t16)); (*_t16) = s_; } }
   sd_str _t17 = SD_STR_LIT("}");
   sd_m_Gen__emit(l_g, _t17);
-  sd_list * _t18 = sd_list_slice(((*l_g)).f_loops, SD_INT(0), SD_INT_S((SD_SMALL(sd_list_len(((*l_g)).f_loops)) - ((int64_t)1))));
-  sd_list * *_t19 = (&(l_g)->f_loops);
-  sd_list_release(*_t19);
-  *_t19 = _t18;
+  sd_int_release(l_label);
+  sd_int_release(l_done);
+  sd_list_release(L.l_acc); L.l_acc = NULL;
+  SD_LF_LEAVE(L);
+}
+
+typedef struct { sd_lframe h; sd_str _t3; sd_str _t4; sd_str l_c; sd_str _t7; sd_str _t17; sd_str _t20; } sd_L_sd_m_Gen__genLoopCopy;
+static void sd_lr_sd_m_Gen__genLoopCopy(sd_lframe *p) {
+  sd_L_sd_m_Gen__genLoopCopy *L = (sd_L_sd_m_Gen__genLoopCopy *)p;
+  sd_str_release(L->_t3);
+  sd_str_release(L->_t4);
+  sd_str_release(L->l_c);
+  sd_str_release(L->_t7);
+  sd_str_release(L->_t17);
+  sd_str_release(L->_t20);
+}
+static void sd_m_Gen__genLoopCopy(sd_S_Gen * l_g, sd_S_Stmt l_st, sd_int l_label, sd_list * l_acc, sd_int l_accTo, bool l_spills) {
+  sd_L_sd_m_Gen__genLoopCopy L = {{0}};
+  SD_LF_ENTER(L, sd_lr_sd_m_Gen__genLoopCopy);
+  sd_str _t1 = SD_STR_LIT("for (;;) {");
+  sd_m_Gen__emit(l_g, _t1);
+  sd_int *_t2 = (&(l_g)->f_indent);
+  { int64_t r_; if (SD_LIKELY((((*_t2).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((*_t2).w, SD_INT(1).w, &r_))) (*_t2).w = r_; else { sd_int s_ = sd_int_add_slow((*_t2), SD_INT(1)); sd_int_release((*_t2)); (*_t2) = s_; } }
+  L._t3 = sd_m_Gen__loopCheck((*l_g), l_st, l_acc);
+  sd_m_Gen__emit(l_g, L._t3);
+  sd_str_release(L._t3); L._t3 = NULL;
+  if (sd_int_ge((l_st).f_expr, SD_INT(0))) {
+    int64_t l_mark = SD_SMALL(sd_list_len(((*l_g)).f_slots));
+    SD_PREEMPT();
+    L._t4 = sd_m_Gen__gexpr(l_g, (l_st).f_expr);
+    sd_str _t5 = sd_m_Gen__condVal(l_g, L._t4, SD_INT_S(l_mark));
+    L.l_c = _t5;
+    sd_str_release(L._t4); L._t4 = NULL;
+    sd_str _t6[] = {SD_STR_LIT("if (!("), L.l_c, SD_STR_LIT(")) break;")};
+    L._t7 = sd_str_concat_n(_t6, 3);
+    sd_m_Gen__emit(l_g, L._t7);
+    sd_str_release(L._t7); L._t7 = NULL;
+    sd_str_release(L.l_c); L.l_c = NULL;
+  }
+  sd_S_LoopCtx _t8 = (sd_S_LoopCtx){.f_mark = sd_list_len(((*l_g)).f_slots), .f_label = sd_int_retain(l_label), .f_acc = sd_list_retain(l_acc), .f_accTo = sd_int_retain(l_accTo)};
+  sd_list ** _t9 = (&(l_g)->f_loops);
+  SD_LIST_PUSH(_t9, sd_S_LoopCtx, _t8);
+  sd_str _t10 = SD_STR_LIT("{");
+  sd_m_Gen__emit(l_g, _t10);
+  sd_int *_t11 = (&(l_g)->f_indent);
+  { int64_t r_; if (SD_LIKELY((((*_t11).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((*_t11).w, SD_INT(1).w, &r_))) (*_t11).w = r_; else { sd_int s_ = sd_int_add_slow((*_t11), SD_INT(1)); sd_int_release((*_t11)); (*_t11) = s_; } }
+  SD_PREEMPT();
+  sd_m_Gen__genBody(l_g, (l_st).f_body);
+  sd_int *_t12 = (&(l_g)->f_indent);
+  { int64_t r_; if (SD_LIKELY((((*_t12).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_sub_overflow((*_t12).w, SD_INT(1).w, &r_))) (*_t12).w = r_; else { sd_int s_ = sd_int_sub_slow((*_t12), SD_INT(1)); sd_int_release((*_t12)); (*_t12) = s_; } }
+  sd_str _t13 = SD_STR_LIT("}");
+  sd_m_Gen__emit(l_g, _t13);
+  sd_list * _t14 = sd_list_slice(((*l_g)).f_loops, SD_INT(0), SD_INT_S((SD_SMALL(sd_list_len(((*l_g)).f_loops)) - ((int64_t)1))));
+  sd_list * *_t15 = (&(l_g)->f_loops);
+  sd_list_release(*_t15);
+  *_t15 = _t14;
+  if (sd_int_ge(l_label, SD_INT(0))) {
+    sd_str_part _t16[] = {{SD_STR_LIT("_c")}, {NULL, l_label}, {SD_STR_LIT(":;")}};
+    L._t17 = sd_str_concat_parts(_t16, 3);
+    sd_m_Gen__emit(l_g, L._t17);
+    sd_str_release(L._t17); L._t17 = NULL;
+  }
+  bool _t19 = l_spills;
+  if (_t19) {
+    sd_str _t18 = sd_m_Gen__spillBarrier((*l_g), l_st);
+    _t19 = (!sd_str_eq(_t18, SD_STR_LIT("")));
+    sd_str_release(_t18); 
+  }
+  if (_t19) {
+    L._t20 = sd_m_Gen__spillBarrier((*l_g), l_st);
+    sd_m_Gen__emit(l_g, L._t20);
+    sd_str_release(L._t20); L._t20 = NULL;
+  }
   if (sd_int_ge((l_st).f_post, SD_INT(0))) {
-    sd_str_part _t20[] = {{SD_STR_LIT("_c")}, {NULL, l_label}, {SD_STR_LIT(":;")}};
-    L._t21 = sd_str_concat_parts(_t20, 3);
-    sd_m_Gen__emit(l_g, L._t21);
-    sd_str_release(L._t21); L._t21 = NULL;
     sd_m_Gen__genStmt(l_g, (l_st).f_post);
   }
-  sd_int *_t22 = (&(l_g)->f_indent);
-  { int64_t r_; if (SD_LIKELY((((*_t22).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_sub_overflow((*_t22).w, SD_INT(1).w, &r_))) (*_t22).w = r_; else { sd_int s_ = sd_int_sub_slow((*_t22), SD_INT(1)); sd_int_release((*_t22)); (*_t22) = s_; } }
-  sd_str _t23 = SD_STR_LIT("}");
-  sd_m_Gen__emit(l_g, _t23);
-  bool _t24 = true;
-  sd_m_Gen__popScope(l_g, _t24);
-  sd_int *_t25 = (&(l_g)->f_indent);
-  { int64_t r_; if (SD_LIKELY((((*_t25).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_sub_overflow((*_t25).w, SD_INT(1).w, &r_))) (*_t25).w = r_; else { sd_int s_ = sd_int_sub_slow((*_t25), SD_INT(1)); sd_int_release((*_t25)); (*_t25) = s_; } }
-  sd_str _t26 = SD_STR_LIT("}");
-  sd_m_Gen__emit(l_g, _t26);
-  sd_int_release(l_label);
+  sd_int *_t21 = (&(l_g)->f_indent);
+  { int64_t r_; if (SD_LIKELY((((*_t21).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_sub_overflow((*_t21).w, SD_INT(1).w, &r_))) (*_t21).w = r_; else { sd_int s_ = sd_int_sub_slow((*_t21), SD_INT(1)); sd_int_release((*_t21)); (*_t21) = s_; } }
+  sd_str _t22 = SD_STR_LIT("}");
+  sd_m_Gen__emit(l_g, _t22);
   SD_LF_LEAVE(L);
 }
 
@@ -45375,12 +47437,12 @@ static void sd_m_Lexer__lexWord(sd_S_Lexer * l_lx) {
   SD_LF_LEAVE(L);
 }
 
-typedef struct { sd_lframe h; sd_str l_why; sd_str _t44; sd_str _t46; sd_str l_raw; } sd_L_sd_m_Lexer__lexNumber;
+typedef struct { sd_lframe h; sd_str l_why; sd_str _t51; sd_str _t53; sd_str l_raw; } sd_L_sd_m_Lexer__lexNumber;
 static void sd_lr_sd_m_Lexer__lexNumber(sd_lframe *p) {
   sd_L_sd_m_Lexer__lexNumber *L = (sd_L_sd_m_Lexer__lexNumber *)p;
   sd_str_release(L->l_why);
-  sd_str_release(L->_t44);
-  sd_str_release(L->_t46);
+  sd_str_release(L->_t51);
+  sd_str_release(L->_t53);
   sd_str_release(L->l_raw);
 }
 static void sd_m_Lexer__lexNumber(sd_S_Lexer * l_lx) {
@@ -45408,204 +47470,232 @@ static void sd_m_Lexer__lexNumber(sd_S_Lexer * l_lx) {
     *_t7 = _t6;
     sd_int l_digits = SD_INT(0);
     {
+      if (SD_LIKELY(((l_digits.w) & 1) == 0)) {
+        int64_t r_digits_3357 = SD_SMALL(l_digits);
+        for (;;) {
+          SD_PREEMPT();
+          bool _t12 = sd_int_lt(((*l_lx)).f_i, SD_INT_S(l_n));
+          if (_t12) {
+            sd_int _t11 = sd_f_hexValue(sd_str_at(((*l_lx)).f_src, ((*l_lx)).f_i));
+            _t12 = sd_int_ge(_t11, SD_INT(0));
+            sd_int_release(_t11);
+          }
+          if (!(_t12)) break;
+          {
+            sd_int *_t13 = (&(l_lx)->f_i);
+            { int64_t r_; if (SD_LIKELY((((*_t13).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((*_t13).w, SD_INT(1).w, &r_))) (*_t13).w = r_; else { sd_int s_ = sd_int_add_slow((*_t13), SD_INT(1)); sd_int_release((*_t13)); (*_t13) = s_; } }
+            if (SD_UNLIKELY(__builtin_add_overflow(r_digits_3357, ((int64_t)1), &r_digits_3357))) {
+              sd_int _t14 = sd_int_from_i64((int64_t)((uint64_t)r_digits_3357 - (uint64_t)((int64_t)1)));
+              l_digits = sd_int_add(_t14, SD_INT_S(((int64_t)1)));
+              sd_int_release(_t14);
+              goto _c9;
+            }
+          }
+          _c10:;
+        }
+        l_digits = sd_int_from_i64(r_digits_3357);
+        goto _d8;
+      }
       for (;;) {
         SD_PREEMPT();
-        bool _t9 = sd_int_lt(((*l_lx)).f_i, SD_INT_S(l_n));
-        if (_t9) {
-          sd_int _t8 = sd_f_hexValue(sd_str_at(((*l_lx)).f_src, ((*l_lx)).f_i));
-          _t9 = sd_int_ge(_t8, SD_INT(0));
-          sd_int_release(_t8);
+        bool _t16 = sd_int_lt(((*l_lx)).f_i, SD_INT_S(l_n));
+        if (_t16) {
+          sd_int _t15 = sd_f_hexValue(sd_str_at(((*l_lx)).f_src, ((*l_lx)).f_i));
+          _t16 = sd_int_ge(_t15, SD_INT(0));
+          sd_int_release(_t15);
         }
-        if (!(_t9)) break;
+        if (!(_t16)) break;
         {
-          sd_int *_t10 = (&(l_lx)->f_i);
-          { int64_t r_; if (SD_LIKELY((((*_t10).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((*_t10).w, SD_INT(1).w, &r_))) (*_t10).w = r_; else { sd_int s_ = sd_int_add_slow((*_t10), SD_INT(1)); sd_int_release((*_t10)); (*_t10) = s_; } }
+          sd_int *_t17 = (&(l_lx)->f_i);
+          { int64_t r_; if (SD_LIKELY((((*_t17).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((*_t17).w, SD_INT(1).w, &r_))) (*_t17).w = r_; else { sd_int s_ = sd_int_add_slow((*_t17), SD_INT(1)); sd_int_release((*_t17)); (*_t17) = s_; } }
           { int64_t r_; if (SD_LIKELY((((l_digits).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_digits).w, SD_INT(1).w, &r_))) (l_digits).w = r_; else { sd_int s_ = sd_int_add_slow((l_digits), SD_INT(1)); sd_int_release((l_digits)); (l_digits) = s_; } }
         }
+        _c9:;
       }
+      _d8:;
     }
     if (sd_int_eq(l_digits, SD_INT(0))) {
-      sd_str _t11 = SD_STR_LIT("hexadecimal literal needs digits after 0x");
-      sd_m_Lexer__fail(l_lx, l_pos, _t11);
+      sd_str _t18 = SD_STR_LIT("hexadecimal literal needs digits after 0x");
+      sd_m_Lexer__fail(l_lx, l_pos, _t18);
     }
     sd_int_release(l_digits);
   } else {
     {
       for (;;) {
         SD_PREEMPT();
-        bool _t13 = sd_int_lt(((*l_lx)).f_i, SD_INT_S(l_n));
-        if (_t13) {
-          bool _t12 = sd_f_isDigit(sd_str_at(((*l_lx)).f_src, ((*l_lx)).f_i));
-          _t13 = _t12;
+        bool _t20 = sd_int_lt(((*l_lx)).f_i, SD_INT_S(l_n));
+        if (_t20) {
+          bool _t19 = sd_f_isDigit(sd_str_at(((*l_lx)).f_src, ((*l_lx)).f_i));
+          _t20 = _t19;
         }
-        if (!(_t13)) break;
+        if (!(_t20)) break;
         {
-          sd_int *_t14 = (&(l_lx)->f_i);
-          { int64_t r_; if (SD_LIKELY((((*_t14).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((*_t14).w, SD_INT(1).w, &r_))) (*_t14).w = r_; else { sd_int s_ = sd_int_add_slow((*_t14), SD_INT(1)); sd_int_release((*_t14)); (*_t14) = s_; } }
+          sd_int *_t21 = (&(l_lx)->f_i);
+          { int64_t r_; if (SD_LIKELY((((*_t21).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((*_t21).w, SD_INT(1).w, &r_))) (*_t21).w = r_; else { sd_int s_ = sd_int_add_slow((*_t21), SD_INT(1)); sd_int_release((*_t21)); (*_t21) = s_; } }
         }
       }
     }
     sd_int l_zeros = SD_INT(0);
-    bool _t16 = ((sd_str_at(((*l_lx)).f_src, l_start)) == (((uint8_t)48)));
-    if (_t16) {
-      sd_int _t15 = sd_int_sub(((*l_lx)).f_i, l_start);
-      _t16 = sd_int_gt(_t15, SD_INT(1));
-      sd_int_release(_t15);
+    bool _t23 = ((sd_str_at(((*l_lx)).f_src, l_start)) == (((uint8_t)48)));
+    if (_t23) {
+      sd_int _t22 = sd_int_sub(((*l_lx)).f_i, l_start);
+      _t23 = sd_int_gt(_t22, SD_INT(1));
+      sd_int_release(_t22);
     }
-    if (_t16) {
-      sd_int _t17 = SD_INT(1);
+    if (_t23) {
+      sd_int _t24 = SD_INT(1);
       sd_int_release(l_zeros);
-      l_zeros = _t17;
+      l_zeros = _t24;
       {
         for (;;) {
           SD_PREEMPT();
-          sd_int _t18 = sd_int_add(l_start, l_zeros);
-          sd_int _t19 = sd_int_sub(((*l_lx)).f_i, SD_INT(1));
-          bool _t21 = sd_int_lt(_t18, _t19);
-          if (_t21) {
-            sd_int _t20 = sd_int_add(l_start, l_zeros);
-            _t21 = ((sd_str_at(((*l_lx)).f_src, _t20)) == (((uint8_t)48)));
-            sd_int_release(_t20);
+          sd_int _t25 = sd_int_add(l_start, l_zeros);
+          sd_int _t26 = sd_int_sub(((*l_lx)).f_i, SD_INT(1));
+          bool _t28 = sd_int_lt(_t25, _t26);
+          if (_t28) {
+            sd_int _t27 = sd_int_add(l_start, l_zeros);
+            _t28 = ((sd_str_at(((*l_lx)).f_src, _t27)) == (((uint8_t)48)));
+            sd_int_release(_t27);
           }
-          bool _t22 = _t21;
-          sd_int_release(_t19);
-          sd_int_release(_t18);
-          if (!(_t22)) break;
+          bool _t29 = _t28;
+          sd_int_release(_t26);
+          sd_int_release(_t25);
+          if (!(_t29)) break;
           {
             { int64_t r_; if (SD_LIKELY((((l_zeros).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_zeros).w, SD_INT(1).w, &r_))) (l_zeros).w = r_; else { sd_int s_ = sd_int_add_slow((l_zeros), SD_INT(1)); sd_int_release((l_zeros)); (l_zeros) = s_; } }
           }
         }
       }
     }
-    uint8_t _t23 = sd_m_Lexer__peekByte((*l_lx), SD_INT(0));
-    bool _t26 = ((_t23) == (((uint8_t)46)));
-    if (_t26) {
-      uint8_t _t24 = sd_m_Lexer__peekByte((*l_lx), SD_INT(1));
-      bool _t25 = sd_f_isDigit(_t24);
-      _t26 = _t25;
+    uint8_t _t30 = sd_m_Lexer__peekByte((*l_lx), SD_INT(0));
+    bool _t33 = ((_t30) == (((uint8_t)46)));
+    if (_t33) {
+      uint8_t _t31 = sd_m_Lexer__peekByte((*l_lx), SD_INT(1));
+      bool _t32 = sd_f_isDigit(_t31);
+      _t33 = _t32;
     }
-    if (_t26) {
-      sd_int *_t27 = (&(l_lx)->f_i);
-      { int64_t r_; if (SD_LIKELY((((*_t27).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((*_t27).w, SD_INT(1).w, &r_))) (*_t27).w = r_; else { sd_int s_ = sd_int_add_slow((*_t27), SD_INT(1)); sd_int_release((*_t27)); (*_t27) = s_; } }
+    if (_t33) {
+      sd_int *_t34 = (&(l_lx)->f_i);
+      { int64_t r_; if (SD_LIKELY((((*_t34).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((*_t34).w, SD_INT(1).w, &r_))) (*_t34).w = r_; else { sd_int s_ = sd_int_add_slow((*_t34), SD_INT(1)); sd_int_release((*_t34)); (*_t34) = s_; } }
       {
         for (;;) {
           SD_PREEMPT();
-          bool _t29 = sd_int_lt(((*l_lx)).f_i, SD_INT_S(l_n));
-          if (_t29) {
-            bool _t28 = sd_f_isDigit(sd_str_at(((*l_lx)).f_src, ((*l_lx)).f_i));
-            _t29 = _t28;
+          bool _t36 = sd_int_lt(((*l_lx)).f_i, SD_INT_S(l_n));
+          if (_t36) {
+            bool _t35 = sd_f_isDigit(sd_str_at(((*l_lx)).f_src, ((*l_lx)).f_i));
+            _t36 = _t35;
           }
-          if (!(_t29)) break;
+          if (!(_t36)) break;
           {
-            sd_int *_t30 = (&(l_lx)->f_i);
-            { int64_t r_; if (SD_LIKELY((((*_t30).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((*_t30).w, SD_INT(1).w, &r_))) (*_t30).w = r_; else { sd_int s_ = sd_int_add_slow((*_t30), SD_INT(1)); sd_int_release((*_t30)); (*_t30) = s_; } }
+            sd_int *_t37 = (&(l_lx)->f_i);
+            { int64_t r_; if (SD_LIKELY((((*_t37).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((*_t37).w, SD_INT(1).w, &r_))) (*_t37).w = r_; else { sd_int s_ = sd_int_add_slow((*_t37), SD_INT(1)); sd_int_release((*_t37)); (*_t37) = s_; } }
           }
         }
       }
-      uint8_t _t31 = sd_m_Lexer__peekByte((*l_lx), SD_INT(0));
-      bool _t33 = ((_t31) == (((uint8_t)101)));
-      if (!_t33) {
-        uint8_t _t32 = sd_m_Lexer__peekByte((*l_lx), SD_INT(0));
-        _t33 = ((_t32) == (((uint8_t)69)));
+      uint8_t _t38 = sd_m_Lexer__peekByte((*l_lx), SD_INT(0));
+      bool _t40 = ((_t38) == (((uint8_t)101)));
+      if (!_t40) {
+        uint8_t _t39 = sd_m_Lexer__peekByte((*l_lx), SD_INT(0));
+        _t40 = ((_t39) == (((uint8_t)69)));
       }
-      if (_t33) {
-        sd_int _t34 = sd_int_add(((*l_lx)).f_i, SD_INT(1));
-        sd_int l_j = _t34;
+      if (_t40) {
+        sd_int _t41 = sd_int_add(((*l_lx)).f_i, SD_INT(1));
+        sd_int l_j = _t41;
         if ((sd_int_lt(l_j, SD_INT_S(l_n)) && (((sd_str_at(((*l_lx)).f_src, l_j)) == (((uint8_t)43))) || ((sd_str_at(((*l_lx)).f_src, l_j)) == (((uint8_t)45)))))) {
           { int64_t r_; if (SD_LIKELY((((l_j).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_j).w, SD_INT(1).w, &r_))) (l_j).w = r_; else { sd_int s_ = sd_int_add_slow((l_j), SD_INT(1)); sd_int_release((l_j)); (l_j) = s_; } }
         }
-        bool _t36 = sd_int_lt(l_j, SD_INT_S(l_n));
-        if (_t36) {
-          bool _t35 = sd_f_isDigit(sd_str_at(((*l_lx)).f_src, l_j));
-          _t36 = _t35;
+        bool _t43 = sd_int_lt(l_j, SD_INT_S(l_n));
+        if (_t43) {
+          bool _t42 = sd_f_isDigit(sd_str_at(((*l_lx)).f_src, l_j));
+          _t43 = _t42;
         }
-        if (_t36) {
-          sd_int _t37 = sd_int_retain(l_j);
-          sd_int *_t38 = (&(l_lx)->f_i);
-          sd_int_release(*_t38);
-          *_t38 = _t37;
+        if (_t43) {
+          sd_int _t44 = sd_int_retain(l_j);
+          sd_int *_t45 = (&(l_lx)->f_i);
+          sd_int_release(*_t45);
+          *_t45 = _t44;
           {
             for (;;) {
               SD_PREEMPT();
-              bool _t40 = sd_int_lt(((*l_lx)).f_i, SD_INT_S(l_n));
-              if (_t40) {
-                bool _t39 = sd_f_isDigit(sd_str_at(((*l_lx)).f_src, ((*l_lx)).f_i));
-                _t40 = _t39;
+              bool _t47 = sd_int_lt(((*l_lx)).f_i, SD_INT_S(l_n));
+              if (_t47) {
+                bool _t46 = sd_f_isDigit(sd_str_at(((*l_lx)).f_src, ((*l_lx)).f_i));
+                _t47 = _t46;
               }
-              if (!(_t40)) break;
+              if (!(_t47)) break;
               {
-                sd_int *_t41 = (&(l_lx)->f_i);
-                { int64_t r_; if (SD_LIKELY((((*_t41).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((*_t41).w, SD_INT(1).w, &r_))) (*_t41).w = r_; else { sd_int s_ = sd_int_add_slow((*_t41), SD_INT(1)); sd_int_release((*_t41)); (*_t41) = s_; } }
+                sd_int *_t48 = (&(l_lx)->f_i);
+                { int64_t r_; if (SD_LIKELY((((*_t48).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((*_t48).w, SD_INT(1).w, &r_))) (*_t48).w = r_; else { sd_int s_ = sd_int_add_slow((*_t48), SD_INT(1)); sd_int_release((*_t48)); (*_t48) = s_; } }
               }
             }
           }
         }
         sd_int_release(l_j);
       }
-      sd_box * _t42 = SD_BOX_REF(sd_k_Tok__Float);
+      sd_box * _t49 = SD_BOX_REF(sd_k_Tok__Float);
       sd_box_release(l_kind);
-      l_kind = _t42;
+      l_kind = _t49;
     }
     if (sd_int_gt(l_zeros, SD_INT(0))) {
       L.l_why = SD_STR_LIT(" starts with 0 (Seed has no octal literals)");
       if ((SD_BOX_GET(l_kind, sd_E_Tok).tag == 4)) {
-        sd_str _t43 = SD_STR_LIT(" starts with 0 (a number has no leading zeros)");
+        sd_str _t50 = SD_STR_LIT(" starts with 0 (a number has no leading zeros)");
         sd_str_release(L.l_why);
-        L.l_why = _t43;
+        L.l_why = _t50;
       }
-      L._t44 = sd_str_slice(((*l_lx)).f_src, l_start, ((*l_lx)).f_i);
-      sd_str _t45[] = {SD_STR_LIT("the number "), L._t44, L.l_why};
-      L._t46 = sd_str_concat_n(_t45, 3);
-      sd_int _t47 = sd_int_add(l_start, l_zeros);
-      sd_str _t48 = sd_str_slice(((*l_lx)).f_src, _t47, ((*l_lx)).f_i);
-      sd_str _t49 = sd_str_concat(SD_STR_LIT("write "), _t48);
-      sd_S_Diag _t50 = (sd_S_Diag){.f_pos = sd_rt_S3Pos(l_pos), .f_message = L._t46, .f_hint = _t49};
-      L._t46 = NULL;
-      sd_list ** _t51 = (&(l_lx)->f_errors);
-      SD_LIST_PUSH(_t51, sd_S_Diag, _t50);
-      sd_str_release(_t48); 
-      sd_int_release(_t47);
-      sd_str_release(L._t44); L._t44 = NULL;
+      L._t51 = sd_str_slice(((*l_lx)).f_src, l_start, ((*l_lx)).f_i);
+      sd_str _t52[] = {SD_STR_LIT("the number "), L._t51, L.l_why};
+      L._t53 = sd_str_concat_n(_t52, 3);
+      sd_int _t54 = sd_int_add(l_start, l_zeros);
+      sd_str _t55 = sd_str_slice(((*l_lx)).f_src, _t54, ((*l_lx)).f_i);
+      sd_str _t56 = sd_str_concat(SD_STR_LIT("write "), _t55);
+      sd_S_Diag _t57 = (sd_S_Diag){.f_pos = sd_rt_S3Pos(l_pos), .f_message = L._t53, .f_hint = _t56};
+      L._t53 = NULL;
+      sd_list ** _t58 = (&(l_lx)->f_errors);
+      SD_LIST_PUSH(_t58, sd_S_Diag, _t57);
+      sd_str_release(_t55); 
+      sd_int_release(_t54);
+      sd_str_release(L._t51); L._t51 = NULL;
       sd_str_release(L.l_why); L.l_why = NULL;
     }
     sd_int_release(l_zeros);
   }
-  bool _t55 = sd_int_lt(((*l_lx)).f_i, SD_INT_S(l_n));
-  if (_t55) {
-    bool _t52 = sd_f_isLetter(sd_str_at(((*l_lx)).f_src, ((*l_lx)).f_i));
-    bool _t54 = _t52;
-    if (!_t54) {
-      bool _t53 = sd_f_isDigit(sd_str_at(((*l_lx)).f_src, ((*l_lx)).f_i));
-      _t54 = _t53;
+  bool _t62 = sd_int_lt(((*l_lx)).f_i, SD_INT_S(l_n));
+  if (_t62) {
+    bool _t59 = sd_f_isLetter(sd_str_at(((*l_lx)).f_src, ((*l_lx)).f_i));
+    bool _t61 = _t59;
+    if (!_t61) {
+      bool _t60 = sd_f_isDigit(sd_str_at(((*l_lx)).f_src, ((*l_lx)).f_i));
+      _t61 = _t60;
     }
-    _t55 = _t54;
+    _t62 = _t61;
   }
-  if (_t55) {
-    sd_str _t56 = SD_STR_LIT("invalid number literal (a float needs a '.', for example 1.0e9)");
-    sd_m_Lexer__fail(l_lx, l_pos, _t56);
+  if (_t62) {
+    sd_str _t63 = SD_STR_LIT("invalid number literal (a float needs a '.', for example 1.0e9)");
+    sd_m_Lexer__fail(l_lx, l_pos, _t63);
     {
       for (;;) {
         SD_PREEMPT();
-        bool _t60 = sd_int_lt(((*l_lx)).f_i, SD_INT_S(l_n));
-        if (_t60) {
-          bool _t57 = sd_f_isLetter(sd_str_at(((*l_lx)).f_src, ((*l_lx)).f_i));
-          bool _t59 = _t57;
-          if (!_t59) {
-            bool _t58 = sd_f_isDigit(sd_str_at(((*l_lx)).f_src, ((*l_lx)).f_i));
-            _t59 = _t58;
+        bool _t67 = sd_int_lt(((*l_lx)).f_i, SD_INT_S(l_n));
+        if (_t67) {
+          bool _t64 = sd_f_isLetter(sd_str_at(((*l_lx)).f_src, ((*l_lx)).f_i));
+          bool _t66 = _t64;
+          if (!_t66) {
+            bool _t65 = sd_f_isDigit(sd_str_at(((*l_lx)).f_src, ((*l_lx)).f_i));
+            _t66 = _t65;
           }
-          _t60 = _t59;
+          _t67 = _t66;
         }
-        if (!(_t60)) break;
+        if (!(_t67)) break;
         {
-          sd_int *_t61 = (&(l_lx)->f_i);
-          { int64_t r_; if (SD_LIKELY((((*_t61).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((*_t61).w, SD_INT(1).w, &r_))) (*_t61).w = r_; else { sd_int s_ = sd_int_add_slow((*_t61), SD_INT(1)); sd_int_release((*_t61)); (*_t61) = s_; } }
+          sd_int *_t68 = (&(l_lx)->f_i);
+          { int64_t r_; if (SD_LIKELY((((*_t68).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((*_t68).w, SD_INT(1).w, &r_))) (*_t68).w = r_; else { sd_int s_ = sd_int_add_slow((*_t68), SD_INT(1)); sd_int_release((*_t68)); (*_t68) = s_; } }
         }
       }
     }
   }
-  sd_str _t62 = sd_str_slice(((*l_lx)).f_src, l_start, ((*l_lx)).f_i);
-  L.l_raw = _t62;
+  sd_str _t69 = sd_str_slice(((*l_lx)).f_src, l_start, ((*l_lx)).f_i);
+  L.l_raw = _t69;
   sd_m_Lexer__add(l_lx, l_kind, l_pos, L.l_raw, l_start);
   sd_str_release(L.l_raw); L.l_raw = NULL;
   sd_box_release(l_kind);
@@ -48611,7 +50701,7 @@ static sd_T_T2ie sd_f_run(sd_str l_root, sd_S_Build l_t, sd_list * l_args) {
   return _t14;
 }
 
-typedef struct { sd_lframe h; sd_list * l_dirs; sd_list * l_opts; sd_str l_filter; sd_str _t8; sd_str l_hint; sd_str _t15; sd_T_T2se _t19; sd_str l_tmp; sd_str l_base; sd_str _t27; sd_list * _t30; sd_T_T2Lse _t31; sd_list * l_pkgs; sd_str _t36; sd_str _t38; sd_str l_work; sd_err _t44; sd_str _t46; sd_T_T2Lie _t47; sd_list * l_counts; sd_str _t53; sd_str _t56; } sd_L_sd_f_testCommand;
+typedef struct { sd_lframe h; sd_list * l_dirs; sd_list * l_opts; sd_str l_filter; sd_str _t8; sd_str l_hint; sd_str _t15; sd_T_T2se _t19; sd_str l_tmp; sd_str l_base; sd_str _t27; sd_list * _t30; sd_T_T2Lse _t31; sd_list * l_pkgs; sd_str _t36; sd_str _t38; sd_str l_work; sd_err _t46; sd_str _t48; sd_T_T2Lie _t49; sd_list * l_counts; sd_err _t58; sd_str _t60; sd_T_T2Lie _t61; sd_str _t67; sd_str _t70; } sd_L_sd_f_testCommand;
 static void sd_lr_sd_f_testCommand(sd_lframe *p) {
   sd_L_sd_f_testCommand *L = (sd_L_sd_f_testCommand *)p;
   sd_list_release(L->l_dirs);
@@ -48630,12 +50720,15 @@ static void sd_lr_sd_f_testCommand(sd_lframe *p) {
   sd_str_release(L->_t36);
   sd_str_release(L->_t38);
   sd_str_release(L->l_work);
-  sd_iface_release(L->_t44);
-  sd_str_release(L->_t46);
-  sd_rl_T2Lie(L->_t47);
+  sd_iface_release(L->_t46);
+  sd_str_release(L->_t48);
+  sd_rl_T2Lie(L->_t49);
   sd_list_release(L->l_counts);
-  sd_str_release(L->_t53);
-  sd_str_release(L->_t56);
+  sd_iface_release(L->_t58);
+  sd_str_release(L->_t60);
+  sd_rl_T2Lie(L->_t61);
+  sd_str_release(L->_t67);
+  sd_str_release(L->_t70);
 }
 static sd_T_T2ie sd_f_testCommand(sd_str l_root, sd_list * l_args) {
   sd_L_sd_f_testCommand L = {{0}};
@@ -48831,17 +50924,92 @@ static sd_T_T2ie sd_f_testCommand(sd_str l_root, sd_list * l_args) {
         }
         {
           int64_t l_j = ((int64_t)0);
+          if (SD_LIKELY(((l_failed.w) & 1) == 0)) {
+            int64_t r_failed_3623 = SD_SMALL(l_failed);
+            for (;;) {
+              SD_PREEMPT();
+              if (!((l_j < SD_SMALL(sd_list_len(L.l_pkgs))))) break;
+              {
+                { int64_t r_; if (SD_LIKELY((((l_built).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_built).w, SD_INT(1).w, &r_))) (l_built).w = r_; else { sd_int s_ = sd_int_add_slow((l_built), SD_INT(1)); sd_int_release((l_built)); (l_built) = s_; } }
+                sd_str_part _t44[] = {{L.l_tmp}, {SD_STR_LIT("/")}, {NULL, l_built}};
+                sd_str _t45 = sd_str_concat_parts(_t44, 3);
+                L.l_work = _t45;
+                L._t46 = sd_f_fs_mkdir(L.l_work);
+                if (!sd_err_is_null(L._t46)) {
+                  sd_T_T2ie _t47 = (sd_T_T2ie){.r1 = L._t46};
+                  SD_LF_LEAVE(L);
+                  sd_str_release(L.l_work);
+                  sd_list_release(L.l_pkgs);
+                  sd_str_release(L.l_base);
+                  sd_int_release(l_built);
+                  sd_str_release(L.l_tmp);
+                  sd_int_release(l_failed);
+                  sd_int_release(l_passed);
+                  sd_str_release(L.l_filter);
+                  sd_list_release(L.l_opts);
+                  sd_list_release(L.l_dirs);
+                  sd_defer_run(_dm);
+                  return _t47;
+                }
+                if (l_verbose) {
+                L._t46 = SD_IFACE_NULL;
+                  L._t48 = sd_str_concat(SD_STR_LIT("testing "), SD_LIST_GET(L.l_pkgs, sd_str, SD_INT_S(l_j)));
+                  sd_f_fmt_println(L._t48);
+                  sd_str_release(L._t48); L._t48 = NULL;
+                }
+                L._t49 = sd_f_testPackage(l_root, L.l_base, SD_LIST_GET(L.l_pkgs, sd_str, SD_INT_S(l_j)), L.l_work, L.l_opts);
+                if (!sd_err_is_null(L._t49.r1)) {
+                  sd_list_release(L._t49.r0);
+                  sd_T_T2ie _t50 = (sd_T_T2ie){.r1 = L._t49.r1};
+                  SD_LF_LEAVE(L);
+                  sd_str_release(L.l_work);
+                  sd_list_release(L.l_pkgs);
+                  sd_str_release(L.l_base);
+                  sd_int_release(l_built);
+                  sd_str_release(L.l_tmp);
+                  sd_int_release(l_failed);
+                  sd_int_release(l_passed);
+                  sd_str_release(L.l_filter);
+                  sd_list_release(L.l_opts);
+                  sd_list_release(L.l_dirs);
+                  sd_defer_run(_dm);
+                  return _t50;
+                }
+                sd_list * _t51 = L._t49.r0;
+                L._t49 = ((sd_T_T2Lie){0});
+                L.l_counts = _t51;
+                sd_int _t52 = SD_LIST_GET(L.l_counts, sd_int, SD_INT(0));
+                { int64_t r_; if (SD_LIKELY((((l_passed).w | _t52.w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_passed).w, _t52.w, &r_))) (l_passed).w = r_; else { sd_int s_ = sd_int_add_slow((l_passed), _t52); sd_int_release((l_passed)); (l_passed) = s_; } }
+                sd_int _t53 = SD_LIST_GET(L.l_counts, sd_int, SD_INT(1));
+                int64_t _t54; if (SD_UNLIKELY((_t53.w & 1) != 0 || __builtin_add_overflow(r_failed_3623, _t53.w >> 1, &_t54))) {
+                  sd_int _t55 = sd_int_from_i64(r_failed_3623);
+                  l_failed = sd_int_add(_t55, _t53);
+                  sd_int_release(_t55);
+                  sd_list_release(L.l_counts); L.l_counts = NULL;
+                  sd_str_release(L.l_work); L.l_work = NULL;
+                  goto _c42;
+                }
+                r_failed_3623 = _t54;
+                sd_list_release(L.l_counts); L.l_counts = NULL;
+                sd_str_release(L.l_work); L.l_work = NULL;
+              }
+              _c43:;
+              l_j++;
+            }
+            l_failed = sd_int_from_i64(r_failed_3623);
+            goto _d41;
+          }
           for (;;) {
             SD_PREEMPT();
             if (!((l_j < SD_SMALL(sd_list_len(L.l_pkgs))))) break;
             {
               { int64_t r_; if (SD_LIKELY((((l_built).w | SD_INT(1).w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_built).w, SD_INT(1).w, &r_))) (l_built).w = r_; else { sd_int s_ = sd_int_add_slow((l_built), SD_INT(1)); sd_int_release((l_built)); (l_built) = s_; } }
-              sd_str_part _t42[] = {{L.l_tmp}, {SD_STR_LIT("/")}, {NULL, l_built}};
-              sd_str _t43 = sd_str_concat_parts(_t42, 3);
-              L.l_work = _t43;
-              L._t44 = sd_f_fs_mkdir(L.l_work);
-              if (!sd_err_is_null(L._t44)) {
-                sd_T_T2ie _t45 = (sd_T_T2ie){.r1 = L._t44};
+              sd_str_part _t56[] = {{L.l_tmp}, {SD_STR_LIT("/")}, {NULL, l_built}};
+              sd_str _t57 = sd_str_concat_parts(_t56, 3);
+              L.l_work = _t57;
+              L._t58 = sd_f_fs_mkdir(L.l_work);
+              if (!sd_err_is_null(L._t58)) {
+                sd_T_T2ie _t59 = (sd_T_T2ie){.r1 = L._t58};
                 SD_LF_LEAVE(L);
                 sd_str_release(L.l_work);
                 sd_list_release(L.l_pkgs);
@@ -48854,18 +51022,18 @@ static sd_T_T2ie sd_f_testCommand(sd_str l_root, sd_list * l_args) {
                 sd_list_release(L.l_opts);
                 sd_list_release(L.l_dirs);
                 sd_defer_run(_dm);
-                return _t45;
+                return _t59;
               }
               if (l_verbose) {
-              L._t44 = SD_IFACE_NULL;
-                L._t46 = sd_str_concat(SD_STR_LIT("testing "), SD_LIST_GET(L.l_pkgs, sd_str, SD_INT_S(l_j)));
-                sd_f_fmt_println(L._t46);
-                sd_str_release(L._t46); L._t46 = NULL;
+              L._t58 = SD_IFACE_NULL;
+                L._t60 = sd_str_concat(SD_STR_LIT("testing "), SD_LIST_GET(L.l_pkgs, sd_str, SD_INT_S(l_j)));
+                sd_f_fmt_println(L._t60);
+                sd_str_release(L._t60); L._t60 = NULL;
               }
-              L._t47 = sd_f_testPackage(l_root, L.l_base, SD_LIST_GET(L.l_pkgs, sd_str, SD_INT_S(l_j)), L.l_work, L.l_opts);
-              if (!sd_err_is_null(L._t47.r1)) {
-                sd_list_release(L._t47.r0);
-                sd_T_T2ie _t48 = (sd_T_T2ie){.r1 = L._t47.r1};
+              L._t61 = sd_f_testPackage(l_root, L.l_base, SD_LIST_GET(L.l_pkgs, sd_str, SD_INT_S(l_j)), L.l_work, L.l_opts);
+              if (!sd_err_is_null(L._t61.r1)) {
+                sd_list_release(L._t61.r0);
+                sd_T_T2ie _t62 = (sd_T_T2ie){.r1 = L._t61.r1};
                 SD_LF_LEAVE(L);
                 sd_str_release(L.l_work);
                 sd_list_release(L.l_pkgs);
@@ -48878,21 +51046,23 @@ static sd_T_T2ie sd_f_testCommand(sd_str l_root, sd_list * l_args) {
                 sd_list_release(L.l_opts);
                 sd_list_release(L.l_dirs);
                 sd_defer_run(_dm);
-                return _t48;
+                return _t62;
               }
-              sd_list * _t49 = L._t47.r0;
-              L._t47 = ((sd_T_T2Lie){0});
-              L.l_counts = _t49;
-              sd_int _t50 = SD_LIST_GET(L.l_counts, sd_int, SD_INT(0));
-              { int64_t r_; if (SD_LIKELY((((l_passed).w | _t50.w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_passed).w, _t50.w, &r_))) (l_passed).w = r_; else { sd_int s_ = sd_int_add_slow((l_passed), _t50); sd_int_release((l_passed)); (l_passed) = s_; } }
-              sd_int _t51 = SD_LIST_GET(L.l_counts, sd_int, SD_INT(1));
-              { int64_t r_; if (SD_LIKELY((((l_failed).w | _t51.w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_failed).w, _t51.w, &r_))) (l_failed).w = r_; else { sd_int s_ = sd_int_add_slow((l_failed), _t51); sd_int_release((l_failed)); (l_failed) = s_; } }
+              sd_list * _t63 = L._t61.r0;
+              L._t61 = ((sd_T_T2Lie){0});
+              L.l_counts = _t63;
+              sd_int _t64 = SD_LIST_GET(L.l_counts, sd_int, SD_INT(0));
+              { int64_t r_; if (SD_LIKELY((((l_passed).w | _t64.w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_passed).w, _t64.w, &r_))) (l_passed).w = r_; else { sd_int s_ = sd_int_add_slow((l_passed), _t64); sd_int_release((l_passed)); (l_passed) = s_; } }
+              sd_int _t65 = SD_LIST_GET(L.l_counts, sd_int, SD_INT(1));
+              { int64_t r_; if (SD_LIKELY((((l_failed).w | _t65.w) & 1) == 0) && SD_LIKELY(!__builtin_add_overflow((l_failed).w, _t65.w, &r_))) (l_failed).w = r_; else { sd_int s_ = sd_int_add_slow((l_failed), _t65); sd_int_release((l_failed)); (l_failed) = s_; } }
               sd_list_release(L.l_counts); L.l_counts = NULL;
               sd_str_release(L.l_work); L.l_work = NULL;
             }
-            _c41:;
+            _c42:;
+            __asm__ __volatile__("" : "+r"(l_j));
             l_j++;
           }
+          _d41:;
         }
         sd_list_release(L.l_pkgs); L.l_pkgs = NULL;
         sd_str_release(L.l_base); L.l_base = NULL;
@@ -48901,12 +51071,12 @@ static sd_T_T2ie sd_f_testCommand(sd_str l_root, sd_list * l_args) {
       l_i++;
     }
   }
-  sd_str_part _t52[] = {{NULL, l_passed}, {SD_STR_LIT(" passed, ")}, {NULL, l_failed}, {SD_STR_LIT(" failed")}};
-  L._t53 = sd_str_concat_parts(_t52, 4);
-  sd_f_fmt_println(L._t53);
-  sd_str_release(L._t53); L._t53 = NULL;
+  sd_str_part _t66[] = {{NULL, l_passed}, {SD_STR_LIT(" passed, ")}, {NULL, l_failed}, {SD_STR_LIT(" failed")}};
+  L._t67 = sd_str_concat_parts(_t66, 4);
+  sd_f_fmt_println(L._t67);
+  sd_str_release(L._t67); L._t67 = NULL;
   if (sd_int_gt(l_failed, SD_INT(0))) {
-    sd_T_T2ie _t54 = (sd_T_T2ie){SD_INT(1), SD_IFACE_NULL};
+    sd_T_T2ie _t68 = (sd_T_T2ie){SD_INT(1), SD_IFACE_NULL};
     SD_LF_LEAVE(L);
     sd_int_release(l_built);
     sd_str_release(L.l_tmp);
@@ -48916,14 +51086,14 @@ static sd_T_T2ie sd_f_testCommand(sd_str l_root, sd_list * l_args) {
     sd_list_release(L.l_opts);
     sd_list_release(L.l_dirs);
     sd_defer_run(_dm);
-    return _t54;
+    return _t68;
   }
   if (((!((L.l_filter) == NULL)) && sd_int_eq(l_passed, SD_INT(0)))) {
-    sd_str _t55[] = {SD_STR_LIT("seed test: no test description contains \""), L.l_filter, SD_STR_LIT("\"")};
-    L._t56 = sd_str_concat_n(_t55, 3);
-    sd_f_fmt_eprintln(L._t56);
-    sd_str_release(L._t56); L._t56 = NULL;
-    sd_T_T2ie _t57 = (sd_T_T2ie){SD_INT(1), SD_IFACE_NULL};
+    sd_str _t69[] = {SD_STR_LIT("seed test: no test description contains \""), L.l_filter, SD_STR_LIT("\"")};
+    L._t70 = sd_str_concat_n(_t69, 3);
+    sd_f_fmt_eprintln(L._t70);
+    sd_str_release(L._t70); L._t70 = NULL;
+    sd_T_T2ie _t71 = (sd_T_T2ie){SD_INT(1), SD_IFACE_NULL};
     SD_LF_LEAVE(L);
     sd_int_release(l_built);
     sd_str_release(L.l_tmp);
@@ -48933,9 +51103,9 @@ static sd_T_T2ie sd_f_testCommand(sd_str l_root, sd_list * l_args) {
     sd_list_release(L.l_opts);
     sd_list_release(L.l_dirs);
     sd_defer_run(_dm);
-    return _t57;
+    return _t71;
   }
-  sd_T_T2ie _t58 = (sd_T_T2ie){SD_INT(0), SD_IFACE_NULL};
+  sd_T_T2ie _t72 = (sd_T_T2ie){SD_INT(0), SD_IFACE_NULL};
   SD_LF_LEAVE(L);
   sd_int_release(l_built);
   sd_str_release(L.l_tmp);
@@ -48945,7 +51115,7 @@ static sd_T_T2ie sd_f_testCommand(sd_str l_root, sd_list * l_args) {
   sd_list_release(L.l_opts);
   sd_list_release(L.l_dirs);
   sd_defer_run(_dm);
-  return _t58;
+  return _t72;
 }
 
 typedef struct { sd_lframe h; sd_list * l_out; sd_T_T2Lse _t1; sd_list * l_names; sd_str l_path; sd_str l_tests; sd_T_T2Lse _t11; sd_str l_sub; sd_T_T2Lse _t19; } sd_L_sd_f_testPackages;

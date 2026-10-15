@@ -85,7 +85,7 @@ fn (Gen g) mut genStmt(int s) {
     case StmtKind.Assign:
         g.genAssign(s)
     case StmtKind.IncDec:
-        g.genIncDec(st)
+        g.genIncDec(s)
         g.releaseTo(mark)
     case StmtKind.Const:
         int cv = g.c.stmtVar[s]
@@ -275,6 +275,10 @@ fn (Gen g) mut genAssign(int s) {
         g.releaseTo(mark)
     case TargetKind.Place:
         int uv = g.intLocal(tg.expr)
+        if (g.genAccUpdate(s)) {
+            g.releaseTo(mark)
+            return
+        }
         if (uv >= 0 && g.isUnboxed(uv)) {
             g.emit("l_" + g.c.vars[uv].name + " = " + smallOf(g.gexpr(st.expr)) + ";")
         } else if (!g.genAppend(st, tg) && !g.genIntUpdate(st, tg)) {
@@ -506,7 +510,11 @@ fn (Gen g) wrapOwned(int opt, string v) string {
     return v
 }
 
-fn (Gen g) mut genIncDec(Stmt st) {
+fn (Gen g) mut genIncDec(int s) {
+    Stmt st = g.c.ast.stmts[s]
+    if (g.genAccUpdate(s)) {
+        return
+    }
     int lv = st.expr
     ExprInfo i = g.c.info[lv]
     Expr x = g.c.ast.exprs[lv]
@@ -579,33 +587,59 @@ fn (Gen g) mut genFor(Stmt st) {
     if (st.init >= 0) {
         g.genStmt(st.init)
     }
+    // A loop with accumulators gets a fast copy first (gen_acc.sd), which
+    // continues in this one, the general copy, when an update spills.
+    []int acc = g.accVars(st)
+    int done = -1
     int label = -1
-    if (st.post >= 0) {
+    if (acc.len() > 0) {
+        g.ntmp++
+        done = g.ntmp
+        g.ntmp++
+        label = g.ntmp
+        g.genAccLoop(st, acc, label, done)
+    } else if (st.post >= 0) {
         g.ntmp++
         label = g.ntmp
     }
+    g.genLoopCopy(st, label, []int{}, -1, done >= 0)
+    if (done >= 0) {
+        g.emit("_d" + done.string() + ":;")
+    }
+    g.popScope(true)
+    g.indent--
+    g.emit("}")
+}
+
+// for (;;) { check; if (!cond) break; { body } _cN:; post }, with continue
+// label number label (-1: none), raw accumulators acc and the general
+// copy's continue label accTo (gen_acc.sd); spills: whether this is the
+// general copy of a loop with accumulators.
+fn (Gen g) mut genLoopCopy(Stmt st, int label, []int acc, int accTo, bool spills) {
     g.emit("for (;;) {")
     g.indent++
-    g.emit("SD_PREEMPT();")
+    g.emit(g.loopCheck(st, acc))
     if (st.expr >= 0) {
         int mark = g.slots.len()
         string c = g.condVal(g.gexpr(st.expr), mark)
         g.emit("if (!(" + c + ")) break;")
     }
-    g.loops.push(LoopCtx{mark: g.slots.len(), label: label})
+    g.loops.push(LoopCtx{mark: g.slots.len(), label: label, acc: acc, accTo: accTo})
     g.emit("{")
     g.indent++
     g.genBody(st.body)
     g.indent--
     g.emit("}")
     g.loops = g.loops.slice(0, g.loops.len() - 1)
-    if (st.post >= 0) {
+    if (label >= 0) {
         g.emit("_c" + label.string() + ":;")
+    }
+    if (spills && g.spillBarrier(st) != "") {
+        g.emit(g.spillBarrier(st))
+    }
+    if (st.post >= 0) {
         g.genStmt(st.post)
     }
-    g.indent--
-    g.emit("}")
-    g.popScope(true)
     g.indent--
     g.emit("}")
 }

@@ -1215,10 +1215,10 @@ static sd_task *globrunq_get_locked(sd_p *p, int max) {
 /* ------------------------------------------------------- preemption
  *
  * Generated code checks sd_preempt_req_[0] at the top of every loop
- * iteration and on entry to every function that may recurse (SD_PREEMPT in
- * seed.h): one relaxed load and a branch not taken. It counts the Ps whose
- * goroutine sysmon asked to yield (p->preempt): sysmon asks when a P has run
- * the same goroutine for SD_PREEMPT_NS while other goroutines wait to run.
+ * iteration and before every call that may recurse (SD_PREEMPT in seed.h):
+ * one relaxed load and a branch not taken. It counts the Ps whose goroutine
+ * sysmon asked to yield (p->preempt): sysmon asks when a P has run the same
+ * goroutine for SD_PREEMPT_NS while other goroutines wait to run.
  * While it is not zero, every check calls sd_preempt_, which yields the
  * calling goroutine if its own P was asked (to the global queue's tail, as
  * Go does) and returns at once otherwise. A request is withdrawn when the P

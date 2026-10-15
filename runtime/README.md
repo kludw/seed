@@ -684,9 +684,10 @@ most that many run at once.
   the call returns, the goroutine takes its P back, or an idle one, or
   queues itself.
 - **Preemption** is cooperative: the compiler puts a *preemption point*,
-  `SD_PREEMPT()` (seed.h), at the top of every loop iteration and before
-  every call that may close a cycle of calls (compiler/README.md), so a
-  goroutine that computes reaches one often. It is one relaxed load of a
+  `SD_PREEMPT()` (seed.h), at the top of every loop iteration (every
+  1024th in a counted loop of pure small-int code) and before every call
+  that may close a cycle of calls (compiler/README.md), so a goroutine
+  that computes reaches one often. It is one relaxed load of a
   process-wide word, `sd_preempt_req_[0]` (on a cache line of its own),
   and a branch not taken; no thread-local storage. sysmon tracks each
   running P's `schedtick`: when a P has run the same goroutine for 10 ms

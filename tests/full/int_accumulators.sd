@@ -1,0 +1,139 @@
+// Loops that accumulate into an int local: the compiler keeps such a local
+// as a machine word inside the loop and falls back to a general int when it
+// overflows, which must give exactly the same results as general ints.
+package main
+
+import "fmt"
+
+const int big = 4611686018427387903
+
+// Past 2^63 in the middle of the loop.
+fn pastTwo63() int {
+    int sum = 0
+    for (int i = 0; i < 2000; i++) {
+        sum = sum + big / 1000 + (i & 7)
+    }
+    return sum
+}
+
+// Down past -2^63, with a subtraction.
+fn belowMinus2to63() int {
+    int sum = -9223372036854775000
+    for (int i = 0; i < 100; i++) {
+        sum = sum - 10 - i
+    }
+    return sum
+}
+
+// Starts big: the loop runs on general ints from the start.
+fn startsBig() int {
+    int sum = big * big
+    for (int i = 0; i < 10; i++) {
+        sum = sum + i
+    }
+    return sum
+}
+
+// Grows past the small range (2^62) and comes back into it.
+fn upAndDown() int {
+    int sum = big - 5
+    for (int i = 0; i < 20; i++) {
+        if (i < 10) {
+            sum = sum + 1
+        } else {
+            sum = sum - 3
+        }
+    }
+    return sum
+}
+
+// Two accumulators, ++ and --, continue and break.
+fn counts([]int xs) (int, int) {
+    int evens = 0
+    int odds = 0
+    for (int i = 0; i < xs.len(); i++) {
+        if (xs[i] < 0) {
+            continue
+        }
+        if (xs[i] > 1000) {
+            break
+        }
+        if (xs[i] % 2 == 0) {
+            evens++
+        } else {
+            odds--
+        }
+    }
+    return evens, odds
+}
+
+// Adds list elements, which may be big.
+fn total([]int xs) int {
+    int t = 0
+    for (int i = 0; i < xs.len(); i++) {
+        t = t + xs[i]
+    }
+    return t
+}
+
+// A return from inside the loop, and the sum used after it.
+fn firstOver([]int xs, int limit) int {
+    int sum = 0
+    for (int i = 0; i < xs.len(); i++) {
+        if (xs[i] > limit) {
+            return i
+        }
+        sum = sum + xs[i] * 2
+    }
+    return sum
+}
+
+// Nested loops: the inner sum is an accumulator of the inner loop, the
+// total one of the outer loop.
+fn nested(int n) int {
+    int all = 0
+    for (int i = 0; i < n; i++) {
+        int row = 0
+        for (int j = 0; j < n; j++) {
+            row = row + big / 3 + j
+        }
+        all = all + row % 1000 + i
+    }
+    return all
+}
+
+// A loop without post statement and an accumulator updated in a switch.
+fn switched(int n) int {
+    int acc = big - 100
+    int i = 0
+    for (; i < n; ) {
+        i++
+        switch (i % 3) {
+        case 0:
+            acc = acc + 7
+        case 1:
+            acc = acc - 2
+        default:
+            acc++
+        }
+    }
+    return acc
+}
+
+fn main([]string args) error {
+    fmt.println(pastTwo63().string())
+    fmt.println(belowMinus2to63().string())
+    fmt.println(startsBig().string())
+    fmt.println(upAndDown().string())
+    int e, int o = counts([]int{1, 2, -3, 4, 5, 6, 2000, 8})
+    fmt.println(e.string() + " " + o.string())
+    fmt.println(total([]int{1, big, big, big, -5, big * big, 3}).string())
+    fmt.println(total([]int{}).string())
+    fmt.println(firstOver([]int{1, 2, 3}, 10).string())
+    fmt.println(firstOver([]int{1, 20, 3}, 10).string())
+    fmt.println(firstOver([]int{big, big, big}, big + 1).string())
+    fmt.println(nested(50).string())
+    fmt.println(switched(100).string())
+    fmt.println(switched(0).string())
+    return null
+}
