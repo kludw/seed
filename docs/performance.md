@@ -626,6 +626,113 @@ before both changes (mean of 20 runs; instructions where measured):
 packages' C around it changed), so its 5% is layout, as is most of the
 `strings` and `spawn` movement.
 
+## Spawn
+
+`spawn` was the one benchmark still slower than Go on Linux: 0.085 s
+against 0.069 s (1.23x) in `bench/run.sh` (best of 7). The goroutines do
+almost nothing (one send on a buffered channel), so the time is starting
+and ending 100,000 of them, while the main goroutine spawns on one CPU and
+the other three steal and run them. Only the runtime changed
+(runtime/README.md, section 10); the generated C is the same.
+
+**Where the time went.** `perf record` (no hardware counters on this VM:
+`task-clock` samples, with DWARF call graphs), the runtime before:
+
+- `sd_spawn` was 16% of all samples, and 85% of that was one instruction:
+  the `memset` of `ctx_make`, writing the first frame at the top of the new
+  goroutine's stack. A finished goroutine kept its stack, so each spawn
+  wrote to the top of whichever 8 MB mapping the pooled goroutine came
+  with, last used by another CPU: a TLB miss with a page walk (every stack
+  is a mapping of its own, so every top page has its own page table) and
+  cache misses. Resetting the goroutine for reuse was also the spawner's
+  job (it took the group's dead list), so the dozen cache lines of each
+  `sd_task`, last written by the CPU that ran it, came over one by one.
+- `pthread_mutex_lock` and `_unlock` were a quarter of the samples. The
+  group's lock was taken by every spawn and by every goroutine as it
+  ended, which held it while it unlinked itself from a list threaded
+  through its neighbours (running on other CPUs). Once the first two
+  changes below had removed the misses, a trace of the `futex` calls
+  (`perf record -e syscalls:sys_enter_futex`, 16,500 per run, most of them
+  wake-ups of a lock word left contended) put half of them on the group's
+  lock and 30% on the channel's.
+- The count of running goroutines for the deadlock check (an atomic
+  incremented by each spawn, decremented by each end) and the channel's
+  reference count (retained by each spawn's argument copy, released at
+  each end, next to the channel's lock) were lines that every CPU wrote.
+
+**What changed.**
+
+1. **Goroutines are freed where they end** (Go's `goexit0`): on the
+   worker's scheduler stack, into that processor's free list. The spawner
+   takes structures from its own list, refilled with a whole batch from
+   the shared pool (an array of batches, so moving one touches no
+   goroutine).
+2. **Stacks are pooled apart, per processor.** A goroutine takes a stack,
+   and makes its first context, when it first runs, from the free stacks
+   of the processor running it, and gives it back to the processor it ends
+   on. A worker that runs goroutines one after another reuses the same
+   stack, hot in its cache and TLB. Together with 1: 0.086 s to 0.062 s
+   (`perf stat`, mean of 10; the steps below are measured the same way).
+3. **Groups without a lock.** The members sit in slots in fixed chunks:
+   the spawner fills an empty one, an ending goroutine empties its own,
+   and the running count (with the waiting owner's bit) is one atomic.
+   The lock is left to cancellations (which pin each slot while they
+   cancel its goroutine) and the first error. 0.062 s to 0.054 s.
+4. **Fewer shared lines.** Ends and parks are counted off the running
+   count when their processor goes idle (increments stay immediate, so the
+   count never drops below the truth and still reaches zero exactly at a
+   deadlock); the channel's reference count has a line of its own;
+   `sd_task` is laid out so that a spawn writes two lines (the spawn's
+   fields and the arguments), the running goroutine two more, and nothing
+   writes the rest unless it is used. About 3-4% each (interleaved runs).
+
+**Results.** Linux x86_64, 4 cores (a VM shared with other agents' builds
+and benchmarks: single runs move by 5-10%). Before is the runtime at the
+start of this work.
+
+| `spawn` | Before | After | Go |
+|---|---|---|---|
+| `bench/run.sh` (best of 7) | 0.085 s | 0.046-0.049 s | 0.064-0.065 s |
+| interleaved, 7 rounds, median (best) | 90.5 (84.9) ms | 60.5 (50.4) ms | 77.2 (69.7) ms |
+| `perf stat`, 20 runs: elapsed | 82-86 ms | 48-49 ms | |
+| task-clock (CPU time, all threads) | 187-192 ms | 137-141 ms | |
+| context switches | 1,613 | 885-927 | |
+| `clock_nanosleep` calls | 632 | 98-103 | |
+| `SEED_PROCS=1` / `GOMAXPROCS=1` (mean of 10) | 72 ms | 41 ms | 54 ms |
+| `SEED_PROCS=2` | 80 ms | 48 ms | 62 ms |
+| spawn + join, one at a time (`runtime/tests/run.sh bench`) | 1.4-1.6 us | 0.4-0.5 us | |
+
+`spawn` is now 0.7x Go. `futex` calls rose (10,500 to 16,500 per run):
+with the group's lock gone and the goroutines running in parallel, two
+thirds of them are the channel's lock (all goroutines send on one
+channel, so the senders on four CPUs contend; Go has one lock per channel
+too) and most of the rest the scheduler's (`sched.mu`, taken when a
+processor looks at the global queue or goes idle). Those are what is
+left: a profile now has the channel's lock (with the futex calls behind
+it) and the first touch of a goroutine's structure on the CPU that runs it
+(it was written by the spawner on another) at the top.
+
+The full set (`bench/run.sh`, best of 5, after; the other benchmarks do
+not spawn, and their times are within this machine's noise of before;
+`json`, checked with cachegrind, executes the same instructions,
+6,251 M):
+
+| Benchmark | Seed (s) | Go (s) | Seed / Go |
+|---|---|---|---|
+| `fib` | 0.375 | 0.622 | 0.6 |
+| `intloop` | 0.373 | 0.359 | 1.0 |
+| `json` | 0.837 | 0.773 | 1.1 |
+| `maps` | 0.611 | 1.348 | 0.5 |
+| `pingpong` | 0.102 | 0.121 | 0.8 |
+| `sort` | 0.569 | 0.848 | 0.7 |
+| `spawn` | 0.044 | 0.067 | 0.7 |
+| `strings` | 0.463 | 1.540 | 0.3 |
+
+Interleaved before/after (7 rounds, median ms): `fib` 398/397, `intloop`
+439/419, `json` 756/792 (15 rounds: 775/803), `maps` 758/664, `pingpong`
+116/119 (15 rounds: 124/120), `sort` 588/611 (15 rounds: 607/602),
+`strings` 544/546.
+
 ## Build speed
 
 Building a program was almost all C compiler: the front end and generator

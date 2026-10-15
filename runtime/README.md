@@ -1372,6 +1372,15 @@ reports, and the runtime's tests passed on aarch64 under qemu (plain
 build, both context-switch implementations: the assembly and
 `SD_CTX_UCONTEXT`).
 
+Soak of the spawn changes (groups without a lock, stacks per processor,
+the deferred running count; same machine): the 38 programs 30 times each
+per setting (`SEED_PROCS=1`, 2 and 4: 3,420 runs, twice), `test_conc` and
+`test_block` 30 times each per setting (180 runs), and `seed test lib/net
+lib/http lib/time` (58 tests) 30 times per setting (90 runs). No failure.
+`test_conc`, `test_block`, `test_pkg`, `test_str`, the example and the
+`spawn` benchmark also passed on aarch64 under qemu, with both context
+switches.
+
 Performance on an Apple M-series laptop (`-O2`, `run.sh bench`), with
 goroutines as threads (before the M:N scheduler; its numbers on Linux are
 in docs/performance.md, "Goroutine scheduler (M:N)": a `chan int(0)`
