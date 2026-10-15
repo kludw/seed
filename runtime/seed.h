@@ -263,12 +263,24 @@ typedef struct sd_site {
   "772:\n\t.pushsection " SD_SITES_SECTION "\n\t.p2align 3\n\t.quad 772b, " SD_XSTR_(__USER_LABEL_PREFIX__) #TAB \
   "+" #K "*24\n\t.popsection"
 #define SD_SA(TAB, K) __asm__ __volatile__ SD_ASM_INLINE_(SD_SITE_ASM_(TAB, K))
+/* At the entry of each function with marks: a record whose site is
+ * sd_site_fn_start_. The first record after a return address must be a
+ * mark of the same function; when it is the start of another function, the
+ * call had no mark. (The unwinder's function bounds cannot tell: macOS's
+ * compact unwind info merges neighbouring functions with the same frame
+ * layout into one range.) */
+#define SD_SA_FN()                                                                                        \
+  __asm__ __volatile__ SD_ASM_INLINE_("772:\n\t.pushsection " SD_SITES_SECTION                              \
+                                      "\n\t.p2align 3\n\t.quad 772b, " SD_XSTR_(__USER_LABEL_PREFIX__) \
+                                      "sd_site_fn_start_\n\t.popsection")
 #define SD_SAV(V, TAB, K) __asm__ SD_ASM_INLINE_(SD_SITE_ASM_(TAB, K) : "+r"(V))
 #else
 #define SD_SA(TAB, K) ((void)0)
+#define SD_SA_FN() ((void)0)
 #define SD_SAV(V, TAB, K) ((void)0)
 #endif
 /* The crashes of the out-of-line paths, with their site. */
+extern const sd_site sd_site_fn_start_;
 SD_NORETURN void sd_crash_at(const sd_site *s, const char *fmt, ...) SD_PRINTF(2, 3);
 SD_NORETURN void sd_crash_index_at(sd_int i, int64_t len, const sd_site *s);
 /* Before a call of os.crash: the site of the crash that follows. */

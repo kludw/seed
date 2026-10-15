@@ -2089,6 +2089,9 @@ _Static_assert(sizeof(sd_site) == 24, "SD_SA assumes 24-byte sites");
  * every program. */
 __attribute__((used, section(SD_SITES_CSECTION))) static sd_site_rec sd_site_none_ = {0, NULL};
 
+/* The site of the records at the entry of functions (SD_SA_FN). */
+const sd_site sd_site_fn_start_ = {"", "", 0, 0};
+
 /* The records sorted by A, made at the first crash. */
 static sd_site_rec *site_tab;
 static size_t site_n;
@@ -2120,7 +2123,7 @@ static const sd_site *site_find(uintptr_t ip, uintptr_t fn) {
     if (site_tab[mid].a < ip) lo = mid + 1;
     else hi = mid;
   }
-  if (lo == site_n || !fn) return NULL;
+  if (lo == site_n || !fn || site_tab[lo].site == &sd_site_fn_start_) return NULL;
   uintptr_t a = site_tab[lo].a;
   if (a < fn || (uintptr_t)_Unwind_FindEnclosingFunction((void *)a) != fn) return NULL;
   return site_tab[lo].site;

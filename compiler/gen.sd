@@ -1661,6 +1661,7 @@ fn (Gen g) mut genFn(int f) {
     g.emit(sig + " {")
     g.siteStart(f)
     g.indent++
+    g.emit("SD_SA_FN();")
     if (g.preemptsOnEntry(f)) {
         g.emit("SD_PREEMPT();")
     }

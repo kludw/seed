@@ -312,6 +312,7 @@ fn (Gen g) mut genFast(int f) {
     }
     g.emit(sig + " {")
     g.indent++
+    g.emit("SD_SA_FN();")
     // The chooser's call of the fast version is marked with the function's
     // own position, so that a trace through the fast version names it.
     string call = "int64_t r_ = " + g.fastName(f) + "(" + fastArgs.join(", ") + "); SD_SAV(r_, " + g.siteTab + ", " + g.siteRef(fd.pos).string() + ");"
