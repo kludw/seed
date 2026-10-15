@@ -1,0 +1,80 @@
+== initialize
+{"jsonrpc":"2.0","id":0,"result":{"capabilities":{"positionEncoding":"utf-16","textDocumentSync":{"openClose":true,"change":1,"save":{"includeText":false}},"documentFormattingProvider":true,"definitionProvider":true,"hoverProvider":true,"completionProvider":{"triggerCharacters":["."]},"documentSymbolProvider":true},"serverInfo":{"name":"seed lsp"}}}
+== notification textDocument/publishDiagnostics
+{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{"uri":"file://$DIR/proj/main.sd","diagnostics":[]}}
+== hover proj/main.sd 19 10
+{"jsonrpc":"2.0","id":1,"result":{"contents":{"kind":"markdown","value":"```seed\nshop.Cart cart\n```\n\n(variable)"},"range":{"start":{"line":19,"character":8},"end":{"line":19,"character":12}}}}
+== definition proj/main.sd 19 10
+{"jsonrpc":"2.0","id":2,"result":{"uri":"file://$DIR/proj/main.sd","range":{"start":{"line":18,"character":14},"end":{"line":18,"character":18}}}}
+== definition proj/main.sd 19 14
+{"jsonrpc":"2.0","id":3,"result":{"uri":"file://$DIR/proj/shop/cart.sd","range":{"start":{"line":16,"character":20},"end":{"line":16,"character":23}}}}
+== hover proj/main.sd 19 14
+{"jsonrpc":"2.0","id":4,"result":{"contents":{"kind":"markdown","value":"```seed\npub fn (Cart c) mut add(Item item) error\n```\n\nAdds an item; the price must not be negative."},"range":{"start":{"line":19,"character":13},"end":{"line":19,"character":16}}}}
+== definition proj/main.sd 19 23
+{"jsonrpc":"2.0","id":5,"result":{"uri":"file://$DIR/proj/shop/item.sd","range":{"start":{"line":3,"character":9},"end":{"line":3,"character":13}}}}
+== definition proj/main.sd 19 41
+{"jsonrpc":"2.0","id":6,"result":{"uri":"file://$DIR/proj/shop/item.sd","range":{"start":{"line":6,"character":12},"end":{"line":6,"character":17}}}}
+== definition proj/main.sd 19 70
+{"jsonrpc":"2.0","id":7,"result":{"uri":"file://$DIR/proj/shop/item.sd","range":{"start":{"line":11,"character":4},"end":{"line":11,"character":9}}}}
+== definition proj/main.sd 19 64
+{"jsonrpc":"2.0","id":8,"result":{"uri":"file://$DIR/proj/shop/item.sd","range":{"start":{"line":10,"character":9},"end":{"line":10,"character":13}}}}
+== definition proj/main.sd 19 59
+{"jsonrpc":"2.0","id":9,"result":{"uri":"file://$DIR/proj/shop/cart.sd","range":{"start":{"line":0,"character":8},"end":{"line":0,"character":12}}}}
+== hover proj/main.sd 20 35
+{"jsonrpc":"2.0","id":10,"result":{"contents":{"kind":"markdown","value":"```seed\npub string owner\n```\n\nfield of shop.Cart"},"range":{"start":{"line":20,"character":34},"end":{"line":20,"character":39}}}}
+== definition proj/main.sd 20 35
+{"jsonrpc":"2.0","id":11,"result":{"uri":"file://$DIR/proj/shop/cart.sd","range":{"start":{"line":6,"character":15},"end":{"line":6,"character":20}}}}
+== hover proj/main.sd 21 9
+{"jsonrpc":"2.0","id":12,"result":{"contents":{"kind":"markdown","value":"```seed\npub fn println(string s)\n```\n\nWrites s and a newline to stdout."},"range":{"start":{"line":21,"character":8},"end":{"line":21,"character":15}}}}
+== hover proj/main.sd 21 5
+{"jsonrpc":"2.0","id":13,"result":{"contents":{"kind":"markdown","value":"```seed\nimport \"fmt\"\n```\n\nPackage fmt writes text to stdout and stderr. There is no format-string\nlanguage: values become text through .string() and are joined with +.\n\nEach call is a single write, so output from two goroutines can interleave\nbetween calls but never inside one. Stdout is buffered and flushed when\nthe program exits (for any reason) and before anything is written to\nstderr. Stderr is not buffered."},"range":{"start":{"line":21,"character":4},"end":{"line":21,"character":7}}}}
+== hover proj/main.sd 21 17
+{"jsonrpc":"2.0","id":14,"result":{"contents":{"kind":"markdown","value":"```seed\nconst string greeting = \"héllo 😀\"\n```\n\nThe greeting, with a non-ASCII prefix: \"héllo 😀\"."},"range":{"start":{"line":21,"character":16},"end":{"line":21,"character":24}}}}
+== definition proj/main.sd 21 17
+{"jsonrpc":"2.0","id":15,"result":{"uri":"file://$DIR/proj/main.sd","range":{"start":{"line":6,"character":13},"end":{"line":6,"character":21}}}}
+== definition proj/main.sd 21 80
+{"jsonrpc":"2.0","id":16,"result":{"uri":"file://$DIR/proj/main.sd","range":{"start":{"line":8,"character":3},"end":{"line":8,"character":11}}}}
+== hover proj/main.sd 21 52
+{"jsonrpc":"2.0","id":17,"result":{"contents":{"kind":"markdown","value":"```seed\npub fn (Cart c) total() int\n```\n\nThe sum of the prices, in cents."},"range":{"start":{"line":21,"character":52},"end":{"line":21,"character":57}}}}
+== hover proj/main.sd 13 34
+{"jsonrpc":"2.0","id":18,"result":{"contents":{"kind":"markdown","value":"```seed\nint.string() string\n```\n\nbuilt-in method (docs/builtins.md)"},"range":{"start":{"line":13,"character":33},"end":{"line":13,"character":39}}}}
+== hover proj/main.sd 12 15
+{"jsonrpc":"2.0","id":19,"result":{"contents":{"kind":"markdown","value":"```seed\npub type Size enum {\n    Small\n    Large(int extra)\n}\n```"},"range":{"start":{"line":12,"character":14},"end":{"line":12,"character":18}}}}
+== hover proj/main.sd 12 20
+{"jsonrpc":"2.0","id":20,"result":{"contents":{"kind":"markdown","value":"```seed\nshop.Size.Large(int extra)\n```\n\ncase of enum shop.Size"},"range":{"start":{"line":12,"character":19},"end":{"line":12,"character":24}}}}
+== hover proj/main.sd 12 30
+{"jsonrpc":"2.0","id":21,"result":{"contents":{"kind":"markdown","value":"```seed\nint extra\n```\n\n(variable)"},"range":{"start":{"line":12,"character":29},"end":{"line":12,"character":34}}}}
+== definition proj/main.sd 13 28
+{"jsonrpc":"2.0","id":22,"result":{"uri":"file://$DIR/proj/main.sd","range":{"start":{"line":12,"character":29},"end":{"line":12,"character":34}}}}
+== definition proj/main.sd 9 12
+{"jsonrpc":"2.0","id":23,"result":{"uri":"file://$DIR/proj/main.sd","range":{"start":{"line":8,"character":22},"end":{"line":8,"character":23}}}}
+== hover proj/main.sd 8 17
+{"jsonrpc":"2.0","id":24,"result":{"contents":{"kind":"markdown","value":"```seed\npub type Size enum {\n    Small\n    Large(int extra)\n}\n```"},"range":{"start":{"line":8,"character":17},"end":{"line":8,"character":21}}}}
+== definition proj/main.sd 3 9
+{"jsonrpc":"2.0","id":25,"result":{"uri":"file://$DIR/proj/shop/cart.sd","range":{"start":{"line":0,"character":8},"end":{"line":0,"character":12}}}}
+== hover proj/main.sd 0 9
+{"jsonrpc":"2.0","id":26,"result":{"contents":{"kind":"markdown","value":"```seed\npackage main\n```"},"range":{"start":{"line":0,"character":8},"end":{"line":0,"character":12}}}}
+== hover proj/main.sd 22 5
+{"jsonrpc":"2.0","id":27,"result":null}
+== definition proj/main.sd 21 28
+{"jsonrpc":"2.0","id":28,"result":null}
+== hover proj/main.sd 16 0
+{"jsonrpc":"2.0","id":29,"result":null}
+== completion proj/main.sd 20 35
+{"jsonrpc":"2.0","id":30,"result":{"isIncomplete":false,"items":[{"label":"owner","kind":5,"detail":"pub string owner","documentation":{"kind":"markdown","value":"field of shop.Cart"}},{"label":"add","kind":2,"detail":"pub fn (Cart c) mut add(Item item) error","documentation":{"kind":"markdown","value":"Adds an item; the price must not be negative."}},{"label":"total","kind":2,"detail":"pub fn (Cart c) total() int","documentation":{"kind":"markdown","value":"The sum of the prices, in cents."}}]}}
+== completion proj/main.sd 18 27
+{"jsonrpc":"2.0","id":31,"result":{"isIncomplete":false,"items":[{"label":"Cart","kind":22,"detail":"pub type Cart struct {\n    pub string owner\n    []Item items\n}","documentation":{"kind":"markdown","value":"A shopping cart: the items in the order they were added."}},{"label":"Item","kind":22,"detail":"pub type Item struct {\n    pub string name\n    pub int price\n    pub Size size\n}","documentation":{"kind":"markdown","value":"One thing in a cart."}},{"label":"Size","kind":13,"detail":"pub type Size enum {\n    Small\n    Large(int extra)\n}"},{"label":"newCart","kind":3,"detail":"pub fn newCart(string owner) Cart","documentation":{"kind":"markdown","value":"A new, empty cart for owner."}},{"label":"maxItems","kind":21,"detail":"pub const int maxItems = 100","documentation":{"kind":"markdown","value":"The most a cart may hold."}}]}}
+== completion proj/main.sd 19 69
+{"jsonrpc":"2.0","id":32,"result":{"isIncomplete":false,"items":[{"label":"Small","kind":20,"detail":"shop.Size.Small","documentation":{"kind":"markdown","value":"case of enum shop.Size"}},{"label":"Large","kind":20,"detail":"shop.Size.Large(int extra)","documentation":{"kind":"markdown","value":"case of enum shop.Size"}}]}}
+== completion proj/main.sd 21 17
+{"jsonrpc":"2.0","id":33,"result":{"isIncomplete":false,"items":[{"label":"args","kind":6,"detail":"[]string"},{"label":"cart","kind":6,"detail":"shop.Cart"},{"label":"label","kind":6,"detail":"string"},{"label":"describe","kind":3,"detail":"fn describe(shop.Size s) string"},{"label":"main","kind":3,"detail":"fn main([]string args) error"},{"label":"greeting","kind":21,"detail":"const string greeting = \"héllo 😀\"","documentation":{"kind":"markdown","value":"The greeting, with a non-ASCII prefix: \"héllo 😀\"."}},{"label":"fmt","kind":9,"detail":"import \"fmt\""},{"label":"shop","kind":9,"detail":"import \"shop\""},{"label":"assert","kind":14},{"label":"break","kind":14},{"label":"case","kind":14},{"label":"chan","kind":14},{"label":"const","kind":14},{"label":"continue","kind":14},{"label":"default","kind":14},{"label":"defer","kind":14},{"label":"else","kind":14},{"label":"enum","kind":14},{"label":"false","kind":14},{"label":"fn","kind":14},{"label":"for","kind":14},{"label":"group","kind":14},{"label":"if","kind":14},{"label":"implements","kind":14},{"label":"import","kind":14},{"label":"interface","kind":14},{"label":"map","kind":14},{"label":"mut","kind":14},{"label":"null","kind":14},{"label":"package","kind":14},{"label":"pub","kind":14},{"label":"return","kind":14},{"label":"select","kind":14},{"label":"spawn","kind":14},{"label":"struct","kind":14},{"label":"switch","kind":14},{"label":"test","kind":14},{"label":"true","kind":14},{"label":"try","kind":14},{"label":"type","kind":14},{"label":"bool","kind":7,"detail":"built-in type"},{"label":"byte","kind":7,"detail":"built-in type"},{"label":"error","kind":7,"detail":"built-in type"},{"label":"float","kind":7,"detail":"built-in type"},{"label":"int","kind":7,"detail":"built-in type"},{"label":"string","kind":7,"detail":"built-in type"}]}}
+== symbols proj/main.sd
+{"jsonrpc":"2.0","id":34,"result":[{"name":"greeting","kind":14,"detail":"string","range":{"start":{"line":6,"character":0},"end":{"line":6,"character":34}},"selectionRange":{"start":{"line":6,"character":13},"end":{"line":6,"character":21}},"children":[]},{"name":"describe","kind":12,"detail":"fn describe(shop.Size s) string","range":{"start":{"line":8,"character":0},"end":{"line":15,"character":1}},"selectionRange":{"start":{"line":8,"character":3},"end":{"line":8,"character":11}},"children":[]},{"name":"main","kind":12,"detail":"fn main([]string args) error","range":{"start":{"line":17,"character":0},"end":{"line":23,"character":1}},"selectionRange":{"start":{"line":17,"character":3},"end":{"line":17,"character":7}},"children":[]}]}
+== format proj/main.sd
+{"jsonrpc":"2.0","id":35,"result":[]}
+== request textDocument/rename {"textDocument":{"uri":"file:///nowhere.sd"},"position":{"line":0,"character":0},"newName":"x"}
+{"jsonrpc":"2.0","id":36,"error":{"code":-32601,"message":"seed lsp does not support textDocument/rename"}}
+== hover proj/main.sd 19 10
+{"jsonrpc":"2.0","id":37,"result":{"contents":{"kind":"markdown","value":"```seed\nshop.Cart cart\n```\n\n(variable)"},"range":{"start":{"line":19,"character":8},"end":{"line":19,"character":12}}}}
+== shutdown
+{"jsonrpc":"2.0","id":38,"result":null}

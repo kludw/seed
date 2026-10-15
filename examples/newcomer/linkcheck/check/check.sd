@@ -1,9 +1,7 @@
 // Package check checks URLs concurrently with a pool of workers.
 package check
 
-import "errors"
 import "http"
-import "time"
 
 pub type Outcome enum {
     Status(int code)
@@ -36,48 +34,16 @@ pub fn (Outcome o) ok() bool {
     }
 }
 
-fn fetch(string url, chan Outcome out) error {
-    http.Response resp, error err = http.get(url)
-    if (err != null) {
-        out.send(Outcome.Failed(err.message()))
-        return null
-    }
-    out.send(Outcome.Status(resp.status))
-    return null
-}
-
-// Waits for fetch's answer. On timeout it reports TimedOut and fails, which
-// stops the group and so the fetch.
-fn wait(chan Outcome answer, chan Outcome result, int timeout) error {
-    select {
-    case Outcome? o = answer.receive():
-        if (o != null) {
-            result.send(o)
-        }
-        return null
-    case time.after(timeout).receive():
-        result.send(Outcome.TimedOut)
-        return errors.new("timeout")
-    }
-}
-
 // Checks one URL, giving up after timeout nanoseconds.
 pub fn checkOne(string url, int timeout) Outcome {
-    chan Outcome answer = chan Outcome(1)
-    chan Outcome result = chan Outcome(1)
-    error err = group {
-        spawn fetch(url, answer)
-        spawn wait(answer, result, timeout)
-    }
-    Outcome? o = result.receive()
-    if (o == null) {
-        string reason = "no result"
-        if (err != null) {
-            reason = err.message()
+    http.Response resp, error err = http.getWithin(url, timeout)
+    if (err != null) {
+        if (err.message().contains(": timeout after ")) {
+            return Outcome.TimedOut
         }
-        return Outcome.Failed(reason)
+        return Outcome.Failed(err.message())
     }
-    return o
+    return Outcome.Status(resp.status)
 }
 
 fn worker(chan string jobs, chan Report results, int timeout) error {

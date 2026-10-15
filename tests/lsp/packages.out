@@ -1,0 +1,54 @@
+== initialize
+{"jsonrpc":"2.0","id":0,"result":{"capabilities":{"positionEncoding":"utf-16","textDocumentSync":{"openClose":true,"change":1,"save":{"includeText":false}},"documentFormattingProvider":true,"definitionProvider":true,"hoverProvider":true,"completionProvider":{"triggerCharacters":["."]},"documentSymbolProvider":true},"serverInfo":{"name":"seed lsp"}}}
+== notification textDocument/publishDiagnostics
+{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{"uri":"file://$DIR/proj/shop/cart.sd","diagnostics":[]}}
+== definition proj/shop/cart.sd 16 25
+{"jsonrpc":"2.0","id":1,"result":{"uri":"file://$DIR/proj/shop/item.sd","range":{"start":{"line":3,"character":9},"end":{"line":3,"character":13}}}}
+== hover proj/shop/cart.sd 17 15
+{"jsonrpc":"2.0","id":2,"result":{"contents":{"kind":"markdown","value":"```seed\npub int price\n```\n\nThe price in cents.\n\nfield of Item"},"range":{"start":{"line":17,"character":13},"end":{"line":17,"character":18}}}}
+== definition proj/shop/cart.sd 28 33
+{"jsonrpc":"2.0","id":3,"result":{"uri":"file://$DIR/proj/shop/item.sd","range":{"start":{"line":6,"character":12},"end":{"line":6,"character":17}}}}
+== definition proj/shop/cart.sd 12 27
+{"jsonrpc":"2.0","id":4,"result":{"uri":"file://$DIR/proj/shop/cart.sd","range":{"start":{"line":11,"character":22},"end":{"line":11,"character":27}}}}
+== hover proj/shop/cart.sd 16 13
+{"jsonrpc":"2.0","id":5,"result":{"contents":{"kind":"markdown","value":"```seed\nCart c\n```\n\n(mut receiver)"},"range":{"start":{"line":16,"character":13},"end":{"line":16,"character":14}}}}
+== definition proj/shop/cart.sd 20 8
+{"jsonrpc":"2.0","id":6,"result":{"uri":"file://$DIR/proj/shop/cart.sd","range":{"start":{"line":7,"character":11},"end":{"line":7,"character":16}}}}
+== completion proj/shop/cart.sd 28 20
+{"jsonrpc":"2.0","id":7,"result":{"isIncomplete":false,"items":[{"label":"c","kind":6,"detail":"Cart"},{"label":"sum","kind":6,"detail":"int"},{"label":"i","kind":6,"detail":"int"},{"label":"Cart","kind":22,"detail":"pub type Cart struct {\n    pub string owner\n    []Item items\n}","documentation":{"kind":"markdown","value":"A shopping cart: the items in the order they were added."}},{"label":"Item","kind":22,"detail":"pub type Item struct {\n    pub string name\n    pub int price\n    pub Size size\n}","documentation":{"kind":"markdown","value":"One thing in a cart."}},{"label":"Size","kind":13,"detail":"pub type Size enum {\n    Small\n    Large(int extra)\n}"},{"label":"newCart","kind":3,"detail":"pub fn newCart(string owner) Cart","documentation":{"kind":"markdown","value":"A new, empty cart for owner."}},{"label":"maxItems","kind":21,"detail":"pub const int maxItems = 100","documentation":{"kind":"markdown","value":"The most a cart may hold."}},{"label":"errors","kind":9,"detail":"import \"errors\""},{"label":"assert","kind":14},{"label":"break","kind":14},{"label":"case","kind":14},{"label":"chan","kind":14},{"label":"const","kind":14},{"label":"continue","kind":14},{"label":"default","kind":14},{"label":"defer","kind":14},{"label":"else","kind":14},{"label":"enum","kind":14},{"label":"false","kind":14},{"label":"fn","kind":14},{"label":"for","kind":14},{"label":"group","kind":14},{"label":"if","kind":14},{"label":"implements","kind":14},{"label":"import","kind":14},{"label":"interface","kind":14},{"label":"map","kind":14},{"label":"mut","kind":14},{"label":"null","kind":14},{"label":"package","kind":14},{"label":"pub","kind":14},{"label":"return","kind":14},{"label":"select","kind":14},{"label":"spawn","kind":14},{"label":"struct","kind":14},{"label":"switch","kind":14},{"label":"test","kind":14},{"label":"true","kind":14},{"label":"try","kind":14},{"label":"type","kind":14},{"label":"bool","kind":7,"detail":"built-in type"},{"label":"byte","kind":7,"detail":"built-in type"},{"label":"error","kind":7,"detail":"built-in type"},{"label":"float","kind":7,"detail":"built-in type"},{"label":"int","kind":7,"detail":"built-in type"},{"label":"string","kind":7,"detail":"built-in type"}]}}
+== completion proj/shop/cart.sd 20 10
+{"jsonrpc":"2.0","id":8,"result":{"isIncomplete":false,"items":[{"label":"owner","kind":5,"detail":"pub string owner","documentation":{"kind":"markdown","value":"field of Cart"}},{"label":"items","kind":5,"detail":"[]Item items","documentation":{"kind":"markdown","value":"field of Cart"}},{"label":"add","kind":2,"detail":"pub fn (Cart c) mut add(Item item) error","documentation":{"kind":"markdown","value":"Adds an item; the price must not be negative."}},{"label":"total","kind":2,"detail":"pub fn (Cart c) total() int","documentation":{"kind":"markdown","value":"The sum of the prices, in cents."}}]}}
+== notification textDocument/publishDiagnostics
+{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{"uri":"file://$DIR/proj/shop/cart.sd","diagnostics":[]}}
+== notification textDocument/publishDiagnostics
+{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{"uri":"file://$DIR/proj/shop/item.sd","diagnostics":[]}}
+== notification textDocument/publishDiagnostics
+{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{"uri":"file://$DIR/proj/shop/cart.sd","diagnostics":[{"range":{"start":{"line":17,"character":13},"end":{"line":17,"character":18}},"severity":1,"source":"seed","message":"struct Item has no field price"},{"range":{"start":{"line":28,"character":31},"end":{"line":28,"character":36}},"severity":1,"source":"seed","message":"struct Item has no field price"}]}}
+== notification textDocument/publishDiagnostics
+{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{"uri":"file://$DIR/proj/shop/item.sd","diagnostics":[]}}
+== hover proj/shop/cart.sd 17 15
+{"jsonrpc":"2.0","id":9,"result":null}
+== notification textDocument/publishDiagnostics
+{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{"uri":"file://$DIR/proj/shop/cart.sd","diagnostics":[]}}
+== notification textDocument/publishDiagnostics
+{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{"uri":"file://$DIR/proj/shop/item.sd","diagnostics":[]}}
+== notification textDocument/publishDiagnostics
+{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{"uri":"file://$DIR/proj/shop/item.sd","diagnostics":[]}}
+== notification textDocument/publishDiagnostics
+{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{"uri":"file://$DIR/proj/shop/cart.sd","diagnostics":[]}}
+== notification textDocument/publishDiagnostics
+{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{"uri":"file://$DIR/proj/shop/cart.sd","diagnostics":[]}}
+== notification textDocument/publishDiagnostics
+{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{"uri":"file://$DIR/proj/shop/tests/cart_test.sd","diagnostics":[]}}
+== hover proj/shop/tests/cart_test.sd 3 16
+{"jsonrpc":"2.0","id":10,"result":{"contents":{"kind":"markdown","value":"```seed\npub fn newCart(string owner) Cart\n```\n\nA new, empty cart for owner."},"range":{"start":{"line":3,"character":13},"end":{"line":3,"character":20}}}}
+== definition proj/shop/tests/cart_test.sd 4 14
+{"jsonrpc":"2.0","id":11,"result":{"uri":"file://$DIR/proj/shop/item.sd","range":{"start":{"line":3,"character":9},"end":{"line":3,"character":13}}}}
+== completion proj/shop/tests/cart_test.sd 5 13
+{"jsonrpc":"2.0","id":12,"result":{"isIncomplete":false,"items":[{"label":"owner","kind":5,"detail":"pub string owner","documentation":{"kind":"markdown","value":"field of Cart"}},{"label":"items","kind":5,"detail":"[]Item items","documentation":{"kind":"markdown","value":"field of Cart"}},{"label":"add","kind":2,"detail":"pub fn (Cart c) mut add(Item item) error","documentation":{"kind":"markdown","value":"Adds an item; the price must not be negative."}},{"label":"total","kind":2,"detail":"pub fn (Cart c) total() int","documentation":{"kind":"markdown","value":"The sum of the prices, in cents."}}]}}
+== symbols proj/shop/tests/cart_test.sd
+{"jsonrpc":"2.0","id":13,"result":[{"name":"test \"total adds the prices\"","kind":12,"range":{"start":{"line":2,"character":0},"end":{"line":6,"character":1}},"selectionRange":{"start":{"line":2,"character":0},"end":{"line":2,"character":4}},"children":[]}]}
+== symbols proj/shop/cart.sd
+{"jsonrpc":"2.0","id":14,"result":[{"name":"Cart","kind":23,"detail":"struct","range":{"start":{"line":5,"character":0},"end":{"line":8,"character":1}},"selectionRange":{"start":{"line":5,"character":9},"end":{"line":5,"character":13}},"children":[{"name":"owner","kind":8,"detail":"string","range":{"start":{"line":6,"character":15},"end":{"line":6,"character":20}},"selectionRange":{"start":{"line":6,"character":15},"end":{"line":6,"character":20}},"children":[]},{"name":"items","kind":8,"detail":"[]Item","range":{"start":{"line":7,"character":11},"end":{"line":7,"character":16}},"selectionRange":{"start":{"line":7,"character":11},"end":{"line":7,"character":16}},"children":[]}]},{"name":"newCart","kind":12,"detail":"pub fn newCart(string owner) Cart","range":{"start":{"line":11,"character":0},"end":{"line":13,"character":1}},"selectionRange":{"start":{"line":11,"character":7},"end":{"line":11,"character":14}},"children":[]},{"name":"Cart.add","kind":6,"detail":"pub fn (Cart c) mut add(Item item) error","range":{"start":{"line":16,"character":0},"end":{"line":22,"character":1}},"selectionRange":{"start":{"line":16,"character":20},"end":{"line":16,"character":23}},"children":[]},{"name":"Cart.total","kind":6,"detail":"pub fn (Cart c) total() int","range":{"start":{"line":25,"character":0},"end":{"line":31,"character":1}},"selectionRange":{"start":{"line":25,"character":16},"end":{"line":25,"character":21}},"children":[]}]}
+== shutdown
+{"jsonrpc":"2.0","id":15,"result":null}

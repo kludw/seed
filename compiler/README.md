@@ -24,6 +24,7 @@ make test-lib   # the standard library's tests: build/seed2 test lib
 make test-leaks # every test program under a leak checker (leaks or LeakSanitizer)
 make test-fmt   # seed fmt: self-checks on every .sd file, tests/fmt goldens
 make test-examples  # tests/examples.sh and examples/run.sh: every example built, run and checked
+make test-lsp   # tests/test_lsp.sh: seed lsp driven over stdin/stdout by scripted sessions
 make install    # links $(PREFIX)/bin/seed (PREFIX=/usr/local) to build/seed2; make uninstall removes it
 ```
 
@@ -46,6 +47,7 @@ seed test [-v] [--run text] [dir...]  run the tests of every package under the d
 seed fmt [--check] <file.sd | dir>... format in place, or report unformatted files
 seed c <dir | file.sd...>             C program on stdout (what tests/run.sh uses)
 seed ast <file.sd>...                 print the syntax tree (debugging aid)
+seed lsp                              language server on stdin/stdout (see "The language server")
 ```
 
 A program is the `package main` of a directory (all its `.sd` files) or a
@@ -200,6 +202,9 @@ never return (`isNoReturn`).
 | `gen_fast.sd` | gen | small-int versions of pure int functions, and the functions that choose between them and the general ones |
 | `gen_preempt.sd` | gen | where the generated code checks for preemption: the direct call graph's strongly connected components |
 | `gen_acc.sd` | gen | loop accumulators: a fast copy of a loop with raw `int64_t` accumulators that spills into the general copy; each loop iteration's preemption check |
+| `lsp.sd` | lsp | `seed lsp`: JSON-RPC framing, the open documents, dispatch, one goroutine per request |
+| `lsp_check.sd` | lsp | loading and checking a document's package with the editor's text, diagnostics, formatting, LSP positions (UTF-16) |
+| `lsp_query.sd` | lsp | definition and hover (what a name refers to), completion, document symbols |
 
 ## Data structures
 
@@ -917,6 +922,128 @@ that the compiler and the test programs are formatted. The few test files
 with deliberate syntax errors, and `tests/full/errors/unformatted_code.sd`,
 are not formatted. Since compiling checks formatting too (load.sd), every
 program the tests compile is formatted anyway.
+
+## The language server
+
+`seed lsp` (`lsp.sd`, `lsp_check.sd`, `lsp_query.sd`) speaks the Language
+Server Protocol over stdin and stdout: JSON-RPC 2.0 messages with a
+`Content-Length` header, read with `io.readLine` (headers) and `io.read`
+(the body), parsed and written with `lib/json`. It supports `initialize`,
+`shutdown`, `exit`, `didOpen`, `didChange` (full text; a ranged change is
+applied too), `didClose`, `didSave`, `publishDiagnostics`, `formatting`,
+`definition`, `hover`, `completion` (trigger character `.`) and
+`documentSymbol`; other requests get the error MethodNotFound.
+
+**State and checking.** The server keeps the text of every open document
+(`LspServer.docs`, by URI) and nothing else: each request loads and checks
+the document's program again (`lspAnalyze`), as `seed build` and `seed
+test` would, with the open documents' text in place of the files
+(`Loader.overlay`, consulted by `addFiles`). Which program that is:
+
+- the `.sd` files of the document's directory, as a package; for a file in
+  a package's `tests/` directory, the package and its tests in test mode;
+- a package other than `main` in test mode (as `seed test` checks it,
+  without `main`); when several files of a directory declare `fn main` (a
+  directory of single-file programs, like `examples/`), the document alone;
+- imports resolved from the project root: the nearest of the package's
+  directory and the directories above it from which every import that is
+  not in the standard library resolves (`lspProjectRoot`), so a package
+  deep in a project finds its siblings as `seed build` of the program
+  would; a package of the standard library gets its import path.
+
+Checking the compiler itself (about 20,000 lines) takes about 0.2 s, a
+small program a few milliseconds, so there is no cache: after every
+`didOpen`, `didChange`, `didClose` and `didSave` the server checks every
+open document and publishes its diagnostics.
+
+**Diagnostics** are the compiler's: the loader's and parser's errors when
+there are any (as for `seed build`, the checker's errors are not shown
+then, since they would mostly be cascades), otherwise the checker's, plus
+a warning (severity 2) at the first line `seed fmt` would change. The hint
+follows the message on a line of its own. Errors in another package are
+shown at the document's import of that package, with their file and line.
+
+**Positions.** `Pos` counts bytes from 1; LSP counts lines from 0 and
+characters in UTF-16 code units (`lspOffset`, `lspPosition`): a character
+of 2 or 3 bytes of UTF-8 is one unit, one of 4 bytes is two. A diagnostic's
+range covers the identifier or number at its position, or one character.
+
+**Crashes.** Every request runs in a goroutine of its own group
+(`runJob`, `lspTryJob`), which gets a copy of the request and sends its
+JSON result back on a channel. If the compiler crashes on what the editor
+sent (an index out of range on a half-written declaration, say), the
+group returns the crash as an error: the request's result is `null` (an
+empty list for formatting and symbols), the crash is logged to stderr, and
+the server carries on. A completion whose check crashed is tried again
+without the checker, from the tree alone. To make crashes rare, a tree with
+syntax errors is repaired before it is checked (`lspRepair`): the parser
+leaves `-1` where a type is missing (a field `[]` still being typed), and
+each becomes a type name that does not exist, which the checker reports
+and treats as invalid. The request `seed/crash` crashes on purpose, for the
+tests.
+
+**Queries.** Definition and hover lex the document to find the identifier
+under the cursor (or right before it) and look, in order, for:
+
+1. a declaration with that name at that position: function, method,
+   receiver, type, field, enum case and its fields, interface method,
+   constant, parameter, pattern binding, variable, local constant;
+2. an expression at that position that the checker resolved (`ExprInfo`):
+   going backwards through the arena, so that a call (which starts where
+   its callee does and knows the function or method) comes before its
+   callee; locals (`Var.pos`), constants, functions, methods, interface
+   methods, enum cases, struct fields (through the base's type), struct
+   literals and their field names, built-in methods and conversions;
+3. `pkg.name`, `Type.Case` and `pkg.Type.Case` from the tokens before it
+   (types in type positions, case patterns);
+4. a type name (`Checker.teType`), then any name of the package or an
+   imported package.
+
+The result is the declaration's position and a signature rebuilt from the
+tree (`fn (Cart c) mut add(Item item) error`, a type with its fields or
+cases, `const int maxItems = 100`, `shop.Cart cart` for a local), with the
+`//` comment lines right above the declaration as its documentation.
+
+Completion after `.` with nothing typed after it inserts a placeholder
+name at the cursor first (`lspPlaceholder`), so that `cart.` parses as a
+field access whose base the checker types. Then: after the name of an
+imported package, its `pub` functions, types and constants; after a type
+name, the enum's cases; after any other expression, the fields (visible
+from the document's package) and methods of its type, the methods of an
+interface, or the built-in methods of a string, list, map, channel,
+number or error (docs/builtins.md). Elsewhere, the parameters and locals
+in scope (`lspLocals`: the blocks that contain the cursor, walked in the
+tree, with the declarations before it), the package's names, the file's
+imports, the keywords and the built-in types.
+
+Document symbols come from the document alone (parsed, not checked):
+types with their fields, cases or interface methods as children,
+functions, methods (`Type.name`), constants and tests; a declaration's
+range ends at the newline that ends it outside brackets.
+
+Formatting returns one edit that replaces the whole text with
+`formatSource`'s, after the same safety check as `seed fmt` (the result
+parses to the same tree and comments); nothing when the text is formatted
+already or has syntax errors.
+
+**Tests** (`make test-lsp`, tests/test_lsp.sh): tests/lsp/driver (a Seed
+program) turns session scripts (`tests/lsp/*.lsp`: open, change, hover,
+definition, completion, symbols, format, any request) into framed
+messages, and checks the server's answers (framing, one response per
+request) against the transcripts `tests/lsp/*.out`. The sessions work on
+tests/lsp/proj, a program with a package of two files and its tests, with
+non-ASCII text before the names they ask about, and change it with the
+versions in tests/lsp/edits (a type error, a syntax error, an unformatted
+line, a `.` with nothing after it, an unsaved edit of the other file of
+the package). The fuzz sessions type each file of the project in, three
+bytes at a time, and ask for everything at each step; every request must
+be answered, and nothing may crash.
+
+Not supported: incremental document sync is accepted but not asked for,
+and there is no rename, find references, signature help, workspace
+symbols, code actions or semantic tokens. Diagnostics are published for
+open documents only, and an edit to a closed file on disk is seen at the
+next check.
 
 ## Writing the compiler in Seed
 

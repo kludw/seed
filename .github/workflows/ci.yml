@@ -6,6 +6,10 @@ on:
   pull_request:
   workflow_dispatch:
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     strategy:
@@ -18,38 +22,52 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build (bootstrap, three stages)
+        timeout-minutes: 15
         run: make
 
       - name: Fixed point and snapshot
         run: make verify
 
       - name: Core language
+        timeout-minutes: 20
         run: make test
 
       - name: Full language and seed command
+        timeout-minutes: 20
         run: make test-full
 
       - name: Standard library
+        timeout-minutes: 20
         run: make test-lib
 
       - name: Formatter
+        timeout-minutes: 20
         run: make test-fmt
 
       - name: Examples
+        timeout-minutes: 20
         run: make test-examples
 
+      - name: Language server
+        run: make test-lsp
+
       - name: Guide
+        timeout-minutes: 20
         run: docs/guide/check.sh
 
       - name: Runtime (asan, tsan, plain)
+        timeout-minutes: 20
         run: runtime/tests/run.sh
 
       - name: Leaks
+        timeout-minutes: 30
         run: make test-leaks
 
       - name: Concurrency soak
+        timeout-minutes: 20
         shell: bash
         run: |
+          set +e  # the crash tests exit non-zero on purpose
           fails=0
           for f in tests/full/*group*.sd tests/full/*chan*.sd tests/full/*select*.sd tests/full/*spawn*.sd tests/full/preempt*.sd; do
             n=${f%.sd}; [ -f "$n.out" ] || continue

@@ -23,11 +23,14 @@ type Loader struct {
     // with other errors is still checked and those errors are shown too
     // (compileProgram prints these after them).
     []Diag unformatted
+    // Text to use instead of a file's contents, by path (the editor's
+    // unsaved buffers, for seed lsp).
+    map[string]string overlay
 }
 
 fn newLoader(string seedRoot, string projectRoot) Loader {
     string lib = absPath(seedRoot) + "/lib"
-    return Loader{p: newParser(newDiags()), seedRoot: seedRoot, projectRoot: projectRoot, libDir: lib, byDir: map[string]int{}, unformatted: []Diag{}}
+    return Loader{p: newParser(newDiags()), seedRoot: seedRoot, projectRoot: projectRoot, libDir: lib, byDir: map[string]int{}, unformatted: []Diag{}, overlay: map[string]string{}}
 }
 
 // Adds a package and returns its index. Its files are parsed with
@@ -43,7 +46,13 @@ fn (Loader l) mut addPackage(string path, string dir, bool isLib) int {
 // tests/ directory) and checks that they are formatted.
 fn (Loader l) mut addFiles(int pkg, []string files, bool isTest) error {
     for (int i = 0; i < files.len(); i++) {
-        string src = try fs.read(files[i])
+        string? text = l.overlay[files[i]]
+        string src = ""
+        if (text != null) {
+            src = text
+        } else {
+            src = try fs.read(files[i])
+        }
         int file = l.p.diags.addFile(files[i], src)
         int before = l.p.diags.count()
         l.p.parseFile(file)

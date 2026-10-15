@@ -137,13 +137,14 @@ Reading the program's standard input. Stdout and stderr are written with `fmt`.
 | Function | Result |
 |---|---|
 | `io.readLine() (string?, error)` | The next line of stdin without its line ending, or `null` at end of input. |
+| `io.read(int max) (string?, error)` | Between 1 and `max` bytes of stdin, as soon as some are available, or `null` at end of input. Crashes if `max < 1`. |
 | `io.readAll() (string, error)` | Everything left on stdin, up to end of input. |
 
 - A line ends at `"\n"`. A `"\r"` directly before it is removed too. The last line is returned even if it has no `"\n"`. An empty input gives `null` on the first call.
-- `io.readAll()` returns everything not yet returned by `io.readLine()`, so the two can be mixed.
+- The three share one buffer: each returns what the others have not, so they can be mixed. `io.read` is for input that is not made of lines, such as a header line followed by a body of a given length (`seed lsp` reads its messages that way).
 - Stdin is shared by the whole process. Calls from different goroutines are serialised, and each call gets whole lines.
 - The error is set only when reading fails (for example, stdin was closed by the OS): `io.readLine: bad file descriptor`. Reaching the end is not an error.
-- Both are stop points: a goroutine waiting for input whose group is stopped stops there.
+- All three are stop points: a goroutine waiting for input whose group is stopped stops there.
 
 ```
 for (;;) {
@@ -741,12 +742,15 @@ Any other response is a struct literal: `http.Response{status: 302, headers: map
 |---|---|
 | `http.get(string url) (Response, error)` | Sends a `GET` with no extra headers. Exactly `http.send(Request{method: "GET", url: url, headers: map[string]string{}, body: ""})`. |
 | `http.send(Request req) (Response, error)` | Sends any request and returns the response. |
+| `http.getWithin(string url, int timeout) (Response, error)` | `http.get` with a time limit on the whole exchange: `http.sendWithin(Request{method: "GET", url: url, headers: map[string]string{}, body: ""}, timeout)`, with errors that start with `http.getWithin`. |
+| `http.sendWithin(Request req, int timeout) (Response, error)` | `http.send` with a time limit on the whole exchange. |
 
 - The URL must be `http://host[:port][/path][?query]`. Anything else is an error, including `https://`: `http.get: https://example.com/: https is not supported`.
 - The library adds `host`, `content-length` (when the body is not empty, or the method is `POST`, `PUT` or `PATCH`) and `connection: close`. Each request uses a new connection.
 - **Any response is a success**, including `404` and `500`: check `resp.status`. The error is set only when no response arrived (connection refused, timeout, malformed response).
 - **Redirects are not followed**; a `3xx` response is returned as it is, with its `location` header.
-- The client gives up with a `timeout` error when connecting, or any single read or write, makes no progress for 30 seconds. To wait less, run the request in a goroutine and `select` on its result channel and `time.after`, in a second goroutine of the same group that fails when the time is up, so that the group stops the request (a `select` in the group block itself would see the timeout, but the group would still wait for the request; see the example below).
+- `get` and `send` give up with a `timeout` error when connecting, or any single read or write, makes no progress for 30 seconds. `getWithin` and `sendWithin` instead give the whole exchange, from connecting to the last byte of the response, `timeout` nanoseconds (`2 * time.second`), however the time is spent (a server that trickles its answer a byte at a time is cut off too); when it runs out, the error is `http.getWithin: http://example.com/: timeout after 2 s`. A `timeout` that is not positive crashes.
+- A request waiting in any of the four functions is also stopped when its group is: to give up on something else than time (a user's cancel, the first of several answers), run the request in a goroutine and let another goroutine of the same group fail, as in [the guide's chapter 10](guide/10-concurrency.md).
 - Responses with `transfer-encoding: chunked` are decoded. Bodies larger than 64 MiB are an error. Compressed responses are never requested.
 
 ```
@@ -768,39 +772,10 @@ fn main([]string args) error {
 }
 ```
 
-A request with a shorter time limit. `deadline` fails when the time is up, which stops the group and so the `http.get` waiting in `fetch`; when `fetch` fails first, its error is the group's:
+A request with a time limit:
 
 ```
-fn fetch(string url, chan http.Response out) error {
-    out.send(try http.get(url))
-    return null
-}
-
-fn deadline(chan http.Response answer, chan http.Response result, int d) error {
-    select {
-    case http.Response? resp = answer.receive():
-        if (resp != null) {
-            result.send(resp)
-        }
-        return null
-    case time.after(d).receive():
-        return errors.new("no response within " + (d / time.millisecond).string() + " ms")
-    }
-}
-
-fn getWithin(string url, int d) (http.Response, error) {
-    chan http.Response answer = chan http.Response(1)
-    chan http.Response result = chan http.Response(1)
-    try group {
-        spawn fetch(url, answer)
-        spawn deadline(answer, result, d)
-    }
-    http.Response? resp = result.receive()
-    if (resp == null) {
-        return null, errors.new("no response")
-    }
-    return resp, null
-}
+http.Response resp = try http.getWithin("http://localhost:8080/health", 2 * time.second)
 ```
 
 ```
@@ -841,7 +816,7 @@ fmt, io, os, fs, net, crypto, path      (no imports)
 errors, strings, math, rand             → os (for os.crash)
 encoding                                → errors
 time, json                              → errors, os
-http                                    → net, json, encoding, time, fmt, errors
+http                                    → net, json, encoding, time, fmt, errors, os
 ```
 
 ### Native functions

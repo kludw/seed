@@ -1,0 +1,17 @@
+package shop
+
+// One thing in a cart.
+pub type Item struct {
+    pub string name
+    // The price in cents.
+    pub int price
+    pub Size size
+}
+
+pub type Size enum {
+    Small
+    Large(int extra)
+}
+
+// The most a cart may hold.
+pub const int maxItems = 100

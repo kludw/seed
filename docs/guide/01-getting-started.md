@@ -90,6 +90,7 @@ Hello, world!
 | `seed fmt <file.sd or dir>...` | Rewrites the files in the one canonical layout; a directory means every `.sd` file under it. |
 | `seed fmt --check <file.sd or dir>...` | Changes nothing, and reports the files that are not formatted (exit code 1). |
 | `seed c <file.sd or dir>` | Writes the generated C program to stdout. |
+| `seed lsp` | The language server, for editors (see [Editors](#editors)). |
 
 A program is a single `.sd` file, or a directory: the `package main` in it and the packages it imports ([chapter 11](11-packages.md)). Compile errors are printed to stderr, and the command exits with code 1.
 
@@ -110,6 +111,18 @@ $ seed fmt hello.sd
 Given a directory, `seed fmt` formats every `.sd` file under it, in subdirectories too (hidden ones, such as `.git`, are skipped), so a whole project with its packages and tests is `seed fmt .`, as with `gofmt -w .`.
 
 The rules are in [formatting.md](../formatting.md), and [chapter 12](12-the-compiler.md) shows the formatter at work.
+
+## Editors
+
+`seed lsp` is a language server: an editor that speaks the Language Server Protocol starts it and talks to it over stdin and stdout. It checks the file you are editing as you type, together with the rest of its package and the packages it imports (exactly as `seed build` or `seed test` would, with the editor's unsaved text), and gives the editor:
+
+- the compiler's errors and hints, and a warning on the first line that `seed fmt` would change;
+- formatting (the editor's **Format Document** runs the same formatter as `seed fmt`);
+- go to definition and hover (the declaration, with its doc comment) for locals, parameters, functions, methods, types, fields, enum cases, constants and packages;
+- completion after `pkg.` (the package's `pub` names), after `value.` (fields and methods) and after `Enum.` (cases), and otherwise the names in scope and the keywords;
+- the outline of the file.
+
+For VS Code, [editors/vscode/](../../editors/vscode/README.md) has syntax highlighting and a client that starts `seed lsp` (it needs `npm install` once; the README says how). Other editors need only to run `seed lsp` for `.sd` files: in Neovim, for example, `vim.lsp.start({name = "seed", cmd = {"seed", "lsp"}, root_dir = vim.fn.getcwd()})` from a `FileType` autocommand for the `seed` file type.
 
 ## The current compiler
 

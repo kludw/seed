@@ -1,0 +1,16 @@
+package main
+
+import "fmt"
+
+type Light enum {
+    Red
+    Green
+}
+
+fn main([]string args) error {
+    map[string]int counts = map[string]int{}
+    counts["a"] = counts.getOr("a", 0) + 1
+    Light l = Light.Green
+    fmt.println(l.name() + " " + (counts["a"] == 1).string())
+    return null
+}

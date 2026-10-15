@@ -26,6 +26,19 @@ tmp=$(mktemp -d "${TMPDIR:-/tmp}/seedtest.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 pass=0; fail=0
 failed() { fail=$((fail+1)); echo "FAIL $1: $2"; }
+# run_limited SECONDS CMD...: runs CMD, killing it after SECONDS (exit 137),
+# so a program that hangs fails its test instead of stopping the run.
+run_limited() {
+  limit=$1; shift
+  exec 3<&0
+  "$@" <&3 & pid=$!
+  exec 3<&-
+  ( sleep "$limit"; kill -9 "$pid" 2> /dev/null ) > /dev/null 2>&1 & watcher=$!
+  wait "$pid"; rc=$?
+  kill "$watcher" 2> /dev/null; wait "$watcher" 2> /dev/null
+  return $rc
+}
+limit=${SEED_TEST_TIMEOUT:-120}
 for dir in "$@"; do
   for src in "$dir"/*.sd "$dir"/*/; do
     [ -e "$src" ] || continue
@@ -40,8 +53,11 @@ for dir in "$@"; do
       failed "$src" "C compile failed: $(head -c 300 "$tmp/ccerr")"; continue
     fi
     input=/dev/null; [ -f "$name.in" ] && input="$name.in"
-    "$tmp/t" < "$input" > "$tmp/out" 2> "$tmp/err"; code=$?
+    run_limited "$limit" "$tmp/t" < "$input" > "$tmp/out" 2> "$tmp/err"; code=$?
     want=0; [ -f "$name.exit" ] && want=$(cat "$name.exit")
+    if [ "$code" = 137 ] && [ "$want" != 137 ]; then
+      failed "$src" "killed after ${limit}s (hung?). stderr: $(head -c 300 "$tmp/err")"; continue
+    fi
     if [ "$code" != "$want" ]; then
       failed "$src" "exit code $code, want $want. stderr: $(head -c 300 "$tmp/err")"; continue
     fi

@@ -1,0 +1,13 @@
+package main
+
+import "fmt"
+
+// Prints one greeting.
+fn greet(string name) {
+    fmt.println("hi " + name)
+}
+
+fn main([]string args) error {
+    greet("a")
+    return null
+}

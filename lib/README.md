@@ -25,7 +25,7 @@ lib/
   <pkg>/<pkg>.c               its native functions, if any (sd_lib_<pkg>_<name>)
   <pkg>/tests/<pkg>_test.sd   its tests (package <pkg>: test blocks)
   http/wire.sd                http's message reader and writer (no I/O)
-  http/server.sd, client.sd   http.serve, serveListener, get, send (on net)
+  http/server.sd, client.sd   http.serve, serveListener, get, send, getWithin, sendWithin (on net)
   COMPILER_BUGS.md            compiler issues found, with reproductions
   BUGS_FIXED.md               library bugs found by the QA pass, and how it tested
 ```
@@ -98,9 +98,9 @@ checks it).
 | `rand` | everything: `seeded`, `Source` (SplitMix64) with `range`, `fraction`, `permutation`; the package functions `range`, `fraction`, `permutation` on the private native `nextOs` | — |
 | `crypto` | everything: `sha256`, `hmacSha256`, `randomBytes`, `equal` (natives) | — |
 | `json` | everything: `Value`, `parse`, `string`, `pretty`, all accessors | — |
-| `io` | everything: `readLine`, `readAll` (natives) | — |
+| `io` | everything: `readLine`, `read`, `readAll` (natives) | — |
 | `net` | everything: `listen`, `dial`, `Listener` (`accept`, `addr`, `close`), `Conn` (`read`, `write`, `setTimeout`, `remoteAddr`, `close`) (natives) | — |
-| `http` | everything: `Request`, `Response`, `Handler`, `path`, `query`, `statusText`, the status constants, `textResponse`, `jsonResponse`, `serve`, `serveListener`, `get`, `send` | — |
+| `http` | everything: `Request`, `Response`, `Handler`, `path`, `query`, `statusText`, the status constants, `textResponse`, `jsonResponse`, `serve`, `serveListener`, `get`, `send`, `getWithin`, `sendWithin` | — |
 
 ### fmt
 
@@ -308,11 +308,14 @@ one-million-`a` vector, and RFC 4231 cases 1, 2, 3, 4, 6 and 7).
 ### io
 
 Stdin is a handle of the runtime's table (kind `SD_HANDLE_STDIN`), so
-`readLine` and `readAll` share its buffer, are serialised between
+`readLine`, `read` and `readAll` share its buffer, are serialised between
 goroutines (each call is atomic) and are stop points. The descriptor is
 left blocking (it may be shared with a terminal or another process), so
 the runtime always `poll`s before it `read`s. Stdout is flushed before each
-read. A `"\r"` is removed only directly before a `"\n"` (a last line
+read. `read(max)` (added for `seed lsp`, whose messages are a header line
+and a body of a given length with no newline after it) returns what the
+buffer holds, up to `max` bytes, or else one `read` of the descriptor, like
+`fs.File.read`. A `"\r"` is removed only directly before a `"\n"` (a last line
 `"x\r"` without a newline keeps it). `io` has no `tests/` directory: what
 it reads depends on the test runner's stdin, so it is tested by
 `tests/full/io_stdin*.sd` (with `.in` files), by `tests/examples.sh`
@@ -353,7 +356,8 @@ it reads depends on the test runner's stdin, so it is tested by
 ### http
 
 `http.sd` has the public API. `server.sd` has `serve` and
-`serveListener`, `client.sd` has `get` and `send`; both use `wire.sd`, which
+`serveListener`, `client.sd` has `get`, `send`, `getWithin` and
+`sendWithin`; both use `wire.sd`, which
 is private and free of I/O:
 
 - `MessageReader`: fed bytes as they arrive (`feed`), it returns
@@ -426,6 +430,17 @@ The server and the client (server.sd, client.sd):
   `http.get: http://localhost:1/: connection refused` (the `net.dial:
   <addr>:` part is dropped). A malformed response is
   `http.get: <url>: malformed status line` and so on (wire.sd's reasons).
+- `getWithin`/`sendWithin` (DECISIONS.md, "http client timeout"): the
+  limit runs from before the dial to the end of the response, on
+  `time.monotonic`. The dial gets the whole limit (`net.dial`'s own
+  timeout), and before every write and read the connection's timeout is set
+  to what is left (`setTimeout`), checked again after each read, so no wait
+  outlasts the deadline and a server that trickles bytes is cut off at it.
+  Any `timeout` from net on the way becomes `<fn>: <url>: timeout after
+  <limit>`. A write that keeps making progress past the deadline is the one
+  thing that can overrun it (by as long as that write takes). `get` and
+  `send` are `httpSend` with no limit: 30 s without progress per step, as
+  before.
 - The client writes the whole request before reading; a server that
   answers early and closes (413) while a large body is still being sent
   can make that a write error instead of the response.
