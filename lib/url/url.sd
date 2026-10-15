@@ -1,0 +1,572 @@
+package url
+
+// URLs as RFC 3986 defines them (docs/stdlib.md, "url"): parsing a URL or
+// a relative reference into its parts, writing it back, resolving a
+// reference against a base (section 5), percent-encoding, and query
+// strings as ordered lists of parameters. Pure Seed.
+//
+// The parts are kept as written (still percent-encoded), so that parsing
+// and writing a URL loses nothing (an encoded "%2F" stays distinct from
+// "/"); decode a part with pathDecode or queryDecode when its text is
+// needed. Only the scheme is normalised (to lowercase).
+
+import "errors"
+
+// A URL or a relative reference. A part that is absent is null (or "" for
+// the scheme and the path, which are never absent in the RFC's sense), so
+// "http://h/p?" (an empty query) and "http://h/p" (none) stay different.
+pub type Url struct {
+    pub string scheme // lowercase; "" in a relative reference
+    pub string? userinfo // "user:password", before '@'; null without '@'
+    pub string? host // null without an authority ("//"); an IPv6 address without its brackets
+    pub int? port // null without one (or with an empty one, "host:")
+    pub string path // as written: "/a%20b/c"
+    pub string? query // after '?', as written; null without '?'
+    pub string? fragment // after '#', as written; null without '#'
+}
+
+// One parameter of a query string, decoded.
+pub type Param struct {
+    pub string key
+    pub string value
+}
+
+// A query string: its parameters in order. A key may appear more than once.
+pub type Query struct {
+    pub []Param params
+}
+
+fn isAlpha(byte b) bool {
+    return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z')
+}
+
+fn isDigit(byte b) bool {
+    return b >= '0' && b <= '9'
+}
+
+fn hexValue(byte b) int {
+    if (b >= '0' && b <= '9') {
+        return int(b) - int('0')
+    }
+    if (b >= 'a' && b <= 'f') {
+        return int(b) - int('a') + 10
+    }
+    if (b >= 'A' && b <= 'F') {
+        return int(b) - int('A') + 10
+    }
+    return -1
+}
+
+fn showByte(byte b) string {
+    if (b > ' ' && int(b) < 0x7f) {
+        return "'" + string([]byte{b}) + "'"
+    }
+    if (b == ' ') {
+        return "space"
+    }
+    return "byte " + int(b).string()
+}
+
+// The first problem in text at or after offset base: a control character,
+// a space, or a '%' without two hex digits after it; "" if none.
+fn checkChars(string text, int base) string {
+    for (int i = 0; i < text.len(); i++) {
+        byte b = text[i]
+        if (int(b) <= 0x20 || int(b) == 0x7f) {
+            return "invalid character (" + showByte(b) + ") at offset " + (base + i).string() + "; percent-encode it"
+        }
+        if (b == '%' && (i + 2 >= text.len() || hexValue(text[i + 1]) < 0 || hexValue(text[i + 2]) < 0)) {
+            return "'%' at offset " + (base + i).string() + " must be followed by two hex digits"
+        }
+    }
+    return ""
+}
+
+fn fail(string text, string reason) error {
+    return errors.new("url.parse: " + text + ": " + reason)
+}
+
+// Parses an absolute URL ("https://user@example.com:8080/a/b?q=1#top") or
+// a relative reference ("../c?x", "//host/p", "#frag"), following RFC 3986
+// appendix B. Errors name the text and the problem: `url.parse:
+// http://h:80x/: invalid port "80x"`.
+pub fn parse(string text) (Url, error) {
+    string rest = text
+    int offset = 0
+    // Fragment and query.
+    string? fragment = null
+    int? hash = rest.index("#")
+    if (hash != null) {
+        fragment = rest.slice(hash + 1, rest.len())
+        rest = rest.slice(0, hash)
+    }
+    string? query = null
+    int? qmark = rest.index("?")
+    if (qmark != null) {
+        query = rest.slice(qmark + 1, rest.len())
+        rest = rest.slice(0, qmark)
+    }
+    // The scheme: letters, digits, '+', '-' and '.', starting with a
+    // letter, before a ':' that comes before any '/'.
+    string scheme = ""
+    for (int i = 0; i < rest.len(); i++) {
+        byte b = rest[i]
+        if (b == ':') {
+            if (i == 0) {
+                return null, fail(text, "missing scheme before ':'")
+            }
+            scheme = rest.slice(0, i).toLower()
+            rest = rest.slice(i + 1, rest.len())
+            offset = i + 1
+            break
+        }
+        if (!(isAlpha(b) || (i > 0 && (isDigit(b) || b == '+' || b == '-' || b == '.')))) {
+            break
+        }
+    }
+    // The authority.
+    string? userinfo = null
+    string? host = null
+    int? port = null
+    if (rest.startsWith("//")) {
+        int end = rest.len()
+        int? slash = rest.slice(2, rest.len()).index("/")
+        if (slash != null) {
+            end = slash + 2
+        }
+        string authority = rest.slice(2, end)
+        int authOffset = offset + 2
+        rest = rest.slice(end, rest.len())
+        offset = offset + end
+        int at = -1
+        for (int i = 0; i < authority.len(); i++) {
+            if (authority[i] == '@') {
+                at = i
+            }
+        }
+        string hostPort = authority
+        if (at >= 0) {
+            string ui = authority.slice(0, at)
+            string bad = checkChars(ui, authOffset)
+            if (bad != "") {
+                return null, fail(text, bad)
+            }
+            userinfo = ui
+            hostPort = authority.slice(at + 1, authority.len())
+            authOffset = authOffset + at + 1
+        }
+        string portText = ""
+        bool hasPort = false
+        if (hostPort.startsWith("[")) {
+            int? close = hostPort.index("]")
+            if (close == null) {
+                return null, fail(text, "missing ']' in host")
+            }
+            host = hostPort.slice(1, close)
+            string after = hostPort.slice(close + 1, hostPort.len())
+            if (after != "") {
+                if (!after.startsWith(":")) {
+                    return null, fail(text, "unexpected text after ']' in host")
+                }
+                portText = after.slice(1, after.len())
+                hasPort = true
+            }
+        } else {
+            int colon = -1
+            for (int i = 0; i < hostPort.len(); i++) {
+                if (hostPort[i] == ':') {
+                    colon = i
+                }
+            }
+            if (colon >= 0) {
+                host = hostPort.slice(0, colon)
+                portText = hostPort.slice(colon + 1, hostPort.len())
+                hasPort = true
+            } else {
+                host = hostPort
+            }
+        }
+        if (host != null) {
+            string bad = checkChars(host, authOffset)
+            if (bad != "") {
+                return null, fail(text, bad)
+            }
+            for (int i = 0; i < host.len(); i++) {
+                byte b = host[i]
+                if (b == '[' || b == ']' || b == '/' || b == '?' || b == '#' || b == '@') {
+                    return null, fail(text, "invalid character " + showByte(b) + " in host")
+                }
+            }
+        }
+        if (hasPort && portText != "") {
+            for (int i = 0; i < portText.len(); i++) {
+                if (!isDigit(portText[i])) {
+                    return null, fail(text, "invalid port \"" + portText + "\"")
+                }
+            }
+            if (portText.len() > 5) {
+                return null, fail(text, "port " + portText + " out of range")
+            }
+            int p = try portText.toInt()
+            if (p > 65535) {
+                return null, fail(text, "port " + portText + " out of range")
+            }
+            port = p
+        }
+    } else if (scheme == "") {
+        // A relative path whose first segment has a ':' would read as a
+        // scheme (RFC 3986, section 4.2).
+        int? colon = rest.index(":")
+        int? slash = rest.index("/")
+        if (colon != null && (slash == null || colon < slash)) {
+            return null, fail(text, "first path segment contains ':' (write ./ before it)")
+        }
+    }
+    string bad = checkChars(rest, offset)
+    if (bad != "") {
+        return null, fail(text, bad)
+    }
+    if (query != null && qmark != null) {
+        bad = checkChars(query, qmark + 1)
+        if (bad != "") {
+            return null, fail(text, bad)
+        }
+    }
+    if (fragment != null && hash != null) {
+        bad = checkChars(fragment, hash + 1)
+        if (bad != "") {
+            return null, fail(text, bad)
+        }
+    }
+    return Url{scheme: scheme, userinfo: userinfo, host: host, port: port, path: rest, query: query, fragment: fragment}, null
+}
+
+// The host with its port, as net.dial takes it: "example.com:8080",
+// "[::1]:80", or the host alone when there is no port ("" without a host).
+pub fn (Url u) hostPort() string {
+    if (u.host == null) {
+        return ""
+    }
+    string h = u.host
+    if (h.contains(":")) {
+        h = "[" + h + "]"
+    }
+    if (u.port != null) {
+        h = h + ":" + u.port.string()
+    }
+    return h
+}
+
+// The URL as text (RFC 3986, section 5.3). A path that would be misread
+// is adjusted: a "/" is added before a relative path after a host, and
+// "/." before a path starting with "//" without a host.
+pub fn (Url u) string() string {
+    []string out = []string{}
+    if (u.scheme != "") {
+        out.push(u.scheme + ":")
+    }
+    string path = u.path
+    if (u.host != null) {
+        out.push("//")
+        if (u.userinfo != null) {
+            out.push(u.userinfo + "@")
+        }
+        out.push(u.hostPort())
+        if (path != "" && !path.startsWith("/")) {
+            path = "/" + path
+        }
+    } else if (path.startsWith("//")) {
+        path = "/." + path
+    }
+    out.push(path)
+    if (u.query != null) {
+        out.push("?" + u.query)
+    }
+    if (u.fragment != null) {
+        out.push("#" + u.fragment)
+    }
+    return out.join("")
+}
+
+// remove_dot_segments of RFC 3986, section 5.2.4.
+fn removeDots(string path) string {
+    []string out = []string{}
+    string input = path
+    for (; input != ""; ) {
+        if (input.startsWith("../")) {
+            input = input.slice(3, input.len())
+        } else if (input.startsWith("./")) {
+            input = input.slice(2, input.len())
+        } else if (input.startsWith("/./")) {
+            input = input.slice(2, input.len())
+        } else if (input == "/.") {
+            input = "/"
+        } else if (input.startsWith("/../") || input == "/..") {
+            if (input == "/..") {
+                input = "/"
+            } else {
+                input = input.slice(3, input.len())
+            }
+            if (out.len() > 0) {
+                string? _ = out.pop()
+            }
+        } else if (input == "." || input == "..") {
+            input = ""
+        } else {
+            // The first segment, with its leading '/' if any, up to the
+            // next '/'.
+            int start = 0
+            if (input.startsWith("/")) {
+                start = 1
+            }
+            int? next = input.slice(start, input.len()).index("/")
+            int end = input.len()
+            if (next != null) {
+                end = start + next
+            }
+            out.push(input.slice(0, end))
+            input = input.slice(end, input.len())
+        }
+    }
+    return out.join("")
+}
+
+// The URL that ref leads to from this base (RFC 3986, section 5.2.2, the
+// strict algorithm): "http://a/b/c/d;p?q" resolves "../g" to "http://a/b/g".
+pub fn (Url base) resolve(Url ref) Url {
+    if (ref.scheme != "") {
+        return Url{scheme: ref.scheme, userinfo: ref.userinfo, host: ref.host, port: ref.port, path: removeDots(ref.path), query: ref.query, fragment: ref.fragment}
+    }
+    if (ref.host != null) {
+        return Url{scheme: base.scheme, userinfo: ref.userinfo, host: ref.host, port: ref.port, path: removeDots(ref.path), query: ref.query, fragment: ref.fragment}
+    }
+    string path = base.path
+    string? query = base.query
+    if (ref.path != "") {
+        query = ref.query
+        if (ref.path.startsWith("/")) {
+            path = removeDots(ref.path)
+        } else {
+            // merge (section 5.2.3)
+            string merged = ref.path
+            if (base.host != null && base.path == "") {
+                merged = "/" + ref.path
+            } else {
+                int last = -1
+                for (int i = 0; i < base.path.len(); i++) {
+                    if (base.path[i] == '/') {
+                        last = i
+                    }
+                }
+                if (last >= 0) {
+                    merged = base.path.slice(0, last + 1) + ref.path
+                }
+            }
+            path = removeDots(merged)
+        }
+    } else if (ref.query != null) {
+        query = ref.query
+    }
+    return Url{scheme: base.scheme, userinfo: base.userinfo, host: base.host, port: base.port, path: path, query: query, fragment: ref.fragment}
+}
+
+// The query parameters (parseQuery of the query, or none without one).
+pub fn (Url u) params() (Query, error) {
+    if (u.query == null) {
+        return Query{params: []Param{}}, null
+    }
+    return parseQueryAs("url.Url.params", u.query)
+}
+
+fn isUnreserved(byte b) bool {
+    return isAlpha(b) || isDigit(b) || b == '-' || b == '.' || b == '_' || b == '~'
+}
+
+fn encodeWith(string text, bool path) string {
+    []byte out = []byte{}
+    string hex = "0123456789ABCDEF"
+    for (int i = 0; i < text.len(); i++) {
+        byte b = text[i]
+        if (isUnreserved(b) || (path && (b == '$' || b == '&' || b == '+' || b == ':' || b == '=' || b == '@'))) {
+            out.push(b)
+        } else if (!path && b == ' ') {
+            out.push('+')
+        } else {
+            out.push('%')
+            out.push(hex[int(b) >> 4])
+            out.push(hex[int(b) & 15])
+        }
+    }
+    return string(out)
+}
+
+// text with %XX (and with plusIsSpace, "+") decoded; or null and the
+// offset (plus base) of a '%' without two hex digits after it.
+fn decodeBytes(string text, bool plusIsSpace, int base) (string?, int) {
+    if (!text.contains("%") && !(plusIsSpace && text.contains("+"))) {
+        return text, 0
+    }
+    []byte out = []byte{}
+    for (int i = 0; i < text.len(); i++) {
+        byte b = text[i]
+        if (b == '%') {
+            if (i + 2 >= text.len() || hexValue(text[i + 1]) < 0 || hexValue(text[i + 2]) < 0) {
+                return null, base + i
+            }
+            out.push(byte(hexValue(text[i + 1]) * 16 + hexValue(text[i + 2])))
+            i = i + 2
+        } else if (plusIsSpace && b == '+') {
+            out.push(' ')
+        } else {
+            out.push(b)
+        }
+    }
+    return string(out), 0
+}
+
+fn badPercent(string fnName, int offset) error {
+    return errors.new(fnName + ": offset " + offset.string() + ": '%' must be followed by two hex digits")
+}
+
+fn decodeWith(string fnName, string text, bool plusIsSpace) (string, error) {
+    string? out, int bad = decodeBytes(text, plusIsSpace, 0)
+    if (out == null) {
+        return null, badPercent(fnName, bad)
+    }
+    return out, null
+}
+
+// Percent-encodes text for one path segment, as Go's url.PathEscape:
+// letters, digits, "-._~" and "$&+:=@" stay, everything else (a "/"
+// included) becomes %XX with uppercase hex.
+pub fn pathEncode(string text) string {
+    return encodeWith(text, true)
+}
+
+// Decodes %XX in a path; "+" stays "+". Fails on a '%' not followed by two
+// hex digits: `url.pathDecode: offset 3: '%' must be followed by two hex
+// digits`.
+pub fn pathDecode(string text) (string, error) {
+    return decodeWith("url.pathDecode", text, false)
+}
+
+// Encodes text for a query key or value, as Go's url.QueryEscape: letters,
+// digits and "-._~" stay, a space becomes "+", everything else %XX.
+pub fn queryEncode(string text) string {
+    return encodeWith(text, false)
+}
+
+// Decodes a query key or value: %XX, and "+" as a space.
+pub fn queryDecode(string text) (string, error) {
+    return decodeWith("url.queryDecode", text, true)
+}
+
+// The parameters of a query string ("a=1&b=two+words&flag"), in order,
+// decoded. A parameter without '=' has the value ""; empty parameters
+// ("a=1&&b=2") are skipped. Fails on a bad '%': `url.parseQuery: offset 5:
+// '%' must be followed by two hex digits` (the offset is in raw).
+pub fn parseQuery(string raw) (Query, error) {
+    return parseQueryAs("url.parseQuery", raw)
+}
+
+fn parseQueryAs(string fnName, string raw) (Query, error) {
+    []Param out = []Param{}
+    int start = 0
+    for (int i = 0; i <= raw.len(); i++) {
+        if (i < raw.len() && raw[i] != '&') {
+            continue
+        }
+        string piece = raw.slice(start, i)
+        if (piece != "") {
+            string k = piece
+            string v = ""
+            int? eq = piece.index("=")
+            if (eq != null) {
+                k = piece.slice(0, eq)
+                v = piece.slice(eq + 1, piece.len())
+            }
+            string? key, int bad = decodeBytes(k, true, start)
+            if (key == null) {
+                return null, badPercent(fnName, bad)
+            }
+            string? value, int vbad = decodeBytes(v, true, start + k.len() + 1)
+            if (value == null) {
+                return null, badPercent(fnName, vbad)
+            }
+            out.push(Param{key: key, value: value})
+        }
+        start = i + 1
+    }
+    return Query{params: out}, null
+}
+
+// The value of the first parameter called key, or null.
+pub fn (Query q) get(string key) string? {
+    for (int i = 0; i < q.params.len(); i++) {
+        if (q.params[i].key == key) {
+            return q.params[i].value
+        }
+    }
+    return null
+}
+
+// The values of every parameter called key, in order.
+pub fn (Query q) all(string key) []string {
+    []string out = []string{}
+    for (int i = 0; i < q.params.len(); i++) {
+        if (q.params[i].key == key) {
+            out.push(q.params[i].value)
+        }
+    }
+    return out
+}
+
+// Whether a parameter is called key.
+pub fn (Query q) has(string key) bool {
+    return q.get(key) != null
+}
+
+// Adds a parameter at the end.
+pub fn (Query q) mut add(string key, string value) {
+    q.params.push(Param{key: key, value: value})
+}
+
+// Sets key to value: the first parameter called key gets the value and
+// the others are removed; without one, the parameter is added at the end.
+pub fn (Query q) mut set(string key, string value) {
+    []Param out = []Param{}
+    bool done = false
+    for (int i = 0; i < q.params.len(); i++) {
+        if (q.params[i].key != key) {
+            out.push(q.params[i])
+        } else if (!done) {
+            out.push(Param{key: key, value: value})
+            done = true
+        }
+    }
+    if (!done) {
+        out.push(Param{key: key, value: value})
+    }
+    q.params = out
+}
+
+// Removes every parameter called key.
+pub fn (Query q) mut remove(string key) {
+    []Param out = []Param{}
+    for (int i = 0; i < q.params.len(); i++) {
+        if (q.params[i].key != key) {
+            out.push(q.params[i])
+        }
+    }
+    q.params = out
+}
+
+// The query string, "key=value" pairs encoded with queryEncode and joined
+// with "&", in order (Go's Values.Encode sorts them; this keeps them).
+pub fn (Query q) string() string {
+    []string out = []string{}
+    for (int i = 0; i < q.params.len(); i++) {
+        out.push(queryEncode(q.params[i].key) + "=" + queryEncode(q.params[i].value))
+    }
+    return out.join("&")
+}

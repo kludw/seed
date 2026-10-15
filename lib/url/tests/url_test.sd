@@ -1,0 +1,237 @@
+package url
+
+fn urlTestParse(string text) Url {
+    Url? u, error err = parse(text)
+    if (err != null || u == null) {
+        return Url{scheme: "error", userinfo: null, host: null, port: null, path: "", query: null, fragment: null}
+    }
+    return u
+}
+
+fn urlTestError(string text) string {
+    _, error err = parse(text)
+    if (err == null) {
+        return "no error"
+    }
+    return err.message()
+}
+
+test "parse splits every part" {
+    Url u = urlTestParse("HTTPS://user:pw@Example.com:8080/a/b%20c?q=1&r#top")
+    assert(u.scheme == "https")
+    assert(u.userinfo == "user:pw")
+    assert(u.host == "Example.com")
+    assert(u.port == 8080)
+    assert(u.path == "/a/b%20c")
+    assert(u.query == "q=1&r")
+    assert(u.fragment == "top")
+    assert(u.string() == "https://user:pw@Example.com:8080/a/b%20c?q=1&r#top")
+    assert(u.hostPort() == "Example.com:8080")
+}
+
+test "absent and empty parts differ" {
+    Url a = urlTestParse("http://h/p")
+    assert(a.query == null)
+    assert(a.fragment == null)
+    assert(a.port == null)
+    assert(a.userinfo == null)
+    Url b = urlTestParse("http://@h:/p?#")
+    assert(b.userinfo == "")
+    assert(b.port == null)
+    assert(b.query == "")
+    assert(b.fragment == "")
+    assert(b.string() == "http://@h/p?#")
+    Url c = urlTestParse("file:///etc/hosts")
+    assert(c.host == "")
+    assert(c.path == "/etc/hosts")
+    assert(c.string() == "file:///etc/hosts")
+}
+
+test "references without a scheme or host" {
+    Url r = urlTestParse("../a/b?x#y")
+    assert(r.scheme == "")
+    assert(r.host == null)
+    assert(r.path == "../a/b")
+    assert(r.query == "x")
+    assert(r.fragment == "y")
+    Url n = urlTestParse("//example.com/p")
+    assert(n.scheme == "")
+    assert(n.host == "example.com")
+    assert(n.path == "/p")
+    Url e = urlTestParse("")
+    assert(e.path == "")
+    assert(e.string() == "")
+    Url m = urlTestParse("mailto:ann@example.com")
+    assert(m.scheme == "mailto")
+    assert(m.host == null)
+    assert(m.path == "ann@example.com")
+    Url f = urlTestParse("#frag")
+    assert(f.path == "")
+    assert(f.fragment == "frag")
+    // A first segment that is not a valid scheme stays in the path.
+    Url d = urlTestParse("1a/b:c")
+    assert(d.scheme == "")
+    assert(d.path == "1a/b:c")
+}
+
+test "IPv6 hosts" {
+    Url u = urlTestParse("http://[::1]:8080/x")
+    assert(u.host == "::1")
+    assert(u.port == 8080)
+    assert(u.hostPort() == "[::1]:8080")
+    assert(u.string() == "http://[::1]:8080/x")
+    Url v = urlTestParse("http://[fe80::1%25en0]/")
+    assert(v.host == "fe80::1%25en0")
+    assert(urlTestParse("http://h").hostPort() == "h")
+    assert(urlTestParse("/p").hostPort() == "")
+}
+
+test "parse errors" {
+    assert(urlTestError("http://h:80x/") == "url.parse: http://h:80x/: invalid port \"80x\"")
+    assert(urlTestError("http://h:65536/") == "url.parse: http://h:65536/: port 65536 out of range")
+    assert(urlTestError("http://h:1234567/") == "url.parse: http://h:1234567/: port 1234567 out of range")
+    assert(urlTestError("http://[::1/") == "url.parse: http://[::1/: missing ']' in host")
+    assert(urlTestError("http://[::1]x/") == "url.parse: http://[::1]x/: unexpected text after ']' in host")
+    assert(urlTestError(":foo") == "url.parse: :foo: missing scheme before ':'")
+    assert(urlTestError("a:b/c d") == "url.parse: a:b/c d: invalid character (space) at offset 5; percent-encode it")
+    assert(urlTestError("http://h/\x01") == "url.parse: http://h/\x01: invalid character (byte 1) at offset 9; percent-encode it")
+    assert(urlTestError("http://h/a%2") == "url.parse: http://h/a%2: '%' at offset 10 must be followed by two hex digits")
+    assert(urlTestError("http://h/?q=%zz") == "url.parse: http://h/?q=%zz: '%' at offset 12 must be followed by two hex digits")
+    assert(urlTestError("http://h/#%") == "url.parse: http://h/#%: '%' at offset 10 must be followed by two hex digits")
+    assert(urlTestError("http://a b/") == "url.parse: http://a b/: invalid character (space) at offset 8; percent-encode it")
+    assert(urlTestError("x/y:z") == "no error")
+    assert(urlTestError("y:z") == "no error")
+    assert(urlTestError("./a:b") == "no error")
+    assert(urlTestError("a:b") == "no error")
+    assert(urlTestError("é:x") == "url.parse: é:x: first path segment contains ':' (write ./ before it)")
+}
+
+test "string adjusts paths that would be misread" {
+    Url u = Url{scheme: "http", userinfo: null, host: "h", port: null, path: "rel", query: null, fragment: null}
+    assert(u.string() == "http://h/rel")
+    Url v = Url{scheme: "", userinfo: null, host: null, port: null, path: "//x", query: null, fragment: null}
+    assert(v.string() == "/.//x")
+}
+
+fn urlTestResolve(string ref) string {
+    Url base = urlTestParse("http://a/b/c/d;p?q")
+    return base.resolve(urlTestParse(ref)).string()
+}
+
+test "resolve: RFC 3986 section 5.4.1, normal examples" {
+    assert(urlTestResolve("g:h") == "g:h")
+    assert(urlTestResolve("g") == "http://a/b/c/g")
+    assert(urlTestResolve("./g") == "http://a/b/c/g")
+    assert(urlTestResolve("g/") == "http://a/b/c/g/")
+    assert(urlTestResolve("/g") == "http://a/g")
+    assert(urlTestResolve("//g") == "http://g")
+    assert(urlTestResolve("?y") == "http://a/b/c/d;p?y")
+    assert(urlTestResolve("g?y") == "http://a/b/c/g?y")
+    assert(urlTestResolve("#s") == "http://a/b/c/d;p?q#s")
+    assert(urlTestResolve("g#s") == "http://a/b/c/g#s")
+    assert(urlTestResolve("g?y#s") == "http://a/b/c/g?y#s")
+    assert(urlTestResolve(";x") == "http://a/b/c/;x")
+    assert(urlTestResolve("g;x") == "http://a/b/c/g;x")
+    assert(urlTestResolve("g;x?y#s") == "http://a/b/c/g;x?y#s")
+    assert(urlTestResolve("") == "http://a/b/c/d;p?q")
+    assert(urlTestResolve(".") == "http://a/b/c/")
+    assert(urlTestResolve("./") == "http://a/b/c/")
+    assert(urlTestResolve("..") == "http://a/b/")
+    assert(urlTestResolve("../") == "http://a/b/")
+    assert(urlTestResolve("../g") == "http://a/b/g")
+    assert(urlTestResolve("../..") == "http://a/")
+    assert(urlTestResolve("../../") == "http://a/")
+    assert(urlTestResolve("../../g") == "http://a/g")
+}
+
+test "resolve: RFC 3986 section 5.4.2, abnormal examples" {
+    assert(urlTestResolve("../../../g") == "http://a/g")
+    assert(urlTestResolve("../../../../g") == "http://a/g")
+    assert(urlTestResolve("/./g") == "http://a/g")
+    assert(urlTestResolve("/../g") == "http://a/g")
+    assert(urlTestResolve("g.") == "http://a/b/c/g.")
+    assert(urlTestResolve(".g") == "http://a/b/c/.g")
+    assert(urlTestResolve("g..") == "http://a/b/c/g..")
+    assert(urlTestResolve("..g") == "http://a/b/c/..g")
+    assert(urlTestResolve("./../g") == "http://a/b/g")
+    assert(urlTestResolve("./g/.") == "http://a/b/c/g/")
+    assert(urlTestResolve("g/./h") == "http://a/b/c/g/h")
+    assert(urlTestResolve("g/../h") == "http://a/b/c/h")
+    assert(urlTestResolve("g;x=1/./y") == "http://a/b/c/g;x=1/y")
+    assert(urlTestResolve("g;x=1/../y") == "http://a/b/c/y")
+    assert(urlTestResolve("g?y/./x") == "http://a/b/c/g?y/./x")
+    assert(urlTestResolve("g?y/../x") == "http://a/b/c/g?y/../x")
+    assert(urlTestResolve("g#s/./x") == "http://a/b/c/g#s/./x")
+    assert(urlTestResolve("g#s/../x") == "http://a/b/c/g#s/../x")
+    assert(urlTestResolve("http:g") == "http:g")
+}
+
+test "resolve against a base without a path" {
+    Url base = urlTestParse("http://example.com")
+    assert(base.resolve(urlTestParse("a/b")).string() == "http://example.com/a/b")
+    assert(base.resolve(urlTestParse("?q")).string() == "http://example.com?q")
+    Url port = urlTestParse("http://u@h:81/x/y")
+    assert(port.resolve(urlTestParse("z")).string() == "http://u@h:81/x/z")
+}
+
+test "percent-encoding" {
+    assert(pathEncode("a b/c?d%e") == "a%20b%2Fc%3Fd%25e")
+    assert(pathEncode("$&+:=@-._~") == "$&+:=@-._~")
+    assert(pathEncode("!'()*;,") == "%21%27%28%29%2A%3B%2C")
+    assert(pathEncode("é") == "%C3%A9")
+    assert(queryEncode("a b&c=d+e") == "a+b%26c%3Dd%2Be")
+    assert(queryEncode("-._~") == "-._~")
+    string? p, error err = pathDecode("a%20b+c%2f")
+    assert(err == null)
+    assert(p == "a b+c/")
+    string? q, error qerr = queryDecode("a+b%26%C3%A9")
+    assert(qerr == null)
+    assert(q == "a b&é")
+    _, err = pathDecode("100%")
+    assert(err != null)
+    assert(err.message() == "url.pathDecode: offset 3: '%' must be followed by two hex digits")
+    _, err = queryDecode("%g1")
+    assert(err != null)
+    assert(err.message() == "url.queryDecode: offset 0: '%' must be followed by two hex digits")
+}
+
+test "parseQuery keeps order and repeats" {
+    Query q = try parseQuery("b=2&a=1&b=3&flag&&empty=&sp=a+b%21")
+    assert(q.params.len() == 6)
+    assert(q.params[0] == Param{key: "b", value: "2"})
+    assert(q.get("b") == "2")
+    assert(q.all("b") == []string{"2", "3"})
+    assert(q.get("flag") == "")
+    assert(q.get("empty") == "")
+    assert(q.get("sp") == "a b!")
+    assert(q.get("missing") == null)
+    assert(q.has("a"))
+    assert(!q.has("c"))
+    _, error err = parseQuery("a=1&b=%x1")
+    assert(err != null)
+    assert(err.message() == "url.parseQuery: offset 6: '%' must be followed by two hex digits")
+    _, err = parseQuery("a%=1")
+    assert(err != null)
+    assert(err.message() == "url.parseQuery: offset 1: '%' must be followed by two hex digits")
+}
+
+test "building a query" {
+    Query q = Query{params: []Param{}}
+    q.add("q", "seed lang")
+    q.add("tag", "a&b")
+    q.add("tag", "c")
+    assert(q.string() == "q=seed+lang&tag=a%26b&tag=c")
+    q.set("tag", "d")
+    assert(q.string() == "q=seed+lang&tag=d")
+    q.set("page", "2")
+    assert(q.string() == "q=seed+lang&tag=d&page=2")
+    q.remove("q")
+    assert(q.string() == "tag=d&page=2")
+    Url u = urlTestParse("http://h/search")
+    u.query = q.string()
+    assert(u.string() == "http://h/search?tag=d&page=2")
+    Query back = try u.params()
+    assert(back == q)
+    Query none = try urlTestParse("http://h/").params()
+    assert(none.params.len() == 0)
+}
