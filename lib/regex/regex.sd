@@ -1,0 +1,396 @@
+package regex
+
+// Regular expressions with the syntax and the matching rules of Go's
+// regexp (RE2): leftmost-first matching, no backreferences and no
+// lookaround, so that matching takes time linear in the length of the
+// text (docs/stdlib.md, "regex"). The matching engine is native
+// (regex.c); this file is the API on top of it.
+//
+// A Regex is plain data: the pattern, an id and the group names. The
+// compiled form lives in a cache of the goroutine that uses it, keyed by
+// the id; a goroutine that receives a Regex compiles the pattern again the
+// first time it uses it.
+
+import "os"
+
+// A compiled regular expression. Its fields are private: make one with
+// compile or mustCompile.
+pub type Regex struct {
+    string pattern
+    int id
+    []string names
+}
+
+// One match: where it is in the text, and where each group is.
+pub type Match struct {
+    string subject
+    []int spans
+    []string names
+}
+
+// A piece of a replacement template.
+type Piece enum {
+    Text(string text)
+    Group(int index)
+}
+
+// A new id for a compiled regex (distinct for every compile in the
+// process).
+fn rxNewId() int
+
+// Compiles pattern under id into this goroutine's cache; returns the group
+// names ("" for group 0 and unnamed groups).
+fn rxCompile(string pattern, int id) ([]string, error)
+
+// Whether pattern matches somewhere in text.
+fn rxMatches(int id, string pattern, string text) bool
+
+// The leftmost-first match at or after start: the start and end of the
+// match and of each group (-1 for a group that did not take part), or
+// null.
+fn rxFind(int id, string pattern, string text, int start) []int?
+
+// Every match (FindAll's rules), the spans of each one after the other.
+fn rxFindAll(int id, string pattern, string text) []int
+
+// Compiles a pattern. The error names the pattern, the problem and its
+// byte offset: `regex.compile: a(b: missing closing ')' at offset 1`.
+pub fn compile(string pattern) (Regex, error) {
+    int id = rxNewId()
+    []string names = try rxCompile(pattern, id)
+    return Regex{pattern: pattern, id: id, names: names}, null
+}
+
+// compile for a pattern written in the program: crashes if it does not
+// compile.
+pub fn mustCompile(string pattern) Regex {
+    Regex r, error err = compile(pattern)
+    if (err != null) {
+        string msg = err.message()
+        os.crash("regex.mustCompile" + msg.slice("regex.compile".len(), msg.len()))
+    }
+    return r
+}
+
+// text with every metacharacter escaped, so that compile(quote(text))
+// matches text literally: quote("1.5+2") is "1\.5\+2".
+pub fn quote(string text) string {
+    []byte out = []byte{}
+    for (int i = 0; i < text.len(); i++) {
+        byte b = text[i]
+        switch (b) {
+        case '\\', '.', '+', '*', '?', '(', ')', '|', '[', ']', '{', '}', '^', '$':
+            out.push('\\')
+        default:
+        }
+        out.push(b)
+    }
+    return string(out)
+}
+
+// The pattern, as given to compile.
+pub fn (Regex r) string() string {
+    return r.pattern
+}
+
+// The number of groups (parenthesised subexpressions that capture).
+pub fn (Regex r) groupCount() int {
+    return r.names.len() - 1
+}
+
+// The names of the groups by number: element 0 (the whole match) and
+// unnamed groups are "".
+pub fn (Regex r) groupNames() []string {
+    return r.names
+}
+
+// Whether the regex matches anywhere in s. Faster than find: it stops at
+// the first match and does not work out where it starts.
+pub fn (Regex r) matches(string s) bool {
+    return rxMatches(r.id, r.pattern, s)
+}
+
+// The leftmost match in s (the first one Go's regexp would find), or
+// null.
+pub fn (Regex r) find(string s) Match? {
+    []int? spans = rxFind(r.id, r.pattern, s, 0)
+    if (spans == null) {
+        return null
+    }
+    return Match{subject: s, spans: spans, names: r.names}
+}
+
+// The leftmost match in s that starts at or after byte offset start, or
+// null. Assertions see the whole text: ^ does not match at start unless
+// start is 0 (or follows a newline, with the m flag), and \b looks at the
+// byte before start. Crashes unless 0 <= start <= s.len().
+pub fn (Regex r) findAt(string s, int start) Match? {
+    if (start < 0 || start > s.len()) {
+        os.crash("regex.Regex.findAt: start (" + start.string() + ") out of range for a text of " + s.len().string() + " bytes")
+    }
+    []int? spans = rxFind(r.id, r.pattern, s, start)
+    if (spans == null) {
+        return null
+    }
+    return Match{subject: s, spans: spans, names: r.names}
+}
+
+// Every match in s, left to right, not overlapping. An empty match right
+// after another match is left out, as in Go: "a*" in "baaac" matches
+// "" at 0, "aaa" at 1, and "" at 5.
+pub fn (Regex r) findAll(string s) []Match {
+    []int all = rxFindAll(r.id, r.pattern, s)
+    int w = 2 * r.names.len()
+    []Match out = []Match{}
+    for (int i = 0; i < all.len(); i = i + w) {
+        out.push(Match{subject: s, spans: all.slice(i, i + w), names: r.names})
+    }
+    return out
+}
+
+// s with every match replaced by template, in which $1 or ${1} stands for
+// group 1, $name or ${name} for a named group, $0 for the whole match and
+// $$ for a dollar sign. A group that did not take part gives "". Crashes
+// on a malformed template, or one that names a group the pattern lacks.
+pub fn (Regex r) replace(string s, string template) string {
+    []Piece pieces = parseTemplate("regex.Regex.replace", template, r.names)
+    []Match ms = r.findAll(s)
+    []string out = []string{}
+    int last = 0
+    for (int i = 0; i < ms.len(); i++) {
+        out.push(s.slice(last, ms[i].start()))
+        out.push(expandPieces(pieces, ms[i]))
+        last = ms[i].end()
+    }
+    out.push(s.slice(last, s.len()))
+    return out.join("")
+}
+
+// s with every match replaced by text, taken as it is (no $ expansion).
+pub fn (Regex r) replaceLiteral(string s, string text) string {
+    []Match ms = r.findAll(s)
+    []string out = []string{}
+    int last = 0
+    for (int i = 0; i < ms.len(); i++) {
+        out.push(s.slice(last, ms[i].start()))
+        out.push(text)
+        last = ms[i].end()
+    }
+    out.push(s.slice(last, s.len()))
+    return out.join("")
+}
+
+// s with every match m replaced by f(m).
+pub fn (Regex r) replaceWith(string s, fn(Match) string f) string {
+    []Match ms = r.findAll(s)
+    []string out = []string{}
+    int last = 0
+    for (int i = 0; i < ms.len(); i++) {
+        out.push(s.slice(last, ms[i].start()))
+        out.push(f(ms[i]))
+        last = ms[i].end()
+    }
+    out.push(s.slice(last, s.len()))
+    return out.join("")
+}
+
+// s cut around the matches, as Go's Split(s, -1): "a*" splits "abaabaccadaaae"
+// into "", "b", "b", "c", "c", "d", "e". An empty s gives [""] (or [] when
+// the pattern is empty).
+pub fn (Regex r) split(string s) []string {
+    if (r.pattern != "" && s == "") {
+        return []string{""}
+    }
+    []Match ms = r.findAll(s)
+    []string out = []string{}
+    int beg = 0
+    int end = 0
+    for (int i = 0; i < ms.len(); i++) {
+        end = ms[i].start()
+        if (ms[i].end() != 0) {
+            out.push(s.slice(beg, end))
+        }
+        beg = ms[i].end()
+    }
+    if (end != s.len()) {
+        out.push(s.slice(beg, s.len()))
+    }
+    return out
+}
+
+// Byte offset of the start of the match.
+pub fn (Match m) start() int {
+    return m.spans[0]
+}
+
+// Byte offset just after the match.
+pub fn (Match m) end() int {
+    return m.spans[1]
+}
+
+// The matched text.
+pub fn (Match m) text() string {
+    return m.subject.slice(m.spans[0], m.spans[1])
+}
+
+// The number of groups of the regex.
+pub fn (Match m) groupCount() int {
+    return m.names.len() - 1
+}
+
+fn (Match m) checkGroup(string fnName, int i) {
+    if (i < 0 || i >= m.names.len()) {
+        os.crash("regex.Match." + fnName + ": group " + i.string() + " out of range (the pattern has " + (m.names.len() - 1).string() + " groups)")
+    }
+}
+
+// The text of group i (0 is the whole match), or null if the group did not
+// take part in the match. Crashes if the pattern has no group i.
+pub fn (Match m) groupText(int i) string? {
+    m.checkGroup("groupText", i)
+    int a = m.spans[2 * i]
+    if (a < 0) {
+        return null
+    }
+    return m.subject.slice(a, m.spans[2 * i + 1])
+}
+
+// Where group i starts, or null if it did not take part.
+pub fn (Match m) groupStart(int i) int? {
+    m.checkGroup("groupStart", i)
+    int a = m.spans[2 * i]
+    if (a < 0) {
+        return null
+    }
+    return a
+}
+
+// Where group i ends, or null if it did not take part.
+pub fn (Match m) groupEnd(int i) int? {
+    m.checkGroup("groupEnd", i)
+    int b = m.spans[2 * i + 1]
+    if (b < 0) {
+        return null
+    }
+    return b
+}
+
+// The text of the group called name ((?P<name>...) or (?<name>...)), or
+// null if it did not take part. Crashes if no group has that name.
+pub fn (Match m) named(string name) string? {
+    for (int i = 1; i < m.names.len(); i++) {
+        if (m.names[i] == name && name != "") {
+            return m.groupText(i)
+        }
+    }
+    os.crash("regex.Match.named: no group named \"" + name + "\"")
+}
+
+// template with $1, ${name}, ... replaced by this match's groups (the
+// rules of Regex.replace).
+pub fn (Match m) expand(string template) string {
+    return expandPieces(parseTemplate("regex.Match.expand", template, m.names), m)
+}
+
+fn expandPieces([]Piece pieces, Match m) string {
+    []string out = []string{}
+    for (int i = 0; i < pieces.len(); i++) {
+        switch (pieces[i]) {
+        case Piece.Text(string t):
+            out.push(t)
+        case Piece.Group(int g):
+            string? text = m.groupText(g)
+            if (text != null) {
+                out.push(text)
+            }
+        }
+    }
+    return out.join("")
+}
+
+fn isNameByte(byte b) bool {
+    return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') || b == '_'
+}
+
+fn templateCrash(string fnName, string template, string reason) {
+    os.crash(fnName + ": template \"" + template + "\": " + reason)
+}
+
+// The group that a reference in a template names: a number or a name.
+fn templateGroup(string fnName, string template, string ref, []string names) int {
+    if (ref == "") {
+        templateCrash(fnName, template, "empty group reference ${}")
+    }
+    bool digits = true
+    for (int i = 0; i < ref.len(); i++) {
+        if (ref[i] < '0' || ref[i] > '9') {
+            digits = false
+        }
+    }
+    if (digits) {
+        int? n, _ = ref.toInt()
+        if (n == null || n >= names.len()) {
+            templateCrash(fnName, template, "the pattern has no group " + ref)
+        }
+        if (n != null) {
+            return n
+        }
+    }
+    for (int i = 1; i < names.len(); i++) {
+        if (names[i] == ref) {
+            return i
+        }
+    }
+    templateCrash(fnName, template, "the pattern has no group named " + ref)
+    return 0
+}
+
+fn parseTemplate(string fnName, string template, []string names) []Piece {
+    []Piece out = []Piece{}
+    int i = 0
+    int lit = 0
+    for (; i < template.len(); ) {
+        if (template[i] != '$') {
+            i++
+            continue
+        }
+        if (lit < i) {
+            out.push(Piece.Text(template.slice(lit, i)))
+        }
+        if (i + 1 >= template.len()) {
+            templateCrash(fnName, template, "'$' at the end (write $$ for a dollar sign)")
+        }
+        byte n = template[i + 1]
+        if (n == '$') {
+            out.push(Piece.Text("$"))
+            i = i + 2
+        } else if (n == '{') {
+            int? close = template.slice(i + 2, template.len()).index("}")
+            if (close == null) {
+                templateCrash(fnName, template, "missing '}' after '${'")
+            }
+            if (close != null) {
+                string ref = template.slice(i + 2, i + 2 + close)
+                out.push(Piece.Group(templateGroup(fnName, template, ref, names)))
+                i = i + 3 + close
+            }
+        } else if (n >= '0' && n <= '9') {
+            int j = i + 1
+            for (; j < template.len() && template[j] >= '0' && template[j] <= '9'; j++) {}
+            out.push(Piece.Group(templateGroup(fnName, template, template.slice(i + 1, j), names)))
+            i = j
+        } else if (isNameByte(n)) {
+            int j = i + 1
+            for (; j < template.len() && isNameByte(template[j]); j++) {}
+            out.push(Piece.Group(templateGroup(fnName, template, template.slice(i + 1, j), names)))
+            i = j
+        } else {
+            templateCrash(fnName, template, "'$' must be followed by a group number, a name, '{' or '$'")
+        }
+        lit = i
+    }
+    if (lit < template.len()) {
+        out.push(Piece.Text(template.slice(lit, template.len())))
+    }
+    return out
+}

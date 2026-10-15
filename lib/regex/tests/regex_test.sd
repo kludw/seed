@@ -1,0 +1,332 @@
+package regex
+
+import "strings"
+import "time"
+
+fn rxTestError(string pattern) string {
+    _, error err = compile(pattern)
+    if (err == null) {
+        return "no error"
+    }
+    return err.message()
+}
+
+test "compile errors name the pattern, the problem and the offset" {
+    assert(rxTestError("a(b") == "regex.compile: a(b: missing closing ')' at offset 1")
+    assert(rxTestError("a)b") == "regex.compile: a)b: unexpected ')' at offset 1")
+    assert(rxTestError("[a") == "regex.compile: [a: missing closing ']' at offset 0")
+    assert(rxTestError("x[z-a]") == "regex.compile: x[z-a]: invalid character class range at offset 2")
+    assert(rxTestError("a**") == "regex.compile: a**: invalid nested repetition operator * at offset 2")
+    assert(rxTestError("*a") == "regex.compile: *a: missing argument to repetition operator * at offset 0")
+    assert(rxTestError("a{1001}") == "regex.compile: a{1001}: invalid repeat count {1001} at offset 1")
+    assert(rxTestError("a{3,2}") == "regex.compile: a{3,2}: invalid repeat count {3,2} at offset 1")
+    assert(rxTestError("(a)\\1") == "regex.compile: (a)\\1: backreferences are not supported: \\1 at offset 3")
+    assert(rxTestError("(?=a)") == "regex.compile: (?=a): lookahead is not supported at offset 0")
+    assert(rxTestError("(?<=a)") == "regex.compile: (?<=a): lookbehind is not supported at offset 0")
+    assert(rxTestError("\\q") == "regex.compile: \\q: invalid escape sequence \\q at offset 0")
+    assert(rxTestError("a\\") == "regex.compile: a\\: trailing backslash at offset 1")
+    assert(rxTestError("\\p{Klingon}") == "regex.compile: \\p{Klingon}: unknown Unicode class Klingon at offset 0")
+    assert(rxTestError("[[:alfa:]]") == "regex.compile: [[:alfa:]]: unknown POSIX class [:alfa:] at offset 1")
+    assert(rxTestError("(?P<n>a)(?P<n>b)") == "regex.compile: (?P<n>a)(?P<n>b): duplicate capture group name n at offset 8")
+    assert(rxTestError("(?P<a-b>x)") == "regex.compile: (?P<a-b>x): invalid capture group name at offset 0")
+    assert(rxTestError("(?z)") == "regex.compile: (?z): invalid or unsupported group syntax at offset 0")
+    assert(rxTestError("(?)") == "regex.compile: (?): invalid flags group at offset 0")
+    assert(rxTestError("a\xffb") == "regex.compile: a\xffb: invalid UTF-8 at offset 1")
+    assert(rxTestError("(((a{100}){100}){100})") == "regex.compile: (((a{100}){100}){100}): expression too large at offset 0")
+    assert(rxTestError(strings.repeat("(", 1001) + strings.repeat(")", 1001)).endsWith("expression nests too deeply at offset 999"))
+    // A '{' that does not start a repeat count is a literal.
+    assert(rxTestError("a{,5}") == "no error")
+}
+
+fn crashMustCompile() {
+    _ = mustCompile("a(")
+}
+
+test "mustCompile crashes on a bad pattern" {
+    error err = group {
+        spawn crashMustCompile()
+    }
+    assert(err != null)
+    assert(err.message() == "crash: regex.mustCompile: a(: missing closing ')' at offset 1")
+}
+
+test "quote escapes every metacharacter" {
+    assert(quote("1.5+2*(3)") == "1\\.5\\+2\\*\\(3\\)")
+    assert(quote("a|b[c]{d}^$\\?") == "a\\|b\\[c\\]\\{d\\}\\^\\$\\\\\\?")
+    string all = "\\.+*?()|[]{}^$ plain é"
+    Regex r = mustCompile("^" + quote(all) + "$")
+    assert(r.matches(all))
+    assert(!r.matches("x" + all))
+}
+
+test "string, groupCount and groupNames" {
+    Regex r = mustCompile("(?P<year>\\d+)-(\\d+)(?:x)(?<day>\\d+)")
+    assert(r.string() == "(?P<year>\\d+)-(\\d+)(?:x)(?<day>\\d+)")
+    assert(r.groupCount() == 3)
+    assert(r.groupNames() == []string{"", "year", "", "day"})
+}
+
+test "matches" {
+    Regex r = mustCompile("(?i)^h.llo\\b")
+    assert(r.matches("Hello world"))
+    assert(r.matches("HALLO"))
+    assert(!r.matches("say hello"))
+    assert(!r.matches(""))
+    assert(mustCompile("").matches(""))
+    assert(mustCompile("x*").matches("abc"))
+}
+
+test "find and its groups" {
+    Regex r = mustCompile("(?P<user>\\w+)@(?P<host>\\w+)(\\.org)?")
+    Match? m = r.find("mail bob@example now")
+    assert(m != null)
+    if (m != null) {
+        assert(m.start() == 5)
+        assert(m.end() == 16)
+        assert(m.text() == "bob@example")
+        assert(m.groupCount() == 3)
+        assert(m.groupText(0) == "bob@example")
+        assert(m.groupText(1) == "bob")
+        assert(m.groupText(2) == "example")
+        assert(m.groupText(3) == null)
+        assert(m.groupStart(2) == 9)
+        assert(m.groupEnd(2) == 16)
+        assert(m.groupStart(3) == null)
+        assert(m.groupEnd(3) == null)
+        assert(m.named("user") == "bob")
+        assert(m.named("host") == "example")
+    }
+    assert(r.find("nobody here") == null)
+}
+
+fn crashGroupRange() {
+    Match? m = mustCompile("(a)").find("a")
+    if (m != null) {
+        _ = m.groupText(2)
+    }
+}
+
+fn crashNamed() {
+    Match? m = mustCompile("(?P<x>a)").find("a")
+    if (m != null) {
+        _ = m.named("y")
+    }
+}
+
+fn crashFindAt() {
+    _ = mustCompile("a").findAt("abc", 4)
+}
+
+test "group lookups out of range crash" {
+    error err = group {
+        spawn crashGroupRange()
+    }
+    assert(err != null)
+    assert(err.message() == "crash: regex.Match.groupText: group 2 out of range (the pattern has 1 groups)")
+    err = group {
+        spawn crashNamed()
+    }
+    assert(err != null)
+    assert(err.message() == "crash: regex.Match.named: no group named \"y\"")
+    err = group {
+        spawn crashFindAt()
+    }
+    assert(err != null)
+    assert(err.message() == "crash: regex.Regex.findAt: start (4) out of range for a text of 3 bytes")
+}
+
+test "findAt searches from an offset with the text before it in view" {
+    Regex word = mustCompile("\\b\\w+")
+    Match? m = word.findAt("hello world", 2)
+    assert(m != null)
+    if (m != null) {
+        assert(m.text() == "world")
+        assert(m.start() == 6)
+    }
+    Regex start = mustCompile("^a")
+    assert(start.findAt("aaa", 1) == null)
+    Regex line = mustCompile("(?m)^a")
+    Match? l = line.findAt("a\naa", 1)
+    assert(l != null)
+    if (l != null) {
+        assert(l.start() == 2)
+    }
+    assert(word.findAt("abc", 3) == null)
+}
+
+fn rxTestTexts([]Match ms) []string {
+    []string out = []string{}
+    for (int i = 0; i < ms.len(); i++) {
+        out.push(ms[i].text())
+    }
+    return out
+}
+
+test "findAll follows Go's rules for empty matches" {
+    assert(rxTestTexts(mustCompile("a*").findAll("baaac")) == []string{"", "aaa", ""})
+    []Match ms = mustCompile("a*").findAll("baaac")
+    assert(ms[0].start() == 0)
+    assert(ms[1].start() == 1)
+    assert(ms[2].start() == 5)
+    // An empty pattern matches between characters, not inside them.
+    []Match e = mustCompile("").findAll("aé")
+    assert(e.len() == 3)
+    assert(e[2].start() == 3)
+    assert(rxTestTexts(mustCompile("\\d+").findAll("a1b22c333")) == []string{"1", "22", "333"})
+    assert(mustCompile("x").findAll("abc").len() == 0)
+}
+
+test "replace expands templates" {
+    Regex r = mustCompile("(?P<user>\\w+)@(?P<host>\\w+)")
+    assert(r.replace("bob@example, amy@test", "$host:$1") == "example:bob, test:amy")
+    assert(r.replace("bob@example", "${user}_x ${2}") == "bob_x example")
+    assert(r.replace("bob@example", "$0 costs $$5") == "bob@example costs $5")
+    assert(r.replace("no address", "x") == "no address")
+    // $1x is group 1 followed by "x" (Go would read a group named "1x").
+    assert(mustCompile("(a)").replace("a", "$1x") == "ax")
+    // A group that did not take part gives "".
+    assert(mustCompile("(a)|(b)").replace("ab", "[$1$2]") == "[a][b]")
+    assert(mustCompile("a*").replace("baaac", "-") == "-b-c-")
+    assert(mustCompile("").replace("abc", "-") == "-a-b-c-")
+}
+
+fn crashTemplateDollar() {
+    _ = mustCompile("a").replace("a", "x$")
+}
+
+fn crashTemplateGroup() {
+    _ = mustCompile("(a)").replace("a", "$2")
+}
+
+fn crashTemplateName() {
+    _ = mustCompile("(a)").replace("a", "${nope}")
+}
+
+fn crashTemplateBrace() {
+    _ = mustCompile("(a)").replace("a", "${1")
+}
+
+fn crashTemplateExpand() {
+    Match? m = mustCompile("(a)").find("a")
+    if (m != null) {
+        _ = m.expand("$!")
+    }
+}
+
+test "a malformed template crashes" {
+    error err = group {
+        spawn crashTemplateDollar()
+    }
+    assert(err != null)
+    assert(err.message() == "crash: regex.Regex.replace: template \"x$\": '$' at the end (write $$ for a dollar sign)")
+    err = group {
+        spawn crashTemplateGroup()
+    }
+    assert(err != null)
+    assert(err.message() == "crash: regex.Regex.replace: template \"$2\": the pattern has no group 2")
+    err = group {
+        spawn crashTemplateName()
+    }
+    assert(err != null)
+    assert(err.message() == "crash: regex.Regex.replace: template \"${nope}\": the pattern has no group named nope")
+    err = group {
+        spawn crashTemplateBrace()
+    }
+    assert(err != null)
+    assert(err.message() == "crash: regex.Regex.replace: template \"${1\": missing '}' after '${'")
+    err = group {
+        spawn crashTemplateExpand()
+    }
+    assert(err != null)
+    assert(err.message() == "crash: regex.Match.expand: template \"$!\": '$' must be followed by a group number, a name, '{' or '$'")
+}
+
+fn rxTestUpper(Match m) string {
+    return m.text().toUpper()
+}
+
+test "replaceLiteral and replaceWith" {
+    Regex r = mustCompile("\\d+")
+    assert(r.replaceLiteral("a1b22", "$1") == "a$1b$1")
+    assert(r.replaceWith("a1b22", rxTestUpper) == "a1b22")
+    assert(mustCompile("[a-z]+").replaceWith("ab1cd", rxTestUpper) == "AB1CD")
+}
+
+test "expand" {
+    Match? m = mustCompile("(\\w+) (\\w+)").find("hello world")
+    assert(m != null)
+    if (m != null) {
+        assert(m.expand("$2 $1") == "world hello")
+    }
+}
+
+test "split as Go's Split(s, -1)" {
+    assert(mustCompile("a*").split("abaabaccadaaae") == []string{"", "b", "b", "c", "c", "d", "e"})
+    assert(mustCompile(",\\s*").split("a, b,c,   d") == []string{"a", "b", "c", "d"})
+    assert(mustCompile(",").split("a,b,") == []string{"a", "b", ""})
+    assert(mustCompile(",").split("") == []string{""})
+    assert(mustCompile("").split("") == []string{})
+    assert(mustCompile("").split("abc") == []string{"a", "b", "c"})
+    assert(mustCompile("x").split("abc") == []string{"abc"})
+}
+
+test "invalid UTF-8 in the text" {
+    // A byte that cannot start a UTF-8 sequence is one character, as in Go.
+    assert(rxTestTexts(mustCompile(".").findAll("a\xffb")) == []string{"a", "\xff", "b"})
+    // A truncated sequence is not matched by '.' (Go matches its first
+    // byte as U+FFFD): a documented difference.
+    assert(rxTestTexts(mustCompile(".").findAll("\xc3b")) == []string{"b"})
+}
+
+test "pathological patterns take linear time" {
+    string as = strings.repeat("a", 100000)
+    int start = time.monotonic()
+    assert(!mustCompile("(a*)*b").matches(as))
+    assert(mustCompile("(a*)*b").find(as) == null)
+    assert(!mustCompile("(a|aa)*c").matches(as))
+    assert(!mustCompile("(x+x+)+y").matches(strings.repeat("x", 100000)))
+    assert(mustCompile("(a+)+$").findAll(as).len() == 1)
+    // A DFA that would have 2^20 states: built lazily, flushed when full.
+    string ab = strings.repeat("ab", 50000) + "a" + strings.repeat("b", 20)
+    Match? m = mustCompile("(a|b)*a(a|b){20}$").find(ab)
+    assert(m != null)
+    // Far below a second on any machine; a backtracking matcher takes
+    // longer than the age of the universe.
+    assert(time.monotonic() - start < 20 * time.second)
+}
+
+test "more than the cache holds" {
+    []Regex rs = []Regex{}
+    for (int i = 0; i < 40; i++) {
+        rs.push(mustCompile("x" + i.string() + "y"))
+    }
+    for (int round = 0; round < 3; round++) {
+        for (int i = 0; i < rs.len(); i++) {
+            assert(rs[i].matches("ax" + i.string() + "yb"))
+            assert(!rs[i].matches("ax" + (i + 1).string() + "yb"))
+        }
+    }
+}
+
+fn rxTestWorker(Regex r, string text, chan int out) {
+    out.send(r.findAll(text).len())
+}
+
+test "a Regex can be sent to other goroutines" {
+    Regex r = mustCompile("\\w+")
+    chan int out = chan int(4)
+    error err = group {
+        for (int i = 0; i < 4; i++) {
+            spawn rxTestWorker(r, strings.repeat("ab cd ", i + 1), out)
+        }
+    }
+    assert(err == null)
+    int total = 0
+    for (int i = 0; i < 4; i++) {
+        int? n = out.receive()
+        if (n != null) {
+            total = total + n
+        }
+    }
+    assert(total == 2 + 4 + 6 + 8)
+}
