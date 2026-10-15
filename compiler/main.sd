@@ -6,6 +6,7 @@
 //   seed fmt [--check] <file.sd>...       format the files in place (see fmt.sd)
 //   seed c <dir | file.sd...>             write the C program to stdout (for tests)
 //   seed ast <file.sd>...                 print the syntax tree (for debugging)
+//   seed lsp                              a language server on stdin/stdout (lsp.sd)
 //
 // A program is the package main in a directory (all its .sd files), or a
 // single .sd file. The packages it imports are loaded by load.sd.
@@ -28,7 +29,7 @@ const string buildOpt = "-O2"
 const string quickOpt = "-O1"
 const []string cLibs = []string{"-lm", "-lpthread"}
 
-const string usage = "usage:\n  seed build [-o out] <dir | file.sd>\n  seed run <dir | file.sd> [args...]\n  seed test [-v] [--run text] [dir...]\n  seed fmt [--check] <file.sd>...\n  seed c <dir | file.sd...>\n  seed ast <file.sd>...\n"
+const string usage = "usage:\n  seed build [-o out] <dir | file.sd>\n  seed run <dir | file.sd> [args...]\n  seed test [-v] [--run text] [dir...]\n  seed fmt [--check] <file.sd>...\n  seed c <dir | file.sd...>\n  seed ast <file.sd>...\n  seed lsp\n"
 
 fn main([]string args) error {
     if (args.len() < 2) {
@@ -103,6 +104,9 @@ fn main([]string args) error {
     if (cmd == "test") {
         int code = try testCommand(root, rest)
         os.exit(code)
+    }
+    if (cmd == "lsp") {
+        return lspCommand(root)
     }
     fmt.eprint("seed: unknown command " + cmd + "\n" + usage)
     os.exit(2)

@@ -1,0 +1,303 @@
+// The driver of tests/test_lsp.sh: turns a session script into the framed
+// JSON-RPC messages a client would send to `seed lsp`, and checks and
+// prints what the server answered.
+//
+//   driver frame script <file.lsp> <dir>                the messages, framed, on stdout
+//   driver frame fuzz <file.sd> <dir> <step>            a session of truncations of a file
+//   driver unframe <output> script <file.lsp> <dir>     the server's messages, one per line
+//   driver unframe <output> fuzz <file.sd> <dir> <step>
+//
+// unframe checks that every message has a correct Content-Length and that
+// every request got exactly one response (exit code 1 otherwise), and
+// prints each message on a line of its own after a line naming the
+// request ("== hover proj/main.sd 19 10") or the notification, with <dir>
+// written as $DIR.
+//
+// A script has one command per line (# starts a comment); paths are
+// relative to <dir>, lines and characters are LSP positions (from 0, in
+// UTF-16 units):
+//
+//   open <path>                      didOpen with the file's text
+//   change <path> <text file>        didChange: the document's whole text is now the file's
+//   close <path>                     didClose
+//   save <path>                      didSave
+//   hover <path> <line> <char>       also definition, completion
+//   symbols <path>                   documentSymbol
+//   format <path>                    formatting
+//   request <method> <json params>   any request
+//
+// The session starts with initialize and initialized, and ends with
+// shutdown and exit.
+package main
+
+import "errors"
+import "fmt"
+import "fs"
+import "json"
+
+type Session struct {
+    string dir
+    []json.Value msgs
+    []string labels
+}
+
+fn main([]string args) error {
+    if (args.len() < 4) {
+        return errors.new("usage: driver frame|unframe ...")
+    }
+    if (args[1] == "frame") {
+        Session s = try sessionOf(args.slice(2, args.len()))
+        []string out = []string{}
+        for (int i = 0; i < s.msgs.len(); i++) {
+            string body = s.msgs[i].string()
+            out.push("Content-Length: " + body.len().string() + "\r\n\r\n" + body)
+        }
+        fmt.print(out.join(""))
+        return null
+    }
+    if (args[1] == "unframe") {
+        string output = try fs.read(args[2])
+        Session u = try sessionOf(args.slice(3, args.len()))
+        return unframe(u, output)
+    }
+    return errors.new("driver: unknown mode " + args[1])
+}
+
+fn sessionOf([]string spec) (Session, error) {
+    if (spec.len() < 3) {
+        return null, errors.new("driver: a session is script <file.lsp> <dir> or fuzz <file.sd> <dir> <step>")
+    }
+    Session s = Session{dir: spec[2], msgs: []json.Value{}, labels: []string{}}
+    map[string]json.Value init = map[string]json.Value{}
+    init["processId"] = json.Value.Null
+    init["rootUri"] = json.Value.String(uriOf(s.dir))
+    init["capabilities"] = json.Value.Object(map[string]json.Value{})
+    s.request("initialize", json.Value.Object(init), "initialize")
+    s.notify("initialized", json.Value.Object(map[string]json.Value{}))
+    if (spec[0] == "script") {
+        try s.script(spec[1])
+    } else if (spec[0] == "fuzz") {
+        if (spec.len() < 4) {
+            return null, errors.new("driver: fuzz needs <file.sd> <dir> <step>")
+        }
+        int step = try spec[3].toInt()
+        try s.fuzz(spec[1], step)
+    } else {
+        return null, errors.new("driver: unknown session kind " + spec[0])
+    }
+    s.request("shutdown", json.Value.Null, "shutdown")
+    s.notify("exit", json.Value.Null)
+    return s, null
+}
+
+// The file: URI of a path, escaped as the server escapes it.
+fn uriOf(string path) string {
+    string hex = "0123456789ABCDEF"
+    []byte out = []byte{}
+    for (int i = 0; i < path.len(); i++) {
+        byte b = path[i]
+        if ((b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') || b == '/' || b == '-' || b == '.' || b == '_' || b == '~') {
+            out.push(b)
+        } else {
+            out.push('%')
+            out.push(hex[int(b) / 16])
+            out.push(hex[int(b) % 16])
+        }
+    }
+    return "file://" + string(out)
+}
+
+fn (Session s) mut request(string method, json.Value params, string label) {
+    map[string]json.Value m = map[string]json.Value{}
+    m["jsonrpc"] = json.Value.String("2.0")
+    m["id"] = json.Value.Number(float(s.labels.len()))
+    m["method"] = json.Value.String(method)
+    if (!params.isNull()) {
+        m["params"] = params
+    }
+    s.labels.push(label)
+    s.msgs.push(json.Value.Object(m))
+}
+
+fn (Session s) mut notify(string method, json.Value params) {
+    map[string]json.Value m = map[string]json.Value{}
+    m["jsonrpc"] = json.Value.String("2.0")
+    m["method"] = json.Value.String(method)
+    if (!params.isNull()) {
+        m["params"] = params
+    }
+    s.msgs.push(json.Value.Object(m))
+}
+
+fn docId(string uri) json.Value {
+    map[string]json.Value m = map[string]json.Value{}
+    m["uri"] = json.Value.String(uri)
+    return json.Value.Object(m)
+}
+
+fn docParams(string uri) json.Value {
+    map[string]json.Value m = map[string]json.Value{}
+    m["textDocument"] = docId(uri)
+    return json.Value.Object(m)
+}
+
+fn positionParams(string uri, int line, int character) json.Value {
+    map[string]json.Value pos = map[string]json.Value{}
+    pos["line"] = json.Value.Number(float(line))
+    pos["character"] = json.Value.Number(float(character))
+    map[string]json.Value m = map[string]json.Value{}
+    m["textDocument"] = docId(uri)
+    m["position"] = json.Value.Object(pos)
+    return json.Value.Object(m)
+}
+
+fn (Session s) mut open(string uri, string text) {
+    map[string]json.Value doc = map[string]json.Value{}
+    doc["uri"] = json.Value.String(uri)
+    doc["languageId"] = json.Value.String("seed")
+    doc["version"] = json.Value.Number(1.0)
+    doc["text"] = json.Value.String(text)
+    map[string]json.Value m = map[string]json.Value{}
+    m["textDocument"] = json.Value.Object(doc)
+    s.notify("textDocument/didOpen", json.Value.Object(m))
+}
+
+fn (Session s) mut change(string uri, string text) {
+    map[string]json.Value doc = map[string]json.Value{}
+    doc["uri"] = json.Value.String(uri)
+    doc["version"] = json.Value.Number(2.0)
+    map[string]json.Value whole = map[string]json.Value{}
+    whole["text"] = json.Value.String(text)
+    map[string]json.Value m = map[string]json.Value{}
+    m["textDocument"] = json.Value.Object(doc)
+    m["contentChanges"] = json.Value.Array([]json.Value{json.Value.Object(whole)})
+    s.notify("textDocument/didChange", json.Value.Object(m))
+}
+
+fn (Session s) mut script(string file) error {
+    string text = try fs.read(file)
+    []string lines = text.split("\n")
+    for (int i = 0; i < lines.len(); i++) {
+        string line = lines[i].trim()
+        if (line == "" || line.startsWith("#")) {
+            continue
+        }
+        []string w = line.split(" ")
+        string where = file + ":" + (i + 1).string() + ": "
+        if (w[0] == "request") {
+            if (w.len() < 3) {
+                return errors.new(where + "request needs a method and params")
+            }
+            json.Value params = try json.parse(line.slice(w[0].len() + w[1].len() + 2, line.len()))
+            s.request(w[1], params, line)
+            continue
+        }
+        if (w.len() < 2) {
+            return errors.new(where + "missing path")
+        }
+        string uri = uriOf(s.dir + "/" + w[1])
+        if (w[0] == "open") {
+            string doc = try fs.read(s.dir + "/" + w[1])
+            s.open(uri, doc)
+        } else if (w[0] == "change" && w.len() == 3) {
+            string next = try fs.read(s.dir + "/" + w[2])
+            s.change(uri, next)
+        } else if (w[0] == "close") {
+            s.notify("textDocument/didClose", docParams(uri))
+        } else if (w[0] == "save") {
+            s.notify("textDocument/didSave", docParams(uri))
+        } else if (w[0] == "symbols") {
+            s.request("textDocument/documentSymbol", docParams(uri), line)
+        } else if (w[0] == "format") {
+            map[string]json.Value opts = map[string]json.Value{}
+            opts["tabSize"] = json.Value.Number(4.0)
+            opts["insertSpaces"] = json.Value.Bool(true)
+            map[string]json.Value fp = map[string]json.Value{}
+            fp["textDocument"] = docId(uri)
+            fp["options"] = json.Value.Object(opts)
+            s.request("textDocument/formatting", json.Value.Object(fp), line)
+        } else if ((w[0] == "hover" || w[0] == "definition" || w[0] == "completion") && w.len() == 4) {
+            int l = try w[2].toInt()
+            int c = try w[3].toInt()
+            s.request("textDocument/" + w[0], positionParams(uri, l, c), line)
+        } else {
+            return errors.new(where + "unknown command: " + line)
+        }
+    }
+    return null
+}
+
+// Opens the file, then makes it every prefix of itself (one per step
+// bytes) and asks for everything at the end of each prefix and around it:
+// what an editor sends while the file is being typed.
+fn (Session s) mut fuzz(string file, int step) error {
+    string text = try fs.read(file)
+    string uri = uriOf(file)
+    s.open(uri, text)
+    for (int cut = 0; cut <= text.len(); cut = cut + step) {
+        string prefix = text.slice(0, cut)
+        s.change(uri, prefix)
+        []string lines = prefix.split("\n")
+        int last = lines.len() - 1
+        int width = lines[last].len()
+        []string methods = []string{"hover", "definition", "completion"}
+        for (int m = 0; m < methods.len(); m++) {
+            s.request("textDocument/" + methods[m], positionParams(uri, last, width), "fuzz")
+            s.request("textDocument/" + methods[m], positionParams(uri, last, width / 2), "fuzz")
+            if (last > 0) {
+                s.request("textDocument/" + methods[m], positionParams(uri, last - 1, 4), "fuzz")
+            }
+        }
+        s.request("textDocument/documentSymbol", docParams(uri), "fuzz")
+        map[string]json.Value fp = map[string]json.Value{}
+        fp["textDocument"] = docId(uri)
+        fp["options"] = json.Value.Object(map[string]json.Value{})
+        s.request("textDocument/formatting", json.Value.Object(fp), "fuzz")
+    }
+    s.notify("textDocument/didClose", docParams(uri))
+    return null
+}
+
+fn unframe(Session s, string output) error {
+    []int answers = []int{}
+    for (int i = 0; i < s.labels.len(); i++) {
+        answers.push(0)
+    }
+    []string out = []string{}
+    string header = "Content-Length: "
+    int pos = 0
+    for (; pos < output.len(); ) {
+        string rest = output.slice(pos, output.len())
+        int? end = rest.index("\r\n\r\n")
+        if (!rest.startsWith(header) || end == null) {
+            return errors.new("driver: bad header at byte " + pos.string())
+        }
+        int n = try rest.slice(header.len(), end).toInt()
+        int start = pos + end + 4
+        if (start + n > output.len()) {
+            return errors.new("driver: message at byte " + pos.string() + " is shorter than its Content-Length " + n.string())
+        }
+        string body = output.slice(start, start + n)
+        pos = start + n
+        json.Value msg = try json.parse(body)
+        string? method = msg.get("method").asString()
+        int? id = msg.get("id").asInt()
+        if (method != null) {
+            out.push("== notification " + method)
+        } else if (id != null && id >= 0 && id < s.labels.len()) {
+            answers[id] = answers[id] + 1
+            out.push("== " + s.labels[id])
+        } else {
+            out.push("== response to an unknown request")
+        }
+        string uriDir = uriOf(s.dir)
+        out.push(body.replace(uriDir, "file://$DIR").replace(s.dir, "$DIR"))
+    }
+    fmt.print(out.join("\n") + "\n")
+    for (int k = 0; k < answers.len(); k++) {
+        if (answers[k] != 1) {
+            return errors.new("driver: request " + k.string() + " (" + s.labels[k] + ") got " + answers[k].string() + " responses")
+        }
+    }
+    return null
+}

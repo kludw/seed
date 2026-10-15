@@ -1,0 +1,520 @@
+// The language server, continued: loading and checking the package of a
+// document as seed build (or seed test) would, with the open documents'
+// text in place of the files; diagnostics; formatting; positions.
+package main
+
+import "fs"
+import "json"
+
+// A document's program, loaded and checked. file is the document's index
+// in c.ast.files (and c.diags), -1 if it was not loaded. clean is true when
+// loading found no syntax or import errors, so that c was checked like a
+// program being compiled; otherwise c.diags holds those errors, and c was
+// checked anyway (unless only the diagnostics were wanted) so that queries
+// still find what the broken tree has. whole is true when the program is
+// the one any file of the package (other than its tests) would get: the
+// package's files, not the document alone or with the package's tests.
+type LspAnalysis struct {
+    Checker c
+    int file
+    bool clean
+    bool whole
+    []Diag unformatted
+    string src
+}
+
+// The text of a file: the open document's, or the file's.
+fn lspReadText(string path, map[string]string overlay) (string, error) {
+    string? text = overlay[path]
+    if (text != null) {
+        return text, null
+    }
+    return fs.read(path)
+}
+
+// The .sd files of a directory, with the open documents in it that are not
+// saved yet, sorted.
+fn lspSourceFiles(string dir, map[string]string overlay) ([]string, error) {
+    []string files = []string{}
+    if (fs.isDir(dir)) {
+        files = try sourceFiles(dir)
+    }
+    []string open = overlay.keys()
+    for (int i = 0; i < open.len(); i++) {
+        string p = open[i]
+        if (p.endsWith(".sd") && dirName(p) == dir && !files.contains(p)) {
+            files.push(p)
+        }
+    }
+    files.sort()
+    return files, null
+}
+
+// The name in the package clause of a source text, or "".
+fn lspPackageClause(string text) string {
+    []string lines = text.split("\n")
+    for (int i = 0; i < lines.len(); i++) {
+        string line = lines[i].trim()
+        if (line.startsWith("package ")) {
+            return line.slice(8, line.len()).trim()
+        }
+        if (line != "" && !line.startsWith("//")) {
+            return ""
+        }
+    }
+    return ""
+}
+
+// Whether a source text declares fn main (a line starting with "fn main(").
+fn lspHasMain(string text) bool {
+    return text.startsWith("fn main(") || text.contains("\nfn main(")
+}
+
+// Loads the document's package (the files of its directory, or, for a file
+// in a package's tests/ directory, the package and its tests in test mode)
+// and the packages it imports, and checks them. A package other than main
+// is checked in test mode, as seed test does, since it has no main. When
+// several files of a directory declare fn main (a directory of
+// single-file programs, such as examples/), the document is a program of
+// its own. Imports are resolved from the project root (lspProjectRoot).
+fn lspAnalyze(LspJob job, bool checkBroken) (LspAnalysis, error) {
+    string path = job.path
+    string text = try lspReadText(path, job.overlay)
+    string dir = dirName(path)
+    string pkgDir = dir
+    bool tests = false
+    if (lastElement(dir) == "tests") {
+        []string parentFiles = try lspSourceFiles(dirName(dir), job.overlay)
+        if (parentFiles.len() > 0) {
+            pkgDir = dirName(dir)
+            tests = true
+        }
+    }
+    []string files = try lspSourceFiles(pkgDir, job.overlay)
+    bool isMain = lspPackageClause(text) == "main"
+    bool whole = !tests
+    if (isMain && !tests) {
+        int mains = 0
+        for (int i = 0; i < files.len(); i++) {
+            string other = try lspReadText(files[i], job.overlay)
+            if (lspHasMain(other)) {
+                mains++
+            }
+        }
+        if (mains > 1) {
+            whole = false
+            if (lspHasMain(text)) {
+                files = []string{path}
+            }
+        }
+    }
+    if (!tests && !files.contains(path)) {
+        files.push(path)
+    }
+    bool testMode = tests || !isMain
+    Loader l = newLoader(job.seedRoot, pkgDir)
+    l.overlay = job.overlay
+    bool isLib = absPath(pkgDir).startsWith(l.libDir + "/")
+    int pkg = l.addPackage("", pkgDir, isLib)
+    try l.addFiles(pkg, files, false)
+    if (tests) {
+        []string testFiles = try lspSourceFiles(dir, job.overlay)
+        try l.addFiles(pkg, testFiles, true)
+    }
+    string projectRoot = lspProjectRoot(l, pkgDir)
+    l.projectRoot = projectRoot
+    if (isLib) {
+        l.p.ast.pkgs[pkg].path = absPath(pkgDir).slice(l.libDir.len() + 1, absPath(pkgDir).len())
+    } else if (testMode && pkgDir.startsWith(projectRoot + "/")) {
+        l.p.ast.pkgs[pkg].path = pkgDir.slice(projectRoot.len() + 1, pkgDir.len())
+    }
+    try l.loadImports()
+    int file = -1
+    for (int f = 0; f < l.p.ast.files.len(); f++) {
+        if (l.p.ast.files[f].path == path) {
+            file = f
+        }
+    }
+    bool clean = l.p.diags.count() == 0
+    if (!clean && checkBroken) {
+        l.p.ast = lspRepair(l.p.ast)
+    }
+    Checker c = newChecker(l.p.ast, l.p.diags, testMode)
+    c.libDir = l.libDir
+    c.projectRoot = projectRoot
+    if (clean || checkBroken) {
+        c.checkProgram()
+    }
+    return LspAnalysis{c: c, file: file, clean: clean, whole: whole, unformatted: l.unformatted, src: text}, null
+}
+
+// A tree with syntax errors, made safe for the checker: every missing type
+// (-1 where the parser gave up, as in a field `[]` still being typed)
+// becomes a name that does not exist, which the checker reports and treats
+// as invalid instead of crashing on.
+fn lspRepair(Ast tree) Ast {
+    Ast a = tree
+    TypeExpr missing = newTypeExpr(TypeExprKind.Name, Pos{file: 0, line: 1, col: 1})
+    missing.name = lspPlaceholder
+    int m = a.addTypeExpr(missing)
+    for (int t = 0; t < a.typeExprs.len(); t++) {
+        TypeExpr te = a.typeExprs[t]
+        if (te.kind == TypeExprKind.Name) {
+            continue
+        }
+        if (te.kind != TypeExprKind.Func && te.a < 0) {
+            a.typeExprs[t].a = m
+        }
+        if (te.kind == TypeExprKind.Map && te.b < 0) {
+            a.typeExprs[t].b = m
+        }
+        if (te.kind == TypeExprKind.Func) {
+            a.lspRepairList(te.list, te.count, m)
+            a.lspRepairList(te.results, te.resultCount, m)
+        }
+    }
+    for (int p = 0; p < a.params.len(); p++) {
+        if (a.params[p].typeExpr < 0) {
+            a.params[p].typeExpr = m
+        }
+    }
+    for (int g = 0; g < a.targets.len(); g++) {
+        if (a.targets[g].kind == TargetKind.Decl && a.targets[g].typeExpr < 0) {
+            a.targets[g].typeExpr = m
+        }
+    }
+    for (int s = 0; s < a.stmts.len(); s++) {
+        if (a.stmts[s].kind == StmtKind.Const && a.stmts[s].typeExpr < 0) {
+            a.stmts[s].typeExpr = m
+        }
+    }
+    for (int k = 0; k < a.consts.len(); k++) {
+        if (a.consts[k].typeExpr < 0) {
+            a.consts[k].typeExpr = m
+        }
+    }
+    for (int f = 0; f < a.fns.len(); f++) {
+        FnDecl fd = a.fns[f]
+        if (fd.isMethod && fd.recvType < 0) {
+            a.fns[f].recvType = m
+        }
+        a.lspRepairList(fd.results, fd.resultCount, m)
+    }
+    for (int d = 0; d < a.typeDecls.len(); d++) {
+        TypeDecl td = a.typeDecls[d]
+        a.lspRepairList(td.impls, td.implCount, m)
+    }
+    for (int x = 0; x < a.methodSigs.len(); x++) {
+        MethodSig ms = a.methodSigs[x]
+        a.lspRepairList(ms.results, ms.resultCount, m)
+    }
+    return a
+}
+
+// Replaces the -1s in a run of Ast.lists by m.
+fn (Ast a) mut lspRepairList(int start, int count, int m) {
+    for (int i = 0; i < count; i++) {
+        if (start + i < a.lists.len() && a.lists[start + i] < 0) {
+            a.lists[start + i] = m
+        }
+    }
+}
+
+// The project root for a package: the nearest of its directory and the
+// directories above it from which every import of the package that is not
+// in the standard library resolves (seed build takes the root package's
+// directory; this also finds the root for a package deeper in a project).
+fn lspProjectRoot(Loader l, string pkgDir) string {
+    []string local = []string{}
+    for (int i = 0; i < l.p.ast.imports.len(); i++) {
+        string ip = l.p.ast.imports[i].path
+        if (validImportPath(ip) && !fs.isDir(l.seedRoot + "/lib/" + ip)) {
+            local.push(ip)
+        }
+    }
+    if (local.len() == 0) {
+        return pkgDir
+    }
+    string d = pkgDir
+    for (int up = 0; up < 12; up++) {
+        bool all = true
+        for (int j = 0; j < local.len(); j++) {
+            if (!fs.isDir(joinPath(d, local[j]))) {
+                all = false
+                break
+            }
+        }
+        if (all) {
+            return d
+        }
+        if (d == "/" || d == "." || d == "") {
+            break
+        }
+        d = dirName(d)
+    }
+    return pkgDir
+}
+
+// ---- diagnostics ----
+
+// The diagnostics of the document: an object from its path to a list of
+// LSP diagnostics, with the other files of its package too when the
+// analysis is the package's (LspAnalysis.whole), since their own would be
+// the same. Errors in other packages, and in other files of the program
+// that are not in the object, are shown at the document's import of their
+// package (or at its first line).
+fn lspDiagnostics(LspJob job) (json.Value, error) {
+    LspAnalysis a = try lspAnalyze(job, false)
+    map[string][]json.Value byPath = map[string][]json.Value{}
+    byPath[job.path] = []json.Value{}
+    for (int f = 0; f < a.c.ast.files.len(); f++) {
+        if (a.whole && a.c.ast.files[f].pkgIndex == 0) {
+            byPath[a.c.ast.files[f].path] = []json.Value{}
+        }
+    }
+    []Diag all = a.c.diags.sorted()
+    for (int i = 0; i < a.unformatted.len(); i++) {
+        all.push(a.unformatted[i])
+    }
+    for (int k = 0; k < all.len(); k++) {
+        Diag g = all[k]
+        int severity = 1
+        if (k >= all.len() - a.unformatted.len()) {
+            severity = 2
+        }
+        int gf = g.pos.file
+        if (gf < 0 || gf >= a.c.ast.files.len()) {
+            continue
+        }
+        string message = g.message
+        if (severity == 2) {
+            message = "not formatted: seed fmt changes this line"
+        } else if (g.hint != "") {
+            message = message + "\nhint: " + g.hint
+        }
+        string gpath = a.c.ast.files[gf].path
+        []json.Value? list = byPath[gpath]
+        if (list != null) {
+            list.push(lspDiagJson(a.c.diags.sources[gf], g.pos, message, severity))
+            byPath[gpath] = list
+            continue
+        }
+        // Another package's error: at the import of that package in the
+        // document, or at its first line.
+        if (a.file < 0) {
+            continue
+        }
+        Pos at = Pos{file: a.file, line: 1, col: 1}
+        for (int m = 0; m < a.c.ast.imports.len(); m++) {
+            Import im = a.c.ast.imports[m]
+            if (im.file == a.file && im.target == a.c.ast.files[gf].pkgIndex) {
+                at = im.pos
+            }
+        }
+        string where = gpath + ":" + g.pos.line.string() + ":" + g.pos.col.string()
+        []json.Value? own = byPath[job.path]
+        if (own != null) {
+            own.push(lspDiagJson(a.src, at, where + ": " + message, severity))
+            byPath[job.path] = own
+        }
+    }
+    map[string]json.Value out = map[string]json.Value{}
+    []string paths = byPath.keys()
+    for (int p = 0; p < paths.len(); p++) {
+        []json.Value? ds = byPath[paths[p]]
+        if (ds != null) {
+            out[paths[p]] = json.Value.Array(ds)
+        }
+    }
+    return json.Value.Object(out), null
+}
+
+fn lspDiagJson(string src, Pos pos, string message, int severity) json.Value {
+    map[string]json.Value m = map[string]json.Value{}
+    m["range"] = lspRange(src, pos, lspWordEnd(src, pos))
+    m["severity"] = lspNum(severity)
+    m["source"] = json.Value.String("seed")
+    m["message"] = json.Value.String(message)
+    return json.Value.Object(m)
+}
+
+// ---- positions ----
+//
+// Pos counts lines and columns from 1, columns in bytes; LSP counts both
+// from 0, and characters in UTF-16 code units (a character outside the
+// Basic Multilingual Plane, 4 bytes of UTF-8, is 2 units).
+
+// The byte offset where a line (from 0) starts, or -1 past the end.
+fn lspLineStart(string src, int line) int {
+    if (line <= 0) {
+        return 0
+    }
+    int cur = 0
+    for (int i = 0; i < src.len(); i++) {
+        if (src[i] == '\n') {
+            cur++
+            if (cur == line) {
+                return i + 1
+            }
+        }
+    }
+    return -1
+}
+
+// The number of bytes of the UTF-8 sequence that starts with b.
+fn lspCharBytes(byte b) int {
+    if (b >= byte(0xf0)) {
+        return 4
+    }
+    if (b >= byte(0xe0)) {
+        return 3
+    }
+    if (b >= byte(0xc0)) {
+        return 2
+    }
+    return 1
+}
+
+// UTF-16 units of the bytes from start to end.
+fn lspUnits(string src, int start, int end) int {
+    int n = 0
+    int i = start
+    for (; i < end && i < src.len(); ) {
+        int w = lspCharBytes(src[i])
+        if (w == 4) {
+            n = n + 2
+        } else {
+            n++
+        }
+        i = i + w
+    }
+    return n
+}
+
+// The byte offset of an LSP position (clamped to its line and the text).
+fn lspOffset(string src, int line, int character) int {
+    int ls = lspLineStart(src, line)
+    if (ls < 0) {
+        return src.len()
+    }
+    int units = 0
+    int i = ls
+    for (; i < src.len() && src[i] != '\n' && units < character; ) {
+        int w = lspCharBytes(src[i])
+        if (w == 4) {
+            units = units + 2
+        } else {
+            units++
+        }
+        i = i + w
+    }
+    if (i > src.len()) {
+        return src.len()
+    }
+    return i
+}
+
+// The Pos (in file) of an LSP position.
+fn lspPosOf(string src, int file, int line, int character) Pos {
+    int off = lspOffset(src, line, character)
+    int ls = lspLineStart(src, line)
+    if (ls < 0) {
+        ls = 0
+    }
+    return Pos{file: file, line: line + 1, col: off - ls + 1}
+}
+
+fn lspPosition(string src, Pos pos) json.Value {
+    int line = pos.line - 1
+    if (line < 0) {
+        line = 0
+    }
+    int ls = lspLineStart(src, line)
+    int character = 0
+    if (ls >= 0) {
+        character = lspUnits(src, ls, ls + pos.col - 1)
+    }
+    map[string]json.Value m = map[string]json.Value{}
+    m["line"] = lspNum(line)
+    m["character"] = lspNum(character)
+    return json.Value.Object(m)
+}
+
+fn lspRange(string src, Pos start, Pos end) json.Value {
+    map[string]json.Value m = map[string]json.Value{}
+    m["start"] = lspPosition(src, start)
+    m["end"] = lspPosition(src, end)
+    return json.Value.Object(m)
+}
+
+fn lspIdentByte(byte b) bool {
+    return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') || b == '_'
+}
+
+// The end of the word at pos: past the identifier or number there, or one
+// character (none at the end of a line).
+fn lspWordEnd(string src, Pos pos) Pos {
+    int ls = lspLineStart(src, pos.line - 1)
+    if (ls < 0) {
+        return pos
+    }
+    int i = ls + pos.col - 1
+    if (i >= src.len() || src[i] == '\n' || src[i] == '\r') {
+        return pos
+    }
+    int j = i
+    for (; j < src.len() && lspIdentByte(src[j]); ) {
+        j++
+    }
+    if (j == i) {
+        j = i + lspCharBytes(src[i])
+    }
+    return Pos{file: pos.file, line: pos.line, col: pos.col + j - i}
+}
+
+// ---- formatting ----
+
+// One edit that replaces the whole document with its formatted text; no
+// edits when it is formatted already or has syntax errors (which the
+// diagnostics show).
+fn lspFormat(LspJob job) json.Value {
+    []json.Value edits = []json.Value{}
+    string? text = job.overlay[job.path]
+    if (text == null) {
+        return json.Value.Array(edits)
+    }
+    Parser before = fmtParse(job.path, text)
+    if (before.diags.count() > 0) {
+        return json.Value.Array(edits)
+    }
+    string out = formatSource(text)
+    if (out == text) {
+        return json.Value.Array(edits)
+    }
+    Parser after = fmtParse(job.path, out)
+    if (after.diags.count() > 0 || after.ast.dump() != before.ast.dump() || !sameComments(before.ast, after.ast)) {
+        return json.Value.Array(edits)
+    }
+    int lines = 0
+    int last = 0
+    for (int i = 0; i < text.len(); i++) {
+        if (text[i] == '\n') {
+            lines++
+            last = i + 1
+        }
+    }
+    map[string]json.Value end = map[string]json.Value{}
+    end["line"] = lspNum(lines)
+    end["character"] = lspNum(lspUnits(text, last, text.len()))
+    map[string]json.Value start = map[string]json.Value{}
+    start["line"] = lspNum(0)
+    start["character"] = lspNum(0)
+    map[string]json.Value r = map[string]json.Value{}
+    r["start"] = json.Value.Object(start)
+    r["end"] = json.Value.Object(end)
+    map[string]json.Value edit = map[string]json.Value{}
+    edit["range"] = json.Value.Object(r)
+    edit["newText"] = json.Value.String(out)
+    edits.push(json.Value.Object(edit))
+    return json.Value.Array(edits)
+}

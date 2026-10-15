@@ -137,13 +137,14 @@ Reading the program's standard input. Stdout and stderr are written with `fmt`.
 | Function | Result |
 |---|---|
 | `io.readLine() (string?, error)` | The next line of stdin without its line ending, or `null` at end of input. |
+| `io.read(int max) (string?, error)` | Between 1 and `max` bytes of stdin, as soon as some are available, or `null` at end of input. Crashes if `max < 1`. |
 | `io.readAll() (string, error)` | Everything left on stdin, up to end of input. |
 
 - A line ends at `"\n"`. A `"\r"` directly before it is removed too. The last line is returned even if it has no `"\n"`. An empty input gives `null` on the first call.
-- `io.readAll()` returns everything not yet returned by `io.readLine()`, so the two can be mixed.
+- The three share one buffer: each returns what the others have not, so they can be mixed. `io.read` is for input that is not made of lines, such as a header line followed by a body of a given length (`seed lsp` reads its messages that way).
 - Stdin is shared by the whole process. Calls from different goroutines are serialised, and each call gets whole lines.
 - The error is set only when reading fails (for example, stdin was closed by the OS): `io.readLine: bad file descriptor`. Reaching the end is not an error.
-- Both are stop points: a goroutine waiting for input whose group is stopped stops there.
+- All three are stop points: a goroutine waiting for input whose group is stopped stops there.
 
 ```
 for (;;) {

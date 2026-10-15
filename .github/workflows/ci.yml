@@ -38,6 +38,9 @@ jobs:
       - name: Examples
         run: make test-examples
 
+      - name: Language server
+        run: make test-lsp
+
       - name: Guide
         run: docs/guide/check.sh
 

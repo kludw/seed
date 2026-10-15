@@ -98,7 +98,7 @@ checks it).
 | `rand` | everything: `seeded`, `Source` (SplitMix64) with `range`, `fraction`, `permutation`; the package functions `range`, `fraction`, `permutation` on the private native `nextOs` | — |
 | `crypto` | everything: `sha256`, `hmacSha256`, `randomBytes`, `equal` (natives) | — |
 | `json` | everything: `Value`, `parse`, `string`, `pretty`, all accessors | — |
-| `io` | everything: `readLine`, `readAll` (natives) | — |
+| `io` | everything: `readLine`, `read`, `readAll` (natives) | — |
 | `net` | everything: `listen`, `dial`, `Listener` (`accept`, `addr`, `close`), `Conn` (`read`, `write`, `setTimeout`, `remoteAddr`, `close`) (natives) | — |
 | `http` | everything: `Request`, `Response`, `Handler`, `path`, `query`, `statusText`, the status constants, `textResponse`, `jsonResponse`, `serve`, `serveListener`, `get`, `send` | — |
 
@@ -308,11 +308,14 @@ one-million-`a` vector, and RFC 4231 cases 1, 2, 3, 4, 6 and 7).
 ### io
 
 Stdin is a handle of the runtime's table (kind `SD_HANDLE_STDIN`), so
-`readLine` and `readAll` share its buffer, are serialised between
+`readLine`, `read` and `readAll` share its buffer, are serialised between
 goroutines (each call is atomic) and are stop points. The descriptor is
 left blocking (it may be shared with a terminal or another process), so
 the runtime always `poll`s before it `read`s. Stdout is flushed before each
-read. A `"\r"` is removed only directly before a `"\n"` (a last line
+read. `read(max)` (added for `seed lsp`, whose messages are a header line
+and a body of a given length with no newline after it) returns what the
+buffer holds, up to `max` bytes, or else one `read` of the descriptor, like
+`fs.File.read`. A `"\r"` is removed only directly before a `"\n"` (a last line
 `"x\r"` without a newline keeps it). `io` has no `tests/` directory: what
 it reads depends on the test runner's stdin, so it is tested by
 `tests/full/io_stdin*.sd` (with `.in` files), by `tests/examples.sh`

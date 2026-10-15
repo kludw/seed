@@ -1,0 +1,12 @@
+// io.read with max < 1 crashes.
+package main
+
+import "fmt"
+import "io"
+
+fn main([]string args) error {
+    fmt.println("before")
+    string? s = try io.read(0)
+    fmt.println("after " + (s == null).string())
+    return null
+}
