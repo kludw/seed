@@ -1,0 +1,35 @@
+// expect-error: too many errors; only the first 20 are shown
+// expect-errors: 20
+// 25 broken statements: the first 20 errors are shown, then a note (as for
+// type errors).
+package main
+
+fn main([]string args) error {
+    int x = 0
+    x = ]
+    x = ]
+    x = ]
+    x = ]
+    x = ]
+    x = ]
+    x = ]
+    x = ]
+    x = ]
+    x = ]
+    x = ]
+    x = ]
+    x = ]
+    x = ]
+    x = ]
+    x = ]
+    x = ]
+    x = ]
+    x = ]
+    x = ]
+    x = ]
+    x = ]
+    x = ]
+    x = ]
+    x = ]
+    return null
+}

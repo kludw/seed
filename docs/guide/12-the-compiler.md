@@ -35,7 +35,7 @@ Every message has the same parts:
 3. **The code**, with a `^` under the exact spot.
 4. **A hint** with the fix. Misspelt names get a "did you mean" suggestion.
 
-The compiler reports up to 20 errors at once, sorted by position, and avoids reporting knock-on errors caused by an earlier one, so you can usually fix them all in one pass.
+The compiler reports up to 20 errors at once, sorted by position, and avoids reporting knock-on errors caused by an earlier one, so you can usually fix them all in one pass. Syntax errors come first: when a file has one, the compiler reports one for each broken statement, struct field or other member (including those inside the blocks of an `if` or a function whose first line is broken), but checks types only once the syntax is right.
 
 ## The pedantic checks
 

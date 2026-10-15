@@ -17,6 +17,12 @@ completion proj/main.sd 21 17
 symbols proj/main.sd
 format proj/main.sd
 
+# Several syntax errors: one in a function's header, one in that
+# function's body and one in another function, all reported; hover still
+# answers in the body of the function with the broken header.
+change proj/main.sd edits/syntax_errors.sd
+hover proj/main.sd 19 14
+
 # Not formatted: a warning, and formatting replaces the whole text.
 change proj/main.sd edits/unformatted.sd
 format proj/main.sd

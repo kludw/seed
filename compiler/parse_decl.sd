@@ -146,7 +146,16 @@ fn (Parser p) mut parseFn(bool isPub, Pos start) {
     []int results = p.parseResult()
     f.results = p.ast.addList(results)
     f.resultCount = results.len()
-    if (!p.failed && (p.kind() == Tok.Newline || p.kind() == Tok.Eof)) {
+    int body = -1
+    if (p.failed) {
+        body = p.findFnBody(p.pos)
+    }
+    if (body >= 0) {
+        // The header has an error: parse the body anyway, for its errors.
+        p.pos = body
+        p.failed = false
+        f.body = p.parseBlock("")
+    } else if (!p.failed && (p.kind() == Tok.Newline || p.kind() == Tok.Eof)) {
         // No body: a native function, implemented in C (only allowed in the
         // standard library; the checker enforces that).
         f.body = -1
@@ -155,6 +164,26 @@ fn (Parser p) mut parseFn(bool isPub, Pos start) {
     }
     p.ast.fns.push(f)
     p.addTop(TopKind.Fn, p.ast.fns.len() - 1)
+}
+
+// After an error in a function's header: the index of the `{` that opens
+// its body (the first `{` from token i that ends its line), or -1 when the
+// next top-level declaration or the end of the file comes first.
+fn (Parser p) findFnBody(int i) int {
+    for (int j = i; j < p.toks.len(); j++) {
+        Token t = p.toks[j]
+        Tok k = t.kind
+        if (k == Tok.Eof) {
+            return -1
+        }
+        if (j > i && t.pos.col == 1 && (k == Tok.KwFn || k == Tok.KwType || k == Tok.KwConst || k == Tok.KwTest || k == Tok.KwPub || k == Tok.KwImport)) {
+            return -1
+        }
+        if (k == Tok.LBrace && p.endsLine(j)) {
+            return j
+        }
+    }
+    return -1
 }
 
 // Parameters up to and including the closing `)`; the `(` is already read.
@@ -249,7 +278,9 @@ fn (Parser p) mut parseTypeDecl(bool isPub) {
     p.expect(Tok.LBrace, " to open the type body")
     p.skipNewlines()
     []int members = []int{}
-    for (; !p.failed && p.kind() != Tok.RBrace && p.kind() != Tok.Eof; ) {
+    bool opened = !p.failed
+    for (; opened && p.kind() != Tok.RBrace && p.kind() != Tok.Eof; ) {
+        int from = p.pos
         if (td.kind == DeclKind.Struct) {
             bool fieldPub = p.accept(Tok.KwPub)
             int te = p.parseType(true)
@@ -277,6 +308,10 @@ fn (Parser p) mut parseTypeDecl(bool isPub) {
         }
         if (!p.failed && p.kind() != Tok.RBrace) {
             p.expect(Tok.Newline, "")
+        }
+        if (p.failed) {
+            // Skip the rest of the member and go on with the next one.
+            p.syncStatementFrom(from)
         }
         p.skipNewlines()
     }

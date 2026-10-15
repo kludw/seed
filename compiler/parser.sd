@@ -4,8 +4,11 @@
 //
 // Error recovery: the first syntax error in a statement sets `failed`; every
 // parse function then returns quickly without reporting more. The block
-// loop skips to the end of the statement and carries on, and the top-level
-// loop skips to the next declaration, so one run reports many errors.
+// loop skips to the end of the statement and carries on (still parsing the
+// blocks of an if, for or switch whose header is broken), the members of a
+// type and the body of a function with a broken header are parsed too, and
+// the top-level loop skips to the next declaration, so one run reports the
+// errors of every independent statement and declaration.
 //
 // Statements and expressions are in this file; declarations and types are in
 // parse_decl.sd.
@@ -199,10 +202,25 @@ fn (Parser p) mut syncStatementFrom(int from) {
             }
         }
     }
+    // In an if, for or switch whose header has the error, the blocks are
+    // still parsed, so that the errors inside them are reported too.
+    Tok first = p.kindAt(from)
+    bool bodies = first == Tok.KwIf || first == Tok.KwFor || first == Tok.KwSwitch
     for (;;) {
         Tok k = p.kind()
         if (k == Tok.Eof) {
             break
+        }
+        if (bodies && p.opensBody(open)) {
+            p.failed = false
+            if (first == Tok.KwSwitch) {
+                _ = p.parseSwitchBody(newStmt(StmtKind.Switch, p.here()))
+            } else {
+                _ = p.parseBlock("")
+            }
+            // Brackets the broken header left open are given up.
+            open = []Tok{}
+            continue
         }
         if (open.len() == 0 && k == Tok.Newline) {
             p.pos++
@@ -223,6 +241,36 @@ fn (Parser p) mut syncStatementFrom(int from) {
         p.pos++
     }
     p.failed = false
+}
+
+// While skipping a statement whose header has an error: whether the current
+// token is the `{` that opens one of its blocks. It ends its line and is
+// not inside braces; after a closed header it follows `)` or else, after an
+// unclosed one anything but a name or `]` (which would make it a literal).
+fn (Parser p) opensBody([]Tok open) bool {
+    if (p.kind() != Tok.LBrace || p.pos == 0 || !p.endsLine(p.pos)) {
+        return false
+    }
+    for (int i = 0; i < open.len(); i++) {
+        if (open[i] == Tok.LBrace) {
+            return false
+        }
+    }
+    Tok prev = p.toks[p.pos - 1].kind
+    if (open.len() == 0) {
+        return prev == Tok.RParen || prev == Tok.KwElse
+    }
+    return prev != Tok.Ident && prev != Tok.RBrack
+}
+
+// Whether token i is the last of its line (the lexer makes no Newline token
+// after some tokens, `{` among them).
+fn (Parser p) endsLine(int i) bool {
+    if (i + 1 >= p.toks.len()) {
+        return true
+    }
+    Token next = p.toks[i + 1]
+    return next.kind == Tok.Newline || next.kind == Tok.Eof || next.pos.line > p.toks[i].pos.line
 }
 
 // The index in open of the innermost bracket that the closing bracket k
@@ -389,6 +437,9 @@ fn (Parser p) mut parseBlockBody(string context, Pos start) int {
         p.ast.blocks.push(Block{pos: start, end: start, list: 0, count: 0})
         return p.ast.blocks.len() - 1
     }
+    // An error in the header before the `{` is reported already; the
+    // block's own statements are parsed (and their errors reported) anyway.
+    p.failed = false
     p.skipNewlines()
     []int stmts = []int{}
     for (; p.kind() != Tok.RBrace && p.kind() != Tok.Eof; ) {
@@ -610,7 +661,19 @@ fn (Parser p) mut parseSwitch() int {
     p.expect(Tok.LParen, " after switch (the value is always in parentheses)")
     s.expr = p.parseExpr()
     p.expect(Tok.RParen, " to close the switch value")
-    p.expect(Tok.LBrace, " to open the switch body")
+    return p.parseSwitchBody(s)
+}
+
+// The body of a switch, from its `{`.
+fn (Parser p) mut parseSwitchBody(Stmt header) int {
+    Stmt s = header
+    if (p.kind() == Tok.LBrace) {
+        // As in parseBlockBody: the cases are parsed after a header error.
+        p.pos++
+        p.failed = false
+    } else {
+        p.expect(Tok.LBrace, " to open the switch body")
+    }
     p.skipNewlines()
     []int cases = []int{}
     for (; !p.failed && (p.kind() == Tok.KwCase || p.kind() == Tok.KwDefault); ) {
