@@ -1,3 +1,2 @@
 crash: stack overflow or invalid memory access
- calls without a position (optimised code) ...
-    at depth (tests/full/trace_overflow_int.sd:8:4)
+depth (tests/full/trace_overflow_int.sd:

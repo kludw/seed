@@ -1,0 +1,16 @@
+// A tail call that never ends overflows the stack and crashes (exit 2), with
+// every C compiler: the generated C must not let it become a loop that never
+// ends (runtime/seed.h, SD_NO_TCE).
+package main
+
+import "fmt"
+
+fn spin(int n) int {
+    return spin(n + 1)
+}
+
+fn main([]string args) error {
+    fmt.println("start")
+    fmt.println(spin(0).string())
+    return null
+}

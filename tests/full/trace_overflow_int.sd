@@ -1,6 +1,8 @@
 // A stack overflow in a recursion of ints only: such a function runs as a
 // fast version without positions (compiler/README.md, "Crash sites"), so
 // the trace counts its calls and names the function where it was entered.
+// Some C compilers (Apple clang) keep the positions instead, so the
+// expected output only asks for the crash and a frame of depth.
 package main
 
 import "fmt"

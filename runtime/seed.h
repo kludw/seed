@@ -61,11 +61,14 @@ SD_NOINLINE __attribute__((unused)) static int *sd_errno_loc_(void) {
 /* On functions that may recurse (a cycle of the call graph): no tail-call
  * elimination, so a recursion that does not end overflows the stack and
  * crashes, as with every C compiler, rather than becoming a loop that never
- * ends (clang turns `return f(n + 1) + 1` into one). */
+ * ends (clang turns `return f(n + 1) + 1` into one). GCC needs nothing: the
+ * generated code works after each call (overflow checks, crash-site marks),
+ * so it makes no such loop, and its optimize attribute would keep the
+ * functions from being inlined into each other (fib was 25% slower).
+ * tests/core/crash_recursion.sd and tests/full/crash_tail_recursion.sd
+ * check both compilers (CI builds with GCC on Linux, clang on macOS). */
 #if defined(__clang__)
 #define SD_NO_TCE __attribute__((disable_tail_calls))
-#elif defined(__GNUC__)
-#define SD_NO_TCE __attribute__((optimize("no-optimize-sibling-calls")))
 #else
 #define SD_NO_TCE
 #endif
@@ -74,6 +77,15 @@ SD_NOINLINE __attribute__((unused)) static int *sd_errno_loc_(void) {
  * file, as with seed c), so that a crash in them has the return address of
  * a call on a marked line (crash traces, below). */
 #define SD_CRASHES __attribute__((noinline))
+/* The fast versions of int functions (compiler/gen_fast.sd) are small hot
+ * loops of calls and branches; on x86-64 they start on a 64-byte line so
+ * their speed does not depend on where the rest of the program happens to
+ * put them (Intel's 32-byte jump boundaries: fib moved 20% with its address). */
+#if defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__))
+#define SD_FAST_ALIGN __attribute__((aligned(64)))
+#else
+#define SD_FAST_ALIGN
+#endif
 #define SD_LIKELY(x) __builtin_expect(!!(x), 1)
 #define SD_UNLIKELY(x) __builtin_expect(!!(x), 0)
 #define SD_PRINTF(a, b) __attribute__((format(printf, a, b)))
