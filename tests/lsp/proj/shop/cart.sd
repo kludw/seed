@@ -1,0 +1,32 @@
+package shop
+
+import "errors"
+
+// A shopping cart: the items in the order they were added.
+pub type Cart struct {
+    pub string owner
+    []Item items
+}
+
+// A new, empty cart for owner.
+pub fn newCart(string owner) Cart {
+    return Cart{owner: owner, items: []Item{}}
+}
+
+// Adds an item; the price must not be negative.
+pub fn (Cart c) mut add(Item item) error {
+    if (item.price < 0) {
+        return errors.new("negative price")
+    }
+    c.items.push(item)
+    return null
+}
+
+// The sum of the prices, in cents.
+pub fn (Cart c) total() int {
+    int sum = 0
+    for (int i = 0; i < c.items.len(); i++) {
+        sum = sum + c.items[i].price
+    }
+    return sum
+}

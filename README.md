@@ -104,6 +104,7 @@ There is one binary, `seed`:
 | `seed fmt [--check] <file.sd>...` | Formats files in place, or reports the ones that aren't formatted. |
 | `seed c <dir \| file.sd...>` | Prints the generated C (for testing the compiler). |
 | `seed ast <file.sd>...` | Prints the syntax tree (for debugging the parser). |
+| `seed lsp` | A language server on stdin and stdout, for editors: the compiler's errors as you type, formatting, go to definition, hover, completion and the outline ([the guide, chapter 1](docs/guide/01-getting-started.md#editors)). |
 
 A program is a single `.sd` file or the `package main` of a directory, together with the packages it imports. The compiler checks it, generates one self-contained C file (the runtime included), and compiles that with `cc`.
 
@@ -120,6 +121,7 @@ The Makefile has the development targets:
 | `make test-lib` | The standard library's tests. |
 | `make test-fmt` | The formatter's self-checks and golden tests. |
 | `make test-examples` | Builds every example and checks its output, its tests and its formatting. |
+| `make test-lsp` | The language server: scripted sessions over stdin and stdout, and documents typed in a few bytes at a time. |
 | `make test-leaks` | Every test program under a leak checker: macOS `leaks`, LeakSanitizer on Linux (slow). |
 | `docs/guide/check.sh` | Every example of the guide, against its expected output. |
 | `runtime/tests/run.sh` | The runtime's own C tests, under the address, undefined-behaviour and thread sanitizers. |
@@ -137,7 +139,7 @@ The Makefile has the development targets:
 | `bootstrap/` | `seed.c`, the C snapshot of the compiler that `make` starts from, and `inputs.sha256`, the files it was made from. |
 | [tests/](tests/README.md) | Conformance tests: programs with their expected output, and programs the compiler must reject. |
 | [examples/](examples/README.md) | Sixteen example programs, from `wordcount` to an expression language, a concurrent prime sieve, a key-value store and a JSON HTTP API, with a checked runner. |
-| [editors/vscode/](editors/vscode/README.md) | Syntax highlighting for VS Code. |
+| [editors/vscode/](editors/vscode/README.md) | Syntax highlighting for VS Code, and a client for the language server. |
 
 The documentation:
 
@@ -161,7 +163,7 @@ The documentation:
 - Big integers use quadratic algorithms, so converting a number with millions of digits to text is slow.
 - Tested on macOS (arm64) and Linux (x86_64, glibc). Other POSIX systems are untested.
 - The parser reports at most one syntax error per statement.
-- There is no language server and no debugger; generated programs are C, so `lldb` works on them.
+- There is no debugger; generated programs are C, so `lldb` works on them. The language server (`seed lsp`) has no rename, references or signature help.
 
 Bugs found in passing are recorded in [compiler/BUGS_FIXED.md](compiler/BUGS_FIXED.md) and [lib/COMPILER_BUGS.md](lib/COMPILER_BUGS.md).
 

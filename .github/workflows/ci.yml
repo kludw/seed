@@ -48,6 +48,9 @@ jobs:
         timeout-minutes: 20
         run: make test-examples
 
+      - name: Language server
+        run: make test-lsp
+
       - name: Guide
         timeout-minutes: 20
         run: docs/guide/check.sh

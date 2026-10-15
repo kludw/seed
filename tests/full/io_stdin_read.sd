@@ -1,0 +1,32 @@
+package main
+
+import "fmt"
+import "io"
+
+// io.read returns at most max bytes, shares its buffer with readLine, and
+// gives null at the end of input.
+fn main([]string args) error {
+    string? head = try io.read(5)
+    if (head != null) {
+        fmt.println("[" + head + "]")
+    }
+    string? line = try io.readLine()
+    if (line != null) {
+        fmt.println("line: [" + line + "]")
+    }
+    []string parts = []string{}
+    for (;;) {
+        string? chunk = try io.read(3)
+        if (chunk == null) {
+            break
+        }
+        if (chunk.len() > 3) {
+            fmt.println("too long: " + chunk)
+        }
+        parts.push(chunk)
+    }
+    fmt.println("rest: [" + parts.join("") + "]")
+    string? after = try io.read(10)
+    fmt.println("after: " + (after == null).string())
+    return null
+}

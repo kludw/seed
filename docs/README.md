@@ -42,4 +42,4 @@ Start with the guide if you want to learn Seed; use the reference when you need 
 
 ## Tools
 
-- [editors/vscode/](../editors/vscode/README.md): syntax highlighting and editor settings for VS Code.
+- [editors/vscode/](../editors/vscode/README.md): syntax highlighting, editor settings and a client for the language server (`seed lsp`) for VS Code.

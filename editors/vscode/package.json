@@ -1,15 +1,23 @@
 {
   "name": "seed-lang",
   "displayName": "Seed",
-  "description": "Syntax highlighting and editor settings for the Seed language (.sd files)",
+  "description": "Syntax highlighting, editor settings and the seed lsp language server for the Seed language (.sd files)",
   "publisher": "seed-lang",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "engines": {
-    "vscode": "^1.60.0"
+    "vscode": "^1.82.0"
   },
   "categories": [
-    "Programming Languages"
+    "Programming Languages",
+    "Formatters"
   ],
+  "main": "./extension.js",
+  "activationEvents": [
+    "onLanguage:seed"
+  ],
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
   "contributes": {
     "languages": [
       {
@@ -30,6 +38,31 @@
         "scopeName": "source.seed",
         "path": "./syntaxes/seed.tmLanguage.json"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "Seed",
+      "properties": {
+        "seed.path": {
+          "type": "string",
+          "default": "seed",
+          "description": "The seed binary that runs the language server (`seed lsp`): seed on the PATH after make install, or the absolute path of build/seed2."
+        },
+        "seed.languageServer.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Start the language server (diagnostics, formatting, go to definition, hover, completion, outline). Takes effect after a reload."
+        },
+        "seed.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "description": "Log the messages between VS Code and the language server in the Output panel (Seed language server)."
+        }
+      }
+    }
   }
 }

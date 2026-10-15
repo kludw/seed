@@ -20,7 +20,7 @@ LIB_SRC = $(sort $(wildcard lib/*/*.sd lib/*/*.c))
 BOOT_INPUTS = $(SEED_SRC) $(RUNTIME_SRC) $(LIB_SRC)
 SHA256 = $(shell command -v sha256sum >/dev/null 2>&1 && echo sha256sum || echo shasum -a 256)
 
-.PHONY: all test test-full test-leaks test-fmt test-lib test-examples verify release install uninstall clean
+.PHONY: all test test-full test-leaks test-fmt test-lib test-examples test-lsp verify release install uninstall clean
 
 all: build/seed2
 
@@ -77,6 +77,12 @@ test: build/seed2
 test-full: build/seed2
 	tests/run.sh "build/seed2 c" tests/full tests/spec
 	tests/test_cmd.sh build/seed2
+
+# The language server (seed lsp): scripted JSON-RPC sessions over stdin
+# and stdout, and sessions that type the test documents in a few bytes at
+# a time (tests/test_lsp.sh).
+test-lsp: build/seed2
+	tests/test_lsp.sh build/seed2
 
 # Every test program under a leak checker: macOS `leaks --atExit`, or
 # LeakSanitizer elsewhere (slow: a few minutes).

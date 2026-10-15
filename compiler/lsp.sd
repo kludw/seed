@@ -1,0 +1,459 @@
+// `seed lsp`: a Language Server Protocol server on stdin and stdout
+// (compiler/README.md, "The language server").
+//
+// Messages are JSON-RPC 2.0 with a Content-Length header. The server keeps
+// the text of every open document and answers each request by loading and
+// checking the document's package again, with the open documents' text in
+// place of the files on disk (lsp_check.sd), in a goroutine of its own: a
+// crash of the compiler on half-written code fails that one request (the
+// result is empty) and the server carries on. lsp_query.sd answers
+// definition, hover, completion and document symbols from the checked tree.
+package main
+
+import "errors"
+import "fmt"
+import "io"
+import "json"
+import "os"
+
+// An open document: the client's URI, the path it names and the editor's
+// text, which may differ from the file on disk.
+type LspDoc struct {
+    string uri
+    string path
+    string text
+}
+
+type LspServer struct {
+    string seedRoot
+    map[string]LspDoc docs
+    bool shutdown
+}
+
+// What a goroutine works out for one request (see lspRunJob): kind is
+// "diagnostics", "definition", "hover", "completion", "symbols" or
+// "format"; overlay has the text of every open document by path; line and
+// character are the request's position (LSP: from 0, in UTF-16 units).
+type LspJob struct {
+    string kind
+    string seedRoot
+    string path
+    map[string]string overlay
+    int line
+    int character
+}
+
+// Serves until the client sends exit or closes stdin.
+fn lspCommand(string seedRoot) error {
+    LspServer s = LspServer{seedRoot: seedRoot, docs: map[string]LspDoc{}, shutdown: false}
+    for (;;) {
+        string? body = try lspReadMessage()
+        if (body == null) {
+            return null
+        }
+        json.Value msg, error perr = json.parse(body)
+        if (perr != null) {
+            lspSend(lspErrorResponse(json.Value.Null, -32700, perr.message()))
+            continue
+        }
+        s.handle(msg)
+    }
+}
+
+// The body of the next message, or null at the end of input. Headers other
+// than Content-Length are ignored.
+fn lspReadMessage() (string?, error) {
+    int length = -1
+    for (;;) {
+        string? line = try io.readLine()
+        if (line == null) {
+            return null, null
+        }
+        if (line == "") {
+            if (length >= 0) {
+                break
+            }
+            continue
+        }
+        int? colon = line.index(":")
+        if (colon != null && line.slice(0, colon).trim().toLower() == "content-length") {
+            int n, error err = line.slice(colon + 1, line.len()).trim().toInt()
+            if (err == null && n >= 0) {
+                length = n
+            }
+        }
+    }
+    []string parts = []string{}
+    int got = 0
+    for (; got < length; ) {
+        string? chunk = try io.read(length - got)
+        if (chunk == null) {
+            return null, errors.new("seed lsp: the input ended inside a message")
+        }
+        parts.push(chunk)
+        got = got + chunk.len()
+    }
+    return parts.join(""), null
+}
+
+fn lspSend(json.Value msg) {
+    string body = msg.string()
+    fmt.print("Content-Length: " + body.len().string() + "\r\n\r\n" + body)
+}
+
+fn lspResponse(json.Value id, json.Value result) json.Value {
+    map[string]json.Value m = map[string]json.Value{}
+    m["jsonrpc"] = json.Value.String("2.0")
+    m["id"] = id
+    m["result"] = result
+    return json.Value.Object(m)
+}
+
+fn lspErrorResponse(json.Value id, int code, string message) json.Value {
+    map[string]json.Value e = map[string]json.Value{}
+    e["code"] = lspNum(code)
+    e["message"] = json.Value.String(message)
+    map[string]json.Value m = map[string]json.Value{}
+    m["jsonrpc"] = json.Value.String("2.0")
+    m["id"] = id
+    m["error"] = json.Value.Object(e)
+    return json.Value.Object(m)
+}
+
+fn lspNotification(string method, json.Value params) json.Value {
+    map[string]json.Value m = map[string]json.Value{}
+    m["jsonrpc"] = json.Value.String("2.0")
+    m["method"] = json.Value.String(method)
+    m["params"] = params
+    return json.Value.Object(m)
+}
+
+fn lspNum(int n) json.Value {
+    return json.Value.Number(float(n))
+}
+
+// One message from the client.
+fn (LspServer s) mut handle(json.Value msg) {
+    string? method = msg.get("method").asString()
+    if (method == null) {
+        // A response to a request of ours; the server sends none.
+        return
+    }
+    json.Value id = msg.get("id")
+    bool isRequest = !id.isNull()
+    json.Value params = msg.get("params")
+    if (method == "initialize") {
+        lspSend(lspResponse(id, lspCapabilities()))
+        return
+    }
+    if (method == "initialized" || method == "$/cancelRequest" || method == "$/setTrace" || method == "workspace/didChangeConfiguration") {
+        return
+    }
+    if (s.shutdown && method != "exit") {
+        if (isRequest) {
+            lspSend(lspErrorResponse(id, -32600, "seed lsp is shutting down"))
+        }
+        return
+    }
+    if (method == "shutdown") {
+        s.shutdown = true
+        lspSend(lspResponse(id, json.Value.Null))
+        return
+    }
+    if (method == "exit") {
+        if (s.shutdown) {
+            os.exit(0)
+        }
+        os.exit(1)
+    }
+    if (method == "textDocument/didOpen") {
+        json.Value td = params.get("textDocument")
+        string? uri = td.get("uri").asString()
+        string? text = td.get("text").asString()
+        if (uri != null && text != null) {
+            s.docs[uri] = LspDoc{uri: uri, path: lspUriToPath(uri), text: text}
+            s.publishAll()
+        }
+        return
+    }
+    if (method == "textDocument/didChange") {
+        string? curi = params.get("textDocument").get("uri").asString()
+        if (curi == null) {
+            return
+        }
+        LspDoc? doc = s.docs[curi]
+        if (doc == null) {
+            return
+        }
+        string changed = doc.text
+        []json.Value? changes = params.get("contentChanges").asArray()
+        if (changes != null) {
+            for (int i = 0; i < changes.len(); i++) {
+                changed = lspApplyChange(changed, changes[i])
+            }
+        }
+        s.docs[curi] = LspDoc{uri: curi, path: doc.path, text: changed}
+        s.publishAll()
+        return
+    }
+    if (method == "textDocument/didClose") {
+        string? xuri = params.get("textDocument").get("uri").asString()
+        if (xuri != null && s.docs[xuri] != null) {
+            s.docs.delete(xuri)
+            lspSend(lspNotification("textDocument/publishDiagnostics", lspDiagParams(xuri, []json.Value{})))
+            s.publishAll()
+        }
+        return
+    }
+    if (method == "textDocument/didSave") {
+        s.publishAll()
+        return
+    }
+    string kind = ""
+    if (method == "textDocument/formatting") {
+        kind = "format"
+    } else if (method == "textDocument/definition") {
+        kind = "definition"
+    } else if (method == "textDocument/hover") {
+        kind = "hover"
+    } else if (method == "textDocument/completion") {
+        kind = "completion"
+    } else if (method == "textDocument/documentSymbol") {
+        kind = "symbols"
+    } else if (method == "seed/crash") {
+        // For tests/test_lsp.sh: a request whose work crashes.
+        kind = "crash"
+    }
+    if (kind == "") {
+        if (isRequest) {
+            lspSend(lspErrorResponse(id, -32601, "seed lsp does not support " + method))
+        }
+        return
+    }
+    string? quri = params.get("textDocument").get("uri").asString()
+    if (quri == null) {
+        lspSend(lspErrorResponse(id, -32602, method + " needs textDocument.uri"))
+        return
+    }
+    int line = 0
+    int character = 0
+    int? l = params.get("position").get("line").asInt()
+    int? ch = params.get("position").get("character").asInt()
+    if (l != null && ch != null) {
+        line = l
+        character = ch
+    }
+    json.Value result = s.runJob(kind, lspUriToPath(quri), line, character)
+    if (result.isNull() && (kind == "format" || kind == "symbols")) {
+        result = json.Value.Array([]json.Value{})
+    }
+    lspSend(lspResponse(id, result))
+}
+
+fn lspCapabilities() json.Value {
+    map[string]json.Value sync = map[string]json.Value{}
+    sync["openClose"] = json.Value.Bool(true)
+    sync["change"] = lspNum(1)
+    map[string]json.Value save = map[string]json.Value{}
+    save["includeText"] = json.Value.Bool(false)
+    sync["save"] = json.Value.Object(save)
+    map[string]json.Value completion = map[string]json.Value{}
+    completion["triggerCharacters"] = json.Value.Array([]json.Value{json.Value.String(".")})
+    map[string]json.Value caps = map[string]json.Value{}
+    caps["positionEncoding"] = json.Value.String("utf-16")
+    caps["textDocumentSync"] = json.Value.Object(sync)
+    caps["documentFormattingProvider"] = json.Value.Bool(true)
+    caps["definitionProvider"] = json.Value.Bool(true)
+    caps["hoverProvider"] = json.Value.Bool(true)
+    caps["completionProvider"] = json.Value.Object(completion)
+    caps["documentSymbolProvider"] = json.Value.Bool(true)
+    map[string]json.Value info = map[string]json.Value{}
+    info["name"] = json.Value.String("seed lsp")
+    map[string]json.Value result = map[string]json.Value{}
+    result["capabilities"] = json.Value.Object(caps)
+    result["serverInfo"] = json.Value.Object(info)
+    return json.Value.Object(result)
+}
+
+// A change of didChange: the whole text, or (if the client sends ranges
+// although the server asked for full sync) a range replaced.
+fn lspApplyChange(string text, json.Value change) string {
+    string? next = change.get("text").asString()
+    if (next == null) {
+        return text
+    }
+    json.Value r = change.get("range")
+    if (r.isNull()) {
+        return next
+    }
+    int? sl = r.get("start").get("line").asInt()
+    int? sc = r.get("start").get("character").asInt()
+    int? el = r.get("end").get("line").asInt()
+    int? ec = r.get("end").get("character").asInt()
+    if (sl == null || sc == null || el == null || ec == null) {
+        return next
+    }
+    int from = lspOffset(text, sl, sc)
+    int to = lspOffset(text, el, ec)
+    if (to < from) {
+        return text
+    }
+    return text.slice(0, from) + next + text.slice(to, text.len())
+}
+
+// The open documents' text by path.
+fn (LspServer s) overlay() map[string]string {
+    map[string]string out = map[string]string{}
+    []string uris = s.docs.keys()
+    for (int i = 0; i < uris.len(); i++) {
+        LspDoc? d = s.docs[uris[i]]
+        if (d != null) {
+            out[d.path] = d.text
+        }
+    }
+    return out
+}
+
+// Works out one request in a goroutine (lspRunJob), so that a crash in the
+// compiler only loses that answer: the result is then null, and the crash
+// is logged to stderr. A completion whose check crashed is tried again
+// without the checker.
+fn (LspServer s) runJob(string kind, string path, int line, int character) json.Value {
+    LspJob job = LspJob{kind: kind, seedRoot: s.seedRoot, path: path, overlay: s.overlay(), line: line, character: character}
+    json.Value? v = lspTryJob(job)
+    if (v == null && kind == "completion") {
+        job.kind = "completion-unchecked"
+        v = lspTryJob(job)
+    }
+    if (v == null) {
+        return json.Value.Null
+    }
+    return v
+}
+
+fn lspTryJob(LspJob job) json.Value? {
+    chan json.Value out = chan json.Value(1)
+    error err = group {
+        spawn lspJobTask(job, out)
+    }
+    if (err != null) {
+        fmt.eprintln("seed lsp: " + job.kind + " " + job.path + ": " + err.message())
+        return null
+    }
+    return out.receive()
+}
+
+fn lspJobTask(LspJob job, chan json.Value out) error {
+    json.Value v = try lspRunJob(job)
+    out.send(v)
+    return null
+}
+
+fn lspRunJob(LspJob job) (json.Value, error) {
+    if (job.kind == "crash") {
+        os.crash("seed lsp: crash requested (seed/crash)")
+    }
+    if (job.kind == "diagnostics") {
+        return lspDiagnostics(job)
+    }
+    if (job.kind == "format") {
+        return lspFormat(job), null
+    }
+    if (job.kind == "symbols") {
+        return lspSymbols(job), null
+    }
+    if (job.kind == "completion" || job.kind == "completion-unchecked") {
+        return lspCompletion(job)
+    }
+    return lspLookup(job)
+}
+
+// Checks the program of every open document and publishes the document's
+// diagnostics. A check of a package gives the diagnostics of all its files
+// (lspDiagnostics), so the open documents of one package share it.
+fn (LspServer s) mut publishAll() {
+    []string uris = s.docs.keys()
+    map[string]json.Value known = map[string]json.Value{}
+    for (int i = 0; i < uris.len(); i++) {
+        LspDoc? d = s.docs[uris[i]]
+        if (d == null) {
+            continue
+        }
+        json.Value? done = known[d.path]
+        json.Value list = json.Value.Null
+        if (done != null) {
+            list = done
+        } else {
+            json.Value all = s.runJob("diagnostics", d.path, 0, 0)
+            map[string]json.Value? got = all.asObject()
+            if (got != null) {
+                []string paths = got.keys()
+                for (int k = 0; k < paths.len(); k++) {
+                    json.Value? ds = got[paths[k]]
+                    if (ds != null) {
+                        known[paths[k]] = ds
+                    }
+                }
+            }
+            list = all.get(d.path)
+        }
+        lspSend(lspNotification("textDocument/publishDiagnostics", lspDiagParams(d.uri, list.asArray())))
+    }
+}
+
+fn lspDiagParams(string uri, []json.Value? diags) json.Value {
+    map[string]json.Value m = map[string]json.Value{}
+    m["uri"] = json.Value.String(uri)
+    if (diags == null) {
+        m["diagnostics"] = json.Value.Array([]json.Value{})
+    } else {
+        m["diagnostics"] = json.Value.Array(diags)
+    }
+    return json.Value.Object(m)
+}
+
+// ---- URIs ----
+
+// The path of a file: URI, with %XX escapes decoded.
+fn lspUriToPath(string uri) string {
+    string p = uri
+    if (p.startsWith("file://")) {
+        p = p.slice(7, p.len())
+        if (!p.startsWith("/")) {
+            int? slash = p.index("/")
+            if (slash == null) {
+                p = "/"
+            } else {
+                p = p.slice(slash, p.len())
+            }
+        }
+    }
+    []byte out = []byte{}
+    for (int i = 0; i < p.len(); i++) {
+        if (p[i] == '%' && i + 2 < p.len() && hexValue(p[i + 1]) >= 0 && hexValue(p[i + 2]) >= 0) {
+            out.push(byte(hexValue(p[i + 1]) * 16 + hexValue(p[i + 2])))
+            i = i + 2
+        } else {
+            out.push(p[i])
+        }
+    }
+    return cleanPath(absPath(string(out)))
+}
+
+// The file: URI of a path. Every byte but letters, digits, / and -._~ is
+// escaped.
+fn lspPathToUri(string path) string {
+    string hex = "0123456789ABCDEF"
+    []byte out = []byte{}
+    for (int i = 0; i < path.len(); i++) {
+        byte b = path[i]
+        if ((b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') || b == '/' || b == '-' || b == '.' || b == '_' || b == '~') {
+            out.push(b)
+        } else {
+            out.push('%')
+            out.push(hex[int(b) / 16])
+            out.push(hex[int(b) % 16])
+        }
+    }
+    return "file://" + string(out)
+}

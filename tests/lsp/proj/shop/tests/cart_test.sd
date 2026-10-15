@@ -1,0 +1,7 @@
+package shop
+
+test "total adds the prices" {
+    Cart c = newCart("bo")
+    try c.add(Item{name: "a", price: 2, size: Size.Small})
+    assert(c.total() == 2)
+}
