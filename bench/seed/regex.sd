@@ -1,0 +1,82 @@
+// Regular expressions over a 1.5 MB log: findAll with groups, matches on
+// each line, replace and split.
+package main
+
+import "fmt"
+import "regex"
+
+const []string words = []string{"alpha", "beta", "gamma", "delta", "running", "error", "Warning", "sing", "x", "data", "load", "ok", "timeout", "user", "WARN", "connecting"}
+
+const []string hosts = []string{"example", "test", "mail", "corp"}
+
+// A deterministic log: one line per entry, with a date, an address and
+// some words, separated by spaces, commas and semicolons.
+fn makeLog(int lines) string {
+    []string out = []string{}
+    int x = 42
+    for (int i = 0; i < lines; i++) {
+        x = (x * 1103515245 + 12345) % 2147483648
+        int month = 1 + x % 12
+        int day = 1 + (x / 16) % 28
+        []string line = []string{"2026-" + pad2(month) + "-" + pad2(day)}
+        line.push(words[(x / 7) % words.len()] + "@" + hosts[(x / 3) % hosts.len()] + ".com")
+        int n = 4 + x % 6
+        for (int k = 0; k < n; k++) {
+            x = (x * 1103515245 + 12345) % 2147483648
+            string sep = " "
+            if (x % 5 == 0) {
+                sep = ", "
+            } else if (x % 7 == 0) {
+                sep = ";  "
+            }
+            line.push(sep + words[(x / 11) % words.len()] + (x % 1000).string())
+        }
+        out.push(line.join(" "))
+    }
+    return out.join("\n") + "\n"
+}
+
+fn pad2(int n) string {
+    if (n < 10) {
+        return "0" + n.string()
+    }
+    return n.string()
+}
+
+fn main([]string args) error {
+    string text = makeLog(20000)
+    []string lines = text.split("\n")
+    regex.Regex email = regex.mustCompile("\\b(\\w+)@(\\w+)\\.(com|org)\\b")
+    regex.Regex alert = regex.mustCompile("(?i)error|warn")
+    regex.Regex date = regex.mustCompile("(?m)^(\\d{4})-(\\d{2})-(\\d{2})")
+    regex.Regex space = regex.mustCompile("\\s+")
+    regex.Regex sep = regex.mustCompile("[,;]\\s*")
+    regex.Regex ing = regex.mustCompile("[a-z]+ing\\b")
+    int total = 0
+    for (int round = 0; round < 5; round++) {
+        []regex.Match ms = email.findAll(text)
+        for (int i = 0; i < ms.len(); i++) {
+            string? user = ms[i].groupText(1)
+            if (user != null) {
+                total = total + user.len()
+            }
+        }
+        for (int i = 0; i < lines.len(); i++) {
+            if (alert.matches(lines[i])) {
+                total++
+            }
+        }
+        []regex.Match ds = date.findAll(text)
+        for (int i = 0; i < ds.len(); i++) {
+            string? m = ds[i].groupText(2)
+            if (m != null) {
+                total = total + try m.toInt()
+            }
+        }
+        total = total + space.replace(text, " ").len()
+        total = total + sep.split(text).len()
+        total = total + ing.findAll(text).len()
+    }
+    fmt.println(total.string())
+    return null
+}

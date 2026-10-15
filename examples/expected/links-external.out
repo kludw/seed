@@ -1,0 +1,3 @@
+https://cdn.example.net/img/map.png
+mailto:harbour@example.com
+! url.parse: http://bad host/: invalid character (space) at offset 10; percent-encode it

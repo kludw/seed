@@ -1,0 +1,196 @@
+package csv
+
+import "fs"
+
+fn csvTestParse(string text) [][]string {
+    [][]string? rows, error err = parse(text, ',')
+    if (err != null) {
+        return [][]string{[]string{"error: " + err.message()}}
+    }
+    if (rows == null) {
+        return [][]string{}
+    }
+    return rows
+}
+
+fn csvTestError(string text) string {
+    _, error err = parse(text, ',')
+    if (err == null) {
+        return "no error"
+    }
+    return err.message()
+}
+
+test "simple records" {
+    assert(csvTestParse("a,b,c\n1,2,3\n") == [][]string{[]string{"a", "b", "c"}, []string{"1", "2", "3"}})
+    assert(csvTestParse("a,b") == [][]string{[]string{"a", "b"}})
+    assert(csvTestParse("") == [][]string{})
+    assert(csvTestParse("\n\n") == [][]string{})
+    assert(csvTestParse("a,,c,\n") == [][]string{[]string{"a", "", "c", ""}})
+    assert(csvTestParse(",") == [][]string{[]string{"", ""}})
+    // Records may have different numbers of fields.
+    assert(csvTestParse("a\nb,c\n") == [][]string{[]string{"a"}, []string{"b", "c"}})
+    // Spaces are part of fields.
+    assert(csvTestParse(" a , b ") == [][]string{[]string{" a ", " b "}})
+}
+
+test "CRLF and empty lines" {
+    assert(csvTestParse("a,b\r\nc,d\r\n") == [][]string{[]string{"a", "b"}, []string{"c", "d"}})
+    assert(csvTestParse("a\n\n\nb\n") == [][]string{[]string{"a"}, []string{"b"}})
+    // A lone \r inside a field stays.
+    assert(csvTestParse("a\rb,c\n") == [][]string{[]string{"a\rb", "c"}})
+}
+
+test "quoted fields" {
+    assert(csvTestParse("\"a,b\",c\n") == [][]string{[]string{"a,b", "c"}})
+    assert(csvTestParse("\"say \"\"hi\"\"\",x") == [][]string{[]string{"say \"hi\"", "x"}})
+    assert(csvTestParse("\"\",\"\"") == [][]string{[]string{"", ""}})
+    assert(csvTestParse("\"\"\"\"") == [][]string{[]string{"\""}})
+    assert(csvTestParse("x,\"a\"\n") == [][]string{[]string{"x", "a"}})
+    assert(csvTestParse("\"a\",") == [][]string{[]string{"a", ""}})
+}
+
+test "line breaks inside quoted fields" {
+    assert(csvTestParse("\"line 1\nline 2\",b\nc,d\n") == [][]string{[]string{"line 1\nline 2", "b"}, []string{"c", "d"}})
+    // \r\n inside a quoted field becomes \n, as in Go.
+    assert(csvTestParse("\"a\r\nb\"\r\n") == [][]string{[]string{"a\nb"}})
+    // An empty line inside a quoted field is kept.
+    assert(csvTestParse("\"a\n\nb\",c") == [][]string{[]string{"a\n\nb", "c"}})
+    assert(csvTestParse("\"a\n\"\"b\"\"\n\"") == [][]string{[]string{"a\n\"b\"\n"}})
+}
+
+test "errors give the line and column" {
+    assert(csvTestError("a,b\"c\n") == "csv.parse: line 1, column 4: '\"' in an unquoted field (quote the field and double the '\"')")
+    assert(csvTestError("x\n\"a\"b,c\n") == "csv.parse: line 2, column 4: unexpected 'b' after a quoted field")
+    assert(csvTestError("a\n\"open\nstill open\n") == "csv.parse: line 2, column 1: quoted field not closed")
+    assert(csvTestError("a,\"b") == "csv.parse: line 1, column 3: quoted field not closed")
+}
+
+test "other delimiters" {
+    [][]string? rows, error err = parse("a;b\t;\"c;d\"\n", ';')
+    assert(err == null)
+    assert(rows == [][]string{[]string{"a", "b\t", "c;d"}})
+    rows, err = parse("a\tb c\n", '\t')
+    assert(err == null)
+    assert(rows == [][]string{[]string{"a", "b c"}})
+}
+
+fn crashDelimiter() {
+    _ = reader('"')
+}
+
+fn crashFormatDelimiter() {
+    _ = format([][]string{}, '\n')
+}
+
+test "an invalid delimiter crashes" {
+    error err = group {
+        spawn crashDelimiter()
+    }
+    assert(err != null)
+    assert(err.message() == "crash: csv.reader: invalid delimiter '\"'")
+    err = group {
+        spawn crashFormatDelimiter()
+    }
+    assert(err != null)
+    assert(err.message() == "crash: csv.format: invalid delimiter byte 10")
+}
+
+test "feed reads line by line" {
+    Reader r = reader(',')
+    []string? rec, error err = r.feed("a,\"multi")
+    assert(err == null)
+    assert(rec == null)
+    rec, err = r.feed("line\",b")
+    assert(err == null)
+    assert(rec == []string{"a", "multi\nline", "b"})
+    rec, err = r.feed("")
+    assert(err == null)
+    assert(rec == null)
+    rec, err = r.feed("c,d\r")
+    assert(err == null)
+    assert(rec == []string{"c", "d"})
+    rec, err = r.feed(null)
+    assert(err == null)
+    assert(rec == null)
+    Reader open = reader(',')
+    _, err = open.feed("\"x")
+    assert(err == null)
+    _, err = open.feed(null)
+    assert(err != null)
+    assert(err.message() == "csv.reader: line 1, column 1: quoted field not closed")
+}
+
+test "feed reads a file with fs.File.readLine" {
+    string dir = try fs.makeTemp("csv-test-")
+    defer _ = fs.removeAll(dir)
+    string path = dir + "/data.csv"
+    try fs.write(path, "name,notes\r\nann,\"likes\r\ntea\"\r\nbob,\"says \"\"hi\"\"\"\r\n")
+    fs.File f = try fs.open(path)
+    defer f.close()
+    Reader r = reader(',')
+    [][]string rows = [][]string{}
+    for (;;) {
+        string? line = try f.readLine()
+        []string? rec = try r.feed(line)
+        if (rec != null) {
+            rows.push(rec)
+        }
+        if (line == null) {
+            break
+        }
+    }
+    assert(rows == [][]string{[]string{"name", "notes"}, []string{"ann", "likes\ntea"}, []string{"bob", "says \"hi\""}})
+}
+
+test "parseMaps" {
+    []map[string]string? recs, error err = parseMaps("name,age\nann,31\nbob,\"4,2\"\n", ',')
+    assert(err == null)
+    assert(recs != null)
+    if (recs != null) {
+        assert(recs.len() == 2)
+        assert(recs[0]["name"] == "ann")
+        assert(recs[0]["age"] == "31")
+        assert(recs[1]["age"] == "4,2")
+        assert(recs[1].keys() == []string{"name", "age"})
+    }
+    recs, err = parseMaps("", ',')
+    assert(err == null)
+    assert(recs == []map[string]string{})
+    recs, err = parseMaps("a,b\n1,2\n\"x\ny\"\n", ',')
+    assert(err != null)
+    assert(err.message() == "csv.parseMaps: line 3: 1 fields, but the header has 2")
+    recs, err = parseMaps("a,b,a\n", ',')
+    assert(err != null)
+    assert(err.message() == "csv.parseMaps: line 1: duplicate column name \"a\"")
+    recs, err = parseMaps("a\n\"b\n", ',')
+    assert(err != null)
+    assert(err.message() == "csv.parseMaps: line 2, column 1: quoted field not closed")
+}
+
+test "format quotes only where needed" {
+    assert(formatRecord([]string{"a", "b c", ""}, ',') == "a,b c,")
+    assert(formatRecord([]string{"a,b", "say \"hi\"", "two\nlines", "cr\r"}, ',') == "\"a,b\",\"say \"\"hi\"\"\",\"two\nlines\",\"cr\r\"")
+    assert(formatRecord([]string{" lead", "\ttab", "trail "}, ',') == "\" lead\",\"\ttab\",trail ")
+    assert(formatRecord([]string{"a;b", "c,d"}, ';') == "\"a;b\";c,d")
+    assert(formatRecord([]string{}, ',') == "")
+    assert(format([][]string{[]string{"a", "b"}, []string{"1", "2"}}, ',') == "a,b\n1,2\n")
+}
+
+test "format and parse round trip" {
+    [][]string rows = [][]string{
+        []string{"plain", "", "with,comma", "with \"quotes\""},
+        []string{"multi\nline", " space", "\n\n", "é ünïcode"},
+        []string{"\"", "\"\"", ",", ""},
+    }
+    [][]string? back, error err = parse(format(rows, ','), ',')
+    assert(err == null)
+    assert(back == rows)
+    back, err = parse(format(rows, '\t'), '\t')
+    assert(err == null)
+    assert(back == rows)
+    // "\r\n" in a field comes back as "\n" (as in Go).
+    back, err = parse(format([][]string{[]string{"a\r\nb"}}, ','), ',')
+    assert(err == null)
+    assert(back == [][]string{[]string{"a\nb"}})
+}

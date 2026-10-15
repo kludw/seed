@@ -6,7 +6,28 @@ should do, and the workaround used (with the file it is in).
 
 Open:
 
-(none)
+- Returning a list element of struct type as the function's nullable
+  result generates C that does not compile: the element is read as if the
+  list held boxes (`S?`), not `S` values.
+
+  ```
+  type F struct {
+      string name
+  }
+
+  fn first([]F fs) F? {
+      for (int i = 0; i < fs.len(); i++) {
+          return fs[i]
+      }
+      return null
+  }
+  ```
+
+  `cc` reports `incompatible type for argument 1 of 'sd_rt_S1F'`
+  (`expected 'sd_S_F' but argument is of type 'sd_box *'`); the program
+  should compile and return the element. Workaround: copy the element to a
+  variable first (`F f = fs[i]` then `return f`), as `flags.Spec.find` and
+  `findShort` do (lib/flags/flags.sd).
 
 Fixed since the library was first written (each with tests):
 

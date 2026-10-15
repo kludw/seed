@@ -1,0 +1,3 @@
+--- stderr
+error: regex.compile: a(: missing closing ')' at offset 1
+--- exit 1

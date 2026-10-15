@@ -1,0 +1,45 @@
+// The flags and log packages end to end: flags parsed from a list like
+// main's args, a logger on stdout with a fixed clock, and loggers used
+// from goroutines.
+package main
+
+import "flags"
+import "fmt"
+import "log"
+import "time"
+
+fn fixedClock() int {
+    return 86400 * time.second + 42 * time.millisecond
+}
+
+fn work(log.Logger l, int id) {
+    l.with("worker", id.string()).debug("done")
+}
+
+fn main([]string args) error {
+    flags.Spec spec = flags.spec("demo", "FILE...", "A demonstration.")
+    spec.addBool("verbose", 'v', "log more")
+    spec.addInt("workers", 'w', 2, "how many workers")
+    spec.addDuration("wait", null, time.second, "how long to wait")
+    spec.addList("label", 'l', "a label")
+    flags.Parsed p = spec.parseOrExit([]string{"demo", "-vw", "3", "a.txt", "--wait=1m30s", "-l", "x", "--label", "y z", "--", "-b.txt"})
+    fmt.println(p.getBool("verbose").string() + " " + p.getInt("workers").string() + " " + (p.getDuration("wait") / time.second).string() + " " + p.getList("label").join("|") + " " + p.args().join(","))
+    log.Level level = log.Level.Info
+    if (p.getBool("verbose")) {
+        level = log.Level.Debug
+    }
+    log.Logger l = log.new(level, log.Output.Stdout).withClock(fixedClock).with("app", "demo")
+    l.info("starting")
+    try group {
+        for (int i = 0; i < p.getInt("workers"); i++) {
+            spawn work(l, 1)
+        }
+    }
+    l.with("labels", p.getList("label").join(" ")).warn("finished")
+    _, error err = spec.parse([]string{"demo", "--wiat", "1s"})
+    if (err != null) {
+        l.error(err.message())
+    }
+    fmt.print(spec.usage())
+    return null
+}

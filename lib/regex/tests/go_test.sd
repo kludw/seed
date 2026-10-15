@@ -1,0 +1,53 @@
+package regex
+
+import "fmt"
+
+// The differential test: every case of go_cases.sd (generated from Go's
+// regexp by lib/regex/gen/cases.go) must give the same matches here.
+
+// The matches of findAll in go_cases.sd's notation.
+fn rxTestSpans([]Match ms) string {
+    []string out = []string{}
+    for (int i = 0; i < ms.len(); i++) {
+        []string xs = []string{}
+        for (int k = 0; k < ms[i].spans.len(); k++) {
+            xs.push(ms[i].spans[k].string())
+        }
+        out.push(xs.join(" "))
+    }
+    return out.join(";")
+}
+
+test "findAll agrees with Go's regexp" {
+    []string cases = goCasesText().split("\x1e")
+    []string failures = []string{}
+    for (int i = 0; i < cases.len() - 1; i++) {
+        []string parts = cases[i].split("\x1f")
+        string pat = parts[0]
+        string text = parts[1]
+        string want = parts[2]
+        Regex? r, error err = compile(pat)
+        string got = "error"
+        bool matched = false
+        string first = ""
+        if (err == null && r != null) {
+            []Match ms = r.findAll(text)
+            got = rxTestSpans(ms)
+            matched = r.matches(text)
+            Match? m = r.find(text)
+            if (m != null) {
+                first = rxTestSpans([]Match{m})
+            }
+            if (matched != (ms.len() > 0) || (ms.len() > 0 && first != rxTestSpans([]Match{ms[0]}))) {
+                failures.push("/" + pat + "/ on \"" + text + "\": matches or find disagrees with findAll")
+            }
+        }
+        if (got != want) {
+            failures.push("/" + pat + "/ on \"" + text + "\": got " + got + ", Go " + want)
+        }
+    }
+    for (int i = 0; i < failures.len() && i < 20; i++) {
+        fmt.eprintln(failures[i])
+    }
+    assert(failures.len() == 0)
+}

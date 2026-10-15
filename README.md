@@ -138,7 +138,7 @@ The Makefile has the development targets:
 | [lib/](lib/README.md) | The standard library: one directory per package, in Seed with native functions in C. |
 | `bootstrap/` | `seed.c`, the C snapshot of the compiler that `make` starts from, and `inputs.sha256`, the files it was made from. |
 | [tests/](tests/README.md) | Conformance tests: programs with their expected output, and programs the compiler must reject. |
-| [examples/](examples/README.md) | Sixteen example programs, from `wordcount` to an expression language, a concurrent prime sieve, a key-value store and a JSON HTTP API, with a checked runner. |
+| [examples/](examples/README.md) | Eighteen example programs, from `wordcount` to an expression language, a concurrent prime sieve, a key-value store, a JSON HTTP API and a CSV filter, with a checked runner. |
 | [editors/vscode/](editors/vscode/README.md) | Syntax highlighting for VS Code, and a client for the language server. |
 
 The documentation:

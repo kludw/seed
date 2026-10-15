@@ -23,6 +23,7 @@ each. Each pair prints the same checksum, which the script compares.
 | `pingpong` | 100,000 round trips over two unbuffered channels, then 1 million ints through a `chan int(1024)` |
 | `spawn` | 100,000 goroutines in groups of 1,000, each sending one int on a buffered channel |
 | `bigint` | 3^2,000,000 by repeated squaring and fib(1,000,000) by fast doubling, each printed (954,243 and 208,988 digits), parsed back and divided |
+| `regex` | a 1.5 MB log, 5 rounds of: `findAll` with groups (`\b(\w+)@(\w+)\.(com\|org)\b`, `(?m)^(\d{4})-(\d{2})-(\d{2})`, `[a-z]+ing\b`), `matches` on each of 20,000 lines (`(?i)error\|warn`), `replace` (`\s+`) and `split` (`[,;]\s*`). Measured on Linux x86-64: 0.58 s, Go 2.4 s (lib/README.md, "regex") |
 
 The Go programs do the same work the idiomatic way (`strconv`, `sort.Ints`,
 `sort.SliceStable`, `encoding/json` into `any`, `sync.WaitGroup`). One

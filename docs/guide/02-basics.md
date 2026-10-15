@@ -262,6 +262,58 @@ He
 
 `"123".toInt()` can fail, so it returns an error as well as the number. [Chapter 4](04-functions-and-errors.md) explains the pattern.
 
+### Regular expressions
+
+When `index`, `split` and `replace` are not enough, the `regex` package matches regular expressions, with the syntax and the matches of Go's `regexp` (RE2): `\d`, `[a-z]`, `(groups)`, `(?P<name>...)`, `*?`, `{2,5}`, flags like `(?i)`. There are no backreferences and no lookaround, so matching always takes time linear in the length of the text, whatever the pattern. Seed has no raw strings, so a backslash in a pattern is written twice: `"\\d+"`. Positions are byte offsets, and a group that did not take part in a match is `null`:
+
+```seed
+package main
+
+import "fmt"
+import "regex"
+
+fn main([]string args) error {
+    // compile returns an error for a bad pattern; mustCompile crashes,
+    // which suits a pattern written in the program.
+    regex.Regex date = regex.mustCompile("(\\d{4})-(\\d{2})-(\\d{2})")
+    string text = "released 2026-10-15, patched 2026-11-02"
+
+    fmt.println(date.matches(text).string())
+    regex.Match? first = date.find(text)
+    if (first != null) {
+        fmt.println(first.text() + " at " + first.start().string())
+        string? month = first.groupText(2)
+        if (month != null) {
+            fmt.println("month " + month)
+        }
+    }
+    []regex.Match all = date.findAll(text)
+    fmt.println(all.len().string() + " dates")
+    fmt.println(date.replace(text, "$3/$2/$1"))
+
+    regex.Regex sep = regex.mustCompile("\\s*[,;]\\s*")
+    fmt.println(sep.split("a , b;c").join("|"))
+
+    _, error err = regex.compile("(unclosed")
+    if (err != null) {
+        fmt.println(err.message())
+    }
+    return null
+}
+```
+
+```
+true
+2026-10-15 at 9
+month 10
+2 dates
+released 15/10/2026, patched 02/11/2026
+a|b|c
+regex.compile: (unclosed: missing closing ')' at offset 0
+```
+
+A `Regex` is a plain value: it can be stored in a struct, passed to a function or sent to another goroutine. The whole API is in [the standard library reference](../stdlib.md#regex).
+
 ## Printing
 
 | Function | Writes |

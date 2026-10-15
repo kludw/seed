@@ -1,0 +1,7 @@
+2026-10-15 at 5, year 2026
+2027-01-02 at 19, year 2027
+from 15/10/2026 to 02/01/2027, not 99-1-1
+a|b|c
+regex.compile: (?<=x): lookbehind is not supported at offset 0
+words: 24
+crash: found hello

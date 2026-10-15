@@ -544,7 +544,7 @@ There is one binary, `seed`, with these commands:
 
 ## Standard library
 
-`errors`, `fmt`, `io`, `os`, `fs`, `path`, `strings`, `math`, `rand`, `time`, `encoding`, `json`, `crypto`, `net` and `http`. The API is in [docs/stdlib.md](docs/stdlib.md), and the implementation in [lib/](lib/README.md).
+`errors`, `fmt`, `io`, `os`, `fs`, `path`, `strings`, `regex`, `math`, `rand`, `time`, `encoding`, `json`, `csv`, `url`, `crypto`, `net`, `http`, `flags` and `log`. The API is in [docs/stdlib.md](docs/stdlib.md), and the implementation in [lib/](lib/README.md).
 
 ## Implementation plan
 

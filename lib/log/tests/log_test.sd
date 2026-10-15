@@ -1,0 +1,149 @@
+package log
+
+import "fs"
+import "strings"
+import "time"
+
+// 2026-10-15T08:30:00.123456789Z
+fn logTestClock() int {
+    return 1792053000 * time.second + 123456789
+}
+
+fn logTestLines(chan string lines, int n) []string {
+    []string out = []string{}
+    for (int i = 0; i < n; i++) {
+        string? s = lines.receive()
+        if (s != null) {
+            out.push(s)
+        }
+    }
+    return out
+}
+
+test "lines have the time, the level, the message and the fields" {
+    chan string lines = chan string(10)
+    Logger l = new(Level.Info, Output.Lines(lines)).withClock(logTestClock)
+    l.info("listening")
+    l.with("addr", ":8080").with("tls", "false").warn("no certificate")
+    l.error("disk full")
+    assert(logTestLines(lines, 3) == []string{
+        "time=2026-10-15T08:30:00.123Z level=INFO msg=listening",
+        "time=2026-10-15T08:30:00.123Z level=WARN msg=\"no certificate\" addr=:8080 tls=false",
+        "time=2026-10-15T08:30:00.123Z level=ERROR msg=\"disk full\"",
+    })
+}
+
+test "the minimum level" {
+    chan string lines = chan string(10)
+    Logger l = new(Level.Warn, Output.Lines(lines)).withClock(logTestClock)
+    l.debug("a")
+    l.info("b")
+    l.warn("c")
+    l.error("d")
+    l.log(Level.Info, "e")
+    l.log(Level.Error, "f")
+    assert(logTestLines(lines, 3) == []string{
+        "time=2026-10-15T08:30:00.123Z level=WARN msg=c",
+        "time=2026-10-15T08:30:00.123Z level=ERROR msg=d",
+        "time=2026-10-15T08:30:00.123Z level=ERROR msg=f",
+    })
+    assert(!l.enabled(Level.Info))
+    assert(l.enabled(Level.Warn))
+    Logger all = new(Level.Debug, Output.Lines(lines)).withClock(logTestClock)
+    all.debug("g")
+    assert(logTestLines(lines, 1) == []string{"time=2026-10-15T08:30:00.123Z level=DEBUG msg=g"})
+}
+
+test "values are quoted when needed" {
+    assert(render("plain") == "plain")
+    assert(render("") == "\"\"")
+    assert(render("two words") == "\"two words\"")
+    assert(render("a=b") == "\"a=b\"")
+    assert(render("say \"hi\"") == "\"say \\\"hi\\\"\"")
+    assert(render("line\nbreak\ttab\\") == "\"line\\nbreak\\ttab\\\\\"")
+    assert(render("bell\x07") == "\"bell\\x07\"")
+    assert(render("é/ü:1") == "é/ü:1")
+    chan string lines = chan string(1)
+    new(Level.Info, Output.Lines(lines)).withClock(logTestClock).with("path", "/a b").info("")
+    assert(lines.receive() == "time=2026-10-15T08:30:00.123Z level=INFO msg=\"\" path=\"/a b\"")
+}
+
+fn crashBadKey() {
+    _ = new(Level.Info, Output.Stderr).with("a key", "v")
+}
+
+test "an invalid key crashes" {
+    error err = group {
+        spawn crashBadKey()
+    }
+    assert(err != null)
+    assert(err.message() == "crash: log.Logger.with: invalid key \"a key\"")
+}
+
+test "with returns a copy" {
+    chan string lines = chan string(2)
+    Logger base = new(Level.Info, Output.Lines(lines)).withClock(logTestClock)
+    Logger req = base.with("request", "42")
+    base.info("a")
+    req.info("b")
+    assert(logTestLines(lines, 2) == []string{
+        "time=2026-10-15T08:30:00.123Z level=INFO msg=a",
+        "time=2026-10-15T08:30:00.123Z level=INFO msg=b request=42",
+    })
+}
+
+test "timestamps are UTC RFC 3339 with milliseconds" {
+    assert(timestamp(0) == "1970-01-01T00:00:00.000Z")
+    assert(timestamp(-1) == "1969-12-31T23:59:59.999Z")
+    assert(timestamp(1792053000 * time.second + 5 * time.millisecond) == "2026-10-15T08:30:00.005Z")
+}
+
+test "parseLevel" {
+    Level l = try parseLevel("DEBUG")
+    assert(l == Level.Debug)
+    l = try parseLevel("warning")
+    assert(l == Level.Warn)
+    l = try parseLevel("Error")
+    assert(l == Level.Error)
+    assert(l.string() == "ERROR")
+    _, error err = parseLevel("verbose")
+    assert(err != null)
+    assert(err.message() == "log.parseLevel: verbose: unknown level (use debug, info, warn or error)")
+}
+
+test "the real clock" {
+    chan string lines = chan string(1)
+    int before = time.now()
+    new(Level.Info, Output.Lines(lines)).info("now")
+    string? line = lines.receive()
+    assert(line != null)
+    if (line != null) {
+        assert(line.startsWith("time=" + timestamp(before).slice(0, 15)))
+        assert(line.endsWith("Z level=INFO msg=now"))
+    }
+}
+
+fn logTestWriter(Logger l, int id) {
+    for (int i = 0; i < 200; i++) {
+        l.with("writer", id.string()).with("pad", strings.repeat("x", 3000)).info("line " + i.string())
+    }
+}
+
+test "lines from goroutines never interleave in a file" {
+    string dir = try fs.makeTemp("log-test-")
+    defer _ = fs.removeAll(dir)
+    fs.File f = try fs.create(dir + "/app.log")
+    Logger l = new(Level.Info, Output.File(f)).withClock(logTestClock)
+    try group {
+        for (int w = 0; w < 4; w++) {
+            spawn logTestWriter(l, w)
+        }
+    }
+    f.close()
+    []string lines = (try fs.read(dir + "/app.log")).split("\n")
+    assert(lines.len() == 801)
+    for (int i = 0; i < 800; i++) {
+        assert(lines[i].startsWith("time=2026-10-15T08:30:00.123Z level=INFO msg=\"line "))
+        assert(lines[i].endsWith(strings.repeat("x", 3000)))
+    }
+}

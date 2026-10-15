@@ -1,0 +1,2 @@
+demo: -n: invalid integer "many"
+run 'demo --help' for usage

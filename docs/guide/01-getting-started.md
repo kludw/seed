@@ -80,6 +80,55 @@ $ seed run 01_greet.sd
 Hello, world!
 ```
 
+Beyond an argument or two, the `flags` package parses them: `--name value`, `--name=value`, `-n 2`, bundled `-ln2`, `--` and a generated `--help`. Seed has no pointers, so a flag is not bound to a variable as with Go's `flag.Int(&n)`: a `flags.Spec` value declares the flags, parsing gives a `flags.Parsed` value, and the program reads each flag from it with a typed getter. `parseOrExit` handles `--help` and mistakes the way command-line tools do:
+
+```seed
+// Greets someone, as often as asked.
+//
+//     seed run 01_flags.sd -- --name Ada -n 2 -l
+package main
+
+import "flags"
+import "fmt"
+
+fn main([]string args) error {
+    flags.Spec spec = flags.spec("greet", "", "Greets someone.")
+    spec.addString("name", null, "world", "who to greet")
+    spec.addInt("times", 'n', 1, "how many times")
+    spec.addBool("loud", 'l', "shout")
+    flags.Parsed p = spec.parseOrExit(args)
+    string greeting = "Hello, " + p.getString("name") + "!"
+    if (p.getBool("loud")) {
+        greeting = greeting.toUpper()
+    }
+    for (int i = 0; i < p.getInt("times"); i++) {
+        fmt.println(greeting)
+    }
+    return null
+}
+```
+
+```
+$ seed run 01_flags.sd -- --name Ada -n 2 -l
+HELLO, ADA!
+HELLO, ADA!
+$ seed run 01_flags.sd -- --nmae Ada
+greet: --nmae: unknown flag (did you mean --name?)
+run 'greet --help' for usage
+$ seed run 01_flags.sd -- --help
+usage: greet [flags]
+
+Greets someone.
+
+flags:
+      --name string   who to greet (default "world")
+  -n, --times int     how many times (default 1)
+  -l, --loud          shout
+  -h, --help          show this help and exit
+```
+
+Asking for a flag that was not declared, or with the wrong type (`p.getInt("loud")`), crashes at once, so such a mistake shows up the first time the program runs. The details are in [the standard library reference](../stdlib.md#flags).
+
 ## The commands
 
 | Command | What it does |

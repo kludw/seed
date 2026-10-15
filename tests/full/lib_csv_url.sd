@@ -1,0 +1,31 @@
+// The csv and url packages end to end.
+package main
+
+import "csv"
+import "fmt"
+import "url"
+
+fn main([]string args) error {
+    [][]string rows = try csv.parse("name,link\r\nseed,\"https://example.com/a/b?q=x+y&n=1\"\r\n\"multi\nline\",../c\r\n", ',')
+    url.Url base = try url.parse("https://example.com/docs/index.html")
+    for (int i = 1; i < rows.len(); i++) {
+        url.Url u = base.resolve(try url.parse(rows[i][1]))
+        url.Query q = try u.params()
+        bool ok = q.get("q") == "x y" && q.all("n") == []string{"1"}
+        fmt.println(csv.formatRecord([]string{rows[i][0], u.string(), ok.string()}, ';'))
+    }
+    []map[string]string recs = try csv.parseMaps("a,b\n1,2\n", ',')
+    fmt.println(recs[0].keys().join(",") + " " + (recs[0]["b"] == "2").string())
+    csv.Reader r = csv.reader('\t')
+    []string? rec = try r.feed("x\t\"y")
+    fmt.println((rec == null).string())
+    _, error err = r.feed(null)
+    if (err != null) {
+        fmt.println(err.message())
+    }
+    _, err = url.parse("http://[::1")
+    if (err != null) {
+        fmt.println(err.message())
+    }
+    return null
+}

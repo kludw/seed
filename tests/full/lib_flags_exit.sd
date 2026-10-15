@@ -1,0 +1,15 @@
+// flags.Spec.parseOrExit on a bad flag: the reason and a hint on stderr,
+// exit code 2, and nothing after it runs.
+package main
+
+import "flags"
+import "fmt"
+
+fn main([]string args) error {
+    flags.Spec spec = flags.spec("demo", "", "")
+    spec.addInt("count", 'n', 1, "how many")
+    fmt.println("parsing")
+    flags.Parsed p = spec.parseOrExit([]string{"demo", "-n", "many"})
+    fmt.println("not reached " + p.getInt("count").string())
+    return null
+}
