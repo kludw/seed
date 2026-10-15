@@ -1,0 +1,279 @@
+package csv
+
+// Comma-separated values, RFC 4180 (docs/stdlib.md, "csv"): fields
+// separated by a delimiter, records by line breaks, fields quoted with '"'
+// when they hold the delimiter, a quote or a line break, and a quote
+// inside a quoted field written twice. Pure Seed.
+//
+// Reading follows Go's encoding/csv: "\r\n" ends a line like "\n" (also
+// inside a quoted field, where it becomes "\n"), empty lines are skipped,
+// and a '"' inside an unquoted field is an error. Records may have
+// different numbers of fields (parseMaps checks them against the header).
+//
+// The reader works line by line (Reader.feed), so that a program can read
+// a file of any size with fs.File.readLine or io.readLine; parse runs it
+// over a whole text.
+
+import "errors"
+import "os"
+
+// Reads CSV one line at a time: feed returns each record once its last
+// line has been fed.
+pub type Reader struct {
+    byte delimiter
+    string fnName
+    int line
+    []string fields
+    []string pieces
+    bool inQuote
+    int quoteLine
+    int quoteColumn
+}
+
+fn checkDelimiter(string fnName, byte delimiter) {
+    if (delimiter == '"' || delimiter == '\r' || delimiter == '\n' || int(delimiter) >= 0x80) {
+        os.crash(fnName + ": invalid delimiter " + showByte(delimiter))
+    }
+}
+
+fn showByte(byte b) string {
+    if (b >= ' ' && int(b) < 0x7f) {
+        return "'" + string([]byte{b}) + "'"
+    }
+    return "byte " + int(b).string()
+}
+
+fn newReader(string fnName, byte delimiter) Reader {
+    checkDelimiter(fnName, delimiter)
+    return Reader{delimiter: delimiter, fnName: fnName, line: 0, fields: []string{}, pieces: []string{}, inQuote: false, quoteLine: 0, quoteColumn: 0}
+}
+
+// A reader for fields separated by delimiter (usually ',', or ';' or '\t').
+// Crashes if delimiter is '"', '\r', '\n' or not ASCII.
+pub fn reader(byte delimiter) Reader {
+    return newReader("csv.reader", delimiter)
+}
+
+fn (Reader r) fail(int line, int column, string reason) error {
+    return errors.new(r.fnName + ": line " + line.string() + ", column " + column.string() + ": " + reason)
+}
+
+// Feeds the next line of input, without its line ending (a "\r" at the end
+// is removed), as fs.File.readLine and io.readLine give it; null is the end
+// of the input. Returns the record that the line completes, or null when
+// the line is empty (skipped) or ends inside a quoted field (the record
+// continues on the next line). At the end of the input, the error is
+// `quoted field not closed` if a quoted field is still open.
+pub fn (Reader r) mut feed(string? line) ([]string?, error) {
+    if (line == null) {
+        if (r.inQuote) {
+            r.inQuote = false
+            r.fields = []string{}
+            r.pieces = []string{}
+            return null, r.fail(r.quoteLine, r.quoteColumn, "quoted field not closed")
+        }
+        return null, null
+    }
+    r.line++
+    string text = line
+    if (text.endsWith("\r")) {
+        text = text.slice(0, text.len() - 1)
+    }
+    int n = text.len()
+    int i = 0
+    if (r.inQuote) {
+        // Inside a quoted field that started on an earlier line.
+        r.pieces.push("\n")
+    } else if (n == 0) {
+        return null, null
+    }
+    for (;;) {
+        if (!r.inQuote && i < n && text[i] == '"') {
+            r.inQuote = true
+            r.quoteLine = r.line
+            r.quoteColumn = i + 1
+            r.pieces = []string{}
+            i++
+        }
+        if (r.inQuote) {
+            // The rest of a quoted field: up to a '"' that is not doubled.
+            int start = i
+            bool closed = false
+            for (; i < n; i++) {
+                if (text[i] == '"') {
+                    r.pieces.push(text.slice(start, i))
+                    if (i + 1 < n && text[i + 1] == '"') {
+                        r.pieces.push("\"")
+                        i++
+                        start = i + 1
+                        continue
+                    }
+                    closed = true
+                    i++
+                    break
+                }
+            }
+            if (!closed) {
+                r.pieces.push(text.slice(start, n))
+                return null, null
+            }
+            r.inQuote = false
+            r.fields.push(r.pieces.join(""))
+            r.pieces = []string{}
+            if (i == n) {
+                return r.finish(), null
+            }
+            if (text[i] != r.delimiter) {
+                []string _ = r.finish()
+                return null, r.fail(r.line, i + 1, "unexpected " + showByte(text[i]) + " after a quoted field")
+            }
+            i++
+        } else {
+            // An unquoted field: up to the delimiter.
+            int start = i
+            for (; i < n && text[i] != r.delimiter; i++) {
+                if (text[i] == '"') {
+                    []string _ = r.finish()
+                    return null, r.fail(r.line, i + 1, "'\"' in an unquoted field (quote the field and double the '\"')")
+                }
+            }
+            r.fields.push(text.slice(start, i))
+            if (i == n) {
+                return r.finish(), null
+            }
+            i++
+        }
+        if (i == n) {
+            // A delimiter at the end of the line: one more, empty field.
+            r.fields.push("")
+            return r.finish(), null
+        }
+    }
+}
+
+fn (Reader r) mut finish() []string {
+    []string out = r.fields
+    r.fields = []string{}
+    return out
+}
+
+// The records of a whole CSV text. Crashes on an invalid delimiter (as
+// reader does). Errors: `csv.parse: line 2, column 4: '"' in an unquoted
+// field (quote the field and double the '"')`.
+pub fn parse(string text, byte delimiter) ([][]string, error) {
+    return parseAs("csv.parse", text, delimiter)
+}
+
+fn parseAs(string fnName, string text, byte delimiter) ([][]string, error) {
+    Reader r = newReader(fnName, delimiter)
+    []string lines = text.split("\n")
+    [][]string out = [][]string{}
+    for (int i = 0; i < lines.len(); i++) {
+        []string? rec = try r.feed(lines[i])
+        if (rec != null) {
+            out.push(rec)
+        }
+    }
+    []string? last = try r.feed(null)
+    if (last != null) {
+        out.push(last)
+    }
+    return out, null
+}
+
+// The records after the first, each as a map from the first record's
+// column names to the record's fields, in column order. Errors when a
+// column name repeats, or a record has a different number of fields than
+// the header: `csv.parseMaps: line 3: 2 fields, but the header has 3`.
+// An empty text gives no records.
+pub fn parseMaps(string text, byte delimiter) ([]map[string]string, error) {
+    // The line where each record starts, for the messages.
+    Reader r = newReader("csv.parseMaps", delimiter)
+    []string lines = text.split("\n")
+    []map[string]string out = []map[string]string{}
+    []string? header = null
+    int recordLine = 0
+    for (int i = 0; i <= lines.len(); i++) {
+        string? line = null
+        if (i < lines.len()) {
+            line = lines[i]
+        }
+        if (!r.inQuote) {
+            recordLine = i + 1
+        }
+        []string? rec = try r.feed(line)
+        if (rec == null) {
+            continue
+        }
+        if (header == null) {
+            map[string]bool seen = map[string]bool{}
+            for (int k = 0; k < rec.len(); k++) {
+                if (seen[rec[k]] != null) {
+                    return null, errors.new("csv.parseMaps: line " + recordLine.string() + ": duplicate column name \"" + rec[k] + "\"")
+                }
+                seen[rec[k]] = true
+            }
+            header = rec
+            continue
+        }
+        if (rec.len() != header.len()) {
+            return null, errors.new("csv.parseMaps: line " + recordLine.string() + ": " + rec.len().string() + " fields, but the header has " + header.len().string())
+        }
+        map[string]string m = map[string]string{}
+        for (int k = 0; k < rec.len(); k++) {
+            m[header[k]] = rec[k]
+        }
+        out.push(m)
+    }
+    return out, null
+}
+
+// Whether a field must be quoted: it holds the delimiter, a quote, "\r" or
+// "\n", or starts with a space or a tab (which readers that trim leading
+// space would lose), as Go's encoding/csv decides.
+fn needsQuotes(string field, byte delimiter) bool {
+    if (field == "") {
+        return false
+    }
+    if (field[0] == ' ' || field[0] == '\t') {
+        return true
+    }
+    for (int i = 0; i < field.len(); i++) {
+        byte b = field[i]
+        if (b == delimiter || b == '"' || b == '\r' || b == '\n') {
+            return true
+        }
+    }
+    return false
+}
+
+// One record as a line of CSV, without a line ending: fields joined by the
+// delimiter, quoted where needed.
+pub fn formatRecord([]string fields, byte delimiter) string {
+    checkDelimiter("csv.formatRecord", delimiter)
+    return formatFields(fields, delimiter)
+}
+
+fn formatFields([]string fields, byte delimiter) string {
+    []string out = []string{}
+    for (int i = 0; i < fields.len(); i++) {
+        string f = fields[i]
+        if (needsQuotes(f, delimiter)) {
+            f = "\"" + f.replace("\"", "\"\"") + "\""
+        }
+        out.push(f)
+    }
+    return out.join(string([]byte{delimiter}))
+}
+
+// Records as CSV text, each followed by "\n" (RFC 4180 asks for "\r\n":
+// join formatRecord's lines with "\r\n" for that).
+pub fn format([][]string records, byte delimiter) string {
+    checkDelimiter("csv.format", delimiter)
+    []string out = []string{}
+    for (int i = 0; i < records.len(); i++) {
+        out.push(formatFields(records[i], delimiter))
+        out.push("\n")
+    }
+    return out.join("")
+}
