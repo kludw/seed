@@ -1,0 +1,12 @@
+// Package units has lengths with their unit.
+package units
+
+// A length in meters.
+pub type Meter struct {
+    pub float value
+}
+
+// m as text: "2.5 m".
+pub fn (Meter m) string() string {
+    return m.value.string() + " m"
+}

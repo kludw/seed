@@ -48,6 +48,9 @@ seed fmt [--check] <file.sd | dir>... format in place, or report unformatted fil
 seed c [-g] <dir | file.sd...>        C program on stdout (what tests/run.sh uses)
 seed ast <file.sd>...                 print the syntax tree (debugging aid)
 seed lsp                              language server on stdin/stdout (see "The language server")
+seed doc [dir | file.sd | pkg[.Name]] the API of a package with its doc comments (see "seed doc")
+seed doc --html -o out dir...         static HTML for the packages under the dirs
+seed doc --check dir...               the pub names without a doc comment (exit 1 if any)
 ```
 
 A program is the `package main` of a directory (all its `.sd` files) or a
@@ -116,6 +119,62 @@ was recorded by the parser, `Stmt.name`; values only for int, float, bool,
 byte, string, error and their `T?`) and returns `sd_assert_error(msg)` like
 `try` returns an error. After an `assert`, the checker narrows on its
 condition (as after `if (!cond) { return }`).
+
+### seed doc
+
+`seed doc` (`doc.sd`, `doc_html.sd`) loads and checks a package with the
+language server's `lspAnalyze` (the files of the directory, in test mode
+unless it is `package main`, imports resolved from the project root found
+by `lspProjectRoot`, a tree with syntax errors repaired), so it documents
+exactly what the compiler sees; errors are printed to stderr and the
+command exits with 1 after printing what it could. `docLoad` collects the
+root package's `pub` declarations from `Ast.tops`, file by file in source
+order (test files left out) into a `DocPkg`: constants, functions, types
+and the `pub` methods of `pub` types (by the receiver's type name). Each
+`DocDecl` has its declaration as text, rebuilt from the tree with the
+language server's helpers (`lspFnSig`, `lspFieldText`, ...) without `pub`;
+a type shows only its `pub` fields (with their default values), then a
+`// Has fields that are not pub.` line if it has others, its cases or its
+interface methods, each with its own doc comment as `//` lines. A doc
+comment is the run of `//` lines right above the declaration
+(`lspDocComment`); the package's is the one above the `package` clause of
+any of its files. A constant without a comment right below another one
+shares its group's comment (`DocDecl.grouped`; text and HTML show the
+group as one declaration).
+
+The argument is a directory, a `.sd` file (its package, only that file's
+declarations), or a name: `pkg`, `pkg.Name`, `pkg.Name.member` or `pkg
+Name`, where `pkg` is a directory or a standard library package. A
+directory without `.sd` files lists the packages under it with the first
+sentence of each one's comment. The text format follows `go doc`: the
+package clause with its import path, the comment, then CONSTANTS,
+FUNCTIONS and TYPES (each type followed by its methods), each declaration
+followed by its comment indented by four spaces. A member is a method, a
+field, an enum case or an interface method.
+
+`--html -o out dir...` documents every package at and under the
+directories (`docPackageDirs`: `tests`, `testdata`, `build` and hidden
+directories are skipped). A package's import path is the standard
+library's, or its path below the directory given. It writes `index.html`
+(the packages with their first sentence) and one page per package, named
+after its import path with `/` replaced by `.`, with an index and
+anchors `Name` and `Type.method`. In declarations, a PascalCase name of a
+documented type of the page's package links to it, and `pkg.Name` links
+to another documented package when `pkg` is imported by the declaring
+file (`docSigHtml`, which copies strings and comments as they are). In
+comments, blank lines separate paragraphs, indented lines are code, and a
+`` `code` `` span links when it is a documented `Name`, `pkg.Name` or
+`pkg.Type.member`. The pages have no scripts, and one inline style sheet
+with a dark variant.
+
+`--check dir...` prints `path:line: kind name has no doc comment` for
+every `pub` constant, function, type and method of the packages without
+one, and the packages without a package comment; it exits with 1 when
+there are any. `make test-lib` runs it on `lib`, and `make test-doc`
+(tests/test_doc.sh) checks the text output for the test project
+`tests/doc/proj` and standard library names against
+`tests/doc/commands.out`, and that every link of the HTML of `lib` and of
+the project leads to a page and an anchor that exist.
 
 ## Packages
 
@@ -208,6 +267,8 @@ never return (`isNoReturn`).
 | `gen_fast.sd` | gen | small-int versions of pure int functions, and the functions that choose between them and the general ones |
 | `gen_preempt.sd` | gen | where the generated code checks for preemption: the direct call graph's strongly connected components |
 | `gen_acc.sd` | gen | loop accumulators: a fast copy of a loop with raw `int64_t` accumulators that spills into the general copy; each loop iteration's preemption check |
+| `doc.sd` | doc | `seed doc`: loading a package's pub API (`DocPkg`), the text output, one name, `--check` |
+| `doc_html.sd` | doc | `seed doc --html`: the index, the package pages, links between them |
 | `lsp.sd` | lsp | `seed lsp`: JSON-RPC framing, the open documents, dispatch, one goroutine per request |
 | `lsp_check.sd` | lsp | loading and checking a document's package with the editor's text, diagnostics, formatting, LSP positions (UTF-16) |
 | `lsp_query.sd` | lsp | definition and hover (what a name refers to), the position index for resolving many names, completion, document symbols |

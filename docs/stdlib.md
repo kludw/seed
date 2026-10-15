@@ -2,7 +2,7 @@
 
 This is part of the language spec ([SPEC.md](../SPEC.md)). It defines every package in the Seed standard library: the types, the function signatures, and the exact behaviour, including errors and crashes. Built-in methods on `int`, `string`, lists, maps and so on are in [builtins.md](builtins.md) and are not repeated here.
 
-Every package and every function in this document is implemented, in [lib/](../lib/) (the `pub` declarations there are the source of truth; [lib/README.md](../lib/README.md) has the implementation notes). The changes the design needed in the language itself are listed in [Spec changes this design relied on](#spec-changes-this-design-relied-on); they are all in SPEC.md now.
+Every package and every function in this document is implemented, in [lib/](../lib/) (the `pub` declarations there are the source of truth; [lib/README.md](../lib/README.md) has the implementation notes). Every `pub` name there has a doc comment, so `seed doc <package>` (or `seed doc fmt.println`) prints the generated reference of a package, and `make docs` writes it as HTML into `build/docs`; this document stays the specification, with the conventions and the reasons around the API. The changes the design needed in the language itself are listed in [Spec changes this design relied on](#spec-changes-this-design-relied-on); they are all in SPEC.md now.
 
 | Package | Purpose |
 |---|---|

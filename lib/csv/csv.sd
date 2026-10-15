@@ -1,3 +1,7 @@
+// Package csv reads and writes comma-separated values (RFC 4180): fields
+// separated by a delimiter, records by line breaks, and fields quoted with
+// '"' when they hold the delimiter, a quote or a line break. A Reader
+// takes its input a line at a time, so files of any size can be read.
 package csv
 
 // Comma-separated values, RFC 4180 (docs/stdlib.md, "csv"): fields

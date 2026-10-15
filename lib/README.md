@@ -88,6 +88,14 @@ checks it).
   `httpIsToken`), from the same merged-namespace time.
 - **Struct fields** are `pub` where docs/stdlib.md makes them public
   (`http.Request`, `http.Response`); `rand.Source.state` is private.
+- **Doc comments.** Every `pub` constant, function, type and method has
+  a `//` comment right above it, and every package has one right above
+  the `package` clause of one of its files (`Package fmt writes ...`); a
+  run of constants may share the comment above the first. `make test-lib`
+  checks this (`seed doc --check lib`), and `seed doc <pkg>`, hover in
+  editors and `make docs` (HTML in `build/docs`) show them. Comments right
+  after the `package` clause are notes on the implementation, which
+  `seed doc` does not show.
 
 ## What is implemented
 

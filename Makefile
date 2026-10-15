@@ -20,7 +20,7 @@ LIB_SRC = $(sort $(wildcard lib/*/*.sd lib/*/*.c))
 BOOT_INPUTS = $(SEED_SRC) $(RUNTIME_SRC) $(LIB_SRC)
 SHA256 = $(shell command -v sha256sum >/dev/null 2>&1 && echo sha256sum || echo shasum -a 256)
 
-.PHONY: all test test-full test-leaks test-fmt test-lib test-examples test-lsp verify release install uninstall clean
+.PHONY: all test test-full test-leaks test-fmt test-lib test-examples test-lsp test-doc docs verify release install uninstall clean
 
 all: build/seed2
 
@@ -86,14 +86,26 @@ test-full: build/seed2
 test-lsp: build/seed2
 	tests/test_lsp.sh build/seed2
 
+# The HTML documentation of the standard library (seed doc --html).
+docs: build/seed2
+	build/seed2 doc --html -o build/docs lib
+
+# seed doc: the text of a test project's packages and of standard library
+# names against tests/doc/commands.out, the HTML of the standard library
+# (links and anchors), and --check (tests/test_doc.sh).
+test-doc: build/seed2
+	tests/test_doc.sh build/seed2
+
 # Every test program under a leak checker: macOS `leaks --atExit`, or
 # LeakSanitizer elsewhere (slow: a few minutes).
 test-leaks: build/seed2
 	tests/leaks.sh "build/seed2 c" tests/lang tests/core tests/full
 
-# The tests of the standard library packages (lib/<pkg>/tests).
+# The tests of the standard library packages (lib/<pkg>/tests), and
+# their documentation: every pub name has a doc comment (seed doc --check).
 test-lib: build/seed2
 	build/seed2 test lib
+	build/seed2 doc --check lib
 
 # The example programs: tests/examples.sh builds every examples/*.sd and
 # checks wordcount on stdin, todo, and server with fetch (and curl) as

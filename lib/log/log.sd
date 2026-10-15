@@ -1,3 +1,7 @@
+// Package log writes leveled log lines in the key=value format of Go's
+// log/slog text handler. A Logger is a value that the program makes once
+// and passes around; each line is a single write, so lines from concurrent
+// goroutines never mix.
 package log
 
 // Leveled logging (docs/stdlib.md, "log"): one line per message, in the

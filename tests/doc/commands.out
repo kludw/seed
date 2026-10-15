@@ -1,0 +1,237 @@
+== seed doc proj/geo
+package geo // import "geo"
+
+Package geo has shapes and their measurements, for the tests of seed
+doc.
+
+Areas are in square meters:
+
+  geo.area(geo.Shape.Square(2.0)) is 4.0
+
+CONSTANTS
+
+const int triangleSides = 3
+const int squareSides = 4
+    The sides of the shapes, as `Shape` counts them.
+
+FUNCTIONS
+
+fn area(Shape s) float
+    The area of s.
+
+fn undocumented() int
+
+fn named(string name) Named
+    A named shape with no outline.
+
+TYPES
+
+type Shape enum {
+    // A circle of the radius.
+    Circle(float radius)
+    Square(float side)
+    // Nothing at all.
+    Empty
+}
+    A shape. Use `area` for its area and `units.Meter` for lengths.
+
+type Named struct {
+    string name = "unnamed"
+    // The outline, in meters.
+    units.Meter outline
+    // Has fields that are not pub.
+}
+    A shape with its name and the length of its outline.
+
+fn (Named n) label() string
+    The name, or "unnamed".
+
+type Measured interface {
+    // The area, in square meters.
+    area() float
+    mut scale(float by)
+}
+    Something with an area.
+
+-- exit 0
+== seed doc proj/geo/shape.sd
+package geo // import "geo"
+
+CONSTANTS
+
+const int triangleSides = 3
+const int squareSides = 4
+    The sides of the shapes, as `Shape` counts them.
+
+FUNCTIONS
+
+fn area(Shape s) float
+    The area of s.
+
+fn undocumented() int
+
+fn named(string name) Named
+    A named shape with no outline.
+
+TYPES
+
+type Shape enum {
+    // A circle of the radius.
+    Circle(float radius)
+    Square(float side)
+    // Nothing at all.
+    Empty
+}
+    A shape. Use `area` for its area and `units.Meter` for lengths.
+
+type Named struct {
+    string name = "unnamed"
+    // The outline, in meters.
+    units.Meter outline
+    // Has fields that are not pub.
+}
+    A shape with its name and the length of its outline.
+
+fn (Named n) label() string
+    The name, or "unnamed".
+
+type Measured interface {
+    // The area, in square meters.
+    area() float
+    mut scale(float by)
+}
+    Something with an area.
+
+-- exit 0
+== seed doc proj/geo.Named
+package geo // import "geo"
+
+type Named struct {
+    string name = "unnamed"
+    // The outline, in meters.
+    units.Meter outline
+    // Has fields that are not pub.
+}
+    A shape with its name and the length of its outline.
+
+fn (Named n) label() string
+    The name, or "unnamed".
+
+-- exit 0
+== seed doc proj/geo Named.label
+package geo // import "geo"
+
+fn (Named n) label() string
+    The name, or "unnamed".
+
+-- exit 0
+== seed doc proj/geo.Named.outline
+package geo // import "geo"
+
+type Named struct {
+    units.Meter outline
+}
+    The outline, in meters.
+
+-- exit 0
+== seed doc proj/geo.Shape.Circle
+package geo // import "geo"
+
+Shape.Circle(float radius)
+    A circle of the radius.
+
+-- exit 0
+== seed doc proj/geo.Measured.area
+package geo // import "geo"
+
+type Measured interface {
+    area() float
+}
+    The area, in square meters.
+
+-- exit 0
+== seed doc proj/geo squareSides
+package geo // import "geo"
+
+const int squareSides = 4
+    The sides of the shapes, as `Shape` counts them.
+
+-- exit 0
+== seed doc proj
+geo           Package geo has shapes and their measurements, for the tests of seed doc.
+units         Package units has lengths with their unit.
+-- exit 0
+== seed doc strings
+package strings // import "strings"
+
+Package strings has the text helpers that are not built-in methods of
+string: repeating, padding, searching from the end, splitting into
+fields, and classifying bytes.
+
+FUNCTIONS
+
+fn repeat(string s, int count) string
+    `s` repeated `count` times. Crashes if `count` is negative.
+
+fn padLeft(string s, int width, byte fill) string
+    `s` with `fill` added in front until it is `width` characters long,
+    counted as UTF-8 characters (the way `s.chars()` counts them: an invalid
+    byte is one character). Each `fill` byte counts as one character.
+
+fn padRight(string s, int width, byte fill) string
+    The same as padLeft, adding at the end.
+
+fn lastIndex(string s, string sub) int?
+    The byte index of the last occurrence of `sub` in `s`, or null. An empty
+    `sub` gives `s.len()`.
+
+fn fields(string s) []string
+    `s` split around runs of spaces, tabs, \n, \r, \v and \f, with no empty
+    strings.
+
+fn isDigit(byte b) bool
+    '0' to '9'.
+
+fn isLetter(byte b) bool
+    ASCII 'a' to 'z' and 'A' to 'Z'.
+
+fn isSpace(byte b) bool
+    Space, \t, \n, \r, \v or \f.
+
+-- exit 0
+== seed doc fmt.println
+package fmt // import "fmt"
+
+fn println(string s)
+    Writes s and a newline to stdout.
+
+-- exit 0
+== seed doc --check proj
+proj/geo/shape.sd:54: fn undocumented has no doc comment
+seed doc --check: pub names without a doc comment: 1
+-- exit 1
+== seed doc proj/geo.hidden
+seed doc: package geo has no pub name hidden
+-- exit 1
+== seed doc proj/geo.Named.secret
+seed doc: package geo has no pub name Named.secret
+-- exit 1
+== seed doc nowhere.thing
+seed doc: no package nowhere (neither a directory nor a standard library package)
+-- exit 1
+== seed doc --html proj
+usage:
+  seed doc [dir | file.sd | pkg]
+  seed doc pkg.Name[.member]
+  seed doc pkg Name[.member]
+  seed doc --html -o outdir dir...
+  seed doc --check dir...
+-- exit 2
+== seed doc proj/geo a b
+usage:
+  seed doc [dir | file.sd | pkg]
+  seed doc pkg.Name[.member]
+  seed doc pkg Name[.member]
+  seed doc --html -o outdir dir...
+  seed doc --check dir...
+-- exit 2

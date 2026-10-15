@@ -1,3 +1,6 @@
+// Package json parses and produces JSON (RFC 8259) through a dynamic
+// Value: parse turns text into a Value, the accessors read it, and the
+// methods string and pretty turn it back into text.
 package json
 
 // JSON through a dynamic `Value` (docs/stdlib.md, "json"): a strict

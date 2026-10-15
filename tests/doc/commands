@@ -1,0 +1,30 @@
+# The commands of tests/test_doc.sh, run in tests/doc: `seed doc` and
+# the arguments on each line.
+
+# A package: its comment, constants (a group sharing one comment),
+# functions, types with their pub fields, cases and methods.
+proj/geo
+# One file of it.
+proj/geo/shape.sd
+# Names: a type with its methods, a method, a field, a case, an interface
+# method, a constant of a group, in both forms (pkg.Name and pkg Name).
+proj/geo.Named
+proj/geo Named.label
+proj/geo.Named.outline
+proj/geo.Shape.Circle
+proj/geo.Measured.area
+proj/geo squareSides
+# A directory of packages: the list, with each one's first sentence.
+proj
+# A standard library package and function.
+strings
+fmt.println
+# Missing doc comments.
+--check proj
+# Errors: a name that is not pub, one that does not exist, a package that
+# does not exist, bad usage.
+proj/geo.hidden
+proj/geo.Named.secret
+nowhere.thing
+--html proj
+proj/geo a b

@@ -1,3 +1,8 @@
+// Package flags parses command-line flags from main's []string args, with
+// generated help. A Spec declares the flags, parse returns a Parsed value,
+// and the program reads each flag from it by name with a typed getter. The
+// syntax is GNU's: --name value, --name=value, -x value, bundled short
+// bools (-vq) and "--" to end the flags.
 package flags
 
 // Command-line flags for main's []string args (docs/stdlib.md, "flags").

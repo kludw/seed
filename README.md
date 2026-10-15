@@ -104,6 +104,7 @@ There is one binary, `seed`:
 | `seed fmt [--check] <file.sd \| dir>...` | Formats files (or every `.sd` file under a directory) in place, or reports the ones that aren't formatted. |
 | `seed c [-g] <dir \| file.sd...>` | Prints the generated C (for testing the compiler). |
 | `seed ast <file.sd>...` | Prints the syntax tree (for debugging the parser). |
+| `seed doc [dir \| file.sd \| pkg[.Name[.member]]]` | Prints the public API of a package with its doc comments, or one name of it (`seed doc json.Value.get`); `seed doc --html -o out dir...` writes static HTML pages with an index and cross-links (`make docs` does it for the standard library, into `build/docs`); `seed doc --check dir...` lists the `pub` names without a doc comment ([the guide, chapter 11](docs/guide/11-packages.md#documentation)). |
 | `seed lsp` | A language server on stdin and stdout, for editors: the compiler's errors as you type, formatting, go to definition, hover, completion, signature help, references, rename and the outline ([the guide, chapter 1](docs/guide/01-getting-started.md#editors)). |
 
 A program is a single `.sd` file or the `package main` of a directory, together with the packages it imports. The compiler checks it, generates one self-contained C file (the runtime included), and compiles that with `cc`.
@@ -118,10 +119,12 @@ The Makefile has the development targets:
 | `make install` | Links `$PREFIX/bin/seed` to `build/seed2` (`make uninstall` removes it). |
 | `make test` | The language tests in `tests/lang` and `tests/core`. |
 | `make test-full` | The features outside the bootstrap subset, packages, `seed test`, crash traces, and a gdb session (when gdb is installed). |
-| `make test-lib` | The standard library's tests. |
+| `make test-lib` | The standard library's tests, and a check that every `pub` name in it has a doc comment. |
 | `make test-fmt` | The formatter's self-checks and golden tests. |
 | `make test-examples` | Builds every example and checks its output, its tests and its formatting. |
 | `make test-lsp` | The language server: scripted sessions over stdin and stdout, and documents typed in a few bytes at a time. |
+| `make test-doc` | `seed doc`: text output against goldens, the HTML of the standard library (every link resolves), `--check`. |
+| `make docs` | The HTML documentation of the standard library, in `build/docs` (`seed doc --html lib -o build/docs`). |
 | `make test-leaks` | Every test program under a leak checker: macOS `leaks`, LeakSanitizer on Linux (slow). |
 | `docs/guide/check.sh` | Every example of the guide, against its expected output. |
 | `runtime/tests/run.sh` | The runtime's own C tests, under the address, undefined-behaviour and thread sanitizers. |

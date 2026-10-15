@@ -1,0 +1,642 @@
+// `seed doc`: the public API of a package with its doc comments, as text
+// (one package, or one name of it) or as static HTML (doc_html.sd), and
+// --check, which reports the pub names that have no doc comment
+// (compiler/README.md, "seed doc").
+//
+//   seed doc [dir | file.sd | pkg]       a package (default: the current directory)
+//   seed doc pkg.Name[.member]            one name: pkg.println, json.Value.get
+//   seed doc pkg Name[.member]            the same
+//   seed doc --html -o outdir dir...      HTML for the packages under the dirs
+//   seed doc --check dir...               every pub name has a doc comment
+//
+// A package is loaded and checked as the language server loads it
+// (lspAnalyze): the files of its directory, in test mode unless it is
+// package main, with its imports resolved from the project root, so the
+// API is exactly the one the compiler sees.
+package main
+
+import "errors"
+import "fmt"
+import "fs"
+import "os"
+
+// One documented declaration: kind is "const", "fn", "type" or "method";
+// owner is a method's type; sig is the declaration as it would be written
+// (without pub, since everything shown is pub; a type with its pub fields,
+// cases or methods and their doc comments); doc is its doc comment.
+// grouped is set on a constant that has no comment of its own, right
+// below another: it shares the comment of their group, and is shown with
+// it.
+type DocDecl struct {
+    string kind
+    string name
+    string owner
+    string sig
+    string doc
+    string path
+    int file
+    int line
+    bool grouped
+}
+
+// The public API of a package. path is its import path ("" for package
+// main), dir its directory; a is the checked program it was read from.
+type DocPkg struct {
+    string name
+    string path
+    string dir
+    string doc
+    []DocDecl consts
+    []DocDecl fns
+    []DocDecl types
+    []DocDecl methods
+    LspAnalysis a
+}
+
+const string docUsage = "usage:\n  seed doc [dir | file.sd | pkg]\n  seed doc pkg.Name[.member]\n  seed doc pkg Name[.member]\n  seed doc --html -o outdir dir...\n  seed doc --check dir...\n"
+
+fn docCommand(string root, []string args) (int, error) {
+    bool html = false
+    bool check = false
+    string out = ""
+    []string rest = []string{}
+    for (int i = 0; i < args.len(); i++) {
+        string a = args[i]
+        if (a == "--html") {
+            html = true
+        } else if (a == "--check") {
+            check = true
+        } else if (a == "-o" && i + 1 < args.len()) {
+            out = args[i + 1]
+            i++
+        } else if (a.startsWith("-")) {
+            fmt.eprint("seed doc: unknown option " + a + "\n" + docUsage)
+            return 2, null
+        } else {
+            rest.push(a)
+        }
+    }
+    if ((html && out == "") || (!html && out != "") || (html && check)) {
+        fmt.eprint(docUsage)
+        return 2, null
+    }
+    if (html || check) {
+        if (rest.len() == 0) {
+            rest.push(".")
+        }
+        []string dirs = []string{}
+        []string bases = []string{}
+        for (int d = 0; d < rest.len(); d++) {
+            if (!fs.isDir(rest[d])) {
+                fmt.eprintln("seed doc: " + rest[d] + " is not a directory")
+                return 2, null
+            }
+            []string found = try docPackageDirs(rest[d], true)
+            for (int k = 0; k < found.len(); k++) {
+                dirs.push(found[k])
+                bases.push(rest[d])
+            }
+        }
+        if (dirs.len() == 0) {
+            fmt.eprintln("seed doc: no packages in " + rest.join(" "))
+            return 1, null
+        }
+        []DocPkg pkgs = []DocPkg{}
+        bool broken = false
+        for (int p = 0; p < dirs.len(); p++) {
+            DocPkg pkg = try docLoad(root, dirs[p], bases[p])
+            if (docReportErrors(pkg)) {
+                broken = true
+            }
+            pkgs.push(pkg)
+        }
+        if (check) {
+            int missing = 0
+            for (int q = 0; q < pkgs.len(); q++) {
+                []string lines = docMissing(pkgs[q])
+                for (int m = 0; m < lines.len(); m++) {
+                    fmt.println(lines[m])
+                }
+                missing = missing + lines.len()
+            }
+            if (missing > 0) {
+                fmt.eprintln("seed doc --check: pub names without a doc comment: " + missing.string())
+                return 1, null
+            }
+            if (broken) {
+                return 1, null
+            }
+            fmt.println("seed doc --check: every pub name of " + pkgs.len().string() + " packages has a doc comment")
+            return 0, null
+        }
+        try docWriteHtml(pkgs, out)
+        if (broken) {
+            return 1, null
+        }
+        return 0, null
+    }
+    if (rest.len() > 2) {
+        fmt.eprint(docUsage)
+        return 2, null
+    }
+    string target = "."
+    if (rest.len() > 0) {
+        target = rest[0]
+    }
+    string symbol = ""
+    if (rest.len() == 2) {
+        symbol = rest[1]
+    }
+    string onlyFile = ""
+    string dir = ""
+    if (fs.isDir(target)) {
+        dir = target
+    } else if (target.endsWith(".sd") && fs.exists(target)) {
+        dir = dirName(target)
+        onlyFile = cleanPath(absPath(target))
+    } else {
+        // pkg, pkg.Name or pkg.Name.member: the package is a directory
+        // (relative to the current one) or a standard library package.
+        []string parts = target.split(".")
+        string pkgPart = parts[0]
+        if (symbol != "" && parts.len() > 1) {
+            fmt.eprint(docUsage)
+            return 2, null
+        }
+        if (parts.len() > 1) {
+            symbol = parts.slice(1, parts.len()).join(".")
+        }
+        if (fs.isDir(pkgPart) && docHasSources(pkgPart)) {
+            dir = pkgPart
+        } else if (validImportPath(pkgPart) && fs.isDir(root + "/lib/" + pkgPart)) {
+            dir = root + "/lib/" + pkgPart
+        } else {
+            fmt.eprintln("seed doc: no package " + pkgPart + " (neither a directory nor a standard library package)")
+            return 1, null
+        }
+    }
+    if (!docHasSources(dir)) {
+        // A directory of packages: list them.
+        []string subs = try docPackageDirs(dir, true)
+        if (subs.len() == 0) {
+            fmt.eprintln("seed doc: no .sd files in " + dir)
+            return 1, null
+        }
+        []string lines = []string{}
+        for (int s = 0; s < subs.len(); s++) {
+            DocPkg sp = try docLoad(root, subs[s], dir)
+            string label = sp.path
+            if (label == "") {
+                label = subs[s]
+            }
+            lines.push(label + docPad(label, 12) + "  " + docSynopsis(sp.doc))
+        }
+        fmt.print(lines.join("\n") + "\n")
+        return 0, null
+    }
+    DocPkg pkg = try docLoad(root, dir, dir)
+    bool bad = docReportErrors(pkg)
+    if (symbol != "") {
+        string? one = docSymbolText(pkg, symbol)
+        if (one == null) {
+            fmt.eprintln("seed doc: package " + pkg.name + " has no pub name " + symbol)
+            return 1, null
+        }
+        fmt.print(one)
+    } else {
+        fmt.print(docPackageText(pkg, onlyFile))
+    }
+    if (bad) {
+        return 1, null
+    }
+    return 0, null
+}
+
+// Whether a directory has .sd files of its own.
+fn docHasSources(string dir) bool {
+    []string files, error err = sourceFiles(dir)
+    return err == null && files.len() > 0
+}
+
+// The package directories at and under dir (all of them when deep, else
+// only dir itself when it is one), sorted; tests/ directories, hidden
+// ones and build/ are not packages.
+fn docPackageDirs(string dir, bool deep) ([]string, error) {
+    []string out = []string{}
+    if (docHasSources(dir)) {
+        out.push(dir)
+        if (!deep) {
+            return out, null
+        }
+    }
+    []string names = try fs.list(dir)
+    for (int i = 0; i < names.len(); i++) {
+        string n = names[i]
+        string p = joinPath(dir, n)
+        if (!fs.isDir(p) || n.startsWith(".") || n == "tests" || n == "build" || n == "testdata") {
+            continue
+        }
+        []string sub = try docPackageDirs(p, true)
+        for (int j = 0; j < sub.len(); j++) {
+            out.push(sub[j])
+        }
+    }
+    return out, null
+}
+
+fn docPad(string s, int width) string {
+    string out = ""
+    for (int i = s.len(); i < width; i++) {
+        out = out + " "
+    }
+    return out
+}
+
+// Prints a package's errors to stderr; whether it had any.
+fn docReportErrors(DocPkg p) bool {
+    if (p.a.c.diags.count() == 0) {
+        return false
+    }
+    fmt.eprintln("seed doc: " + p.dir + " has errors (its documentation may be incomplete):")
+    p.a.c.diags.print()
+    return true
+}
+
+// Loads and checks the package in dir; its import path is the standard
+// library's for a package there, else its path below base (or its name
+// when it is base itself).
+fn docLoad(string root, string dir, string base) (DocPkg, error) {
+    []string files = try sourceFiles(dir)
+    if (files.len() == 0) {
+        return null, errors.new("seed doc: no .sd files in " + dir)
+    }
+    string clean = cleanPath(absPath(dir))
+    LspJob job = LspJob{kind: "doc", seedRoot: root, path: cleanPath(absPath(files[0])), overlay: map[string]string{}, line: 0, character: 0, roots: []string{}, newName: "", includeDecl: false}
+    LspAnalysis a = try lspAnalyze(job, true)
+    Ast ast = a.c.ast
+    string name = ""
+    if (ast.pkgs.len() > 0) {
+        name = ast.pkgs[0].name
+    }
+    string path = ""
+    string lib = cleanPath(absPath(root)) + "/lib/"
+    string cbase = cleanPath(absPath(base))
+    if (clean.startsWith(lib)) {
+        path = clean.slice(lib.len(), clean.len())
+    } else if (name != "main") {
+        if (clean.startsWith(cbase + "/")) {
+            path = clean.slice(cbase.len() + 1, clean.len())
+        } else {
+            path = lastElement(clean)
+        }
+    }
+    DocPkg p = DocPkg{name: name, path: path, dir: dir, doc: "", consts: []DocDecl{}, fns: []DocDecl{}, types: []DocDecl{}, methods: []DocDecl{}, a: a}
+    map[string]bool pubTypes = map[string]bool{}
+    for (int d = 0; d < ast.typeDecls.len(); d++) {
+        TypeDecl td = ast.typeDecls[d]
+        if (td.isPub && td.file >= 0 && td.file < ast.files.len() && ast.files[td.file].pkgIndex == 0) {
+            pubTypes[td.name] = true
+        }
+    }
+    for (int f = 0; f < ast.files.len(); f++) {
+        SourceFile sf = ast.files[f]
+        if (sf.pkgIndex != 0 || sf.isTest) {
+            continue
+        }
+        string pdoc = lspDocComment(ast, f, sf.pkgPos.line)
+        if (p.doc == "" && pdoc != "") {
+            p.doc = pdoc
+        }
+        string groupDoc = ""
+        int lastConst = -10
+        for (int t = 0; t < sf.topCount; t++) {
+            TopDecl top = ast.tops[sf.tops + t]
+            if (top.kind == TopKind.Const) {
+                ConstDecl cd = ast.consts[top.index]
+                string cdoc = lspDocComment(ast, f, cd.pos.line)
+                // A constant right below another, without a comment of
+                // its own, shares the comment of its group.
+                bool grouped = cdoc == "" && lastConst == cd.pos.line - 1
+                if (grouped) {
+                    cdoc = groupDoc
+                }
+                groupDoc = cdoc
+                lastConst = cd.pos.line
+                if (!cd.isPub || cd.name == "") {
+                    continue
+                }
+                string sig = "const " + ast.typeExprText(cd.typeExpr) + " " + cd.name
+                string value = ast.exprText(cd.expr)
+                if (value != "") {
+                    sig = sig + " = " + value
+                }
+                p.consts.push(DocDecl{kind: "const", name: cd.name, owner: "", sig: sig, doc: cdoc, path: sf.path, file: f, line: cd.pos.line, grouped: grouped && p.consts.len() > 0})
+                continue
+            }
+            lastConst = -10
+            if (top.kind == TopKind.Fn) {
+                FnDecl fd = ast.fns[top.index]
+                if (!fd.isPub || fd.isTest || fd.name == "") {
+                    continue
+                }
+                string fsig = docUnPub(lspFnSig(ast, top.index))
+                string fdoc = lspDocComment(ast, f, fd.start.line)
+                if (fd.isMethod) {
+                    string owner = lspRecvTypeName(ast, fd.recvType)
+                    if (pubTypes[owner] != null) {
+                        p.methods.push(DocDecl{kind: "method", name: fd.name, owner: owner, sig: fsig, doc: fdoc, path: sf.path, file: f, line: fd.pos.line, grouped: false})
+                    }
+                } else {
+                    p.fns.push(DocDecl{kind: "fn", name: fd.name, owner: "", sig: fsig, doc: fdoc, path: sf.path, file: f, line: fd.pos.line, grouped: false})
+                }
+            } else if (top.kind == TopKind.Type) {
+                TypeDecl td = ast.typeDecls[top.index]
+                if (!td.isPub || td.name == "") {
+                    continue
+                }
+                p.types.push(DocDecl{kind: "type", name: td.name, owner: "", sig: docTypeSig(ast, top.index), doc: lspDocComment(ast, f, td.pos.line), path: sf.path, file: f, line: td.pos.line, grouped: false})
+            }
+        }
+    }
+    return p, null
+}
+
+// A declaration's text without its leading pub.
+fn docUnPub(string sig) string {
+    if (sig.startsWith("pub ")) {
+        return sig.slice(4, sig.len())
+    }
+    return sig
+}
+
+// A pub type as it would be written, with only its pub fields (and a
+// comment when it has others), its cases or its methods, each with its doc
+// comment.
+fn docTypeSig(Ast ast, int d) string {
+    TypeDecl td = ast.typeDecls[d]
+    string s = "type " + td.name
+    if (td.kind == DeclKind.Struct) {
+        s = s + " struct"
+    } else if (td.kind == DeclKind.Enum) {
+        s = s + " enum"
+    } else {
+        s = s + " interface"
+    }
+    if (td.implCount > 0) {
+        []string impls = []string{}
+        for (int i = 0; i < td.implCount; i++) {
+            impls.push(ast.typeExprText(ast.at(td.impls, i)))
+        }
+        s = s + " implements " + impls.join(", ")
+    }
+    []string lines = []string{}
+    bool hidden = false
+    for (int f = 0; f < td.fieldCount; f++) {
+        Param p = ast.params[ast.at(td.fields, f)]
+        if (!p.isPub) {
+            hidden = true
+            continue
+        }
+        lines = docWithComment(lines, lspDocComment(ast, td.file, p.pos.line))
+        lines.push(docUnPub(lspFieldText(ast, p)))
+    }
+    if (hidden) {
+        lines.push("// Has fields that are not pub.")
+    }
+    for (int k = 0; k < td.caseCount; k++) {
+        EnumCase ec = ast.enumCases[ast.at(td.cases, k)]
+        lines = docWithComment(lines, lspDocComment(ast, td.file, ec.pos.line))
+        if (ec.paramCount > 0) {
+            lines.push(ec.name + lspParamsText(ast, ec.params, ec.paramCount))
+        } else {
+            lines.push(ec.name)
+        }
+    }
+    for (int m = 0; m < td.methodCount; m++) {
+        int mi = ast.at(td.methods, m)
+        lines = docWithComment(lines, lspDocComment(ast, td.file, ast.methodSigs[mi].pos.line))
+        lines.push(lspMethodSigText(ast, mi))
+    }
+    if (lines.len() == 0) {
+        return s + " {}"
+    }
+    return s + " {\n    " + lines.join("\n    ") + "\n}"
+}
+
+// lines with a doc comment's lines added as // comments.
+fn docWithComment([]string lines, string doc) []string {
+    []string out = lines
+    if (doc == "") {
+        return out
+    }
+    []string dl = doc.split("\n")
+    for (int i = 0; i < dl.len(); i++) {
+        if (dl[i] == "") {
+            out.push("//")
+        } else {
+            out.push("// " + dl[i])
+        }
+    }
+    return out
+}
+
+// A doc comment indented by four spaces under its declaration.
+fn docIndented(string doc) string {
+    if (doc == "") {
+        return ""
+    }
+    []string lines = doc.split("\n")
+    for (int i = 0; i < lines.len(); i++) {
+        if (lines[i] != "") {
+            lines[i] = "    " + lines[i]
+        }
+    }
+    return lines.join("\n") + "\n"
+}
+
+fn docBlock(DocDecl d) string {
+    return d.sig + "\n" + docIndented(d.doc) + "\n"
+}
+
+// The first sentence of a doc comment (up to ". " or the end of its first
+// paragraph), on one line.
+fn docSynopsis(string doc) string {
+    []string paras = doc.split("\n\n")
+    string first = paras[0].replace("\n", " ").trim()
+    int? stop = first.index(". ")
+    if (stop != null) {
+        return first.slice(0, stop + 1)
+    }
+    return first
+}
+
+// The package as text: its clause and comment, then its constants,
+// functions and types (each followed by its methods), in the order of the
+// source files. Only the declarations of onlyFile when it is not "".
+fn docPackageText(DocPkg p, string onlyFile) string {
+    string out = "package " + p.name
+    if (p.path != "") {
+        out = out + " // import \"" + p.path + "\""
+    }
+    out = out + "\n\n"
+    if (p.doc != "" && onlyFile == "") {
+        out = out + p.doc + "\n\n"
+    }
+    []string sections = []string{"CONSTANTS", "FUNCTIONS", "TYPES"}
+    for (int s = 0; s < sections.len(); s++) {
+        []DocDecl list = p.consts
+        if (s == 1) {
+            list = p.fns
+        } else if (s == 2) {
+            list = p.types
+        }
+        string body = ""
+        for (int i = 0; i < list.len(); i++) {
+            DocDecl d = list[i]
+            if (onlyFile != "" && cleanPath(absPath(d.path)) != onlyFile) {
+                continue
+            }
+            if (i + 1 < list.len() && list[i + 1].grouped) {
+                // The comment comes after the last of the group.
+                body = body + d.sig + "\n"
+                continue
+            }
+            body = body + docBlock(d)
+            if (d.kind == "type") {
+                for (int m = 0; m < p.methods.len(); m++) {
+                    DocDecl md = p.methods[m]
+                    if (md.owner == d.name && (onlyFile == "" || cleanPath(absPath(md.path)) == onlyFile)) {
+                        body = body + docBlock(md)
+                    }
+                }
+            }
+        }
+        if (body != "") {
+            out = out + sections[s] + "\n\n" + body
+        }
+    }
+    return out
+}
+
+// One name of the package as text: Name (a constant, function or type,
+// a type with its methods) or Type.member (a method, field, enum case or
+// interface method); null when there is no such pub name.
+fn docSymbolText(DocPkg p, string symbol) string? {
+    []string parts = symbol.split(".")
+    string head = "package " + p.name
+    if (p.path != "") {
+        head = head + " // import \"" + p.path + "\""
+    }
+    head = head + "\n\n"
+    if (parts.len() == 1) {
+        []DocDecl all = []DocDecl{}
+        for (int i = 0; i < p.consts.len(); i++) {
+            all.push(p.consts[i])
+        }
+        for (int j = 0; j < p.fns.len(); j++) {
+            all.push(p.fns[j])
+        }
+        for (int k = 0; k < p.types.len(); k++) {
+            all.push(p.types[k])
+        }
+        for (int n = 0; n < all.len(); n++) {
+            DocDecl d = all[n]
+            if (d.name != symbol) {
+                continue
+            }
+            string out = head + docBlock(d)
+            for (int m = 0; m < p.methods.len(); m++) {
+                if (d.kind == "type" && p.methods[m].owner == d.name) {
+                    out = out + docBlock(p.methods[m])
+                }
+            }
+            return out
+        }
+        return null
+    }
+    if (parts.len() != 2) {
+        return null
+    }
+    string typeName = parts[0]
+    string member = parts[1]
+    for (int q = 0; q < p.methods.len(); q++) {
+        DocDecl md = p.methods[q]
+        if (md.owner == typeName && md.name == member) {
+            return head + docBlock(md)
+        }
+    }
+    Ast ast = p.a.c.ast
+    for (int d = 0; d < ast.typeDecls.len(); d++) {
+        TypeDecl td = ast.typeDecls[d]
+        if (td.name != typeName || !td.isPub || td.file < 0 || ast.files[td.file].pkgIndex != 0) {
+            continue
+        }
+        for (int f = 0; f < td.fieldCount; f++) {
+            Param fp = ast.params[ast.at(td.fields, f)]
+            if (fp.name == member && fp.isPub) {
+                return head + "type " + td.name + " struct {\n    " + docUnPub(lspFieldText(ast, fp)) + "\n}\n" + docIndented(lspDocComment(ast, td.file, fp.pos.line)) + "\n"
+            }
+        }
+        for (int c = 0; c < td.caseCount; c++) {
+            EnumCase ec = ast.enumCases[ast.at(td.cases, c)]
+            if (ec.name == member) {
+                string cs = td.name + "." + ec.name
+                if (ec.paramCount > 0) {
+                    cs = cs + lspParamsText(ast, ec.params, ec.paramCount)
+                }
+                return head + cs + "\n" + docIndented(lspDocComment(ast, td.file, ec.pos.line)) + "\n"
+            }
+        }
+        for (int m = 0; m < td.methodCount; m++) {
+            int mi = ast.at(td.methods, m)
+            if (ast.methodSigs[mi].name == member) {
+                return head + "type " + td.name + " interface {\n    " + lspMethodSigText(ast, mi) + "\n}\n" + docIndented(lspDocComment(ast, td.file, ast.methodSigs[mi].pos.line)) + "\n"
+            }
+        }
+    }
+    return null
+}
+
+// A path relative to the current directory when it is below it.
+fn docRel(string path) string {
+    string? cwd, _ = os.cwd()
+    if (cwd != null && path.startsWith(cwd + "/")) {
+        return path.slice(cwd.len() + 1, path.len())
+    }
+    return path
+}
+
+// The pub names of the package that have no doc comment, as
+// "path:line: kind name has no doc comment", and the package itself when
+// none of its files has a comment above its package clause.
+fn docMissing(DocPkg p) []string {
+    []string out = []string{}
+    if (p.doc == "") {
+        out.push(p.dir + ": package " + p.name + " has no package comment (a comment right above the package clause of one of its files)")
+    }
+    []DocDecl all = []DocDecl{}
+    for (int i = 0; i < p.consts.len(); i++) {
+        all.push(p.consts[i])
+    }
+    for (int j = 0; j < p.fns.len(); j++) {
+        all.push(p.fns[j])
+    }
+    for (int k = 0; k < p.types.len(); k++) {
+        all.push(p.types[k])
+    }
+    for (int m = 0; m < p.methods.len(); m++) {
+        all.push(p.methods[m])
+    }
+    for (int n = 0; n < all.len(); n++) {
+        DocDecl d = all[n]
+        if (d.doc != "") {
+            continue
+        }
+        string name = d.name
+        if (d.owner != "") {
+            name = d.owner + "." + d.name
+        }
+        out.push(docRel(d.path) + ":" + d.line.string() + ": " + d.kind + " " + name + " has no doc comment")
+    }
+    return out
+}

@@ -1,3 +1,6 @@
+// Package path handles slash-separated paths as text, without touching
+// the file system: joining, cleaning, and splitting into directory, base
+// name and extension, with the rules of Go's path package.
 package path
 
 // Slash-separated paths as text (docs/stdlib.md, "path"). These functions

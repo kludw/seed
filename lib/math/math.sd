@@ -1,3 +1,7 @@
+// Package math has the numeric functions and constants: integer helpers
+// with Int and Float variants, square roots and powers, rounding,
+// trigonometry, exponentials and logarithms. The float functions follow
+// IEEE 754: they return nan or an infinity instead of crashing.
 package math
 
 // Numeric functions and constants (docs/stdlib.md, "math"). The float
@@ -8,6 +12,7 @@ package math
 
 import "os"
 
+// The constants π and e, as the nearest floats.
 pub const float pi = 3.141592653589793
 pub const float e = 2.718281828459045
 

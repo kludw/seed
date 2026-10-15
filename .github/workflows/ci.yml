@@ -51,6 +51,9 @@ jobs:
       - name: Language server
         run: make test-lsp
 
+      - name: Documentation (seed doc)
+        run: make test-doc
+
       - name: Guide
         timeout-minutes: 20
         run: docs/guide/check.sh

@@ -1,0 +1,6 @@
+package geo
+
+test "area of a square" {
+    assert(area(Shape.Square(2.0)) == 4.0)
+    assert(named("x").private() == "x")
+}

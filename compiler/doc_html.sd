@@ -1,0 +1,403 @@
+// `seed doc --html`: static HTML pages for packages (doc.sd reads them):
+// index.html, the list of packages with the first sentence of each one's
+// comment, and one page per package (its import path with / replaced by
+// ., then .html), with its comment, an index, and its constants,
+// functions and types with their methods. The names of types in
+// declarations link to their documentation, in the page or in another
+// documented package, and so do `Name` and `pkg.Name` in doc comments.
+package main
+
+import "fs"
+
+// What the pages can link to: the page of each documented package by its
+// import path and by its name, and the anchors of each page ("path#Name",
+// "path#Type.method").
+type DocLinks struct {
+    map[string]string pageByPath
+    map[string]string pathByName
+    map[string]bool anchors
+}
+
+fn docPageName(DocPkg p) string {
+    string key = p.path
+    if (key == "") {
+        key = p.name
+    }
+    return key.replace("/", ".") + ".html"
+}
+
+fn docKey(DocPkg p) string {
+    if (p.path == "") {
+        return p.name
+    }
+    return p.path
+}
+
+fn docWriteHtml([]DocPkg pkgs, string out) error {
+    try fs.mkdir(out)
+    DocLinks links = DocLinks{pageByPath: map[string]string{}, pathByName: map[string]string{}, anchors: map[string]bool{}}
+    for (int i = 0; i < pkgs.len(); i++) {
+        DocPkg p = pkgs[i]
+        string key = docKey(p)
+        links.pageByPath[key] = docPageName(p)
+        if (links.pathByName[p.name] == null) {
+            links.pathByName[p.name] = key
+        }
+        []DocDecl all = docAllDecls(p)
+        for (int j = 0; j < all.len(); j++) {
+            links.anchors[key + "#" + docAnchor(all[j])] = true
+        }
+    }
+    []string rows = []string{}
+    for (int k = 0; k < pkgs.len(); k++) {
+        DocPkg p = pkgs[k]
+        try fs.write(joinPath(out, docPageName(p)), docPageHtml(p, links))
+        rows.push("<tr><td><a href=\"" + docEsc(docPageName(p)) + "\">" + docEsc(docKey(p)) + "</a></td><td>" + docInlineHtml(docSynopsis(p.doc), p, links) + "</td></tr>")
+    }
+    string index = docHead("Packages") + "<h1>Packages</h1>\n<table class=\"pkgs\">\n" + rows.join("\n") + "\n</table>\n" + docFoot()
+    try fs.write(joinPath(out, "index.html"), index)
+    return null
+}
+
+fn docAllDecls(DocPkg p) []DocDecl {
+    []DocDecl all = []DocDecl{}
+    for (int i = 0; i < p.consts.len(); i++) {
+        all.push(p.consts[i])
+    }
+    for (int j = 0; j < p.fns.len(); j++) {
+        all.push(p.fns[j])
+    }
+    for (int k = 0; k < p.types.len(); k++) {
+        all.push(p.types[k])
+    }
+    for (int m = 0; m < p.methods.len(); m++) {
+        all.push(p.methods[m])
+    }
+    return all
+}
+
+fn docAnchor(DocDecl d) string {
+    if (d.owner != "") {
+        return d.owner + "." + d.name
+    }
+    return d.name
+}
+
+fn docHead(string title) string {
+    return "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n<title>" + docEsc(title) + "</title>\n<style>\n" + docCss + "</style>\n</head>\n<body>\n<main>\n"
+}
+
+fn docFoot() string {
+    return "</main>\n</body>\n</html>\n"
+}
+
+const string docCss = ":root { --fg: #1d1d1f; --bg: #ffffff; --muted: #5f6368; --code: #f4f4f5; --link: #0b57d0; --rule: #e3e3e6; }\n@media (prefers-color-scheme: dark) { :root { --fg: #e6e6e8; --bg: #16171a; --muted: #a0a3a8; --code: #222429; --link: #8ab4f8; --rule: #33353a; } }\nbody { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.55 system-ui, -apple-system, sans-serif; }\nmain { max-width: 52rem; margin: 0 auto; padding: 1.5rem 1rem 4rem; }\na { color: var(--link); text-decoration: none; }\na:hover { text-decoration: underline; }\nh1 { font-size: 1.8rem; margin: 0.5rem 0; }\nh2 { font-size: 1.3rem; margin-top: 2.5rem; border-bottom: 1px solid var(--rule); padding-bottom: 0.25rem; }\nh3 { font-size: 1.1rem; margin-top: 2rem; }\npre, code { font: 14px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--code); border-radius: 4px; }\npre { padding: 0.75rem 1rem; overflow-x: auto; }\ncode { padding: 0.1rem 0.3rem; }\npre code { padding: 0; }\n.import, nav { color: var(--muted); }\n.doc { margin-left: 1rem; }\nul.index { list-style: none; padding-left: 0; columns: 2 16rem; }\ntable.pkgs td { padding: 0.3rem 1rem 0.3rem 0; vertical-align: top; }\n"
+
+fn docEsc(string s) string {
+    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;")
+}
+
+// The page of a package.
+fn docPageHtml(DocPkg p, DocLinks links) string {
+    string key = docKey(p)
+    string out = docHead("package " + p.name) + "<nav><a href=\"index.html\">Packages</a></nav>\n<h1>package " + docEsc(p.name) + "</h1>\n"
+    if (p.path != "") {
+        out = out + "<p class=\"import\"><code>import \"" + docEsc(p.path) + "\"</code></p>\n"
+    }
+    out = out + docCommentHtml(p.doc, p, links)
+    // The index.
+    []string items = []string{}
+    []DocDecl tops = []DocDecl{}
+    for (int i = 0; i < p.consts.len(); i++) {
+        tops.push(p.consts[i])
+    }
+    for (int j = 0; j < p.fns.len(); j++) {
+        tops.push(p.fns[j])
+    }
+    for (int k = 0; k < p.types.len(); k++) {
+        tops.push(p.types[k])
+        for (int m = 0; m < p.methods.len(); m++) {
+            if (p.methods[m].owner == p.types[k].name) {
+                tops.push(p.methods[m])
+            }
+        }
+    }
+    for (int n = 0; n < tops.len(); n++) {
+        DocDecl d = tops[n]
+        string label = d.kind + " " + docAnchor(d)
+        items.push("<li><a href=\"#" + docEsc(docAnchor(d)) + "\">" + docEsc(label) + "</a></li>")
+    }
+    if (items.len() > 0) {
+        out = out + "<h2 id=\"index\">Index</h2>\n<ul class=\"index\">\n" + items.join("\n") + "\n</ul>\n"
+    }
+    if (p.consts.len() > 0) {
+        out = out + "<h2 id=\"constants\">Constants</h2>\n"
+        // A group of constants (DocDecl.grouped) is one declaration.
+        int first = 0
+        for (int c = 0; c < p.consts.len(); c++) {
+            if (c + 1 < p.consts.len() && p.consts[c + 1].grouped) {
+                continue
+            }
+            if (c == first) {
+                out = out + docDeclHtml(p.consts[c], p, links, key)
+            } else {
+                string ids = ""
+                []string names = []string{}
+                []string sigs = []string{}
+                for (int g = first; g <= c; g++) {
+                    DocDecl gd = p.consts[g]
+                    ids = ids + "<span id=\"" + docEsc(gd.name) + "\"></span>"
+                    names.push(gd.name)
+                    sigs.push(docSigHtml(gd.sig, gd.file, p, links, key))
+                }
+                out = out + "<h3>" + ids + "const " + docEsc(names.join(", ")) + "</h3>\n<pre><code>" + sigs.join("\n") + "</code></pre>\n" + docCommentHtml(p.consts[c].doc, p, links)
+            }
+            first = c + 1
+        }
+    }
+    if (p.fns.len() > 0) {
+        out = out + "<h2 id=\"functions\">Functions</h2>\n"
+        for (int f = 0; f < p.fns.len(); f++) {
+            out = out + docDeclHtml(p.fns[f], p, links, key)
+        }
+    }
+    if (p.types.len() > 0) {
+        out = out + "<h2 id=\"types\">Types</h2>\n"
+        for (int t = 0; t < p.types.len(); t++) {
+            out = out + docDeclHtml(p.types[t], p, links, key)
+            for (int q = 0; q < p.methods.len(); q++) {
+                if (p.methods[q].owner == p.types[t].name) {
+                    out = out + docDeclHtml(p.methods[q], p, links, key)
+                }
+            }
+        }
+    }
+    return out + docFoot()
+}
+
+fn docDeclHtml(DocDecl d, DocPkg p, DocLinks links, string key) string {
+    string tag = "h3"
+    if (d.kind == "method") {
+        tag = "h4"
+    }
+    string anchor = docAnchor(d)
+    string title = d.kind + " " + anchor
+    return "<" + tag + " id=\"" + docEsc(anchor) + "\"><a href=\"#" + docEsc(anchor) + "\">" + docEsc(title) + "</a></" + tag + ">\n<pre><code>" + docSigHtml(d.sig, d.file, p, links, key) + "</code></pre>\n" + docCommentHtml(d.doc, p, links)
+}
+
+// The imports of a file: the name they are used under, to the import path.
+fn docImports(DocPkg p, int file) map[string]string {
+    map[string]string out = map[string]string{}
+    Ast ast = p.a.c.ast
+    for (int i = 0; i < ast.imports.len(); i++) {
+        Import im = ast.imports[i]
+        if (im.file == file) {
+            out[im.name] = im.path
+        }
+    }
+    return out
+}
+
+// The link to Name of the package with the import path, or "".
+fn docHref(DocLinks links, string path, string key, string name) string {
+    string? page = links.pageByPath[path]
+    if (page == null || links.anchors[path + "#" + name] == null) {
+        return ""
+    }
+    if (path == key) {
+        return "#" + name
+    }
+    return page + "#" + name
+}
+
+// A declaration as HTML, with its type names linked: Name to the type of
+// this package, pkg.Name to the one of an imported package (pkg is a name
+// the file imports). Strings and comments are copied as they are.
+fn docSigHtml(string sig, int file, DocPkg p, DocLinks links, string key) string {
+    map[string]string imports = docImports(p, file)
+    string out = ""
+    int i = 0
+    for (; i < sig.len(); ) {
+        byte b = sig[i]
+        if (b == '"' || b == '\'') {
+            int j = i + 1
+            for (; j < sig.len() && sig[j] != b; ) {
+                if (sig[j] == '\\') {
+                    j++
+                }
+                j++
+            }
+            if (j < sig.len()) {
+                j++
+            }
+            out = out + docEsc(sig.slice(i, j))
+            i = j
+            continue
+        }
+        if (b == '/' && i + 1 < sig.len() && sig[i + 1] == '/') {
+            int e = i
+            for (; e < sig.len() && sig[e] != '\n'; ) {
+                e++
+            }
+            out = out + docEsc(sig.slice(i, e))
+            i = e
+            continue
+        }
+        if (!lspIdentByte(b) || (b >= '0' && b <= '9')) {
+            out = out + docEsc(sig.slice(i, i + 1))
+            i++
+            continue
+        }
+        int w = i
+        for (; w < sig.len() && lspIdentByte(sig[w]); ) {
+            w++
+        }
+        string word = sig.slice(i, w)
+        // pkg.Name
+        string? ipath = imports[word]
+        if (ipath != null && w + 1 < sig.len() && sig[w] == '.' && isUpper(sig[w + 1])) {
+            int n = w + 1
+            for (; n < sig.len() && lspIdentByte(sig[n]); ) {
+                n++
+            }
+            string name = sig.slice(w + 1, n)
+            string href = docHref(links, ipath, key, name)
+            if (href != "") {
+                out = out + "<a href=\"" + docEsc(href) + "\">" + docEsc(word + "." + name) + "</a>"
+                i = n
+                continue
+            }
+        }
+        string own = ""
+        if (isUpper(word[0]) && (i == 0 || sig[i - 1] != '.')) {
+            own = docHref(links, key, key, word)
+        }
+        if (own != "") {
+            out = out + "<a href=\"" + docEsc(own) + "\">" + docEsc(word) + "</a>"
+        } else {
+            out = out + docEsc(word)
+        }
+        i = w
+    }
+    return out
+}
+
+// A doc comment as HTML: paragraphs (separated by blank lines), indented
+// lines as code blocks, `code` spans.
+fn docCommentHtml(string doc, DocPkg p, DocLinks links) string {
+    if (doc == "") {
+        return ""
+    }
+    []string lines = doc.split("\n")
+    string out = "<div class=\"doc\">\n"
+    []string para = []string{}
+    []string code = []string{}
+    for (int i = 0; i <= lines.len(); i++) {
+        string line = ""
+        bool end = i == lines.len()
+        if (!end) {
+            line = lines[i]
+        }
+        bool indented = !end && (line.startsWith("  ") || line.startsWith("\t"))
+        if (indented) {
+            if (para.len() > 0) {
+                out = out + "<p>" + docInlineHtml(para.join(" "), p, links) + "</p>\n"
+                para = []string{}
+            }
+            code.push(line)
+            continue
+        }
+        if (code.len() > 0) {
+            out = out + "<pre><code>" + docEsc(docDedent(code).join("\n")) + "</code></pre>\n"
+            code = []string{}
+        }
+        if (end || line.trim() == "") {
+            if (para.len() > 0) {
+                out = out + "<p>" + docInlineHtml(para.join(" "), p, links) + "</p>\n"
+                para = []string{}
+            }
+            continue
+        }
+        para.push(line.trim())
+    }
+    return out + "</div>\n"
+}
+
+// Lines without the indentation they all share.
+fn docDedent([]string lines) []string {
+    int common = 1000
+    for (int i = 0; i < lines.len(); i++) {
+        string l = lines[i]
+        if (l.trim() == "") {
+            continue
+        }
+        int n = 0
+        for (; n < l.len() && (l[n] == ' ' || l[n] == '\t'); ) {
+            n++
+        }
+        if (n < common) {
+            common = n
+        }
+    }
+    []string out = []string{}
+    for (int j = 0; j < lines.len(); j++) {
+        string l = lines[j]
+        if (l.len() >= common) {
+            out.push(l.slice(common, l.len()))
+        } else {
+            out.push("")
+        }
+    }
+    return out
+}
+
+// Text with `code` spans; a span that is Name (of this package) or
+// pkg.Name, pkg.Name.member or pkg.name (of a documented package) links to
+// it.
+fn docInlineHtml(string text, DocPkg p, DocLinks links) string {
+    []string parts = text.split("`")
+    if (parts.len() < 3) {
+        return docEsc(text)
+    }
+    string out = ""
+    for (int i = 0; i < parts.len(); i++) {
+        string part = parts[i]
+        if (i % 2 == 0 || i == parts.len() - 1) {
+            if (i % 2 == 1) {
+                out = out + "`"
+            }
+            out = out + docEsc(part)
+            continue
+        }
+        string href = docCodeHref(part, p, links)
+        if (href != "") {
+            out = out + "<a href=\"" + docEsc(href) + "\"><code>" + docEsc(part) + "</code></a>"
+        } else {
+            out = out + "<code>" + docEsc(part) + "</code>"
+        }
+    }
+    return out
+}
+
+// Where a code span links to, or "".
+fn docCodeHref(string code, DocPkg p, DocLinks links) string {
+    string key = docKey(p)
+    for (int i = 0; i < code.len(); i++) {
+        if (!lspIdentByte(code[i]) && code[i] != '.') {
+            return ""
+        }
+    }
+    []string parts = code.split(".")
+    if (parts.len() == 0 || parts[0] == "") {
+        return ""
+    }
+    string own = docHref(links, key, key, code)
+    if (own != "") {
+        return own
+    }
+    string? path = links.pathByName[parts[0]]
+    if (path == null || parts.len() < 2) {
+        return ""
+    }
+    return docHref(links, path, key, parts.slice(1, parts.len()).join("."))
+}

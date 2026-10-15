@@ -1,3 +1,7 @@
+// Package http is an HTTP/1.1 server and client. A server calls a Handler
+// for each request, each connection in a goroutine of its own; the client
+// sends a Request and returns the Response. Header names are lowercase,
+// and bodies are strings.
 package http
 
 // An HTTP/1.1 server and client (docs/stdlib.md, "http"). This file has the
@@ -40,6 +44,7 @@ pub type Handler interface {
     handle(Request req) (Response, error)
 }
 
+// Status codes, for Response.status and statusText.
 pub const int statusOk = 200
 pub const int statusCreated = 201
 pub const int statusNoContent = 204

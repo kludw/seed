@@ -1,3 +1,6 @@
+// Package encoding turns data into text and back: hex, base64 (standard
+// and URL-safe, RFC 4648) and URL percent-encoding. Decoders return an
+// error that names the offset of the first bad byte.
 package encoding
 
 // Turning data into text and back (docs/stdlib.md, "encoding"): hex,

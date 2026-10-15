@@ -1,3 +1,6 @@
+// Package rand makes pseudo-random numbers: a seeded Source, which gives
+// the same sequence on every platform and in every Seed version, and
+// functions that draw from a source seeded by the operating system.
 package rand
 
 // Pseudo-random numbers (docs/stdlib.md, "rand"): the seeded `Source`, in

@@ -1,3 +1,7 @@
+// Package url parses, writes and resolves URLs as RFC 3986 defines them,
+// percent-encodes and decodes their parts, and handles query strings as
+// ordered lists of parameters. The parts are kept as written (still
+// percent-encoded), so parsing and writing a URL loses nothing.
 package url
 
 // URLs as RFC 3986 defines them (docs/stdlib.md, "url"): parsing a URL or

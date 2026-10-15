@@ -1,3 +1,6 @@
+// Package strings has the text helpers that are not built-in methods of
+// string: repeating, padding, searching from the end, splitting into
+// fields, and classifying bytes.
 package strings
 
 // Text helpers that are not built-in methods (docs/stdlib.md, "strings").

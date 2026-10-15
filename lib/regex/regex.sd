@@ -1,3 +1,7 @@
+// Package regex matches regular expressions with the syntax and rules of
+// Go's regexp (RE2): leftmost-first matching, without backreferences or
+// lookaround, so that matching takes time linear in the length of the
+// text.
 package regex
 
 // Regular expressions with the syntax and the matching rules of Go's

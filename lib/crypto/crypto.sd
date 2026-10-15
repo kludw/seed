@@ -1,3 +1,7 @@
+// Package crypto has the few cryptographic building blocks most programs
+// need: SHA-256, HMAC-SHA-256, secure random bytes and a constant-time
+// comparison. Digests and keys are raw bytes in a string; turn them into
+// text with encoding.hexEncode or encoding.base64UrlEncode.
 package crypto
 
 // The few cryptographic building blocks most programs need (docs/stdlib.md,

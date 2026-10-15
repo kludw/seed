@@ -134,6 +134,45 @@ main.sd:15:19: error: the field items of cart.Cart is not pub
     hint: only pub fields can be used outside package cart
 ```
 
+## Documentation
+
+A comment right above a declaration is its documentation, and a comment right above the `package` clause documents the package, as in Go. `seed doc` prints the `pub` part of a package with those comments: the constants, functions and types, each type's `pub` fields (with their default values) and its `pub` methods. In the directory of the project above:
+
+```
+$ seed doc cart
+package cart // import "cart"
+
+Package cart keeps the items of a shopping cart and prices them.
+
+FUNCTIONS
+
+fn newCart() Cart
+
+TYPES
+
+type Item struct {
+    string name
+    int cents
+    int quantity
+}
+
+type Cart struct {
+    // Has fields that are not pub.
+}
+    Fields without pub can only be used inside package cart, so other
+    packages must call newCart() instead of writing a Cart{...} literal.
+
+fn (Cart c) mut add(Item item) error
+
+fn (Cart c) mut setDiscount(int percent)
+
+fn (Cart c) total() int
+
+fn (Cart c) count() int
+```
+
+`seed doc cart.Cart.add` shows one name, `seed doc json` or `seed doc fmt.println` a package or a function of the standard library, and `seed doc --check .` lists the `pub` names that have no comment yet. `seed doc --html -o docs .` writes the documentation of every package of the project as web pages, with the type names linked; in Seed's repository, `make docs` does the same for the standard library (`seed doc --html -o build/docs lib`). Editors show the same comments on hover.
+
 ## Nothing runs on its own
 
 There is no `init()` function, and there are no package-level variables, only constants. Importing a package never runs any of its code. Everything a program does starts in `main`, and the state it needs is created there and passed along. This keeps programs easy to follow, and it is also required by concurrency: goroutines share nothing, so there can't be global mutable state.

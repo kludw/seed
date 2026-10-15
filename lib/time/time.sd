@@ -10,6 +10,7 @@ package time
 import "errors"
 import "os"
 
+// Durations, in nanoseconds: write 5 * time.second.
 pub const int nanosecond = 1
 pub const int microsecond = 1000
 pub const int millisecond = 1000000

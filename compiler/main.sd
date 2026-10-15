@@ -8,6 +8,7 @@
 //   seed c <dir | file.sd...>             write the C program to stdout (for tests)
 //   seed ast <file.sd>...                 print the syntax tree (for debugging)
 //   seed lsp                              a language server on stdin/stdout (lsp.sd)
+//   seed doc [--html -o out | --check] ...  the API of packages, documented (doc.sd)
 //
 // A program is the package main in a directory (all its .sd files), or a
 // single .sd file. The packages it imports are loaded by load.sd.
@@ -31,7 +32,7 @@ const string quickOpt = "-O1"
 const string debugOpt = "-O0"
 const []string cLibs = []string{"-lm", "-lpthread"}
 
-const string usage = "usage:\n  seed build [-g] [-o out] <dir | file.sd>\n  seed run [-g] <dir | file.sd> [args...]\n  seed test [-v] [--run text] [dir...]\n  seed fmt [--check] <file.sd | dir>...\n  seed c [-g] <dir | file.sd...>\n  seed ast <file.sd>...\n  seed lsp\n"
+const string usage = "usage:\n  seed build [-g] [-o out] <dir | file.sd>\n  seed run [-g] <dir | file.sd> [args...]\n  seed test [-v] [--run text] [dir...]\n  seed fmt [--check] <file.sd | dir>...\n  seed c [-g] <dir | file.sd...>\n  seed ast <file.sd>...\n  seed lsp\n  seed doc [dir | file.sd | pkg[.Name]] | --html -o outdir dir... | --check dir...\n"
 
 fn main([]string args) error {
     if (args.len() < 2) {
@@ -123,6 +124,10 @@ fn main([]string args) error {
     }
     if (cmd == "lsp") {
         return lspCommand(root)
+    }
+    if (cmd == "doc") {
+        int docCode = try docCommand(root, rest)
+        os.exit(docCode)
     }
     fmt.eprint("seed: unknown command " + cmd + "\n" + usage)
     os.exit(2)

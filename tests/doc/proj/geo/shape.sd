@@ -1,0 +1,70 @@
+// Package geo has shapes and their measurements, for the tests of seed
+// doc.
+//
+// Areas are in square meters:
+//
+//   geo.area(geo.Shape.Square(2.0)) is 4.0
+package geo
+
+import "units"
+
+// The sides of the shapes, as `Shape` counts them.
+pub const int triangleSides = 3
+pub const int squareSides = 4
+
+// Not documented: private.
+const int hidden = 0
+
+// A shape. Use `area` for its area and `units.Meter` for lengths.
+pub type Shape enum {
+    // A circle of the radius.
+    Circle(float radius)
+    Square(float side)
+    // Nothing at all.
+    Empty
+}
+
+// A shape with its name and the length of its outline.
+pub type Named struct {
+    pub string name = "unnamed"
+    // The outline, in meters.
+    pub units.Meter outline
+    int secret
+}
+
+// Something with an area.
+pub type Measured interface {
+    // The area, in square meters.
+    area() float
+    mut scale(float by)
+}
+
+// The area of s.
+pub fn area(Shape s) float {
+    switch (s) {
+    case Shape.Circle(float r):
+        return 3.14159 * r * r
+    case Shape.Square(float side):
+        return side * side
+    case Shape.Empty:
+        return 0.0
+    }
+}
+
+pub fn undocumented() int {
+    return hidden + 1
+}
+
+// A named shape with no outline.
+pub fn named(string name) Named {
+    return Named{name: name, outline: units.Meter{value: 0.0}, secret: 0}
+}
+
+// The name, or "unnamed".
+pub fn (Named n) label() string {
+    return n.name + n.secret.string()
+}
+
+fn (Named n) private() string {
+    return n.name
+}

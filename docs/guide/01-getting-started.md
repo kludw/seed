@@ -139,6 +139,7 @@ Asking for a flag that was not declared, or with the wrong type (`p.getInt("loud
 | `seed fmt <file.sd or dir>...` | Rewrites the files in the one canonical layout; a directory means every `.sd` file under it. |
 | `seed fmt --check <file.sd or dir>...` | Changes nothing, and reports the files that are not formatted (exit code 1). |
 | `seed c [-g] <file.sd or dir>` | Writes the generated C program to stdout. |
+| `seed doc [dir or pkg[.Name]]` | Prints the documentation of a package, or of one name of it (`seed doc fmt.println`); `--html -o out` writes web pages, `--check` lists the `pub` names without a doc comment ([chapter 11](11-packages.md#documentation)). |
 | `seed lsp` | The language server, for editors (see [Editors](#editors)). |
 
 A program is a single `.sd` file, or a directory: the `package main` in it and the packages it imports ([chapter 11](11-packages.md)). Compile errors are printed to stderr, and the command exits with code 1.
