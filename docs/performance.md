@@ -22,6 +22,7 @@ each. Each pair prints the same checksum, which the script compares.
 | `json` | a 1 MB document (6,000 objects) built from `json.Value`s, then printed and parsed back 30 times |
 | `pingpong` | 100,000 round trips over two unbuffered channels, then 1 million ints through a `chan int(1024)` |
 | `spawn` | 100,000 goroutines in groups of 1,000, each sending one int on a buffered channel |
+| `bigint` | 3^2,000,000 by repeated squaring and fib(1,000,000) by fast doubling, each printed (954,243 and 208,988 digits), parsed back and divided |
 
 The Go programs do the same work the idiomatic way (`strconv`, `sort.Ints`,
 `sort.SliceStable`, `encoding/json` into `any`, `sync.WaitGroup`). One
@@ -998,3 +999,27 @@ document) and the per-byte loops of the parser and printer: their index is
 a general `int` (it starts at a struct field, which the interval analysis
 cannot bound), so each byte costs a tag test, a bounds check and an
 overflow check, about 18 instructions where C would take 5.
+
+## Big integers
+
+Big integers had only the schoolbook algorithms, so printing a number of a
+million digits took 23 s. `seed_int.c` now multiplies long numbers with
+Karatsuba's method (on 64-bit words where the C compiler has
+`unsigned __int128`), divides them with Burnikel and Ziegler's recursive
+division, and converts them to and from decimal text by divide and conquer
+over the powers 10^(9 * 2^k); runtime/README.md, section 5, has the
+details. On Linux x86_64 (one core, gcc `-O2`, Go 1.24), in seconds:
+
+| Operation on 3^2,000,000 (954,243 digits) | Before | After | Go `math/big` |
+|---|---|---|---|
+| computing it by repeated squaring | 3.6 | 0.15 | 0.11 |
+| `string()` | 22.9 | 0.45 | 0.26 |
+| `toInt()` of the text | 4.3 | 0.2 | 1.5 |
+| dividing by 7^666,666 | 5.1 | 0.15 | 0.13 |
+| 100000! by a loop of `f = f * i`, then `string()` | 7.0 + 5.2 | 1.1 + 0.15 | 1.2 + 0.07 |
+
+The `bigint` benchmark (bench/seed/bigint.sd) went from 57 s to 1.45 s;
+Go's version takes 3.7 s, most of it in `SetString`, which is still
+quadratic in Go. Multiplication and printing remain 1.5-2x slower than
+Go's, whose inner loops are in assembly; Toom-Cook would gain little below
+millions of digits.

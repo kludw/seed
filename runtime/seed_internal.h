@@ -88,6 +88,12 @@ sd_str sd_str_alloc_(int64_t len); /* uninitialised data of len bytes, NUL writt
 sd_str sd_str_byte_(uint8_t c);    /* immortal one-byte string */
 char *sd_int_to_cstr(sd_int a);    /* malloc'ed decimal text */
 sd_bigint *sd_bigint_copy_(const sd_bigint *b);
+/* The schoolbook (quadratic) big integer algorithms, which the tests compare
+ * with the fast ones that seed_int.c uses for long numbers. */
+sd_int sd_int_mul_basecase_(sd_int a, sd_int b);
+void sd_int_divmod_basecase_(sd_int a, sd_int b, sd_int *q, sd_int *r);
+char *sd_int_to_cstr_basecase_(sd_int a);
+bool sd_int_parse_dec_basecase_(const char *p, int64_t len, sd_int *out);
 
 /* Lists */
 sd_list *sd_list_new_len_(const sd_type *et, int64_t len); /* len elements, uninitialised */

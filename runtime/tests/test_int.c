@@ -1,5 +1,6 @@
 /* Growing integers: known values, Python-generated vectors, differential
- * tests against __int128, algebraic identities and crash behaviour. */
+ * tests against __int128, algebraic identities, the fast algorithms for long
+ * numbers against the schoolbook ones, and crash behaviour. */
 #include "check.h"
 #include "int_vectors.h"
 
@@ -229,6 +230,158 @@ static void test_identities(void) {
   }
 }
 
+/* ---- the subquadratic algorithms against the schoolbook ones ----
+ *
+ * Long products use Karatsuba (on 64-bit words), long divisions
+ * Burnikel-Ziegler, and long text conversions divide and conquer; each is
+ * compared with the schoolbook version that seed_int.c keeps for short
+ * numbers, on random operands of sizes across the thresholds, in patterns
+ * that stress carries and borrows. */
+sd_int sd_int_mul_basecase_(sd_int a, sd_int b);
+void sd_int_divmod_basecase_(sd_int a, sd_int b, sd_int *q, sd_int *r);
+char *sd_int_to_cstr(sd_int a);
+char *sd_int_to_cstr_basecase_(sd_int a);
+bool sd_int_parse_dec_(const char *p, int64_t len, sd_int *out);
+bool sd_int_parse_dec_basecase_(const char *p, int64_t len, sd_int *out);
+
+/* A number of n 32-bit limbs (0 for zero) in one of several patterns. */
+static sd_int rnd_limbs(int n, int kind) {
+  if (n == 0) return SD_INT(0);
+  char *s = malloc((size_t)n * 8 + 8);
+  int p = 0;
+  if (rnd() & 1) s[p++] = '-';
+  s[p++] = '0';
+  s[p++] = 'x';
+  for (int i = 0; i < n; i++) {
+    uint32_t limb;
+    switch (kind) {
+    case 0: limb = 0xFFFFFFFFu; break;                                     /* 2^k - 1 */
+    case 1: limb = i == 0 ? 1 : 0; break;                                   /* 2^k */
+    case 2: limb = rnd() % 4 == 0 ? (uint32_t)rnd() : 0; break;             /* sparse */
+    case 3: limb = rnd() % 4 == 0 ? 0xFFFFFFFFu : (uint32_t)rnd(); break;   /* mostly random, runs of ones */
+    case 4: limb = i == 0 ? 0x80000000u : (uint32_t)(rnd() & 0xF); break;   /* top bit set, small limbs */
+    default: limb = (uint32_t)rnd(); break;
+    }
+    if (i == 0 && limb == 0) limb = 1 + (uint32_t)(rnd() % 7);
+    p += sprintf(s + p, i == 0 ? "%x" : "%08x", limb);
+  }
+  s[p] = 0;
+  sd_int v = sd_int_from_lit(s);
+  free(s);
+  return v;
+}
+
+static int rnd_size(int max) {
+  switch (rnd() % 5) {
+  case 0: return (int)(rnd() % 4);
+  case 1: return 20 + (int)(rnd() % 120); /* around the thresholds */
+  default: return (int)(rnd() % (uint64_t)(max + 1));
+  }
+}
+
+static void check_text(sd_int v) {
+  char *fast = sd_int_to_cstr(v), *slow = sd_int_to_cstr_basecase_(v);
+  CHECK_STREQ(fast, slow);
+  /* back, with leading zeros sometimes */
+  size_t len = strlen(fast);
+  char *t = malloc(len + 64);
+  int off = 0, neg = fast[0] == '-';
+  if (neg) t[off++] = '-';
+  int zeros = rnd() % 4 == 0 ? (int)(rnd() % 40) : 0;
+  memset(t + off, '0', (size_t)zeros);
+  strcpy(t + off + zeros, fast + neg);
+  sd_int p1, p2;
+  CHECK(sd_int_parse_dec_(t, (int64_t)strlen(t), &p1));
+  CHECK(sd_int_parse_dec_basecase_(t, (int64_t)strlen(t), &p2));
+  CHECK(sd_int_eq(p1, v));
+  CHECK(sd_int_eq(p2, v));
+  sd_int_release(p1);
+  sd_int_release(p2);
+  free(t);
+  free(fast);
+  free(slow);
+}
+
+static void check_divmod(sd_int a, sd_int b) {
+  if (sd_int_eq(b, SD_INT(0))) return;
+  sd_int q1 = sd_int_div(a, b), r1 = sd_int_mod(a, b), q2, r2;
+  sd_int_divmod_basecase_(a, b, &q2, &r2);
+  CHECK(sd_int_eq(q1, q2));
+  CHECK(sd_int_eq(r1, r2));
+  sd_int_release(q1), sd_int_release(r1), sd_int_release(q2), sd_int_release(r2);
+}
+
+static void test_fast_algorithms(void) {
+  for (int i = 0; i < 400; i++) {
+    sd_int x = rnd_limbs(rnd_size(900), (int)(rnd() % 8)), y = rnd_limbs(rnd_size(900), (int)(rnd() % 8));
+    if (rnd() % 6 == 0) { /* operands of very different sizes */
+      sd_int_release(y);
+      y = rnd_limbs(1 + (int)(rnd() % 3), (int)(rnd() % 8));
+    }
+    sd_int m1 = sd_int_mul(x, y), m2 = sd_int_mul_basecase_(x, y);
+    CHECK(sd_int_eq(m1, m2));
+    sd_int s1 = sd_int_mul(x, x), s2 = sd_int_mul_basecase_(x, x);
+    CHECK(sd_int_eq(s1, s2));
+    sd_int m1x = sd_int_add(m1, x);
+    check_divmod(m1x, y); /* a long quotient and a long divisor */
+    check_divmod(s1, y);
+    check_divmod(x, y);
+    check_text(i % 2 ? m1 : x);
+    sd_int *all[] = {&x, &y, &m1, &m2, &s1, &s2, &m1x};
+    for (size_t k = 0; k < sizeof all / sizeof all[0]; k++) sd_int_release(*all[k]);
+  }
+  /* Powers of ten and their neighbours, around the conversion's split
+   * points (10^(9 * 2^k)): 10^n, 10^n - 1, 10^n + 1, negated. */
+  sd_int ten = SD_INT(1);
+  for (int n = 0; n <= 9 * 512 + 3; n++) {
+    bool edge = n < 40 || n % 9 < 2 || n % 9 == 8 || n % 97 == 0;
+    if (edge) {
+      sd_int below = sd_int_sub(ten, SD_INT(1)), above = sd_int_add(ten, SD_INT(1)), neg = sd_int_neg(ten);
+      check_text(ten);
+      check_text(below);
+      check_text(above);
+      check_text(neg);
+      sd_int *all[] = {&below, &above, &neg};
+      for (size_t k = 0; k < sizeof all / sizeof all[0]; k++) sd_int_release(*all[k]);
+    }
+    sd_int t = sd_int_mul(ten, SD_INT(10));
+    sd_int_release(ten);
+    ten = t;
+  }
+  /* The 4609-digit power of ten exactly, divided by its square root and by
+   * nearby numbers. */
+  char *s = sd_int_to_cstr(ten);
+  CHECK(s[0] == '1' && strlen(s) == 9 * 512 + 5 && strspn(s + 1, "0") == 9 * 512 + 4);
+  free(s);
+  sd_int big = sd_int_mul(ten, ten), less = sd_int_sub(ten, SD_INT(1)), negbig = sd_int_neg(big);
+  check_divmod(big, ten);
+  check_divmod(big, less);
+  check_divmod(negbig, less);
+  check_text(big);
+  sd_int_release(negbig);
+  sd_int_release(less);
+  sd_int_release(big);
+  sd_int_release(ten);
+  /* Limb boundaries: 2^(32k) - 1, 2^(32k), 2^(32k) + 1 squared and divided. */
+  for (int k = 1; k < 200; k += (k < 70 ? 1 : 37)) {
+    sd_int p = sd_int_shl(SD_INT(1), SD_INT(32 * k));
+    sd_int v[3] = {sd_int_sub(p, SD_INT(1)), sd_int_retain(p), sd_int_add(p, SD_INT(1))};
+    for (int a = 0; a < 3; a++) {
+      for (int b = 0; b < 3; b++) {
+        sd_int m1 = sd_int_mul(v[a], v[b]), m2 = sd_int_mul_basecase_(v[a], v[b]);
+        CHECK(sd_int_eq(m1, m2));
+        check_divmod(m1, v[b]);
+        sd_int m1b = sd_int_sub(m1, SD_INT(1));
+        check_divmod(m1b, v[a]);
+        sd_int_release(m1), sd_int_release(m2), sd_int_release(m1b);
+      }
+      check_text(v[a]);
+    }
+    for (int a = 0; a < 3; a++) sd_int_release(v[a]);
+    sd_int_release(p);
+  }
+}
+
 static sd_err crash_div0(void *p) {
   sd_int r = sd_int_div(*(sd_int *)p, SD_INT(0));
   sd_int_release(r);
@@ -342,6 +495,7 @@ int main(void) {
   test_vectors();
   test_differential();
   test_identities();
+  test_fast_algorithms();
   int64_t live1 = sd_live_objects();
   CHECK(live1 == live0); /* every bigint freed (only checked with -DSD_COUNT_OBJECTS) */
   test_crashes();

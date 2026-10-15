@@ -1,7 +1,7 @@
 // expect-error: chain_compare_recovery.sd:10:15: error: comparison operators do not chain
 // expect-errors: 1
-// After the error inside the parentheses, the parser skips the whole if
-// statement (its block included) instead of ending the function early.
+// After the error inside the parentheses, the parser parses the if's block
+// (no error there) and goes on with the function instead of ending it.
 package main
 
 import "fmt"

@@ -1,0 +1,45 @@
+// expect-error: syntax_recovery_statements.sd:20:15: error: comparison operators do not chain
+// expect-errors: 9
+// One error per broken statement, also inside the blocks of a statement
+// whose header has the error (if, else if, for, switch), and nothing more:
+// the lines marked "error" have one each.
+package main
+
+import "fmt"
+
+type Pair struct {
+    int a
+    int b
+}
+
+fn twice(int x) int {
+    return x * 2
+}
+
+fn main([]string args) error {
+    if (1 < 2 < 3) { // error
+        int a = ] // error
+        fmt.println("unreachable")
+    }
+    int v = twice(2)
+    if (v > 1) {
+        fmt.println("big")
+    } else if (v < 0 < 1) { // error
+        v = ) // error
+    } else {
+        v = 3 +* 4 // error
+    }
+    for (int i = 0; i < 3; i++ { // error
+        fmt.println(i.string() // error
+    }
+    switch (v < 1 < 2) { // error
+    case 1:
+        fmt.println("one")
+    default:
+        v = 1 +/ 2 // error
+    }
+    Pair p = Pair{a: 1,
+        b: 2}
+    fmt.println(p.a.string())
+    return null
+}

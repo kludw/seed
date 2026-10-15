@@ -1,0 +1,54 @@
+// Big integers: 3^2000000 by repeated squaring and fib(1000000) by fast
+// doubling, each converted to decimal text, parsed back and divided.
+package main
+
+import "fmt"
+
+fn pow(int b, int e) int {
+    int result = 1
+    int x = b
+    int n = e
+    for (; n > 0; ) {
+        if ((n & 1) == 1) {
+            result = result * x
+        }
+        n = n >> 1
+        if (n > 0) {
+            x = x * x
+        }
+    }
+    return result
+}
+
+// fib(n) and fib(n + 1).
+fn fib(int n) (int, int) {
+    if (n == 0) {
+        return 0, 1
+    }
+    int a, int b = fib(n / 2)
+    int c = a * (2 * b - a)
+    int d = a * a + b * b
+    if (n % 2 == 0) {
+        return c, d
+    }
+    return d, c + d
+}
+
+// The length and the first and last 12 digits of a number's text, and
+// whether parsing the text gives the number back.
+fn summary(int x) (string, error) {
+    string s = x.string()
+    int back = try s.toInt()
+    return s.len().string() + " " + s.slice(0, 12) + "..." + s.slice(s.len() - 12, s.len()) + " " + (back == x).string(), null
+}
+
+fn main([]string args) error {
+    int p = pow(3, 2000000)
+    fmt.println(try summary(p))
+    int f, int f1 = fib(1000000)
+    fmt.println(try summary(f))
+    int q = p / f
+    fmt.println(try summary(q))
+    fmt.println((p % f).string().len().string() + " " + (f1 - f).string().len().string())
+    return null
+}

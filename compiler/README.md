@@ -371,7 +371,24 @@ to the end of the statement (`syncStatementFrom`: a newline outside
 brackets, where the brackets the statement opened before the error, such as
 the `(` of `if (a < b < c) {`, count as open) and continues; the top level
 skips to the next line that starts a declaration (`syncTop`), always moving
-past the offending token. When a file has syntax errors, checking is skipped.
+past the offending token. So that one compile reports the errors of every
+independent statement and declaration:
+
+- In an `if`, `for` or `switch` whose header has the error, the skip still
+  parses the statement's blocks (`opensBody`: a `{` that ends its line, not
+  inside braces, after `)` or `else`, or after anything but a name or `]`
+  when the header left a bracket open; for a switch, its cases), and a
+  block whose `{` is found right after a broken header is parsed normally
+  (`parseBlockBody` clears `failed` after its `{`).
+- After an error in a function's header, its body is parsed if a `{` that
+  ends its line comes before the next top-level declaration
+  (`findFnBody`).
+- A struct field, enum case or interface method with an error is skipped
+  to the end of its line, and the type's next members are parsed.
+
+The errors go to the same `Diags` as the checker's, so at most 20
+(`maxErrors`) are shown, followed by `too many errors; only the first 20
+are shown`. When a file has syntax errors, checking is skipped.
 
 **Checking** (`checkProgram`):
 
@@ -1069,9 +1086,9 @@ messages, and checks the server's answers (framing, one response per
 request) against the transcripts `tests/lsp/*.out`. The sessions work on
 tests/lsp/proj, a program with a package of two files and its tests, with
 non-ASCII text before the names they ask about, and change it with the
-versions in tests/lsp/edits (a type error, a syntax error, an unformatted
-line, a `.` with nothing after it, an unsaved edit of the other file of
-the package). The fuzz sessions type each file of the project in, three
+versions in tests/lsp/edits (a type error, a syntax error, three syntax
+errors, an unformatted line, a `.` with nothing after it, an unsaved edit
+of the other file of the package). The fuzz sessions type each file of the project in, three
 bytes at a time, and ask for everything at each step; every request must
 be answered, and nothing may crash.
 
@@ -1338,5 +1355,8 @@ forward one release at a time.
   inlining). The column of a line that crashes in a conversion or another
   runtime call whose value is used later in the line is the statement's,
   not the call's.
-- The parser reports at most one syntax error per statement; an error in an
-  expression that spans lines may hide a second error on the next line.
+- The parser reports one syntax error per statement (or member of a type);
+  an error in an expression that spans lines may hide a second error on
+  the next line. A function written with its `{` on the next line parses
+  as a native function followed by a stray block, whose contents are not
+  checked for errors.

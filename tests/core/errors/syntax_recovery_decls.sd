@@ -1,0 +1,33 @@
+// expect-error: syntax_recovery_decls.sd:9:11: error: expected the end of the statement, found 'y'
+// expect-errors: 7
+// One error per broken member of a type, and the body of a function whose
+// header has an error is still parsed: the lines marked "error" have one
+// each.
+package main
+
+type Point struct {
+    int x y // error
+    int z
+    string a b // error
+}
+
+type Shape enum {
+    Circle(float r)
+    Square(float side float) // error
+    Empty
+}
+
+type Named interface {
+    name(int) string // error
+    size() int
+}
+
+fn broken(int a b) int { // error
+    int c = ) // error
+    return c
+}
+
+fn main([]string args) error {
+    int v = 1 +* 2 // error
+    return null
+}
