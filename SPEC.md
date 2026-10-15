@@ -86,18 +86,20 @@ The methods of every built-in type are listed in [builtins.md](docs/builtins.md)
 |-----------------|---------------------------------------------------------------|
 | `m[k]`          | The value as `V?`, or `null` if the key is missing.           |
 | `m[k] = v`      | Sets a value. A new key goes to the end of the order.         |
+| `getOr(k, d)`   | The value for `k`, or `d` (a `V`) if the key is missing. Does not change the map. |
 | `len()`         | The number of entries.                                        |
 | `delete(k)`     | Removes a key. `mut`.                                         |
 | `keys()`        | The keys as `[]K`, in insertion order.                        |
 
 - Maps keep insertion order, so iterating over them is deterministic. Two maps are equal when they have the same entries, in any order.
 - Values cannot be nullable (`map[K](V?)` is rejected): `m[k]` already uses null for a missing key.
-- `m[k]++` and `m[k]--` are not allowed, because the entry may be missing; write `m[k] = v`.
+- `m[k]++` and `m[k]--` are not allowed, because the entry may be missing. Counting is `m[k] = m.getOr(k, 0) + 1`.
 
 ### Converting to text
 
 - `int`, `float`, `bool`, `byte` and `string` have a `string()` method: `count.string()`, `ratio.string()`, `done.string()`. `byte.string()` gives the number (`'a'.string()` is `"97"`); `string([]byte)` builds text from bytes.
-- Lists, maps and user types have no automatic text form. A user type that needs one writes its own `string()` method.
+- Lists, maps and structs have no automatic text form. A user type that needs one writes its own `string()` method.
+- Every enum has a built-in `name()` method that returns the name of the value's case: `Direction.North.name()` is `"North"`, and `Shape.Circle(2.0).name()` is `"Circle"` (the case only, not its data). An enum cannot declare a method of its own called `name`; the built-in one satisfies an interface's `name() string`.
 
 ## Printing
 
@@ -140,7 +142,7 @@ string text, err = fs.read(other)     // text is new, err is reused
 | Arithmetic | `+ - * / %`                   | `int`, `float` (`%` on `int` only) |
 | Joining    | `+`                           | `string`                         |
 | Bitwise    | `& \| ^ << >>`                | `int`, `byte`                    |
-| Comparison | `== !=`                       | Every type except channels and function values (and types that contain them). A `T?` is compared with `null` only (see [Null](#null)). |
+| Comparison | `== !=`                       | Every type except channels and function values (and types that contain them). A `T?` is compared with `null` or with a `T`, not with another `T?` (see [Null](#null)). |
 | Ordering   | `< <= > >=`                   | `int`, `float`, `string`, `byte` |
 | Logic      | `&& \|\| !`                   | `bool`                           |
 | Unary      | `-` (numbers), `!` (`bool`)   |                                  |
@@ -155,7 +157,7 @@ string text, err = fs.read(other)     // text is new, err is reused
 
 ## Null
 
-- No type can be null unless its type says so. A `T?` can be null, while a plain `T` never is (the one exception is `error`, see [Errors](#errors)).
+- No type can be null unless its type says so. A `T?` can be null, while a plain `T` never is (the one exception is `error`, which is narrowed like a `T?`; see [Errors](#errors)).
 - A `T` converts to `T?` automatically. A `T?` cannot be used as a `T` until the compiler can see that it is not null. This is called *narrowing*:
 
 ```
@@ -164,7 +166,7 @@ if (u.email != null) {
 }
 ```
 
-- A `T?` can be compared with `null`, but not with a value: `n == 2` is an error for an `int? n`. Narrow it first: `n != null && n == 2`. Nullable elements and fields of lists, structs and enums compare as part of their container.
+- A `T?` can be compared with `null`, and with a `T` when `T` itself has `==`: for an `int? n`, `n == 2` is false when `n` is null, and `n != 2` is true. This works on any `T?`, including a map lookup: `counts["a"] == 3`. Two `T?` values do not compare with each other (`a == b` for two `int?` is an error): narrow them first. Nullable elements and fields of lists, structs and enums compare as part of their container. A comparison with a value does not narrow.
 - Narrowing applies to variables and their fields (`x`, `u.email`, `u.address.city`), not to list elements, map lookups or call results: store those in a variable first (`int? n = m[k]`).
 - A condition narrows where it is known to be true: `x != null` inside the `if` block, `x == null` in its `else`, and through `&&`, `||` and `!` (`if (x != null && x.len() > 0)`, `if (x == null || x.len() == 0)`).
 - After an `if` whose block always leaves (`return`, `break`, `continue`, a call of `os.exit` or `os.crash`), the rest of the block knows the opposite of its condition:
@@ -184,7 +186,7 @@ use(x)                   // x is a T from here on
 
 - Seed has no pointers. Every value behaves like an independent copy.
 - Copies are cheap. Data is shared until someone modifies it, and only then is it actually copied (copy-on-write).
-- Function arguments are read-only. To change a value, a function returns a new one, or the value is changed through a `mut` method.
+- A function cannot change its caller's variables. A parameter is the function's own copy of the argument: it can be assigned a new value (`args = args.slice(1, args.len())`), which the caller never sees, but it cannot be changed in place (no `mut` methods, and no assignment to its fields or elements; in Go these would reach the caller's slice or map). To change a value, a function returns a new one, or the value is changed through a `mut` method.
 - Channels are the one exception: a channel value is a handle to a shared channel (see [Channels](#channels)).
 
 ## Functions and methods
@@ -223,7 +225,8 @@ fn (User u) mut tag(string t) {
 - A plain method only reads its receiver.
 - A `mut` method changes the variable it was called on. Built-in methods such as `xs.push(x)` follow the same rule.
 - A `mut` method can be called on a local variable or on any part of one: `u.tag("x")`, `u.address.set(...)`, `users[0].tag("x")`.
-- A `mut` method cannot be called on a function parameter, because parameters are read-only. Copy the parameter into a local variable first.
+- A `mut` method cannot be called on a function parameter, because a parameter cannot be changed in place (it can only be assigned a new value). Copy the parameter into a local variable first.
+- The receiver of a plain method is read-only: it cannot be assigned or changed. Only a `mut` method changes its receiver.
 
 ### Function values
 
@@ -319,7 +322,7 @@ defer f.close()
 ## Errors
 
 - `error` is an interface with a `message() string` method. A user type can implement it (`type ParseError struct implements error`), and then converts to `error` automatically.
-- `error` is the one type that can be `null` without a `?`: a `null` error means "no error".
+- `error` is the one type that can be `null` without a `?`: a `null` error means "no error". Like a `T?`, an error must be known not to be null before `message()` is called on it: the compiler narrows errors exactly as it narrows `T?` paths ([Null](#null)), so `err.message()` compiles inside `if (err != null)`, after `if (err == null) { return ... }`, right of `err != null &&`, after `assert(err != null)` in a test, or after the variable was assigned an error that is never null (a value of a type that implements `error`, or another error known not to be null). Anything else is a compile error: `err may be null (an error is null when there is no error)`.
 - A function that can fail returns `(..., error)`, with the error last. When the error is not null, the other return values are null.
 - Every error must be handled. Ignoring a returned error is a compile error, and so is ignoring any other result: discard it with `_ = f()`.
 
@@ -396,6 +399,8 @@ if (err != null) {
 select {
 case int? n = results.receive():
     ...
+case last = updates.receive():      // last is an existing string?
+    ...
 case jobs.send(j):
     ...
 case time.after(5 * time.second).receive():
@@ -404,7 +409,7 @@ case time.after(5 * time.second).receive():
 ```
 
 - `select` waits until one of its channel operations can proceed, then runs that case. When several can, one is chosen at random.
-- A case is `ch.send(v)`, `ch.receive()`, `_ = ch.receive()` or `T? v = ch.receive()`, which declares a new variable for that case (`error e = ch.receive()` for a `chan error`). It cannot assign to an existing variable.
+- A case is `ch.send(v)`, `ch.receive()`, `_ = ch.receive()`, `T? v = ch.receive()`, which declares a new variable for that case (`error e = ch.receive()` for a `chan error`), or `v = ch.receive()`, which assigns an existing variable (or parameter) of exactly the received type (`T?`, or `error`), as an assignment would: typed names are declared, untyped ones assigned. A field or element cannot receive directly.
 - On a `chan error`, the received value is an error and must be handled like any other: `case ch.receive():` is an error; write `case error e = ch.receive():`, or `case _ = ch.receive():` to discard it.
 - The channels and the values to send of every case are evaluated first, in order, before `select` waits.
 - There is no `default` case, so `select` always waits.
@@ -467,7 +472,7 @@ test "load skips empty lines" {
 - `assert(bool)` is built in and only allowed in tests (not inside a `group` block). A failed `assert` ends the test. The message shows where it is, the condition as written, and for a comparison of numbers, bools, bytes, strings or errors, the value of each side (as `.string()` gives it, so a byte shows as its number: `b == 'b' (97 == 98)`): `users/tests/load_test.sd:7: assert failed: names.len() == 3 (2 == 3)`. After `assert(cond)`, the compiler narrows on `cond` as after an `if`.
 - A test fails when an `assert` fails, when an error leaves it, or when it crashes. Each test runs in a goroutine of its own group, one after the other, so a crash fails only that test.
 - `seed test [dir...]` runs the tests of every package under the directories (by default the current one), prints one line per failed test (`FAIL "<name>": <where>: <reason>`) and a summary `N passed, M failed`, and exits with 1 when a test failed (or a package didn't compile). `-v` also prints a line for each package and each test that passes; `--run text` runs only the tests whose description contains the text, and exits with 1 when it matches none.
-- A test of a crash runs the code in a group and checks the error: `error err = group { spawn f() }` then `assert(err.message() == "crash: ...")`.
+- A test of a crash runs the code in a group and checks the error: `error err = group { spawn f() }`, then `assert(err != null)` and `assert(err.message() == "crash: ...")`.
 
 ## Memory
 
@@ -485,7 +490,7 @@ The compiler rejects:
 
 - a `switch` that doesn't cover every case, an enum `switch` with `default`, or a value `switch` whose `default` isn't last
 - an unchecked error, or an unused call result
-- a nullable value used without a null check, or a value read before the error beside it was checked
+- a nullable value (or an error that may be null) used without a null check, or a value read before the error beside it was checked
 - an unused local variable (including a pattern binding) or import
 - shadowing
 - unreachable code
@@ -508,7 +513,7 @@ There is one binary, `seed`, with these commands:
 - `seed run <dir | file.sd> [args...]` compiles a program and runs it with the arguments (a `--` before them is skipped), exiting with its exit code.
 - `seed build [-o out] <dir | file.sd>` compiles a program (the `package main` of a directory and the packages it imports, or a single file) into one executable, named after the directory or file unless `-o` says otherwise.
 - `seed test [-v] [--run text] [dir...]` runs the tests (see [Tests](#tests)).
-- `seed fmt [--check] <file.sd>...` formats the code (the rules are in [docs/formatting.md](docs/formatting.md)). Compiling a file that is not formatted is an error pointing at the first line that differs, with the hint `run: seed fmt <file>`.
+- `seed fmt [--check] <file.sd | dir>...` formats the code (the rules are in [docs/formatting.md](docs/formatting.md)); a directory stands for every `.sd` file under it, subdirectories included (hidden ones, whose names start with `.`, are skipped). Compiling a file that is not formatted is an error pointing at the first line that differs, with the hint `run: seed fmt <file>`.
 - `seed c <dir | file.sd...>` prints the generated C program, and `seed ast <file.sd>...` prints the syntax tree. They are for testing and debugging the compiler.
 
 `seed` compiles to C and uses the system C compiler (`cc`). It finds the standard library and the runtime next to itself (through `$PATH` and symbolic links), or in `$SEED_ROOT`.

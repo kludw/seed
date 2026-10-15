@@ -101,7 +101,7 @@ There is one binary, `seed`:
 | `seed run <dir \| file.sd> [args...]` | Compiles a program and runs it with the arguments. |
 | `seed build [-o out] <dir \| file.sd>` | Compiles a program into one executable. |
 | `seed test [-v] [--run text] [dir...]` | Runs the `test` blocks of every package under the directories (`--run`: only the tests whose description contains the text; `-v`: list each test). |
-| `seed fmt [--check] <file.sd>...` | Formats files in place, or reports the ones that aren't formatted. |
+| `seed fmt [--check] <file.sd \| dir>...` | Formats files (or every `.sd` file under a directory) in place, or reports the ones that aren't formatted. |
 | `seed c <dir \| file.sd...>` | Prints the generated C (for testing the compiler). |
 | `seed ast <file.sd>...` | Prints the syntax tree (for debugging the parser). |
 
@@ -157,7 +157,6 @@ The documentation:
 - Deadlock detection is global: it fires only when every goroutine is blocked. A goroutine stuck while others keep running waits forever, and defers do not run on a deadlock.
 - When a group fails, the code of the group block itself is not stopped, only the goroutines it started.
 - File I/O other than reading an `fs.File` is not a stop point, so a goroutine blocked in it (opening or writing a FIFO, for example) is stopped only when the call returns.
-- A `select` case can only receive into a new variable.
 - Big integers use quadratic algorithms, so converting a number with millions of digits to text is slow.
 - Tested on macOS (arm64) and Linux (x86_64, glibc). Other POSIX systems are untested.
 - The parser reports at most one syntax error per statement.

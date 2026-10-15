@@ -339,9 +339,10 @@ builds, so wall times are interleaved A/B runs (best of 7 to 15) and
 reported as ratios; instruction counts come from callgrind and do not
 depend on the load. compiler/README.md ("Memory management") has the rules.
 
-1. **Parameters were already borrowed.** Parameters are read-only in Seed,
-   so a callee never retains or releases one and a caller passes its
-   values as they are; nothing to do there.
+1. **Parameters were already borrowed.** Parameters cannot be changed in
+   place in Seed, so a callee never retains or releases one and a caller
+   passes its values as they are; nothing to do there. (A parameter that
+   the function assigns, allowed since, takes a retained copy on entry.)
 2. **Mut-call arguments are borrowed** when they read another variable
    than the receiver's (`c.error(pos, message)` no longer copies `pos` and
    `message`), and literals are never retained into a temporary.

@@ -28,6 +28,7 @@ fn main([]string args) error {
     select {
     case int v = ch.receive():
         use(v)
+    case   last=ch.receive() :   use(last)
     }
     return null
 }

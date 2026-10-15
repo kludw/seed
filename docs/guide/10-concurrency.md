@@ -120,7 +120,21 @@ fn main([]string args) error {
 sent 3 jobs, received 2 replies
 ```
 
-A receive case either declares a new variable (`string? r = replies.receive()`) or drops the value (`replies.receive()` or `_ = replies.receive()`). On a `chan error` the received error must be handled like any other: `case error e = errs.receive():`, or `case _ = errs.receive():` to discard it.
+A receive case declares a new variable (`string? r = replies.receive()`), assigns an existing one, or drops the value (`replies.receive()` or `_ = replies.receive()`). As everywhere, a name with a type in front of it is declared, and a name without one is assigned: `case latest = updates.receive():` stores the value in `latest`, a variable of exactly the received type (`string?` for a `chan string`) declared before the `select`, which is handy for keeping the last value across the iterations of a loop:
+
+```seed
+string? latest = null
+for (bool open = true; open; ) {
+    select {
+    case latest = updates.receive():
+        open = latest != null
+    case tick.receive():
+        show(latest)
+    }
+}
+```
+
+On a `chan error` the received error must be handled like any other: `case error e = errs.receive():` (or `case err = errs.receive():` for an existing `error err`), or `case _ = errs.receive():` to discard it.
 
 When several cases are ready, any one of them may run. There is no `default` case: `select` always waits. To wait with a limit, add a timer channel as one more case (see [timeouts](#timeouts)).
 

@@ -43,7 +43,7 @@ will do (see "Adding a language feature").
 seed build [-o out] <dir | file.sd>   compile a program (default output: the directory's or file's name)
 seed run <dir | file.sd> [args...]    compile into $TMPDIR and run; passes the exit code
 seed test [-v] [--run text] [dir...]  run the tests of every package under the dirs (default .)
-seed fmt [--check] <file.sd>...       format in place, or report unformatted files
+seed fmt [--check] <file.sd | dir>... format in place, or report unformatted files
 seed c <dir | file.sd...>             C program on stdout (what tests/run.sh uses)
 seed ast <file.sd>...                 print the syntax tree (debugging aid)
 ```
@@ -388,7 +388,11 @@ narrowed *paths* (`"v12.email"` = variable 12, field `email`), added by
 conditions (`!=`/`==` null through `&&`, `||`, `!`) and by assigning a
 value that is never null (`isNonNullValue`: a `T`, not a `T?`) to a `T?`
 path with one target (declarations included), killed by assignment to the
-path or a prefix, and by a mut method call on a prefix. `checkIf` checks
+path or a prefix, and by a mut method call on a prefix. Paths of type
+`error` are narrowed the same way (`narrowable`): `err.message()` needs
+`errorKnownNonNull` (a narrowed path), and an error that is known not to
+be null, or a struct or enum converted to `error`, is a value that is never
+null for `isNonNullValue`. `checkIf` checks
 each branch from the narrowings before the `if` and joins them
 (`joinNarrows`): an entry killed in either branch stays killed, and the
 paths narrowed at the end of every branch that falls through
@@ -445,8 +449,9 @@ Concurrency (SPEC.md, "Concurrency"):
 - `select` (`checkSelect`): each case's comm statement must be an
   expression statement `ch.send(v)`/`ch.receive()`, or a one-target
   assignment of `ch.receive()` to a new variable of exactly the receive
-  type, or to `_`. Each case has its own scope. A select whose cases all
-  exit, exits (`stmtExits`).
+  type, to an existing variable (an identifier) of exactly that type, or
+  to `_`. Each case has its own scope. A select whose cases all exit,
+  exits (`stmtExits`).
 - Package constants cannot hold channels (`hasChan`), because constants are
   cached per goroutine.
 - `time` is a standard library package (`lib/time`): `after` and `sleep`
@@ -487,11 +492,19 @@ vtables, `sd_test_N` for tests); the names of a package other than `main`
 also carry its prefix (`sd_f_cart_newCart`, `sd_S_cart_Item`).
 
 *Memory management.* Ownership follows runtime/README.md section 3:
-parameters are borrowed, results are owned, stores consume. Parameters are
-read-only in Seed, so a callee never retains or releases one (unless it
-stores it), and a caller passes its arguments without retaining them: a
-call result passed on is released after the statement, anything else is
-passed as it is. The generator
+parameters are borrowed, results are owned, stores consume. Parameters
+cannot be changed in place in Seed, so a callee never retains or releases
+one (unless it stores it), and a caller passes its arguments without
+retaining them: a call result passed on is released after the statement,
+anything else is passed as it is. A parameter that the function assigns
+(`findOwnedParams`: a mutation of the borrow analysis whose root is the
+parameter; the checker allows only whole assignments) is *owned* instead:
+on entry `ownParams` declares a local `o_<name>` (a frame field when its
+type lives in frames) holding a retained copy of the C parameter `l_<name>`,
+in a scope around the body, and from then on it is an ordinary local
+(`varC`), released by assignments, returns and the end of the body. The
+fast version of a pure int function (gen_fast.sd) assigns its C parameter
+directly, since words need no ownership. The generator
 tracks the counted values the current function owns in a stack of *slots*
 (`Gen.slots`): local variables and the temporaries of the statement being
 generated.
@@ -560,8 +573,10 @@ generated.
   as for a parameter; `x` and the roots of borrowed locals are never moved
   (a moved container would get a new owner that may change it in place).
   Other variables cannot alias the place: locals are values, parameters are
-  read-only and borrowed from the caller, and a mut call keeps a copy of
-  every argument read from its receiver's own variable (`mutArgs`).
+  borrowed from the caller and never changed in place (an assigned one owns
+  its value, and its assignments are mutations like any local's), and a mut
+  call keeps a copy of every argument read from its receiver's own variable
+  (`mutArgs`).
 - `x = x + a + b` on a local string, or on a string field of a local
   struct or of a mut method's receiver through struct fields only
   (`w.out = w.out + s + ","`, `d.body.text = d.body.text + s`), appends in
@@ -715,7 +730,8 @@ versions are the checked-at-run-time form of "the parameters are small".
   false}, {ch2, SD_SEND, (void *)&v, false}}`. The chosen index from
   `sd_select` is dispatched with an `if`/`else if` chain (a C `switch`
   would catch `break`). A receive case declares its variable from
-  `cs[i].ok` and the buffer, or releases the buffer when it has none.
+  `cs[i].ok` and the buffer, stores it into an existing variable (`gstore`,
+  which releases the old value), or releases the buffer when it has none.
 - `time.after(d)` calls the native `sd_lib_time_after`, which is
   `sd_time_after(d)` (a `chan int`); `time.sleep(d)` is `sd_time_sleep(d)`;
   `time.second` is the constant `sd_c_time_second()`.
@@ -813,6 +829,16 @@ tests/full/int_bounded_loops.sd has loops right at the edge (two trips of
 length, bounds and counters assigned in the loop, nested runs, and the
 divisions above against general ints.
 
+Built-in methods are `Res.Builtin` with a `Builtin` (check_call.sd,
+`checkBuiltin`; gen_call.sd, `gbuiltin`). `m.getOr(k, d)` evaluates the
+map, the key and the default (`operands`) and is the borrowed `(p ? *p :
+d)` of `sd_map_get`. An enum's `e.name()` (`Builtin.EnumName`, chosen in
+`checkSelectorCall` when the enum has no method `name`, which
+`resolveSignature` forbids) reads the tag once and is a chain of `?:` over
+immortal string literals (`enumNameChain`); for `implements`, the built-in
+satisfies `name() string` (`checkImplementsOne`), and the vtable gets a
+thunk that does the same on the payload (`genVtables`).
+
 Per-type helpers (`sd_rt_`/`sd_rl_` retain and release for structs and
 tuples, `sd_eq_` for struct `==`, `sd_less_` sortBy adapters) are requested
 on demand through a queue (`Gen.helper`) and generated at the end. Each
@@ -836,6 +862,9 @@ the lexer) are merged back in by position. A tree printer would have to
 rebuild every construct and re-attach comments to nodes; printing the tokens
 keeps the program the same by construction, keeps redundant parentheses, and
 needs very little knowledge of the grammar.
+
+A directory on the command line stands for the `.sd` files under it
+(`sdFilesUnder`: sorted, subdirectories included, hidden ones skipped).
 
 1. **Validate.** The file is parsed with the normal parser. A file with
    syntax errors is reported and left alone.
@@ -1053,7 +1082,7 @@ forward one release at a time.
   returned, discarded or with `try`); its block cannot `return`, `try`, or
   `break`/`continue` out of it; `spawn` takes the calls `defer` takes,
   returning `error` or nothing, never a mut method; select cases are send,
-  receive, `_ =` receive or a receive into a new `T?` variable; channel
+  receive, `_ =` receive or a receive into a new or existing `T?` variable; channel
   elements are not nullable; constants cannot hold channels; `defer
   ch.close()` is allowed; `time` (after, sleep, constants) is a standard
   library package.
@@ -1131,8 +1160,6 @@ forward one release at a time.
 - Deadlock detection is global: it only fires when *every* goroutine is
   blocked and no timer is pending; a goroutine stuck while others run (or
   sleep) waits forever. Defers do not run on a deadlock.
-- A select case cannot assign the received value to an existing variable;
-  declare a new one in the case.
 - A mut call evaluates its arguments before the receiver's place, so in
   `xs[f()].push(g())` `g` runs before `f`.
 - A deadlock in one test ends the whole test program (deadlock detection is

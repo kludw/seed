@@ -58,12 +58,7 @@ fn main([]string args) error {
                 continue
             }
             words++
-            int? seen = counts[word]
-            if (seen == null) {
-                counts[word] = 1
-            } else {
-                counts[word] = seen + 1
-            }
+            counts[word] = counts.getOr(word, 0) + 1
         }
     }
     []WordCount ranked = []WordCount{}

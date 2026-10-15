@@ -6,22 +6,21 @@ fn main([]string args) error {
     map[string]int counts = map[string]int{}
     []string words = "the cat saw the dog and the cat ran".split(" ")
     for (int i = 0; i < words.len(); i++) {
-        int? seen = counts[words[i]]
-        if (seen == null) {
-            counts[words[i]] = 1
-        } else {
-            counts[words[i]] = seen + 1
-        }
+        counts[words[i]] = counts.getOr(words[i], 0) + 1
     }
 
     // keys() is in insertion order, so this output is always the same.
     []string keys = counts.keys()
     for (int i = 0; i < keys.len(); i++) {
-        int? n = counts[keys[i]]
-        if (n != null) {
-            fmt.println(keys[i] + " " + n.string())
-        }
+        fmt.println(keys[i] + " " + counts.getOr(keys[i], 0).string())
     }
+
+    // A lookup is an int?: check it, or compare it with an int.
+    int? dogs = counts["dog"]
+    if (dogs != null) {
+        fmt.println("dog: " + dogs.string())
+    }
+    fmt.println((counts["cat"] == 2).string() + " " + (counts["cow"] == 0).string())
 
     counts.delete("the")
     counts.delete("missing")

@@ -1,0 +1,4 @@
+05_error_unchecked.sd:15:17: error: err may be null (an error is null when there is no error)
+   15 |     fmt.println(err.message())
+      |                 ^
+    hint: check err != null before calling message()

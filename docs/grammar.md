@@ -112,7 +112,7 @@ CaseLabel   = Expr | EnumPattern .
 EnumPattern = TypeName "." Ident [ "(" Params ")" ] .
 
 Select      = "select" "{" NL { SelectClause } "}" .
-SelectClause = "case" ( VarDecl | Assign | Expr ) ":" NL { Stmt NL } .   // ch.send(v), ch.receive(), _ = ch.receive() or T? v = ch.receive()
+SelectClause = "case" ( VarDecl | Assign | Expr ) ":" NL { Stmt NL } .   // ch.send(v), ch.receive(), _ = ch.receive(), T? v = ch.receive() or v = ch.receive()
 
 Return      = "return" [ Expr { "," Expr } ] .
 Defer       = "defer" [ "_" "=" ] Expr .                   // a call; _ = discards its error

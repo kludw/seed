@@ -130,7 +130,7 @@ There are no package-level variables, only constants. Goroutines share nothing (
 | Arithmetic | `+ - * / %` | `int`, `float` (`%` only on `int`) |
 | Joining | `+` | `string` |
 | Bitwise | `& \| ^ << >>` | `int`, `byte` |
-| Comparison | `== !=` | Every type except channels and functions. Structs, lists and maps compare by contents. A nullable `T?` compares only with `null` ([chapter 5](05-null-safety.md#the-rules)). |
+| Comparison | `== !=` | Every type except channels and functions. Structs, lists and maps compare by contents. A nullable `T?` compares with `null` or with a `T` (false when it is null), not with another `T?` ([chapter 5](05-null-safety.md#the-rules)). |
 | Ordering | `< <= > >=` | `int`, `float`, `string`, `byte` |
 | Logic | `&& \|\| !` | `bool` |
 
