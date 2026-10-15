@@ -1,0 +1,357 @@
+// The language server, continued: signature help, the parameters of the
+// call the cursor is in (compiler/README.md, "The language server").
+package main
+
+import "json"
+
+// A signature cut into its parts: label is head + "(" + the parameters
+// joined with ", " + ")" + tail.
+type LspSigParts struct {
+    string head
+    []string params
+    string tail
+    string doc
+}
+
+// The call around the cursor, found in the tokens of the text before it:
+// the token of the function's name (callee, an index in toks; -1 when the
+// cursor is in no call), the number of commas before the cursor in the
+// call's arguments (active), and the brackets opened inside the call and
+// not closed yet, innermost first (inner).
+type LspCallSite struct {
+    int callee
+    int active
+    []Tok inner
+}
+
+// textDocument/signatureHelp: the signature of the function, method, enum
+// case, interface method, built-in method or function value called, with
+// the parameter the cursor is in. The text is usually broken while a call
+// is typed, so it is checked as it is, with a placeholder argument at the
+// cursor when the argument there is empty (as completion does after a
+// '.'), and if that leaves the call out of the tree, with the rest of the
+// line replaced by the brackets that close the call. When even that does
+// not parse, the function's name is resolved alone.
+fn lspSignatureHelp(LspJob job) (json.Value, error) {
+    string text = try lspReadText(job.path, job.overlay)
+    int off = lspOffset(text, job.line, job.character)
+    Lexer lx = lex(0, text.slice(0, off))
+    LspCallSite site = lspCallSiteOf(lx.tokens, job.line + 1)
+    if (site.callee < 0) {
+        return json.Value.Null, null
+    }
+    Token callee = lx.tokens[site.callee]
+    int j = off
+    for (; j > 0 && (text[j - 1] == ' ' || text[j - 1] == '\t' || text[j - 1] == '\n' || text[j - 1] == '\r'); ) {
+        j--
+    }
+    bool empty = j > 0 && (text[j - 1] == '(' || text[j - 1] == ',') && site.inner.len() == 0
+    string arg = ""
+    if (empty) {
+        arg = lspPlaceholder
+    }
+    LspJob probe = job
+    probe.overlay[job.path] = text.slice(0, off) + arg + text.slice(off, text.len())
+    LspAnalysis a = try lspAnalyze(probe, true)
+    LspSigParts? parts = lspCallSig(a, callee)
+    if (parts == null) {
+        string closers = ""
+        for (int i = 0; i < site.inner.len(); i++) {
+            closers = closers + lspCloser(site.inner[i])
+        }
+        int eol = off
+        for (; eol < text.len() && text[eol] != '\n'; ) {
+            eol++
+        }
+        probe.overlay[job.path] = text.slice(0, off) + arg + closers + ")" + text.slice(eol, text.len())
+        a = try lspAnalyze(probe, true)
+        parts = lspCallSig(a, callee)
+    }
+    if (parts == null && a.file >= 0) {
+        Lexer full = lex(a.file, a.src)
+        int ti = lspTokenAt(full.tokens, Pos{file: a.file, line: callee.pos.line, col: callee.pos.col})
+        if (ti >= 0) {
+            parts = lspSymSig(a.c, lspResolve(a.c, full.tokens, ti))
+        }
+    }
+    if (parts == null) {
+        return json.Value.Null, null
+    }
+    map[string]json.Value help = map[string]json.Value{}
+    help["signatures"] = json.Value.Array([]json.Value{lspSigJson(parts)})
+    help["activeSignature"] = lspNum(0)
+    help["activeParameter"] = lspNum(site.active)
+    return json.Value.Object(help), null
+}
+
+fn lspCloser(Tok k) string {
+    if (k == Tok.LBrace) {
+        return "}"
+    }
+    if (k == Tok.LBrack) {
+        return "]"
+    }
+    return ")"
+}
+
+// Walks back from the cursor to the '(' of the call it is in: an unmatched
+// '(' right after a name. An unmatched '(' after anything else (a
+// parenthesised expression, `if (`), '[' or '{' is a bracket inside the
+// call, and the commas counted so far were in it. The '(' of a function's
+// declaration (`fn name(`, `) name(`, `mut name(`) means the cursor is in
+// no call, and so does the end of a line before the cursor's (line, from
+// 1) that ends a statement.
+fn lspCallSiteOf([]Token toks, int line) LspCallSite {
+    LspCallSite site = LspCallSite{callee: -1, active: 0, inner: []Tok{}}
+    int depth = 0
+    for (int i = toks.len() - 1; i >= 0; i--) {
+        Tok k = toks[i].kind
+        if (k == Tok.RParen || k == Tok.RBrack || k == Tok.RBrace) {
+            depth++
+            continue
+        }
+        if (k == Tok.Comma && depth == 0) {
+            site.active++
+            continue
+        }
+        if (k == Tok.Newline && toks[i].pos.line < line && depth == 0 && i > 0 && lspEndsStatement(toks[i - 1].kind)) {
+            // The line before ends a statement: the cursor is not in a
+            // call that started there.
+            return LspCallSite{callee: -1, active: 0, inner: []Tok{}}
+        }
+        if (k != Tok.LParen && k != Tok.LBrack && k != Tok.LBrace) {
+            continue
+        }
+        if (depth > 0) {
+            depth--
+            continue
+        }
+        if (k == Tok.LParen && i > 0 && toks[i - 1].kind == Tok.Ident) {
+            if (i > 1) {
+                Tok before = toks[i - 2].kind
+                if (before == Tok.KwFn || before == Tok.RParen || before == Tok.KwMut) {
+                    return LspCallSite{callee: -1, active: 0, inner: []Tok{}}
+                }
+            }
+            site.callee = i - 1
+            return site
+        }
+        site.inner.push(k)
+        site.active = 0
+    }
+    return LspCallSite{callee: -1, active: 0, inner: []Tok{}}
+}
+
+// Whether a line that ends with a token of kind k ends a statement there
+// (it does not after an opening bracket, a comma or an operator, where a
+// call's arguments go on).
+fn lspEndsStatement(Tok k) bool {
+    return k == Tok.Ident || k == Tok.Int || k == Tok.Float || k == Tok.Byte || k == Tok.String || k == Tok.RParen || k == Tok.RBrack || k == Tok.RBrace || k == Tok.KwNull || k == Tok.KwTrue || k == Tok.KwFalse || k == Tok.KwReturn || k == Tok.KwBreak || k == Tok.KwContinue
+}
+
+// The signature of the call whose function name is the token callee (from
+// the lexed text, file 0), from the checker's result for the call.
+fn lspCallSig(LspAnalysis a, Token callee) LspSigParts? {
+    if (a.file < 0) {
+        return null
+    }
+    Checker c = a.c
+    Pos at = Pos{file: a.file, line: callee.pos.line, col: callee.pos.col}
+    for (int e = c.ast.exprs.len() - 1; e >= 0; e--) {
+        Expr x = c.ast.exprs[e]
+        if (x.kind != ExprKind.Call || x.pos != at || x.a < 0 || e >= c.info.len()) {
+            continue
+        }
+        Expr fx = c.ast.exprs[x.a]
+        if (fx.pos != at || fx.text != callee.text) {
+            continue
+        }
+        ExprInfo inf = c.info[e]
+        if ((inf.res == Res.Func || inf.res == Res.Method) && inf.ref >= 0 && inf.ref < c.ast.fns.len()) {
+            return lspFnSigParts(c.ast, inf.ref)
+        }
+        if (inf.res == Res.IfaceMethod) {
+            return lspIfaceSigParts(c, inf.ref, inf.sub)
+        }
+        if (inf.res == Res.EnumNew) {
+            return lspCaseSigParts(c, inf.ref, inf.sub)
+        }
+        if (inf.res == Res.Builtin && fx.kind == ExprKind.Field && fx.a >= 0) {
+            int recv = c.info[fx.a].ty
+            if (recv < 0 || recv == tyInvalid || recv >= c.types.list.len()) {
+                return null
+            }
+            []string specs = lspBuiltinSpecs(c, recv)
+            for (int i = 0; i < specs.len(); i++) {
+                []string sp = specs[i].split("|")
+                if (sp[0] == fx.text) {
+                    LspSigParts bp = lspSplitSig(sp[1])
+                    bp.head = c.typeName(recv) + "." + fx.text
+                    bp.doc = "built-in method (docs/builtins.md)"
+                    return bp
+                }
+            }
+            return null
+        }
+        if (inf.res == Res.ValueCall) {
+            int ft = c.info[x.a].ty
+            if (ft < 0 || ft == tyInvalid || ft >= c.types.list.len() || c.kindOf(ft) != Kind.Func) {
+                return null
+            }
+            LspSigParts vp = lspSplitSig(c.typeName(ft))
+            vp.head = fx.text
+            vp.doc = "function value"
+            return vp
+        }
+        return null
+    }
+    return null
+}
+
+// The signature of a function, method, enum case or interface method that
+// a name resolved to (lspResolve), found by its declaration's position.
+fn lspSymSig(Checker c, LspSym s) LspSigParts? {
+    if (!s.found || s.pos.file < 0) {
+        return null
+    }
+    if (s.kind == "fn" || s.kind == "method") {
+        for (int f = 0; f < c.ast.fns.len(); f++) {
+            if (c.ast.fns[f].pos == s.pos) {
+                return lspFnSigParts(c.ast, f)
+            }
+        }
+        return null
+    }
+    for (int d = 0; d < c.ast.typeDecls.len(); d++) {
+        TypeDecl td = c.ast.typeDecls[d]
+        if (s.kind == "case") {
+            for (int k = 0; k < td.caseCount; k++) {
+                if (c.ast.enumCases[c.ast.at(td.cases, k)].pos == s.pos) {
+                    return lspCaseSigParts(c, d, k)
+                }
+            }
+        }
+        if (s.kind == "ifaceMethod") {
+            for (int m = 0; m < td.methodCount; m++) {
+                if (c.ast.methodSigs[c.ast.at(td.methods, m)].pos == s.pos) {
+                    return lspIfaceSigParts(c, d, m)
+                }
+            }
+        }
+    }
+    return null
+}
+
+fn lspParamTexts(Ast ast, int list, int count) []string {
+    []string ps = []string{}
+    for (int i = 0; i < count; i++) {
+        Param p = ast.params[ast.at(list, i)]
+        ps.push(ast.typeExprText(p.typeExpr) + " " + p.name)
+    }
+    return ps
+}
+
+fn lspFnSigParts(Ast ast, int f) LspSigParts {
+    FnDecl fd = ast.fns[f]
+    string head = "fn "
+    if (fd.isPub) {
+        head = "pub fn "
+    }
+    if (fd.isMethod) {
+        head = head + "(" + ast.typeExprText(fd.recvType) + " " + fd.recvName + ") "
+        if (fd.recvMut) {
+            head = head + "mut "
+        }
+    }
+    return LspSigParts{head: head + fd.name, params: lspParamTexts(ast, fd.params, fd.paramCount), tail: lspResultsText(ast, fd.results, fd.resultCount), doc: lspDocComment(ast, fd.file, fd.start.line)}
+}
+
+fn lspIfaceSigParts(Checker c, int d, int mi) LspSigParts? {
+    if (d < 0 || d >= c.ast.typeDecls.len()) {
+        return null
+    }
+    TypeDecl td = c.ast.typeDecls[d]
+    if (mi < 0 || mi >= td.methodCount) {
+        return null
+    }
+    MethodSig ms = c.ast.methodSigs[c.ast.at(td.methods, mi)]
+    string head = "fn "
+    if (ms.isMut) {
+        head = "fn mut "
+    }
+    return LspSigParts{head: head + ms.name, params: lspParamTexts(c.ast, ms.params, ms.paramCount), tail: lspResultsText(c.ast, ms.results, ms.resultCount), doc: lspDocComment(c.ast, td.file, ms.pos.line)}
+}
+
+fn lspCaseSigParts(Checker c, int d, int ci) LspSigParts? {
+    if (d < 0 || d >= c.ast.typeDecls.len()) {
+        return null
+    }
+    TypeDecl td = c.ast.typeDecls[d]
+    if (ci < 0 || ci >= td.caseCount) {
+        return null
+    }
+    EnumCase ec = c.ast.enumCases[c.ast.at(td.cases, ci)]
+    return LspSigParts{head: c.declDisplayName(d) + "." + ec.name, params: lspParamTexts(c.ast, ec.params, ec.paramCount), tail: "", doc: lspJoinDoc(lspDocComment(c.ast, td.file, ec.pos.line), "case of enum " + c.declDisplayName(d))}
+}
+
+// Cuts a signature as written ("fn slice(int a, int b) string",
+// "fn(int, string) bool") at its parameter list.
+fn lspSplitSig(string sig) LspSigParts {
+    LspSigParts out = LspSigParts{head: sig, params: []string{}, tail: "", doc: ""}
+    int? open = sig.index("(")
+    if (open == null) {
+        return out
+    }
+    int depth = 0
+    int start = open + 1
+    for (int i = open; i < sig.len(); i++) {
+        byte b = sig[i]
+        if (b == '(') {
+            depth++
+        } else if (b == ')') {
+            depth--
+            if (depth == 0) {
+                string last = sig.slice(start, i).trim()
+                if (last != "") {
+                    out.params.push(last)
+                }
+                out.head = sig.slice(0, open)
+                out.tail = sig.slice(i + 1, sig.len())
+                return out
+            }
+        } else if (b == ',' && depth == 1) {
+            out.params.push(sig.slice(start, i).trim())
+            start = i + 1
+        }
+    }
+    return out
+}
+
+// A SignatureInformation: the label, the documentation, and each
+// parameter as its [start, end) in the label (UTF-16 units).
+fn lspSigJson(LspSigParts p) json.Value {
+    string label = p.head + "("
+    []json.Value params = []json.Value{}
+    for (int i = 0; i < p.params.len(); i++) {
+        if (i > 0) {
+            label = label + ", "
+        }
+        int from = lspUnits(label, 0, label.len())
+        label = label + p.params[i]
+        int to = lspUnits(label, 0, label.len())
+        map[string]json.Value pm = map[string]json.Value{}
+        pm["label"] = json.Value.Array([]json.Value{lspNum(from), lspNum(to)})
+        params.push(json.Value.Object(pm))
+    }
+    label = label + ")" + p.tail
+    map[string]json.Value m = map[string]json.Value{}
+    m["label"] = json.Value.String(label)
+    if (p.doc != "") {
+        map[string]json.Value d = map[string]json.Value{}
+        d["kind"] = json.Value.String("markdown")
+        d["value"] = json.Value.String(p.doc)
+        m["documentation"] = json.Value.Object(d)
+    }
+    m["parameters"] = json.Value.Array(params)
+    return json.Value.Object(m)
+}

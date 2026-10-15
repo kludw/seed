@@ -1,0 +1,796 @@
+// The language server, continued: references, document highlights and
+// rename (compiler/README.md, "The language server").
+//
+// A symbol is known by the place of its declaration ("path:line:col"),
+// which is the same in every program that loads the declaring file, so
+// the references of a symbol are the identifiers with its name, in every
+// program where it can be used, that resolve (lspResolveIn) to a symbol
+// declared there. A local is looked for in its own file; a package-level
+// name, a field, a method or an enum case in its package and the
+// package's tests; a pub one also in every package of the workspace that
+// imports its package, directly or through others.
+package main
+
+import "fs"
+import "json"
+
+// The key of rename's refusals in a job's result: lsp.sd turns such a
+// result into an error response, which the editor shows.
+const string lspRefusalKey = "seedRefusal"
+
+fn lspRefusal(string message) json.Value {
+    map[string]json.Value m = map[string]json.Value{}
+    m[lspRefusalKey] = json.Value.String(message)
+    return json.Value.Object(m)
+}
+
+// One place that names a symbol: the identifier at line and col (Pos, from
+// 1, in bytes) of a file, and its LSP range.
+type LspRef struct {
+    string path
+    int line
+    int col
+    json.Value range
+}
+
+// The symbol at the request's position: the analysis of the document, the
+// identifier token and what it resolved to, with its key (the place of its
+// declaration, "path:line:col").
+type LspTarget struct {
+    bool found
+    LspAnalysis a
+    Token tok
+    LspSym sym
+    string key
+    string declPath
+}
+
+// A program a symbol was looked for in: the document it was loaded for
+// (lspAnalyze), whether it loaded without syntax or import errors, and its
+// errors (to compare after a rename).
+type LspScope struct {
+    string anchor
+    bool clean
+    []string errors
+}
+
+fn lspNoTarget(LspAnalysis a) LspTarget {
+    return LspTarget{found: false, a: a, tok: Token{kind: Tok.Eof, pos: Pos{file: -1, line: 0, col: 0}, text: "", raw: ""}, sym: lspNoSym(), key: "", declPath: ""}
+}
+
+// The place of a symbol's declaration, "path:line:col", or "" when it has
+// none (built-in names).
+fn lspSymKey(Checker c, LspSym s) string {
+    if (!s.found || s.pos.file < 0 || s.pos.file >= c.ast.files.len()) {
+        return ""
+    }
+    return c.ast.files[s.pos.file].path + ":" + s.pos.line.string() + ":" + s.pos.col.string()
+}
+
+fn lspTargetAt(LspJob job) (LspTarget, error) {
+    LspAnalysis a = try lspAnalyze(job, true)
+    if (a.file < 0) {
+        return lspNoTarget(a), null
+    }
+    Lexer lx = lex(a.file, a.src)
+    int ti = lspTokenAt(lx.tokens, lspPosOf(a.src, a.file, job.line, job.character))
+    if (ti < 0 || lx.tokens[ti].kind != Tok.Ident) {
+        return lspNoTarget(a), null
+    }
+    LspSym s = lspResolve(a.c, lx.tokens, ti)
+    string key = lspSymKey(a.c, s)
+    if (s.found && (s.kind == "package" || s.kind == "builtin")) {
+        // Found, but with nothing to look for.
+        return LspTarget{found: true, a: a, tok: lx.tokens[ti], sym: s, key: "", declPath: ""}, null
+    }
+    if (!s.found || key == "") {
+        return lspNoTarget(a), null
+    }
+    string declPath = ""
+    if (key != "") {
+        declPath = a.c.ast.files[s.pos.file].path
+    }
+    return LspTarget{found: true, a: a, tok: lx.tokens[ti], sym: s, key: key, declPath: declPath}, null
+}
+
+// The identifiers named name in the files of an analysis that resolve to
+// the symbol key: only in the file onlyPath when it is not "", only in the
+// root package's files (and its tests) when rootOnly.
+fn lspRefsIn(LspAnalysis a, string name, string key, string onlyPath, bool rootOnly) []LspRef {
+    []LspRef out = []LspRef{}
+    LspIndex ix = lspNoIndex()
+    for (int f = 0; f < a.c.ast.files.len() && f < a.c.diags.sources.len(); f++) {
+        SourceFile sf = a.c.ast.files[f]
+        if ((rootOnly && sf.pkgIndex != 0) || (onlyPath != "" && sf.path != onlyPath)) {
+            continue
+        }
+        string src = a.c.diags.sources[f]
+        if (!src.contains(name)) {
+            continue
+        }
+        if (!ix.built) {
+            ix = lspIndexOf(a.c)
+        }
+        Lexer lx = lex(f, src)
+        for (int i = 0; i < lx.tokens.len(); i++) {
+            Token t = lx.tokens[i]
+            if (t.kind != Tok.Ident || t.text != name) {
+                continue
+            }
+            LspSym s = lspResolveIn(a.c, ix, lx.tokens, i)
+            if (lspSymKey(a.c, s) == key) {
+                Pos end = Pos{file: f, line: t.pos.line, col: t.pos.col + t.raw.len()}
+                out.push(LspRef{path: sf.path, line: t.pos.line, col: t.pos.col, range: lspRange(src, t.pos, end)})
+            }
+        }
+    }
+    return out
+}
+
+// The references of the target in every program it can be used in (see
+// the top of the file), sorted by file and position, each once, and the
+// programs that were searched.
+fn lspCollectRefs(LspJob job, LspTarget t) ([]LspRef, []LspScope, error) {
+    []LspRef all = []LspRef{}
+    []LspScope scopes = []LspScope{}
+    string name = t.tok.text
+    if (t.sym.kind == "local" || t.sym.kind == "caseField") {
+        all = lspRefsIn(t.a, name, t.key, t.declPath, false)
+        scopes.push(lspScopeOf(job.path, t.a))
+        return lspSortRefs(all), scopes, null
+    }
+    int df = t.sym.pos.file
+    string pkgDir = dirName(t.declPath)
+    if (t.a.c.ast.files[df].isTest) {
+        pkgDir = dirName(pkgDir)
+    }
+    string root = lspSearchRoot(job, pkgDir)
+    LspWorkspace ws = lspScan(root, job.overlay, pkgDir)
+    // A package of the standard library is searched only when it is in
+    // the workspace (when the workspace is Seed's own repository); its
+    // declaration is always a reference.
+    []string anchors = []string{}
+    string lib = cleanPath(absPath(job.seedRoot)) + "/lib/"
+    if (!cleanPath(absPath(pkgDir)).startsWith(lib) || pkgDir.startsWith(root + "/")) {
+        anchors = lspAnchors(ws, pkgDir, t.declPath, job.overlay, map[string]bool{})
+    }
+    string dsrc = t.a.c.diags.sources[df]
+    all.push(LspRef{path: t.declPath, line: t.sym.pos.line, col: t.sym.pos.col, range: lspRange(dsrc, t.sym.pos, Pos{file: df, line: t.sym.pos.line, col: t.sym.pos.col + t.sym.len})})
+    bool isMain = t.a.c.ast.pkgs[t.a.c.ast.files[df].pkgIndex].name == "main"
+    if (t.sym.exported && !isMain) {
+        map[string]bool users = lspImporters(ws, pkgDir, job.seedRoot, root, job.overlay)
+        for (int d = 0; d < ws.dirs.len(); d++) {
+            string dir = ws.dirs[d]
+            if (users[dir] != null && dir != pkgDir) {
+                []string more = lspAnchors(ws, dir, "", job.overlay, users)
+                for (int m = 0; m < more.len(); m++) {
+                    anchors.push(more[m])
+                }
+            }
+        }
+    }
+    for (int i = 0; i < anchors.len(); i++) {
+        LspAnalysis a = t.a
+        if (anchors[i] != job.path) {
+            LspJob other = job
+            other.path = anchors[i]
+            a = try lspAnalyze(other, true)
+        }
+        []LspRef found = lspRefsIn(a, name, t.key, "", true)
+        for (int k = 0; k < found.len(); k++) {
+            all.push(found[k])
+        }
+        scopes.push(lspScopeOf(anchors[i], a))
+    }
+    return lspSortRefs(all), scopes, null
+}
+
+fn lspScopeOf(string anchor, LspAnalysis a) LspScope {
+    []string errors = []string{}
+    for (int i = 0; i < a.c.diags.list.len(); i++) {
+        errors.push(a.c.diags.list[i].message)
+    }
+    for (int j = 0; j < a.unformatted.len(); j++) {
+        errors.push(a.unformatted[j].message)
+    }
+    return LspScope{anchor: anchor, clean: a.clean, errors: errors}
+}
+
+// The references sorted by path, line and column, without repeats.
+fn lspSortRefs([]LspRef refs) []LspRef {
+    map[string]LspRef byKey = map[string]LspRef{}
+    []string keys = []string{}
+    for (int i = 0; i < refs.len(); i++) {
+        LspRef r = refs[i]
+        string k = r.path + "\n" + lspPad(r.line) + ":" + lspPad(r.col)
+        if (byKey[k] == null) {
+            byKey[k] = r
+            keys.push(k)
+        }
+    }
+    keys.sort()
+    []LspRef out = []LspRef{}
+    for (int j = 0; j < keys.len(); j++) {
+        LspRef? r = byKey[keys[j]]
+        if (r != null) {
+            out.push(r)
+        }
+    }
+    return out
+}
+
+fn lspPad(int n) string {
+    string s = n.string()
+    for (; s.len() < 10; ) {
+        s = "0" + s
+    }
+    return s
+}
+
+// ---- the workspace ----
+
+// The package directories under a root: the .sd files of each (open
+// documents not saved yet included) and of its tests/ directory.
+type LspWorkspace struct {
+    []string dirs
+    map[string][]string files
+    map[string][]string tests
+    int count
+}
+
+// At most this many .sd files are read when looking for the packages that
+// import a package.
+const int lspMaxFiles = 5000
+
+// Where to look for the users of a package: the workspace folder that
+// holds it (or holds the document), else the directory above it.
+fn lspSearchRoot(LspJob job, string pkgDir) string {
+    for (int i = 0; i < job.roots.len(); i++) {
+        string r = job.roots[i]
+        if (pkgDir == r || pkgDir.startsWith(r + "/")) {
+            return r
+        }
+    }
+    for (int j = 0; j < job.roots.len(); j++) {
+        string r = job.roots[j]
+        if (job.path.startsWith(r + "/")) {
+            return r
+        }
+    }
+    return dirName(pkgDir)
+}
+
+// The packages under root, and the package pkgDir even when it is not
+// under it.
+fn lspScan(string root, map[string]string overlay, string pkgDir) LspWorkspace {
+    map[string][]string raw = map[string][]string{}
+    LspWorkspace w = LspWorkspace{dirs: []string{}, files: map[string][]string{}, tests: map[string][]string{}, count: 0}
+    raw = w.walk(root, 0, raw)
+    if (!pkgDir.startsWith(root + "/") && pkgDir != root) {
+        raw = w.walk(pkgDir, 15, raw)
+    }
+    []string open = overlay.keys()
+    for (int i = 0; i < open.len(); i++) {
+        string p = open[i]
+        string d = dirName(p)
+        if (!p.endsWith(".sd") || (!d.startsWith(root + "/") && d != root)) {
+            continue
+        }
+        []string? have = raw[d]
+        if (have == null) {
+            raw[d] = []string{p}
+        } else if (!have.contains(p)) {
+            have.push(p)
+            have.sort()
+            raw[d] = have
+        }
+    }
+    []string dirs = raw.keys()
+    dirs.sort()
+    for (int j = 0; j < dirs.len(); j++) {
+        string dir = dirs[j]
+        []string? fs0 = raw[dir]
+        if (fs0 == null) {
+            continue
+        }
+        string parent = dirName(dir)
+        if (lastElement(dir) == "tests" && raw[parent] != null) {
+            w.tests[parent] = fs0
+        } else {
+            w.files[dir] = fs0
+            w.dirs.push(dir)
+        }
+    }
+    return w
+}
+
+// Adds the .sd files of dir and the directories below it to raw (hidden
+// directories, build and node_modules left out).
+fn (LspWorkspace w) mut walk(string dir, int depth, map[string][]string found) map[string][]string {
+    map[string][]string raw = found
+    if (depth > 16 || w.count >= lspMaxFiles) {
+        return raw
+    }
+    []string names, error err = fs.list(dir)
+    if (err != null) {
+        return raw
+    }
+    names.sort()
+    []string here = []string{}
+    []string subs = []string{}
+    for (int i = 0; i < names.len(); i++) {
+        string n = names[i]
+        string p = joinPath(dir, n)
+        if (fs.isDir(p)) {
+            if (!n.startsWith(".") && n != "build" && n != "node_modules") {
+                subs.push(p)
+            }
+        } else if (n.endsWith(".sd") && w.count < lspMaxFiles) {
+            here.push(p)
+            w.count++
+        }
+    }
+    if (here.len() > 0) {
+        raw[dir] = here
+    }
+    for (int j = 0; j < subs.len(); j++) {
+        raw = w.walk(subs[j], depth + 1, raw)
+    }
+    return raw
+}
+
+// The import paths of a source text.
+fn lspImportsOf(string text) []string {
+    []string out = []string{}
+    []string lines = text.split("\n")
+    for (int i = 0; i < lines.len(); i++) {
+        string l = lines[i].trim()
+        if (l.startsWith("import \"") && l.len() > 8) {
+            string rest = l.slice(8, l.len())
+            int? q = rest.index("\"")
+            if (q != null) {
+                out.push(rest.slice(0, q))
+            }
+        } else if (l.startsWith("fn ") || l.startsWith("pub ") || l.startsWith("type ") || l.startsWith("const ")) {
+            break
+        }
+    }
+    return out
+}
+
+// The directory an import of a package in dir names, as the loader finds
+// it: the standard library's package, else the directory of that path
+// under dir or a directory above it (up to root); "" when there is none.
+fn lspImportDir(string seedRoot, string dir, string path, string root) string {
+    if (!validImportPath(path)) {
+        return ""
+    }
+    string lib = cleanPath(absPath(seedRoot)) + "/lib/" + path
+    if (fs.isDir(lib)) {
+        return lib
+    }
+    string d = dir
+    for (int up = 0; up < 16; up++) {
+        string cand = joinPath(d, path)
+        if (fs.isDir(cand)) {
+            return cleanPath(cand)
+        }
+        if (d == root || d == "/" || d == "." || d == "") {
+            break
+        }
+        d = dirName(d)
+    }
+    return ""
+}
+
+// The package directories of the workspace that import pkgDir, directly or
+// through other packages (pkgDir itself included).
+fn lspImporters(LspWorkspace ws, string pkgDir, string seedRoot, string root, map[string]string overlay) map[string]bool {
+    map[string]bool users = map[string]bool{}
+    users[cleanPath(pkgDir)] = true
+    // The imports of every package, resolved once.
+    map[string][]string deps = map[string][]string{}
+    for (int d = 0; d < ws.dirs.len(); d++) {
+        string dir = ws.dirs[d]
+        []string files = lspDirFiles(ws, dir)
+        []string targets = []string{}
+        for (int f = 0; f < files.len(); f++) {
+            string text, error err = lspReadText(files[f], overlay)
+            if (err != null) {
+                continue
+            }
+            []string imps = lspImportsOf(text)
+            for (int k = 0; k < imps.len(); k++) {
+                string to = lspImportDir(seedRoot, dir, imps[k], root)
+                if (to != "" && !targets.contains(to)) {
+                    targets.push(to)
+                }
+            }
+        }
+        deps[dir] = targets
+    }
+    for (bool changed = true; changed; ) {
+        changed = false
+        for (int i = 0; i < ws.dirs.len(); i++) {
+            string dir = ws.dirs[i]
+            if (users[dir] != null) {
+                continue
+            }
+            []string? ts = deps[dir]
+            if (ts == null) {
+                continue
+            }
+            for (int j = 0; j < ts.len(); j++) {
+                if (users[ts[j]] != null) {
+                    users[dir] = true
+                    changed = true
+                    break
+                }
+            }
+        }
+    }
+    return users
+}
+
+// The files of a package directory and of its tests.
+fn lspDirFiles(LspWorkspace ws, string dir) []string {
+    []string out = []string{}
+    []string? fs0 = ws.files[dir]
+    if (fs0 != null) {
+        out = fs0
+    }
+    []string? ts = ws.tests[dir]
+    if (ts != null) {
+        for (int i = 0; i < ts.len(); i++) {
+            out.push(ts[i])
+        }
+    }
+    return out
+}
+
+// The documents to analyse (lspAnalyze) so that every file of the package
+// in dir is checked with its tests: a file of its tests/ directory when it
+// has one, else one of its files. In a directory of single-file programs
+// (several files declare main), each program is its own: the one that
+// declares the symbol (declPath), or each one that imports one of users.
+fn lspAnchors(LspWorkspace ws, string dir, string declPath, map[string]string overlay, map[string]bool users) []string {
+    []string files = []string{}
+    []string? fs0 = ws.files[dir]
+    if (fs0 != null) {
+        files = fs0
+    }
+    if (files.len() == 0 && declPath != "") {
+        return []string{declPath}
+    }
+    int mains = 0
+    for (int i = 0; i < files.len(); i++) {
+        string text, error err = lspReadText(files[i], overlay)
+        if (err == null && lspPackageClause(text) == "main" && lspHasMain(text)) {
+            mains++
+        }
+    }
+    if (mains > 1) {
+        if (declPath != "") {
+            return []string{declPath}
+        }
+        []string progs = []string{}
+        for (int j = 0; j < files.len(); j++) {
+            string ptext, error perr = lspReadText(files[j], overlay)
+            if (perr != null) {
+                continue
+            }
+            []string imps = lspImportsOf(ptext)
+            for (int k = 0; k < imps.len(); k++) {
+                if (lspUsesAny(imps[k], users)) {
+                    progs.push(files[j])
+                    break
+                }
+            }
+        }
+        return progs
+    }
+    []string? ts = ws.tests[dir]
+    if (ts != null && ts.len() > 0) {
+        return []string{ts[0]}
+    }
+    if (files.len() == 0) {
+        return []string{}
+    }
+    return []string{files[0]}
+}
+
+// Whether the import path, from dir, may name one of the packages in
+// users (by its last elements; the analysis decides).
+fn lspUsesAny(string path, map[string]bool users) bool {
+    []string ks = users.keys()
+    for (int i = 0; i < ks.len(); i++) {
+        if (ks[i].endsWith("/" + path)) {
+            return true
+        }
+    }
+    return false
+}
+
+// ---- references and highlights ----
+
+// textDocument/references (Location[]) and textDocument/documentHighlight
+// (the references in the document itself, from its own analysis).
+fn lspReferences(LspJob job) (json.Value, error) {
+    LspTarget t = try lspTargetAt(job)
+    if (!t.found || t.key == "") {
+        return json.Value.Null, null
+    }
+    []json.Value out = []json.Value{}
+    if (job.kind == "highlight") {
+        []LspRef here = lspSortRefs(lspRefsIn(t.a, t.tok.text, t.key, job.path, false))
+        for (int i = 0; i < here.len(); i++) {
+            map[string]json.Value h = map[string]json.Value{}
+            h["range"] = here[i].range
+            out.push(json.Value.Object(h))
+        }
+        return json.Value.Array(out), null
+    }
+    []LspRef refs, _ = try lspCollectRefs(job, t)
+    string declKey = t.key
+    for (int j = 0; j < refs.len(); j++) {
+        LspRef r = refs[j]
+        if (!job.includeDecl && r.path + ":" + r.line.string() + ":" + r.col.string() == declKey) {
+            continue
+        }
+        map[string]json.Value loc = map[string]json.Value{}
+        loc["uri"] = json.Value.String(lspPathToUri(r.path))
+        loc["range"] = r.range
+        out.push(json.Value.Object(loc))
+    }
+    return json.Value.Array(out), null
+}
+
+// ---- rename ----
+
+// Why the target cannot be renamed, or "".
+fn lspCannotRename(LspTarget t, string seedRoot) string {
+    string name = t.tok.text
+    if (t.sym.kind == "builtin" || t.key == "") {
+        if (t.sym.kind == "package") {
+            return "cannot rename the package " + name + " here: rename its directory and the imports"
+        }
+        return name + " is built into the language and cannot be renamed"
+    }
+    string lib = cleanPath(absPath(seedRoot)) + "/lib/"
+    if (cleanPath(absPath(t.declPath)).startsWith(lib)) {
+        return name + " belongs to the standard library and cannot be renamed"
+    }
+    return ""
+}
+
+// Why newName cannot be the new name of a symbol of the kind, or "": it
+// must be an identifier that is not a keyword or a built-in type, written
+// as the compiler requires (PascalCase for types and enum cases, camelCase
+// for everything else; check_style.sd).
+fn lspBadName(string kind, string newName) string {
+    if (newName == "") {
+        return "the new name is empty"
+    }
+    for (int i = 0; i < newName.len(); i++) {
+        byte b = newName[i]
+        bool letter = (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z')
+        if (!letter && !(i > 0 && b >= '0' && b <= '9') && b != '_') {
+            return "\"" + newName + "\" is not a name: a name is letters and digits, starting with a letter"
+        }
+    }
+    if (keywords[newName] != null) {
+        return newName + " is a keyword"
+    }
+    if (isBuiltinTypeName(newName)) {
+        return newName + " is the name of a built-in type"
+    }
+    if (kind == "type" || kind == "case") {
+        if (!isPascalCase(newName)) {
+            return "the name of a " + lspKindWord(kind) + " must be written in PascalCase, such as " + convertCase(newName, true)
+        }
+    } else if (!isCamelCase(newName)) {
+        return "the name of a " + lspKindWord(kind) + " must be written in camelCase, such as " + convertCase(newName, false)
+    }
+    return ""
+}
+
+fn lspKindWord(string kind) string {
+    if (kind == "fn") {
+        return "function"
+    }
+    if (kind == "case") {
+        return "enum case"
+    }
+    if (kind == "caseField") {
+        return "field"
+    }
+    if (kind == "ifaceMethod") {
+        return "method"
+    }
+    if (kind == "const") {
+        return "constant"
+    }
+    if (kind == "local") {
+        return "variable"
+    }
+    return kind
+}
+
+// textDocument/prepareRename (the range of the name and the name, or a
+// refusal) and textDocument/rename: a WorkspaceEdit that renames every
+// reference (lspCollectRefs), in the open documents' text where there is
+// one. The rename is refused when a program it touches has syntax errors
+// (its references could be incomplete), and when the renamed programs
+// would have errors that they did not have (a name that is taken, say); a
+// file that was formatted and is not after the rename (a line got too
+// long) is formatted again, so that it still compiles.
+fn lspRename(LspJob job) (json.Value, error) {
+    LspTarget t = try lspTargetAt(job)
+    if (!t.found) {
+        if (job.kind == "prepareRename") {
+            return json.Value.Null, null
+        }
+        return lspRefusal("there is no name here to rename"), null
+    }
+    string why = lspCannotRename(t, job.seedRoot)
+    if (why != "") {
+        return lspRefusal(why), null
+    }
+    string oldName = t.tok.text
+    if (job.kind == "prepareRename") {
+        map[string]json.Value pr = map[string]json.Value{}
+        pr["range"] = lspRange(t.a.src, t.tok.pos, Pos{file: t.tok.pos.file, line: t.tok.pos.line, col: t.tok.pos.col + t.tok.raw.len()})
+        pr["placeholder"] = json.Value.String(oldName)
+        return json.Value.Object(pr), null
+    }
+    string bad = lspBadName(t.sym.kind, job.newName)
+    if (bad != "") {
+        return lspRefusal("cannot rename " + oldName + " to " + job.newName + ": " + bad), null
+    }
+    []LspRef refs, []LspScope scopes = try lspCollectRefs(job, t)
+    for (int s = 0; s < scopes.len(); s++) {
+        if (!scopes[s].clean) {
+            return lspRefusal("cannot rename " + oldName + ": " + scopes[s].anchor + " (or a package it imports) has syntax errors; fix them first"), null
+        }
+    }
+    // The new text of every file, by path, in the order of the references.
+    []string paths = []string{}
+    map[string]string texts = map[string]string{}
+    map[string]bool reformatted = map[string]bool{}
+    for (int i = refs.len() - 1; i >= 0; i--) {
+        LspRef r = refs[i]
+        string? cur = texts[r.path]
+        string text = ""
+        if (cur == null) {
+            text = try lspReadText(r.path, job.overlay)
+            paths.insert(0, r.path)
+        } else {
+            text = cur
+        }
+        int ls = lspLineStart(text, r.line - 1)
+        int off = ls + r.col - 1
+        if (ls < 0 || off + oldName.len() > text.len() || text.slice(off, off + oldName.len()) != oldName) {
+            return lspRefusal("cannot rename " + oldName + ": " + r.path + " changed while it was being renamed; try again"), null
+        }
+        texts[r.path] = text.slice(0, off) + job.newName + text.slice(off + oldName.len(), text.len())
+    }
+    map[string]string overlay = job.overlay
+    for (int p = 0; p < paths.len(); p++) {
+        string before = try lspReadText(paths[p], job.overlay)
+        string? after = texts[paths[p]]
+        if (after == null) {
+            continue
+        }
+        string next = after
+        if (formatSource(before) == before && formatSource(after) != after) {
+            Parser fp = fmtParse(paths[p], after)
+            if (fp.diags.count() == 0) {
+                next = formatSource(after)
+                reformatted[paths[p]] = true
+            }
+        }
+        texts[paths[p]] = next
+        overlay[paths[p]] = next
+    }
+    // The renamed programs must have no errors that they did not have.
+    for (int k = 0; k < scopes.len(); k++) {
+        LspJob again = job
+        again.path = scopes[k].anchor
+        again.overlay = overlay
+        LspAnalysis a = try lspAnalyze(again, false)
+        LspScope now = lspScopeOf(again.path, a)
+        map[string]int had = map[string]int{}
+        for (int e = 0; e < scopes[k].errors.len(); e++) {
+            string m = lspRenamedText(scopes[k].errors[e], oldName, job.newName)
+            had[m] = had.getOr(m, 0) + 1
+        }
+        for (int n = 0; n < a.c.diags.list.len(); n++) {
+            Diag g = a.c.diags.list[n]
+            int left = had.getOr(g.message, 0)
+            if (left > 0) {
+                had[g.message] = left - 1
+                continue
+            }
+            string where = ""
+            if (g.pos.file >= 0 && g.pos.file < a.c.ast.files.len()) {
+                where = a.c.ast.files[g.pos.file].path + ":" + g.pos.line.string() + ": "
+            }
+            return lspRefusal("cannot rename " + oldName + " to " + job.newName + ": " + where + g.message), null
+        }
+        if (now.errors.len() > scopes[k].errors.len()) {
+            return lspRefusal("cannot rename " + oldName + " to " + job.newName + ": the program of " + again.path + " would not compile"), null
+        }
+    }
+    map[string]json.Value changes = map[string]json.Value{}
+    for (int q = 0; q < paths.len(); q++) {
+        string path = paths[q]
+        []json.Value edits = []json.Value{}
+        if (reformatted[path] != null) {
+            string old = try lspReadText(path, job.overlay)
+            string? whole = texts[path]
+            if (whole != null) {
+                edits.push(lspWholeEdit(old, whole))
+            }
+        } else {
+            for (int r = 0; r < refs.len(); r++) {
+                if (refs[r].path == path) {
+                    map[string]json.Value edit = map[string]json.Value{}
+                    edit["range"] = refs[r].range
+                    edit["newText"] = json.Value.String(job.newName)
+                    edits.push(json.Value.Object(edit))
+                }
+            }
+        }
+        changes[lspPathToUri(path)] = json.Value.Array(edits)
+    }
+    map[string]json.Value we = map[string]json.Value{}
+    we["changes"] = json.Value.Object(changes)
+    return json.Value.Object(we), null
+}
+
+// An error message of before a rename, as it would read after it: the old
+// name replaced where it is a whole word.
+fn lspRenamedText(string message, string oldName, string newName) string {
+    []byte out = []byte{}
+    int i = 0
+    for (; i < message.len(); ) {
+        bool start = i == 0 || !lspIdentByte(message[i - 1])
+        int end = i + oldName.len()
+        if (start && end <= message.len() && message.slice(i, end) == oldName && (end == message.len() || !lspIdentByte(message[end]))) {
+            string n = newName
+            for (int k = 0; k < n.len(); k++) {
+                out.push(n[k])
+            }
+            i = end
+            continue
+        }
+        out.push(message[i])
+        i++
+    }
+    return string(out)
+}
+
+// An edit that replaces the whole of old with text.
+fn lspWholeEdit(string old, string text) json.Value {
+    int lines = 0
+    int last = 0
+    for (int i = 0; i < old.len(); i++) {
+        if (old[i] == '\n') {
+            lines++
+            last = i + 1
+        }
+    }
+    map[string]json.Value end = map[string]json.Value{}
+    end["line"] = lspNum(lines)
+    end["character"] = lspNum(lspUnits(old, last, old.len()))
+    map[string]json.Value start = map[string]json.Value{}
+    start["line"] = lspNum(0)
+    start["character"] = lspNum(0)
+    map[string]json.Value r = map[string]json.Value{}
+    r["start"] = json.Value.Object(start)
+    r["end"] = json.Value.Object(end)
+    map[string]json.Value edit = map[string]json.Value{}
+    edit["range"] = json.Value.Object(r)
+    edit["newText"] = json.Value.String(text)
+    return json.Value.Object(edit)
+}

@@ -1,0 +1,24 @@
+package main
+
+import "fmt"
+import "shop"
+
+// The greeting, with a non-ASCII prefix: "héllo 😀".
+const string greeting = "héllo 😀"
+
+fn describe(shop.Size s) string {
+    switch (s) {
+    case shop.Size.Small:
+        return "small"
+    case shop.Size.Large(int extra):
+        return "large +" + extra.string()
+    }
+}
+
+fn main([]string args) error {
+    shop.Cart cart = shop.newCart("ann")
+    try cart.add(shop.Item{name: "tea", 
+    string label = "😀 é " + cart.owner
+    fmt.println(greeting + " " + label + " " + cart.total().string() + " " + describe(shop.Size.Large(2)))
+    return null
+}

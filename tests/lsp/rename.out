@@ -1,0 +1,78 @@
+== initialize
+{"jsonrpc":"2.0","id":0,"result":{"capabilities":{"positionEncoding":"utf-16","textDocumentSync":{"openClose":true,"change":1,"save":{"includeText":false}},"documentFormattingProvider":true,"definitionProvider":true,"hoverProvider":true,"completionProvider":{"triggerCharacters":["."]},"documentSymbolProvider":true,"referencesProvider":true,"documentHighlightProvider":true,"renameProvider":{"prepareProvider":true},"signatureHelpProvider":{"triggerCharacters":["(",","]}},"serverInfo":{"name":"seed lsp"}}}
+== notification textDocument/publishDiagnostics
+{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{"uri":"file://$DIR/proj/main.sd","diagnostics":[]}}
+== prepareRename proj/main.sd 20 31
+{"jsonrpc":"2.0","id":1,"result":{"range":{"start":{"line":20,"character":29},"end":{"line":20,"character":33}},"placeholder":"cart"}}
+== prepareRename proj/main.sd 22 5
+{"jsonrpc":"2.0","id":2,"result":null}
+== prepareRename proj/main.sd 21 28
+{"jsonrpc":"2.0","id":3,"result":null}
+== prepareRename proj/main.sd 21 5
+{"jsonrpc":"2.0","id":4,"error":{"code":-32803,"message":"cannot rename the package fmt here: rename its directory and the imports"}}
+== prepareRename proj/main.sd 21 9
+{"jsonrpc":"2.0","id":5,"error":{"code":-32803,"message":"println belongs to the standard library and cannot be renamed"}}
+== rename proj/main.sd 18 15 basket
+{"jsonrpc":"2.0","id":6,"result":{"changes":{"file://$DIR/proj/main.sd":[{"range":{"start":{"line":18,"character":14},"end":{"line":18,"character":18}},"newText":"basket"},{"range":{"start":{"line":19,"character":8},"end":{"line":19,"character":12}},"newText":"basket"},{"range":{"start":{"line":20,"character":29},"end":{"line":20,"character":33}},"newText":"basket"},{"range":{"start":{"line":21,"character":47},"end":{"line":21,"character":51}},"newText":"basket"}]}}}
+== rename proj/main.sd 19 14 put
+{"jsonrpc":"2.0","id":7,"result":{"changes":{"file://$DIR/proj/main.sd":[{"range":{"start":{"line":19,"character":13},"end":{"line":19,"character":16}},"newText":"put"}],"file://$DIR/proj/shop/cart.sd":[{"range":{"start":{"line":16,"character":20},"end":{"line":16,"character":23}},"newText":"put"}],"file://$DIR/proj/shop/tests/cart_test.sd":[{"range":{"start":{"line":4,"character":10},"end":{"line":4,"character":13}},"newText":"put"}]}}}
+== rename proj/shop/item.sd 3 10 Product
+{"jsonrpc":"2.0","id":8,"result":{"changes":{"file://$DIR/proj/main.sd":[{"range":{"start":{"line":19,"character":22},"end":{"line":19,"character":26}},"newText":"Product"}],"file://$DIR/proj/shop/cart.sd":[{"range":{"start":{"line":7,"character":6},"end":{"line":7,"character":10}},"newText":"Product"},{"range":{"start":{"line":12,"character":39},"end":{"line":12,"character":43}},"newText":"Product"},{"range":{"start":{"line":16,"character":24},"end":{"line":16,"character":28}},"newText":"Product"}],"file://$DIR/proj/shop/item.sd":[{"range":{"start":{"line":3,"character":9},"end":{"line":3,"character":13}},"newText":"Product"}],"file://$DIR/proj/shop/tests/cart_test.sd":[{"range":{"start":{"line":4,"character":14},"end":{"line":4,"character":18}},"newText":"Product"}]}}}
+== rename proj/shop/item.sd 11 5 Tiny
+{"jsonrpc":"2.0","id":9,"result":{"changes":{"file://$DIR/proj/main.sd":[{"range":{"start":{"line":10,"character":19},"end":{"line":10,"character":24}},"newText":"Tiny"},{"range":{"start":{"line":19,"character":68},"end":{"line":19,"character":73}},"newText":"Tiny"}],"file://$DIR/proj/shop/item.sd":[{"range":{"start":{"line":11,"character":4},"end":{"line":11,"character":9}},"newText":"Tiny"}],"file://$DIR/proj/shop/tests/cart_test.sd":[{"range":{"start":{"line":4,"character":51},"end":{"line":4,"character":56}},"newText":"Tiny"}]}}}
+== rename proj/main.sd 20 35 holder
+{"jsonrpc":"2.0","id":10,"result":{"changes":{"file://$DIR/proj/main.sd":[{"range":{"start":{"line":20,"character":34},"end":{"line":20,"character":39}},"newText":"holder"}],"file://$DIR/proj/shop/cart.sd":[{"range":{"start":{"line":6,"character":15},"end":{"line":6,"character":20}},"newText":"holder"},{"range":{"start":{"line":12,"character":16},"end":{"line":12,"character":21}},"newText":"holder"}]}}}
+== rename proj/main.sd 6 15 welcome
+{"jsonrpc":"2.0","id":11,"result":{"changes":{"file://$DIR/proj/main.sd":[{"range":{"start":{"line":6,"character":13},"end":{"line":6,"character":21}},"newText":"welcome"},{"range":{"start":{"line":21,"character":16},"end":{"line":21,"character":24}},"newText":"welcome"}]}}}
+== rename proj/main.sd 8 5 sizeName
+{"jsonrpc":"2.0","id":12,"result":{"changes":{"file://$DIR/proj/main.sd":[{"range":{"start":{"line":8,"character":3},"end":{"line":8,"character":11}},"newText":"sizeName"},{"range":{"start":{"line":21,"character":77},"end":{"line":21,"character":85}},"newText":"sizeName"}]}}}
+== notification textDocument/publishDiagnostics
+{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{"uri":"file://$DIR/proj/main.sd","diagnostics":[]}}
+== notification textDocument/publishDiagnostics
+{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{"uri":"file://$DIR/proj/shop/item.sd","diagnostics":[]}}
+== notification textDocument/publishDiagnostics
+{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{"uri":"file://$DIR/proj/main.sd","diagnostics":[{"range":{"start":{"line":19,"character":17},"end":{"line":19,"character":21}},"severity":1,"source":"seed","message":"missing field cost in shop.Item literal\nhint: a struct literal must set every field that has no default value"},{"range":{"start":{"line":19,"character":40},"end":{"line":19,"character":45}},"severity":1,"source":"seed","message":"struct shop.Item has no field price"},{"range":{"start":{"line":3,"character":0},"end":{"line":3,"character":6}},"severity":1,"source":"seed","message":"$DIR/proj/shop/cart.sd:18:14: struct shop.Item has no field price"},{"range":{"start":{"line":3,"character":0},"end":{"line":3,"character":6}},"severity":1,"source":"seed","message":"$DIR/proj/shop/cart.sd:29:32: struct shop.Item has no field price"}]}}
+== notification textDocument/publishDiagnostics
+{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{"uri":"file://$DIR/proj/shop/item.sd","diagnostics":[]}}
+== rename proj/shop/item.sd 6 14 amount
+{"jsonrpc":"2.0","id":13,"result":{"changes":{"file://$DIR/proj/shop/item.sd":[{"range":{"start":{"line":6,"character":12},"end":{"line":6,"character":16}},"newText":"amount"}]}}}
+== notification textDocument/publishDiagnostics
+{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{"uri":"file://$DIR/proj/main.sd","diagnostics":[]}}
+== notification textDocument/publishDiagnostics
+{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{"uri":"file://$DIR/proj/shop/item.sd","diagnostics":[]}}
+== notification textDocument/publishDiagnostics
+{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{"uri":"file://$DIR/proj/shop/item.sd","diagnostics":[]}}
+== notification textDocument/publishDiagnostics
+{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{"uri":"file://$DIR/proj/main.sd","diagnostics":[]}}
+== rename proj/main.sd 18 15 for
+{"jsonrpc":"2.0","id":14,"error":{"code":-32803,"message":"cannot rename cart to for: for is a keyword"}}
+== rename proj/main.sd 18 15 string
+{"jsonrpc":"2.0","id":15,"error":{"code":-32803,"message":"cannot rename cart to string: string is the name of a built-in type"}}
+== rename proj/main.sd 18 15 my_cart
+{"jsonrpc":"2.0","id":16,"error":{"code":-32803,"message":"cannot rename cart to my_cart: the name of a variable must be written in camelCase, such as myCart"}}
+== rename proj/main.sd 18 15 Basket
+{"jsonrpc":"2.0","id":17,"error":{"code":-32803,"message":"cannot rename cart to Basket: the name of a variable must be written in camelCase, such as basket"}}
+== rename proj/shop/item.sd 3 10 product
+{"jsonrpc":"2.0","id":18,"error":{"code":-32803,"message":"cannot rename Item to product: the name of a type must be written in PascalCase, such as Product"}}
+== rename proj/main.sd 18 15 2cart
+{"jsonrpc":"2.0","id":19,"error":{"code":-32803,"message":"cannot rename cart to 2cart: \"2cart\" is not a name: a name is letters and digits, starting with a letter"}}
+== rename proj/main.sd 18 15 label
+{"jsonrpc":"2.0","id":20,"error":{"code":-32803,"message":"cannot rename cart to label: $DIR/proj/main.sd:21: label is already declared at line 19; shadowing is not allowed"}}
+== rename proj/main.sd 8 5 main
+{"jsonrpc":"2.0","id":21,"error":{"code":-32803,"message":"cannot rename describe to main: $DIR/proj/main.sd:18: main is already declared at line 9"}}
+== rename proj/shop/item.sd 10 10 Item
+{"jsonrpc":"2.0","id":22,"error":{"code":-32803,"message":"cannot rename Size to Item: $DIR/proj/shop/item.sd:11: Item is already declared at line 4"}}
+== rename proj/main.sd 21 9 say
+{"jsonrpc":"2.0","id":23,"error":{"code":-32803,"message":"println belongs to the standard library and cannot be renamed"}}
+== rename proj/main.sd 13 34 text
+{"jsonrpc":"2.0","id":24,"error":{"code":-32803,"message":"string is built into the language and cannot be renamed"}}
+== rename proj/main.sd 21 5 out
+{"jsonrpc":"2.0","id":25,"error":{"code":-32803,"message":"cannot rename the package fmt here: rename its directory and the imports"}}
+== rename proj/main.sd 22 5 x
+{"jsonrpc":"2.0","id":26,"error":{"code":-32803,"message":"there is no name here to rename"}}
+== notification textDocument/publishDiagnostics
+{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{"uri":"file://$DIR/proj/main.sd","diagnostics":[{"range":{"start":{"line":8,"character":24},"end":{"line":8,"character":30}},"severity":1,"source":"seed","message":"expected ')' to close the parameter list, found 'string'"},{"range":{"start":{"line":14,"character":4},"end":{"line":14,"character":5}},"severity":1,"source":"seed","message":"expected an expression, found '}'"},{"range":{"start":{"line":20,"character":29},"end":{"line":20,"character":30}},"severity":1,"source":"seed","message":"expected an expression, found '*'"}]}}
+== rename proj/main.sd 18 15 basket
+{"jsonrpc":"2.0","id":27,"error":{"code":-32803,"message":"cannot rename cart: $DIR/proj/main.sd (or a package it imports) has syntax errors; fix them first"}}
+== shutdown
+{"jsonrpc":"2.0","id":28,"result":null}

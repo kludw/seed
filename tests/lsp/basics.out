@@ -1,5 +1,5 @@
 == initialize
-{"jsonrpc":"2.0","id":0,"result":{"capabilities":{"positionEncoding":"utf-16","textDocumentSync":{"openClose":true,"change":1,"save":{"includeText":false}},"documentFormattingProvider":true,"definitionProvider":true,"hoverProvider":true,"completionProvider":{"triggerCharacters":["."]},"documentSymbolProvider":true},"serverInfo":{"name":"seed lsp"}}}
+{"jsonrpc":"2.0","id":0,"result":{"capabilities":{"positionEncoding":"utf-16","textDocumentSync":{"openClose":true,"change":1,"save":{"includeText":false}},"documentFormattingProvider":true,"definitionProvider":true,"hoverProvider":true,"completionProvider":{"triggerCharacters":["."]},"documentSymbolProvider":true,"referencesProvider":true,"documentHighlightProvider":true,"renameProvider":{"prepareProvider":true},"signatureHelpProvider":{"triggerCharacters":["(",","]}},"serverInfo":{"name":"seed lsp"}}}
 == notification textDocument/publishDiagnostics
 {"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{"uri":"file://$DIR/proj/main.sd","diagnostics":[]}}
 == hover proj/main.sd 19 10
@@ -72,8 +72,8 @@
 {"jsonrpc":"2.0","id":34,"result":[{"name":"greeting","kind":14,"detail":"string","range":{"start":{"line":6,"character":0},"end":{"line":6,"character":34}},"selectionRange":{"start":{"line":6,"character":13},"end":{"line":6,"character":21}},"children":[]},{"name":"describe","kind":12,"detail":"fn describe(shop.Size s) string","range":{"start":{"line":8,"character":0},"end":{"line":15,"character":1}},"selectionRange":{"start":{"line":8,"character":3},"end":{"line":8,"character":11}},"children":[]},{"name":"main","kind":12,"detail":"fn main([]string args) error","range":{"start":{"line":17,"character":0},"end":{"line":23,"character":1}},"selectionRange":{"start":{"line":17,"character":3},"end":{"line":17,"character":7}},"children":[]}]}
 == format proj/main.sd
 {"jsonrpc":"2.0","id":35,"result":[]}
-== request textDocument/rename {"textDocument":{"uri":"file:///nowhere.sd"},"position":{"line":0,"character":0},"newName":"x"}
-{"jsonrpc":"2.0","id":36,"error":{"code":-32601,"message":"seed lsp does not support textDocument/rename"}}
+== request textDocument/codeAction {"textDocument":{"uri":"file:///nowhere.sd"},"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":0}},"context":{"diagnostics":[]}}
+{"jsonrpc":"2.0","id":36,"error":{"code":-32601,"message":"seed lsp does not support textDocument/codeAction"}}
 == hover proj/main.sd 19 10
 {"jsonrpc":"2.0","id":37,"result":{"contents":{"kind":"markdown","value":"```seed\nshop.Cart cart\n```\n\n(variable)"},"range":{"start":{"line":19,"character":8},"end":{"line":19,"character":12}}}}
 == shutdown

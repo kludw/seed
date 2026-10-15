@@ -11,7 +11,8 @@
 // every request got exactly one response (exit code 1 otherwise), and
 // prints each message on a line of its own after a line naming the
 // request ("== hover proj/main.sd 19 10") or the notification, with <dir>
-// written as $DIR.
+// written as $DIR and the repository (<dir>/../.., where the standard
+// library is) as $ROOT.
 //
 // A script has one command per line (# starts a comment); paths are
 // relative to <dir>, lines and characters are LSP positions (from 0, in
@@ -21,7 +22,11 @@
 //   change <path> <text file>        didChange: the document's whole text is now the file's
 //   close <path>                     didClose
 //   save <path>                      didSave
-//   hover <path> <line> <char>       also definition, completion
+//   hover <path> <line> <char>       also definition, completion, highlight
+//                                    (documentHighlight), signature
+//                                    (signatureHelp), prepareRename
+//   references <path> <line> <char> [decl]   with decl: includeDeclaration
+//   rename <path> <line> <char> <new name>
 //   symbols <path>                   documentSymbol
 //   format <path>                    formatting
 //   request <method> <json params>   any request
@@ -216,10 +221,32 @@ fn (Session s) mut script(string file) error {
             fp["textDocument"] = docId(uri)
             fp["options"] = json.Value.Object(opts)
             s.request("textDocument/formatting", json.Value.Object(fp), line)
-        } else if ((w[0] == "hover" || w[0] == "definition" || w[0] == "completion") && w.len() == 4) {
+        } else if ((w[0] == "hover" || w[0] == "definition" || w[0] == "completion" || w[0] == "highlight" || w[0] == "signature" || w[0] == "prepareRename") && w.len() == 4) {
             int l = try w[2].toInt()
             int c = try w[3].toInt()
-            s.request("textDocument/" + w[0], positionParams(uri, l, c), line)
+            s.request("textDocument/" + methodOf(w[0]), positionParams(uri, l, c), line)
+        } else if (w[0] == "references" && (w.len() == 4 || (w.len() == 5 && w[4] == "decl"))) {
+            int rl = try w[2].toInt()
+            int rc = try w[3].toInt()
+            json.Value rp = positionParams(uri, rl, rc)
+            map[string]json.Value ctx = map[string]json.Value{}
+            ctx["includeDeclaration"] = json.Value.Bool(w.len() == 5)
+            map[string]json.Value? rm = rp.asObject()
+            if (rm != null) {
+                rm["context"] = json.Value.Object(ctx)
+                rp = json.Value.Object(rm)
+            }
+            s.request("textDocument/references", rp, line)
+        } else if (w[0] == "rename" && w.len() == 5) {
+            int nl = try w[2].toInt()
+            int nc = try w[3].toInt()
+            json.Value np = positionParams(uri, nl, nc)
+            map[string]json.Value? nm = np.asObject()
+            if (nm != null) {
+                nm["newName"] = json.Value.String(w[4])
+                np = json.Value.Object(nm)
+            }
+            s.request("textDocument/rename", np, line)
         } else {
             return errors.new(where + "unknown command: " + line)
         }
@@ -227,8 +254,20 @@ fn (Session s) mut script(string file) error {
     return null
 }
 
+// The LSP method of a script command.
+fn methodOf(string command) string {
+    if (command == "highlight") {
+        return "documentHighlight"
+    }
+    if (command == "signature") {
+        return "signatureHelp"
+    }
+    return command
+}
+
 // Opens the file, then makes it every prefix of itself (one per step
-// bytes) and asks for everything at the end of each prefix and around it:
+// bytes) and asks for everything at the end of each prefix and around it
+// (and renames the name on the line before):
 // what an editor sends while the file is being typed.
 fn (Session s) mut fuzz(string file, int step) error {
     string text = try fs.read(file)
@@ -240,12 +279,20 @@ fn (Session s) mut fuzz(string file, int step) error {
         []string lines = prefix.split("\n")
         int last = lines.len() - 1
         int width = lines[last].len()
-        []string methods = []string{"hover", "definition", "completion"}
+        []string methods = []string{"hover", "definition", "completion", "signatureHelp", "references", "documentHighlight", "prepareRename"}
         for (int m = 0; m < methods.len(); m++) {
             s.request("textDocument/" + methods[m], positionParams(uri, last, width), "fuzz")
             s.request("textDocument/" + methods[m], positionParams(uri, last, width / 2), "fuzz")
             if (last > 0) {
                 s.request("textDocument/" + methods[m], positionParams(uri, last - 1, 4), "fuzz")
+            }
+        }
+        if (last > 0) {
+            json.Value rp = positionParams(uri, last - 1, 4)
+            map[string]json.Value? rm = rp.asObject()
+            if (rm != null) {
+                rm["newName"] = json.Value.String("renamed")
+                s.request("textDocument/rename", json.Value.Object(rm), "fuzz")
             }
         }
         s.request("textDocument/documentSymbol", docParams(uri), "fuzz")
@@ -291,7 +338,11 @@ fn unframe(Session s, string output) error {
             out.push("== response to an unknown request")
         }
         string uriDir = uriOf(s.dir)
-        out.push(body.replace(uriDir, "file://$DIR").replace(s.dir, "$DIR"))
+        string root = s.dir
+        if (root.endsWith("/tests/lsp")) {
+            root = root.slice(0, root.len() - 10)
+        }
+        out.push(body.replace(uriDir, "file://$DIR").replace(s.dir, "$DIR").replace(uriOf(root), "file://$ROOT"))
     }
     fmt.print(out.join("\n") + "\n")
     for (int k = 0; k < answers.len(); k++) {

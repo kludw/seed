@@ -7,7 +7,9 @@
 // place of the files on disk (lsp_check.sd), in a goroutine of its own: a
 // crash of the compiler on half-written code fails that one request (the
 // result is empty) and the server carries on. lsp_query.sd answers
-// definition, hover, completion and document symbols from the checked tree.
+// definition, hover, completion and document symbols from the checked tree,
+// lsp_refs.sd references, document highlights and rename, and lsp_sig.sd
+// signature help.
 package main
 
 import "errors"
@@ -24,16 +26,21 @@ type LspDoc struct {
     string text
 }
 
+// roots are the workspace folders the client named in initialize, where
+// references and rename look for the packages that import a package.
 type LspServer struct {
     string seedRoot
     map[string]LspDoc docs
     bool shutdown
+    []string roots
 }
 
 // What a goroutine works out for one request (see lspRunJob): kind is
-// "diagnostics", "definition", "hover", "completion", "symbols" or
-// "format"; overlay has the text of every open document by path; line and
-// character are the request's position (LSP: from 0, in UTF-16 units).
+// "diagnostics", "definition", "hover", "completion", "symbols", "format",
+// "references", "highlight", "rename", "prepareRename" or "signature";
+// overlay has the text of every open document by path; line and character
+// are the request's position (LSP: from 0, in UTF-16 units). newName is
+// rename's new name, includeDecl references' includeDeclaration.
 type LspJob struct {
     string kind
     string seedRoot
@@ -41,11 +48,14 @@ type LspJob struct {
     map[string]string overlay
     int line
     int character
+    []string roots
+    string newName
+    bool includeDecl
 }
 
 // Serves until the client sends exit or closes stdin.
 fn lspCommand(string seedRoot) error {
-    LspServer s = LspServer{seedRoot: seedRoot, docs: map[string]LspDoc{}, shutdown: false}
+    LspServer s = LspServer{seedRoot: seedRoot, docs: map[string]LspDoc{}, shutdown: false, roots: []string{}}
     for (;;) {
         string? body = try lspReadMessage()
         if (body == null) {
@@ -143,6 +153,7 @@ fn (LspServer s) mut handle(json.Value msg) {
     bool isRequest = !id.isNull()
     json.Value params = msg.get("params")
     if (method == "initialize") {
+        s.roots = lspRoots(params)
         lspSend(lspResponse(id, lspCapabilities()))
         return
     }
@@ -220,6 +231,16 @@ fn (LspServer s) mut handle(json.Value msg) {
         kind = "completion"
     } else if (method == "textDocument/documentSymbol") {
         kind = "symbols"
+    } else if (method == "textDocument/references") {
+        kind = "references"
+    } else if (method == "textDocument/documentHighlight") {
+        kind = "highlight"
+    } else if (method == "textDocument/rename") {
+        kind = "rename"
+    } else if (method == "textDocument/prepareRename") {
+        kind = "prepareRename"
+    } else if (method == "textDocument/signatureHelp") {
+        kind = "signature"
     } else if (method == "seed/crash") {
         // For tests/test_lsp.sh: a request whose work crashes.
         kind = "crash"
@@ -243,11 +264,53 @@ fn (LspServer s) mut handle(json.Value msg) {
         line = l
         character = ch
     }
-    json.Value result = s.runJob(kind, lspUriToPath(quri), line, character)
+    LspJob job = s.job(kind, lspUriToPath(quri), line, character)
+    string? newName = params.get("newName").asString()
+    if (newName != null) {
+        job.newName = newName
+    }
+    bool? incl = params.get("context").get("includeDeclaration").asBool()
+    job.includeDecl = incl != null && incl
+    json.Value result = s.runPrepared(job)
     if (result.isNull() && (kind == "format" || kind == "symbols")) {
         result = json.Value.Array([]json.Value{})
     }
+    // A rename the server refuses (lspRefusal) is an error the editor
+    // shows.
+    string? refused = result.get(lspRefusalKey).asString()
+    if (refused != null) {
+        lspSend(lspErrorResponse(id, -32803, refused))
+        return
+    }
     lspSend(lspResponse(id, result))
+}
+
+// The workspace folders of initialize's params (workspaceFolders, else
+// rootUri, else rootPath), as paths.
+fn lspRoots(json.Value params) []string {
+    []string out = []string{}
+    []json.Value? folders = params.get("workspaceFolders").asArray()
+    if (folders != null) {
+        for (int i = 0; i < folders.len(); i++) {
+            string? u = folders[i].get("uri").asString()
+            if (u != null) {
+                out.push(lspUriToPath(u))
+            }
+        }
+    }
+    if (out.len() > 0) {
+        return out
+    }
+    string? root = params.get("rootUri").asString()
+    if (root != null) {
+        out.push(lspUriToPath(root))
+        return out
+    }
+    string? rootPath = params.get("rootPath").asString()
+    if (rootPath != null && rootPath != "") {
+        out.push(cleanPath(absPath(rootPath)))
+    }
+    return out
 }
 
 fn lspCapabilities() json.Value {
@@ -267,6 +330,14 @@ fn lspCapabilities() json.Value {
     caps["hoverProvider"] = json.Value.Bool(true)
     caps["completionProvider"] = json.Value.Object(completion)
     caps["documentSymbolProvider"] = json.Value.Bool(true)
+    caps["referencesProvider"] = json.Value.Bool(true)
+    caps["documentHighlightProvider"] = json.Value.Bool(true)
+    map[string]json.Value rename = map[string]json.Value{}
+    rename["prepareProvider"] = json.Value.Bool(true)
+    caps["renameProvider"] = json.Value.Object(rename)
+    map[string]json.Value sigs = map[string]json.Value{}
+    sigs["triggerCharacters"] = json.Value.Array([]json.Value{json.Value.String("("), json.Value.String(",")})
+    caps["signatureHelpProvider"] = json.Value.Object(sigs)
     map[string]json.Value info = map[string]json.Value{}
     info["name"] = json.Value.String("seed lsp")
     map[string]json.Value result = map[string]json.Value{}
@@ -319,7 +390,16 @@ fn (LspServer s) overlay() map[string]string {
 // is logged to stderr. A completion whose check crashed is tried again
 // without the checker.
 fn (LspServer s) runJob(string kind, string path, int line, int character) json.Value {
-    LspJob job = LspJob{kind: kind, seedRoot: s.seedRoot, path: path, overlay: s.overlay(), line: line, character: character}
+    return s.runPrepared(s.job(kind, path, line, character))
+}
+
+fn (LspServer s) job(string kind, string path, int line, int character) LspJob {
+    return LspJob{kind: kind, seedRoot: s.seedRoot, path: path, overlay: s.overlay(), line: line, character: character, roots: s.roots, newName: "", includeDecl: false}
+}
+
+fn (LspServer s) runPrepared(LspJob prepared) json.Value {
+    LspJob job = prepared
+    string kind = job.kind
     json.Value? v = lspTryJob(job)
     if (v == null && kind == "completion") {
         job.kind = "completion-unchecked"
@@ -364,6 +444,15 @@ fn lspRunJob(LspJob job) (json.Value, error) {
     }
     if (job.kind == "completion" || job.kind == "completion-unchecked") {
         return lspCompletion(job)
+    }
+    if (job.kind == "references" || job.kind == "highlight") {
+        return lspReferences(job)
+    }
+    if (job.kind == "rename" || job.kind == "prepareRename") {
+        return lspRename(job)
+    }
+    if (job.kind == "signature") {
+        return lspSignatureHelp(job)
     }
     return lspLookup(job)
 }

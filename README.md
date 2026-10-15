@@ -104,7 +104,7 @@ There is one binary, `seed`:
 | `seed fmt [--check] <file.sd \| dir>...` | Formats files (or every `.sd` file under a directory) in place, or reports the ones that aren't formatted. |
 | `seed c [-g] <dir \| file.sd...>` | Prints the generated C (for testing the compiler). |
 | `seed ast <file.sd>...` | Prints the syntax tree (for debugging the parser). |
-| `seed lsp` | A language server on stdin and stdout, for editors: the compiler's errors as you type, formatting, go to definition, hover, completion and the outline ([the guide, chapter 1](docs/guide/01-getting-started.md#editors)). |
+| `seed lsp` | A language server on stdin and stdout, for editors: the compiler's errors as you type, formatting, go to definition, hover, completion, signature help, references, rename and the outline ([the guide, chapter 1](docs/guide/01-getting-started.md#editors)). |
 
 A program is a single `.sd` file or the `package main` of a directory, together with the packages it imports. The compiler checks it, generates one self-contained C file (the runtime included), and compiles that with `cc`.
 
@@ -161,7 +161,7 @@ The documentation:
 - File I/O other than reading an `fs.File` is not a stop point, so a goroutine blocked in it (opening or writing a FIFO, for example) is stopped only when the call returns.
 - Tested on macOS (arm64) and Linux (x86_64, glibc). Other POSIX systems are untested.
 - The parser reports one syntax error per statement (or member of a type); an error in an expression that spans lines may hide a second error on the next line.
-- A crash shows where it happened and the calls that led there, but not the calls of functions that the C compiler inlined (`seed run -g` shows them). There is no debugger of Seed's own: `seed build -g` makes gdb and lldb follow the Seed source, with Seed's variables under their C names (`l_x`). The language server (`seed lsp`) has no rename, references or signature help.
+- A crash shows where it happened and the calls that led there, but not the calls of functions that the C compiler inlined (`seed run -g` shows them). There is no debugger of Seed's own: `seed build -g` makes gdb and lldb follow the Seed source, with Seed's variables under their C names (`l_x`).
 
 Bugs found in passing are recorded in [compiler/BUGS_FIXED.md](compiler/BUGS_FIXED.md) and [lib/COMPILER_BUGS.md](lib/COMPILER_BUGS.md).
 

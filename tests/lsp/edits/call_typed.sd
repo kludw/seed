@@ -1,0 +1,20 @@
+package main
+
+import "fmt"
+import "shop"
+
+// Joins b and a.
+fn pair(int a, string b) string {
+    return b + a.string()
+}
+
+fn main([]string args) error {
+    shop.Cart cart = shop.newCart("ann")
+    string s = pair(1, 
+    fmt.println("😀 " + pair(2, "x") + s)
+    []string few = args.slice(0, 1)
+    fn(int, string) string join = pair
+    string j = join(3, "y")
+    try cart.add(shop.Item{name: few[0], price: j.len(), size: shop.Size.Small})
+    return null
+}

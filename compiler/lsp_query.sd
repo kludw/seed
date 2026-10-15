@@ -13,21 +13,34 @@ const string lspPlaceholder = "lspCompletionPlaceholder"
 
 // What a name in the source refers to: its declaration (pos; pos.file -1
 // when there is none to go to), the length of the declared name, the
-// declaration as source text and its documentation (markdown).
+// declaration as source text and its documentation (markdown). kind is
+// what was declared: "local" (a variable, parameter, receiver, pattern
+// binding or local constant), "fn", "method", "type", "field", "case",
+// "caseField", "ifaceMethod", "const", "package" or "builtin"; exported
+// is true when other packages can use it (for a case or an interface
+// method: when its type is pub), so that references look there too.
 type LspSym struct {
     bool found
     Pos pos
     int len
     string sig
     string doc
+    string kind
+    bool exported
 }
 
 fn lspNoSym() LspSym {
-    return LspSym{found: false, pos: Pos{file: -1, line: 0, col: 0}, len: 0, sig: "", doc: ""}
+    return LspSym{found: false, pos: Pos{file: -1, line: 0, col: 0}, len: 0, sig: "", doc: "", kind: "", exported: false}
 }
 
-fn lspSymOf(Pos pos, string name, string sig, string doc) LspSym {
-    return LspSym{found: true, pos: pos, len: name.len(), sig: sig, doc: doc}
+fn lspSymOf(Pos pos, string name, string sig, string doc, string kind, bool exported) LspSym {
+    return LspSym{found: true, pos: pos, len: name.len(), sig: sig, doc: doc, kind: kind, exported: exported}
+}
+
+// A symbol without a declaration in the source: a built-in type, method or
+// conversion.
+fn lspBuiltinSym(string sig, string doc) LspSym {
+    return LspSym{found: true, pos: Pos{file: -1, line: 0, col: 0}, len: 0, sig: sig, doc: doc, kind: "builtin", exported: false}
 }
 
 // definition or hover at the job's position.
@@ -94,6 +107,98 @@ fn lspTokenAt([]Token toks, Pos cur) int {
 // expression, a qualified name (pkg.name, Type.Case, pkg.Type.Case), a type
 // name, or another name of the package or an imported package.
 fn lspResolve(Checker c, []Token toks, int ti) LspSym {
+    return lspResolveIn(c, lspNoIndex(), toks, ti)
+}
+
+// Where the checked tree has things, by position ("file:line:col"), so
+// that resolving many tokens (references, rename) does not search the
+// whole tree for each: the expressions (latest first, as lspExprAt goes),
+// the type names, the positions of declared names and the lines of
+// receivers (where lspDeclAt can find something). Without built,
+// lspResolveIn searches the tree.
+type LspIndex struct {
+    bool built
+    map[string][]int exprs
+    map[string][]int typeNames
+    map[string]bool decls
+    map[string]bool recvLines
+}
+
+fn lspNoIndex() LspIndex {
+    return LspIndex{built: false, exprs: map[string][]int{}, typeNames: map[string][]int{}, decls: map[string]bool{}, recvLines: map[string]bool{}}
+}
+
+fn lspPosKey(Pos p) string {
+    return p.file.string() + ":" + p.line.string() + ":" + p.col.string()
+}
+
+fn lspIndexOf(Checker c) LspIndex {
+    LspIndex ix = lspNoIndex()
+    ix.built = true
+    for (int e = c.ast.exprs.len() - 1; e >= 0; e--) {
+        if (e >= c.info.len()) {
+            continue
+        }
+        string k = lspPosKey(c.ast.exprs[e].pos)
+        []int? at = ix.exprs[k]
+        if (at == null) {
+            ix.exprs[k] = []int{e}
+        } else {
+            at.push(e)
+            ix.exprs[k] = at
+        }
+    }
+    for (int t = 0; t < c.ast.typeExprs.len(); t++) {
+        TypeExpr te = c.ast.typeExprs[t]
+        if (te.kind != TypeExprKind.Name) {
+            continue
+        }
+        string tk = lspPosKey(te.pos)
+        []int? tat = ix.typeNames[tk]
+        if (tat == null) {
+            ix.typeNames[tk] = []int{t}
+        } else {
+            tat.push(t)
+            ix.typeNames[tk] = tat
+        }
+    }
+    for (int f = 0; f < c.ast.fns.len(); f++) {
+        FnDecl fd = c.ast.fns[f]
+        ix.decls[lspPosKey(fd.pos)] = true
+        if (fd.isMethod) {
+            ix.recvLines[fd.recvPos.file.string() + ":" + fd.recvPos.line.string()] = true
+        }
+    }
+    for (int d = 0; d < c.ast.typeDecls.len(); d++) {
+        TypeDecl td = c.ast.typeDecls[d]
+        ix.decls[lspPosKey(td.pos)] = true
+        for (int j = 0; j < td.caseCount; j++) {
+            ix.decls[lspPosKey(c.ast.enumCases[c.ast.at(td.cases, j)].pos)] = true
+        }
+        for (int m = 0; m < td.methodCount; m++) {
+            ix.decls[lspPosKey(c.ast.methodSigs[c.ast.at(td.methods, m)].pos)] = true
+        }
+    }
+    for (int k = 0; k < c.ast.consts.len(); k++) {
+        ix.decls[lspPosKey(c.ast.consts[k].pos)] = true
+    }
+    // Fields, parameters, case fields and pattern bindings are all Params.
+    for (int pi = 0; pi < c.ast.params.len(); pi++) {
+        ix.decls[lspPosKey(c.ast.params[pi].pos)] = true
+    }
+    for (int g = 0; g < c.ast.targets.len(); g++) {
+        ix.decls[lspPosKey(c.ast.targets[g].pos)] = true
+    }
+    for (int s = 0; s < c.ast.stmts.len(); s++) {
+        if (c.ast.stmts[s].kind == StmtKind.Const) {
+            ix.decls[lspPosKey(c.ast.stmts[s].namePos)] = true
+        }
+    }
+    return ix
+}
+
+// lspResolve with an index of c (lspIndexOf, or lspNoIndex to search).
+fn lspResolveIn(Checker c, LspIndex ix, []Token toks, int ti) LspSym {
     Token t = toks[ti]
     if (t.kind == Tok.String) {
         for (int i = 0; i < c.ast.imports.len(); i++) {
@@ -110,19 +215,46 @@ fn lspResolve(Checker c, []Token toks, int ti) LspSym {
         }
         return lspPkgSym(c, c.ast.files[t.pos.file].pkgIndex)
     }
-    LspSym d = lspDeclAt(c, toks, ti)
-    if (d.found) {
-        return d
+    string key = lspPosKey(t.pos)
+    if (!ix.built || ix.decls[key] != null || ix.recvLines[t.pos.file.string() + ":" + t.pos.line.string()] != null) {
+        LspSym d = lspDeclAt(c, toks, ti)
+        if (d.found) {
+            return d
+        }
     }
-    LspSym e = lspExprAt(c, toks, t.pos, t.text)
-    if (e.found) {
-        return e
+    if (ix.built) {
+        []int? es = ix.exprs[key]
+        if (es != null) {
+            for (int i = 0; i < es.len(); i++) {
+                LspSym ie = lspExprSym(c, toks, es[i], t.text)
+                if (ie.found) {
+                    return ie
+                }
+            }
+        }
+    } else {
+        LspSym e = lspExprAt(c, toks, t.pos, t.text)
+        if (e.found) {
+            return e
+        }
     }
     LspSym q = lspQualified(c, toks, ti)
     if (q.found) {
         return q
     }
-    for (int k = 0; k < c.ast.typeExprs.len(); k++) {
+    []int tes = []int{}
+    if (ix.built) {
+        []int? named = ix.typeNames[key]
+        if (named != null) {
+            tes = named
+        }
+    } else {
+        for (int n = 0; n < c.ast.typeExprs.len(); n++) {
+            tes.push(n)
+        }
+    }
+    for (int j = 0; j < tes.len(); j++) {
+        int k = tes[j]
         TypeExpr te = c.ast.typeExprs[k]
         if (te.kind == TypeExprKind.Name && te.pos == t.pos && te.pkg == "" && te.name == t.text && k < c.teType.len()) {
             LspSym ts = lspTypeSym(c, c.teType[k])
@@ -148,7 +280,7 @@ fn lspNameSym(Checker c, int file, string name) LspSym {
         return lspGlobalSym(c, g)
     }
     if (isBuiltinTypeName(name)) {
-        return LspSym{found: true, pos: Pos{file: -1, line: 0, col: 0}, len: 0, sig: name, doc: "built-in type (docs/builtins.md)"}
+        return lspBuiltinSym(name, "built-in type (docs/builtins.md)")
     }
     return lspNoSym()
 }
@@ -208,7 +340,7 @@ fn lspDeclAt(Checker c, []Token toks, int ti) LspSym {
                 rs.pos = p
                 return rs
             }
-            return lspSymOf(p, name, c.ast.typeExprText(fd.recvType) + " " + name, "(receiver)")
+            return lspSymOf(p, name, c.ast.typeExprText(fd.recvType) + " " + name, "(receiver)", "local", false)
         }
     }
     for (int d = 0; d < c.ast.typeDecls.len(); d++) {
@@ -232,7 +364,7 @@ fn lspDeclAt(Checker c, []Token toks, int ti) LspSym {
             for (int k = 0; k < ec.paramCount; k++) {
                 Param cp = c.ast.params[c.ast.at(ec.params, k)]
                 if (cp.pos == p) {
-                    return lspSymOf(p, name, c.ast.typeExprText(cp.typeExpr) + " " + cp.name, "field of " + c.declDisplayName(d) + "." + ec.name)
+                    return lspSymOf(p, name, c.ast.typeExprText(cp.typeExpr) + " " + cp.name, "field of " + c.declDisplayName(d) + "." + ec.name, "caseField", td.isPub)
                 }
             }
         }
@@ -253,7 +385,7 @@ fn lspDeclAt(Checker c, []Token toks, int ti) LspSym {
             if (pi < c.paramVar.len() && c.paramVar[pi] >= 0) {
                 return lspVarSym(c, c.paramVar[pi])
             }
-            return lspSymOf(p, name, c.ast.typeExprText(pm.typeExpr) + " " + name, "")
+            return lspSymOf(p, name, c.ast.typeExprText(pm.typeExpr) + " " + name, "", "local", false)
         }
     }
     for (int t = 0; t < c.ast.targets.len(); t++) {
@@ -262,7 +394,7 @@ fn lspDeclAt(Checker c, []Token toks, int ti) LspSym {
             if (t < c.targetVar.len() && c.targetVar[t] >= 0) {
                 return lspVarSym(c, c.targetVar[t])
             }
-            return lspSymOf(p, name, c.ast.typeExprText(tg.typeExpr) + " " + name, "(variable)")
+            return lspSymOf(p, name, c.ast.typeExprText(tg.typeExpr) + " " + name, "(variable)", "local", false)
         }
     }
     for (int s = 0; s < c.ast.stmts.len(); s++) {
@@ -271,7 +403,7 @@ fn lspDeclAt(Checker c, []Token toks, int ti) LspSym {
             if (s < c.stmtVar.len() && c.stmtVar[s] >= 0) {
                 return lspVarSym(c, c.stmtVar[s])
             }
-            return lspSymOf(p, name, "const " + c.ast.typeExprText(st.typeExpr) + " " + name, "(local constant)")
+            return lspSymOf(p, name, "const " + c.ast.typeExprText(st.typeExpr) + " " + name, "(local constant)", "local", false)
         }
     }
     return lspNoSym()
@@ -318,10 +450,10 @@ fn lspExprSym(Checker c, []Token toks, int e, string name) LspSym {
             if (inf.ty != tyVoid && inf.ty != tyInvalid) {
                 result = " " + c.typeName(inf.ty)
             }
-            return LspSym{found: true, pos: Pos{file: -1, line: 0, col: 0}, len: 0, sig: recv + "." + name + "()" + result, doc: "built-in method (docs/builtins.md)"}
+            return lspBuiltinSym(recv + "." + name + "()" + result, "built-in method (docs/builtins.md)")
         }
         if (inf.res == Res.Conv) {
-            return LspSym{found: true, pos: Pos{file: -1, line: 0, col: 0}, len: 0, sig: name + "(...) " + name, doc: "conversion to " + name + " (docs/builtins.md)"}
+            return lspBuiltinSym(name + "(...) " + name, "conversion to " + name + " (docs/builtins.md)")
         }
         return lspNoSym()
     }
@@ -430,7 +562,11 @@ fn lspFnSym(Checker c, int f) LspSym {
         return lspNoSym()
     }
     FnDecl fd = c.ast.fns[f]
-    return lspSymOf(fd.pos, fd.name, lspFnSig(c.ast, f), lspDocComment(c.ast, fd.file, fd.start.line))
+    string kind = "fn"
+    if (fd.isMethod) {
+        kind = "method"
+    }
+    return lspSymOf(fd.pos, fd.name, lspFnSig(c.ast, f), lspDocComment(c.ast, fd.file, fd.start.line), kind, fd.isPub)
 }
 
 // `pub fn (Cart c) mut add(Item item) error` as declared.
@@ -480,7 +616,7 @@ fn lspTypeDeclSym(Checker c, int d) LspSym {
         return lspNoSym()
     }
     TypeDecl td = c.ast.typeDecls[d]
-    return lspSymOf(td.pos, td.name, lspTypeSig(c.ast, d), lspDocComment(c.ast, td.file, td.pos.line))
+    return lspSymOf(td.pos, td.name, lspTypeSig(c.ast, d), lspDocComment(c.ast, td.file, td.pos.line), "type", td.isPub)
 }
 
 // The declaration of a type with its fields, cases or methods.
@@ -540,7 +676,7 @@ fn lspFieldSym(Checker c, int d, int i) LspSym {
         return lspNoSym()
     }
     Param p = c.ast.params[c.ast.at(td.fields, i)]
-    return lspSymOf(p.pos, p.name, lspFieldText(c.ast, p), lspJoinDoc(lspDocComment(c.ast, td.file, p.pos.line), "field of " + c.declDisplayName(d)))
+    return lspSymOf(p.pos, p.name, lspFieldText(c.ast, p), lspJoinDoc(lspDocComment(c.ast, td.file, p.pos.line), "field of " + c.declDisplayName(d)), "field", p.isPub)
 }
 
 // A struct field as declared: `pub int timeout = 30 * time.second`.
@@ -568,7 +704,7 @@ fn lspCaseSym(Checker c, int d, int ci) LspSym {
     if (ec.paramCount > 0) {
         sig = sig + lspParamsText(c.ast, ec.params, ec.paramCount)
     }
-    return lspSymOf(ec.pos, ec.name, sig, lspJoinDoc(lspDocComment(c.ast, td.file, ec.pos.line), "case of enum " + c.declDisplayName(d)))
+    return lspSymOf(ec.pos, ec.name, sig, lspJoinDoc(lspDocComment(c.ast, td.file, ec.pos.line), "case of enum " + c.declDisplayName(d)), "case", td.isPub)
 }
 
 fn lspIfaceMethodSym(Checker c, int d, int mi) LspSym {
@@ -581,7 +717,7 @@ fn lspIfaceMethodSym(Checker c, int d, int mi) LspSym {
     }
     int m = c.ast.at(td.methods, mi)
     MethodSig ms = c.ast.methodSigs[m]
-    return lspSymOf(ms.pos, ms.name, "fn " + lspMethodSigText(c.ast, m), lspJoinDoc(lspDocComment(c.ast, td.file, ms.pos.line), "method of interface " + c.declDisplayName(d)))
+    return lspSymOf(ms.pos, ms.name, "fn " + lspMethodSigText(c.ast, m), lspJoinDoc(lspDocComment(c.ast, td.file, ms.pos.line), "method of interface " + c.declDisplayName(d)), "ifaceMethod", td.isPub)
 }
 
 fn lspConstSym(Checker c, int k) LspSym {
@@ -597,7 +733,7 @@ fn lspConstSym(Checker c, int k) LspSym {
     if (value != "") {
         sig = sig + " = " + value
     }
-    return lspSymOf(cd.pos, cd.name, sig, lspDocComment(c.ast, cd.file, cd.pos.line))
+    return lspSymOf(cd.pos, cd.name, sig, lspDocComment(c.ast, cd.file, cd.pos.line), "const", cd.isPub)
 }
 
 fn lspVarSym(Checker c, int v) LspSym {
@@ -620,7 +756,7 @@ fn lspVarSym(Checker c, int v) LspSym {
         sig = "const " + sig
         what = "(local constant)"
     }
-    return lspSymOf(x.pos, x.name, sig, what)
+    return lspSymOf(x.pos, x.name, sig, what, "local", false)
 }
 
 // lspVarSym, with a receiver's position moved from its type to its name
@@ -670,9 +806,9 @@ fn lspPkgSym(Checker c, int pkg) LspSym {
         sig = "import \"" + pk.path + "\""
     }
     if (first < 0) {
-        return LspSym{found: true, pos: Pos{file: -1, line: 0, col: 0}, len: 0, sig: sig, doc: doc}
+        return LspSym{found: true, pos: Pos{file: -1, line: 0, col: 0}, len: 0, sig: sig, doc: doc, kind: "package", exported: false}
     }
-    return lspSymOf(c.ast.files[first].pkgPos, pk.name, sig, doc)
+    return lspSymOf(c.ast.files[first].pkgPos, pk.name, sig, doc, "package", false)
 }
 
 // The `//` comment lines right above a line (each on a line of its own),
@@ -1007,9 +1143,21 @@ fn lspTypeItems(Checker c, int t, Pos at) []json.Value {
     return lspBuiltinItems(c, ty)
 }
 
-// The built-in methods of a type (docs/builtins.md), as "name|signature"
-// with T for the element type and K for a map's key type.
+// The built-in methods of a type (docs/builtins.md), as completion items.
 fn lspBuiltinItems(Checker c, int ty) []json.Value {
+    []string specs = lspBuiltinSpecs(c, ty)
+    []json.Value items = []json.Value{}
+    for (int i = 0; i < specs.len(); i++) {
+        []string parts = specs[i].split("|")
+        items.push(lspItem(parts[0], 2, parts[1], "built-in method (docs/builtins.md)"))
+    }
+    return items
+}
+
+// The built-in methods of a type (docs/builtins.md), as "name|signature",
+// with the element type and a map's key type in place of T and K: the
+// table of completion and signature help.
+fn lspBuiltinSpecs(Checker c, int ty) []string {
     Kind k = c.kindOf(ty)
     []string specs = []string{}
     string elem = ""
@@ -1063,19 +1211,19 @@ fn lspBuiltinItems(Checker c, int ty) []json.Value {
     } else if (k == Kind.Error) {
         specs = []string{"message|fn message() string"}
     }
-    []json.Value items = []json.Value{}
+    []string out = []string{}
     for (int i = 0; i < specs.len(); i++) {
         []string parts = specs[i].split("|")
-        string sig = parts[1]
+        // K is set aside first, so that an element type with a K in its
+        // name (map[string]Kind) is not changed.
+        string sig = parts[1].replace("K", "\x01")
         if (elem != "") {
             sig = sig.replace("T", elem)
         }
-        if (key != "") {
-            sig = sig.replace("K", key)
-        }
-        items.push(lspItem(parts[0], 2, sig, "built-in method (docs/builtins.md)"))
+        sig = sig.replace("\x01", key)
+        out.push(parts[0] + "|" + sig)
     }
-    return items
+    return out
 }
 
 // A name in scope at a position, with its type as written.

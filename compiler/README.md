@@ -210,7 +210,9 @@ never return (`isNoReturn`).
 | `gen_acc.sd` | gen | loop accumulators: a fast copy of a loop with raw `int64_t` accumulators that spills into the general copy; each loop iteration's preemption check |
 | `lsp.sd` | lsp | `seed lsp`: JSON-RPC framing, the open documents, dispatch, one goroutine per request |
 | `lsp_check.sd` | lsp | loading and checking a document's package with the editor's text, diagnostics, formatting, LSP positions (UTF-16) |
-| `lsp_query.sd` | lsp | definition and hover (what a name refers to), completion, document symbols |
+| `lsp_query.sd` | lsp | definition and hover (what a name refers to), the position index for resolving many names, completion, document symbols |
+| `lsp_refs.sd` | lsp | references, document highlights, prepareRename and rename: the workspace's packages and their imports, the checks of a new name |
+| `lsp_sig.sd` | lsp | signature help: the call around the cursor, its signature and active parameter |
 
 ## Data structures
 
@@ -993,14 +995,18 @@ program the tests compile is formatted anyway.
 
 ## The language server
 
-`seed lsp` (`lsp.sd`, `lsp_check.sd`, `lsp_query.sd`) speaks the Language
-Server Protocol over stdin and stdout: JSON-RPC 2.0 messages with a
-`Content-Length` header, read with `io.readLine` (headers) and `io.read`
-(the body), parsed and written with `lib/json`. It supports `initialize`,
-`shutdown`, `exit`, `didOpen`, `didChange` (full text; a ranged change is
-applied too), `didClose`, `didSave`, `publishDiagnostics`, `formatting`,
-`definition`, `hover`, `completion` (trigger character `.`) and
-`documentSymbol`; other requests get the error MethodNotFound.
+`seed lsp` (`lsp.sd`, `lsp_check.sd`, `lsp_query.sd`, `lsp_refs.sd`,
+`lsp_sig.sd`) speaks the Language Server Protocol over stdin and stdout:
+JSON-RPC 2.0 messages with a `Content-Length` header, read with
+`io.readLine` (headers) and `io.read` (the body), parsed and written with
+`lib/json`. It supports `initialize`, `shutdown`, `exit`, `didOpen`,
+`didChange` (full text; a ranged change is applied too), `didClose`,
+`didSave`, `publishDiagnostics`, `formatting`, `definition`, `hover`,
+`completion` (trigger character `.`), `signatureHelp` (trigger characters
+`(` and `,`), `references`, `documentHighlight`, `prepareRename`, `rename`
+and `documentSymbol`; other requests get the error MethodNotFound. The
+workspace folders of `initialize` (`workspaceFolders`, else `rootUri` or
+`rootPath`) are kept for references and rename.
 
 **State and checking.** The server keeps the text of every open document
 (`LspServer.docs`, by URI) and nothing else: each request loads and checks
@@ -1093,6 +1099,75 @@ types with their fields, cases or interface methods as children,
 functions, methods (`Type.name`), constants and tests; a declaration's
 range ends at the newline that ends it outside brackets.
 
+**Signature help** (`lsp_sig.sd`) lexes the text before the cursor and
+walks back to the `(` of the call it is in: an unmatched `(` right after a
+name, counting the commas at its level (`activeParameter`). An unmatched
+`(` after anything else, `[` or `{` is a bracket inside the call (a struct
+literal argument), and the commas counted so far were in it; the `(` of a
+declaration (`fn name(`, `) name(`, `mut name(`) or a line before the
+cursor's that ends a statement (after a name, a literal or a closing
+bracket) means the cursor is in no call. The text is then checked with a
+placeholder argument at the cursor when the argument there is empty, and
+the call is looked up in the tree by the position of its function's name
+(`ExprInfo` of the call: function, method, interface method, enum case,
+built-in method from completion's table `lspBuiltinSpecs`, or a function
+value, from its type). When the call is not in the tree, the text is
+checked again with the rest of the line replaced by the brackets that
+close it, and if that fails too, the name alone is resolved as for
+hover. The signature's parameters are given as offsets in its label.
+
+**References, highlights and rename** (`lsp_refs.sd`). A symbol is known
+by the place of its declaration (`path:line:col`, `lspSymKey`), which is
+the same in every program that loads its file, so references are the
+identifier tokens with the symbol's name, in the programs where it can be
+used, that resolve (as for definition) to the same declaration. To make
+resolving every candidate cheap, `lspIndexOf` indexes the checked tree by
+position first (expressions, type names, declared names), and
+`lspResolveIn` looks only there. Where to look depends on the symbol
+(`LspSym.kind` and `exported`):
+
+- a local (variable, parameter, receiver, pattern binding, local
+  constant) or an enum case's field: its own file;
+- anything else: the files of its package and of the package's tests
+  (one analysis of a test file of the package, or of a file of the package
+  when it has no tests; in a directory of single-file programs, the
+  declaring program);
+- when it is `pub` (a case or interface method: when its type is) and its
+  package is not `main`: also every package of the workspace that imports
+  its package, directly or through other packages. The workspace (the
+  folder of `initialize` that holds the package, else the directory above
+  it) is walked for `.sd` files (at most 5,000; hidden directories,
+  `build` and `node_modules` skipped; open documents included), their
+  `import` lines resolved as the loader would (`lspImportDir`: the
+  standard library first, then the directory and the directories above
+  it), and each importing package analysed as above. A package of the
+  standard library is searched itself only when it is in the workspace;
+  its declaration is always a reference.
+
+The references are sorted by file and position, without repeats;
+`includeDeclaration` decides whether the declaration is one.
+`documentHighlight` is the references in the document, from its own
+analysis only.
+
+`prepareRename` gives the range of the name under the cursor, or refuses
+(an error response, code -32803, whose message the editor shows) a
+package, a built-in name and a name of the standard library. `rename`
+refuses, besides those, a new name that is not an identifier, is a keyword
+or a built-in type, or breaks the naming rules (PascalCase for types and
+enum cases, camelCase for the rest, `check_style.sd`; the message
+suggests the converted name), and a rename in a program with syntax
+errors (its references could be incomplete). Otherwise it replaces every
+reference in the open documents' text, or the file's, and checks every
+program it searched again with the new text: an error that was not there
+before (after the old name in the old errors is replaced by the new one) is
+the reason it refuses (`label is already declared at line 19;
+shadowing is not allowed`), since Seed has no shadowing, a name that is
+taken anywhere it is visible is such an error. A file that was formatted
+and would not be after the rename is formatted again, as one edit of the
+whole text. The result is a WorkspaceEdit (`changes`, by URI). Renaming an
+interface method does not rename the methods that implement it (the check
+afterwards refuses the rename, since they no longer implement it).
+
 Formatting returns one edit that replaces the whole text with
 `formatSource`'s, after the same safety check as `seed fmt` (the result
 parses to the same tree and comments); nothing when the text is formatted
@@ -1100,20 +1175,25 @@ already or has syntax errors.
 
 **Tests** (`make test-lsp`, tests/test_lsp.sh): tests/lsp/driver (a Seed
 program) turns session scripts (`tests/lsp/*.lsp`: open, change, hover,
-definition, completion, symbols, format, any request) into framed
-messages, and checks the server's answers (framing, one response per
-request) against the transcripts `tests/lsp/*.out`. The sessions work on
+definition, completion, signature, references, highlight, prepareRename,
+rename, symbols, format, any request) into framed messages, and checks the
+server's answers (framing, one response per request) against the
+transcripts `tests/lsp/*.out` (with the test directory written `$DIR` and
+the repository `$ROOT`). `references.lsp`, `rename.lsp` and
+`signature.lsp` cover the new requests across files, packages and tests,
+after non-ASCII text, on unsaved edits and on broken code. The sessions work on
 tests/lsp/proj, a program with a package of two files and its tests, with
 non-ASCII text before the names they ask about, and change it with the
 versions in tests/lsp/edits (a type error, a syntax error, three syntax
 errors, an unformatted line, a `.` with nothing after it, an unsaved edit
-of the other file of the package). The fuzz sessions type each file of the project in, three
-bytes at a time, and ask for everything at each step; every request must
-be answered, and nothing may crash.
+of the other file of the package, calls being typed). The fuzz sessions type each file of the project in, three
+bytes at a time, and ask for everything at each step (rename included);
+every request must be answered, and nothing may crash.
 
 Not supported: incremental document sync is accepted but not asked for,
-and there is no rename, find references, signature help, workspace
-symbols, code actions or semantic tokens. Diagnostics are published for
+and there are no workspace symbols, code actions or semantic tokens.
+References and rename do not follow an interface method to the methods
+that implement it, and do not look into comments. Diagnostics are published for
 open documents only, and an edit to a closed file on disk is seen at the
 next check.
 

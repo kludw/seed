@@ -169,6 +169,9 @@ The rules are in [formatting.md](../formatting.md), and [chapter 12](12-the-comp
 - formatting (the editor's **Format Document** runs the same formatter as `seed fmt`);
 - go to definition and hover (the declaration, with its doc comment) for locals, parameters, functions, methods, types, fields, enum cases, constants and packages;
 - completion after `pkg.` (the package's `pub` names), after `value.` (fields and methods) and after `Enum.` (cases), and otherwise the names in scope and the keywords;
+- signature help: the parameters of the function or method being called, with the one you are typing;
+- find all references and the highlights of a name in the file, across the files of its package, its tests and the packages of the workspace that import it;
+- rename, of the same names, in every file that uses them (unsaved ones included); a new name that breaks the naming rules, is a keyword or is already taken is refused with the compiler's reason, and so is a name of the standard library;
 - the outline of the file.
 
 For VS Code, [editors/vscode/](../../editors/vscode/README.md) has syntax highlighting and a client that starts `seed lsp` (it needs `npm install` once; the README says how). Other editors need only to run `seed lsp` for `.sd` files: in Neovim, for example, `vim.lsp.start({name = "seed", cmd = {"seed", "lsp"}, root_dir = vim.fn.getcwd()})` from a `FileType` autocommand for the `seed` file type.

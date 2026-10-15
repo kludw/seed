@@ -1,5 +1,5 @@
 == initialize
-{"jsonrpc":"2.0","id":0,"result":{"capabilities":{"positionEncoding":"utf-16","textDocumentSync":{"openClose":true,"change":1,"save":{"includeText":false}},"documentFormattingProvider":true,"definitionProvider":true,"hoverProvider":true,"completionProvider":{"triggerCharacters":["."]},"documentSymbolProvider":true},"serverInfo":{"name":"seed lsp"}}}
+{"jsonrpc":"2.0","id":0,"result":{"capabilities":{"positionEncoding":"utf-16","textDocumentSync":{"openClose":true,"change":1,"save":{"includeText":false}},"documentFormattingProvider":true,"definitionProvider":true,"hoverProvider":true,"completionProvider":{"triggerCharacters":["."]},"documentSymbolProvider":true,"referencesProvider":true,"documentHighlightProvider":true,"renameProvider":{"prepareProvider":true},"signatureHelpProvider":{"triggerCharacters":["(",","]}},"serverInfo":{"name":"seed lsp"}}}
 == notification textDocument/publishDiagnostics
 {"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{"uri":"file://$DIR/programs/three.sd","diagnostics":[]}}
 == hover programs/three.sd 11 25

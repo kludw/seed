@@ -1,0 +1,44 @@
+== initialize
+{"jsonrpc":"2.0","id":0,"result":{"capabilities":{"positionEncoding":"utf-16","textDocumentSync":{"openClose":true,"change":1,"save":{"includeText":false}},"documentFormattingProvider":true,"definitionProvider":true,"hoverProvider":true,"completionProvider":{"triggerCharacters":["."]},"documentSymbolProvider":true,"referencesProvider":true,"documentHighlightProvider":true,"renameProvider":{"prepareProvider":true},"signatureHelpProvider":{"triggerCharacters":["(",","]}},"serverInfo":{"name":"seed lsp"}}}
+== notification textDocument/publishDiagnostics
+{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{"uri":"file://$DIR/proj/main.sd","diagnostics":[]}}
+== signature proj/main.sd 18 35
+{"jsonrpc":"2.0","id":1,"result":{"signatures":[{"label":"pub fn newCart(string owner) Cart","documentation":{"kind":"markdown","value":"A new, empty cart for owner."},"parameters":[{"label":[15,27]}]}],"activeSignature":0,"activeParameter":0}}
+== signature proj/main.sd 19 40
+{"jsonrpc":"2.0","id":2,"result":{"signatures":[{"label":"pub fn (Cart c) mut add(Item item) error","documentation":{"kind":"markdown","value":"Adds an item; the price must not be negative."},"parameters":[{"label":[24,33]}]}],"activeSignature":0,"activeParameter":0}}
+== signature proj/main.sd 21 87
+{"jsonrpc":"2.0","id":3,"result":{"signatures":[{"label":"fn describe(shop.Size s) string","parameters":[{"label":[12,23]}]}],"activeSignature":0,"activeParameter":0}}
+== signature proj/main.sd 21 102
+{"jsonrpc":"2.0","id":4,"result":{"signatures":[{"label":"shop.Size.Large(int extra)","documentation":{"kind":"markdown","value":"case of enum shop.Size"},"parameters":[{"label":[16,25]}]}],"activeSignature":0,"activeParameter":0}}
+== notification textDocument/publishDiagnostics
+{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{"uri":"file://$DIR/proj/main.sd","diagnostics":[]}}
+== signature proj/main.sd 12 22
+{"jsonrpc":"2.0","id":5,"result":{"signatures":[{"label":"fn pair(int a, string b) string","documentation":{"kind":"markdown","value":"Joins b and a."},"parameters":[{"label":[8,13]},{"label":[15,23]}]}],"activeSignature":0,"activeParameter":1}}
+== signature proj/main.sd 13 32
+{"jsonrpc":"2.0","id":6,"result":{"signatures":[{"label":"fn pair(int a, string b) string","documentation":{"kind":"markdown","value":"Joins b and a."},"parameters":[{"label":[8,13]},{"label":[15,23]}]}],"activeSignature":0,"activeParameter":1}}
+== signature proj/main.sd 13 18
+{"jsonrpc":"2.0","id":7,"result":{"signatures":[{"label":"pub fn println(string s)","documentation":{"kind":"markdown","value":"Writes s and a newline to stdout."},"parameters":[{"label":[15,23]}]}],"activeSignature":0,"activeParameter":0}}
+== signature proj/main.sd 13 37
+{"jsonrpc":"2.0","id":8,"result":{"signatures":[{"label":"pub fn println(string s)","documentation":{"kind":"markdown","value":"Writes s and a newline to stdout."},"parameters":[{"label":[15,23]}]}],"activeSignature":0,"activeParameter":0}}
+== signature proj/main.sd 14 33
+{"jsonrpc":"2.0","id":9,"result":{"signatures":[{"label":"[]string.slice(int a, int b) []string","documentation":{"kind":"markdown","value":"built-in method (docs/builtins.md)"},"parameters":[{"label":[15,20]},{"label":[22,27]}]}],"activeSignature":0,"activeParameter":1}}
+== signature proj/main.sd 16 23
+{"jsonrpc":"2.0","id":10,"result":{"signatures":[{"label":"join(int, string) string","documentation":{"kind":"markdown","value":"function value"},"parameters":[{"label":[5,8]},{"label":[10,16]}]}],"activeSignature":0,"activeParameter":1}}
+== signature proj/main.sd 18 4
+{"jsonrpc":"2.0","id":11,"result":null}
+== signature proj/main.sd 6 14
+{"jsonrpc":"2.0","id":12,"result":null}
+== notification textDocument/publishDiagnostics
+{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{"uri":"file://$DIR/proj/main.sd","diagnostics":[{"range":{"start":{"line":14,"character":4},"end":{"line":14,"character":5}},"severity":1,"source":"seed","message":"expected ')' to close the argument list, found '['"}]}}
+== signature proj/main.sd 12 23
+{"jsonrpc":"2.0","id":13,"result":{"signatures":[{"label":"fn pair(int a, string b) string","documentation":{"kind":"markdown","value":"Joins b and a."},"parameters":[{"label":[8,13]},{"label":[15,23]}]}],"activeSignature":0,"activeParameter":1}}
+== signature proj/main.sd 12 20
+{"jsonrpc":"2.0","id":14,"result":{"signatures":[{"label":"fn pair(int a, string b) string","documentation":{"kind":"markdown","value":"Joins b and a."},"parameters":[{"label":[8,13]},{"label":[15,23]}]}],"activeSignature":0,"activeParameter":0}}
+== signature proj/main.sd 14 4
+{"jsonrpc":"2.0","id":15,"result":null}
+== notification textDocument/publishDiagnostics
+{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{"uri":"file://$DIR/proj/main.sd","diagnostics":[{"range":{"start":{"line":20,"character":11},"end":{"line":20,"character":16}},"severity":1,"source":"seed","message":"expected ':' after the field name, found 'label'"},{"range":{"start":{"line":24,"character":0},"end":{"line":24,"character":0}},"severity":1,"source":"seed","message":"unexpected end of file: missing '}'"}]}}
+== signature proj/main.sd 19 40
+{"jsonrpc":"2.0","id":16,"result":{"signatures":[{"label":"pub fn (Cart c) mut add(Item item) error","documentation":{"kind":"markdown","value":"Adds an item; the price must not be negative."},"parameters":[{"label":[24,33]}]}],"activeSignature":0,"activeParameter":0}}
+== shutdown
+{"jsonrpc":"2.0","id":17,"result":null}

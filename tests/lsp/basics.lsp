@@ -56,5 +56,5 @@ symbols proj/main.sd
 format proj/main.sd
 
 # Not supported: an error response, and the server carries on.
-request textDocument/rename {"textDocument":{"uri":"file:///nowhere.sd"},"position":{"line":0,"character":0},"newName":"x"}
+request textDocument/codeAction {"textDocument":{"uri":"file:///nowhere.sd"},"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":0}},"context":{"diagnostics":[]}}
 hover proj/main.sd 19 10
