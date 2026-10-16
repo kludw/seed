@@ -46,7 +46,7 @@ fn loops() {
 fn methods() string {
     Logger l = Logger{prefix: "[a] "}
     defer l.log("first deferred")
-    l = Logger{prefix: "[b] "}
+    l.prefix = "[b] "
     defer l.log("second deferred")
     defer _ = closeIt("file")
     fn(int) f = note

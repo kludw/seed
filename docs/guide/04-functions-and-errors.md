@@ -379,7 +379,7 @@ fn main([]string args) error {
 
 ## defer
 
-`defer f(x)` runs the call when the surrounding function returns, however it returns, and also when it crashes. Several deferred calls run in reverse order. The arguments are evaluated when the `defer` statement runs, not when the call happens. So is the receiver of a method: `defer s.close()` closes the `s` of that moment, a copy. If `s` is given another file or connection later (a log that is replaced when it is compacted), the deferred call closes the old one, and the new one must be closed where it is replaced or by a call at the end.
+`defer f(x)` runs the call when the surrounding function returns, however it returns, and also when it crashes. Several deferred calls run in reverse order. The arguments are evaluated when the `defer` statement runs, not when the call happens. So is the receiver of a method: `defer s.close()` closes the `s` of that moment, a copy. If `s` were given another file or connection later (a log that is replaced when it is compacted), the deferred call would close the old one and leave the new one open, so the compiler rejects that: assigning `s` (or a variable passed to the deferred method) after `defer s.close()` is an error, `s is assigned after the defer of s.close() on line 12, ...`. Close each value where it is replaced and the last one at the end instead, or, in a loop, defer the close right after each assignment (each value then has a deferred call of its own).
 
 ```seed
 package main

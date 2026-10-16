@@ -1,0 +1,53 @@
+// A deferred method call keeps its receiver's value from when the defer ran.
+// These shapes are allowed: a variable declared in the loop (a new one each
+// iteration), a variable assigned before the defer in a loop (each value
+// gets its own deferred call), a variable assigned only before the defer,
+// and changes to a field or through a mut method (only assigning the whole
+// variable after the defer is an error).
+package main
+
+import "fmt"
+
+type Res struct {
+    string name
+    int uses
+}
+
+fn (Res r) close() {
+    fmt.println("close " + r.name + " (" + r.uses.string() + " uses)")
+}
+
+fn (Res r) mut use() {
+    r.uses++
+}
+
+fn declared() {
+    for (int i = 0; i < 2; i++) {
+        Res r = Res{name: "declared " + i.string(), uses: 0}
+        defer r.close()
+    }
+}
+
+fn assignedBefore() {
+    Res r = Res{name: "first", uses: 0}
+    for (int i = 0; i < 2; i++) {
+        r = Res{name: "loop " + i.string(), uses: 0}
+        defer r.close()
+    }
+}
+
+fn changedInPlace() {
+    Res r = Res{name: "start", uses: 0}
+    r = Res{name: "replaced", uses: 0}
+    defer r.close()
+    r.use()
+    r.uses = 5
+    fmt.println("now " + r.uses.string() + " uses")
+}
+
+fn main([]string args) error {
+    declared()
+    assignedBefore()
+    changedInPlace()
+    return null
+}
