@@ -1,0 +1,33 @@
+// Values without a text form, for the failed asserts of tests/show_test.sd.
+package values
+
+pub type Point struct {
+    pub int x
+    pub int y
+}
+
+pub type Shape enum {
+    Circle(float radius)
+    Rect(Point corner, Point size)
+    Empty
+}
+
+pub type Named interface {
+    title() string
+}
+
+pub type Tag struct implements Named {
+    pub string text
+}
+
+pub fn (Tag t) title() string {
+    return t.text
+}
+
+pub fn squares(int n) []int {
+    []int xs = []int{}
+    for (int i = 0; i < n; i++) {
+        xs.push(i * i)
+    }
+    return xs
+}

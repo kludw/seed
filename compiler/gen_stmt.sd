@@ -146,6 +146,13 @@ fn (Gen g) mut genAssert(Stmt st) {
     string cond = ""
     string lhs = ""
     string rhs = ""
+    // Values without a .string() (lists, maps, structs, enums, interfaces)
+    // are shown by the runtime from their descriptor (sd_show): one value
+    // compared with null, or both sides of == and != (sd_assert_show).
+    int showT = -1
+    string showA = ""
+    string showB = ""
+    bool aNullLit = false
     if (x.kind == ExprKind.Binary && isComparison(x.op) && !g.c.info[e].wrap) {
         bool aNull = g.c.ast.exprs[x.a].kind == ExprKind.NullLit
         bool bNull = g.c.ast.exprs[x.b].kind == ExprKind.NullLit
@@ -168,6 +175,10 @@ fn (Gen g) mut genAssert(Stmt st) {
                     lhs = rhs
                     rhs = shown
                 }
+            } else if (g.showable(ot)) {
+                showT = ot
+                showA = v
+                aNullLit = aNull
             }
         } else {
             int t = g.typeOf(x.a)
@@ -178,6 +189,12 @@ fn (Gen g) mut genAssert(Stmt st) {
             if (lhs == "" || rhs == "") {
                 lhs = ""
                 rhs = ""
+                int tb = g.typeOf(x.b)
+                if ((x.op == Tok.Eq || x.op == Tok.Ne) && g.showable(t) && g.ctype(t) == g.ctype(tb)) {
+                    showT = t
+                    showA = vals[0]
+                    showB = vals[1]
+                }
             }
         }
     } else {
@@ -188,7 +205,30 @@ fn (Gen g) mut genAssert(Stmt st) {
     g.indent++
     string text = g.c.diags.paths[st.pos.file] + ":" + st.pos.line.string() + ": assert failed: " + st.name
     []string parts = []string{}
-    if (lhs == "") {
+    if (showT >= 0) {
+        // The runtime takes the values by address: copies in C locals
+        // (borrowed, like the operands).
+        string ct = g.ctype(showT)
+        string pa = g.newTmp()
+        g.emit(declText(ct, pa) + " = " + showA + ";")
+        if (showB == "") {
+            lhs = "sd_show(" + g.desc(showT) + ", &" + pa + ")"
+            rhs = "SD_STR_LIT(\"null\")"
+            if (aNullLit) {
+                lhs = rhs
+                rhs = "sd_show(" + g.desc(showT) + ", &" + pa + ")"
+            }
+        } else {
+            string pb = g.newTmp()
+            g.emit(declText(ct, pb) + " = " + showB + ";")
+            parts.push("SD_STR_LIT(" + cString(text + " ") + ")")
+            parts.push(g.temp(tyString, "sd_assert_show(" + g.desc(showT) + ", &" + pa + ", &" + pb + ", " + cString(x.op.text()) + ")"))
+        }
+    }
+    if (parts.len() > 0) {
+        // both sides shown by sd_assert_show
+        lhs = ""
+    } else if (lhs == "") {
         parts.push("SD_STR_LIT(" + cString(text) + ")")
     } else {
         parts.push("SD_STR_LIT(" + cString(text + " (") + ")")
@@ -204,6 +244,21 @@ fn (Gen g) mut genAssert(Stmt st) {
     g.emit("}")
     if (g.slots.len() > failMark) {
         g.slots = g.slots.slice(0, failMark)
+    }
+}
+
+// Whether the runtime can show a value of type t from its descriptor
+// (sd_show): everything with == but functions and channels.
+fn (Gen g) showable(int t) bool {
+    int base = t
+    if (g.c.types.isOpt(t)) {
+        base = g.elemOf(t)
+    }
+    switch (g.kindOf(base)) {
+    case Kind.Int, Kind.Float, Kind.Bool, Kind.Byte, Kind.String, Kind.Error, Kind.List, Kind.Map, Kind.Struct, Kind.Enum, Kind.Interface:
+        return true
+    case Kind.Void, Kind.Null, Kind.Invalid, Kind.Tuple, Kind.Func, Kind.Chan, Kind.Opt:
+        return false
     }
 }
 

@@ -231,6 +231,12 @@ FAIL "discount is applied and clamped": cart/tests/cart_test.sd:16: assert faile
 3 passed, 1 failed
 ```
 
+Lists, maps, structs and enums have no `.string()`, but a failed `assert` shows them anyway, written much as in the source, with where two of them first differ:
+
+```
+FAIL "items": cart/tests/cart_test.sd:24: assert failed: c.names() == []string{"tea", "milk"} (["tea", "bread"] == ["tea", "milk"], first difference at index 1: "bread" vs "milk")
+```
+
 An error that leaves a test is shown as `cart/tests/cart_test.sd:4: error: ...` and a crash as `... crash: index out of range: 5 with length 2`, with the line of the test. `seed test` exits with code 1 when a test fails.
 
 Two options help while you work on one test. `--run text` runs only the tests whose description contains the text (a plain substring, not a pattern), and `-v` prints each package and each test as it runs, the passing ones too:

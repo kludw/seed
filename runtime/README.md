@@ -221,7 +221,13 @@ static const sd_type T_User = SD_STRUCT_TYPE("User", S_User, F_User);
 ```
 
 Use `SD_STRUCT_TYPE_TRIVIAL` when no field is counted (retain/release become
-no-ops and deep copy is a `memcpy`). Fields of nested struct type point at
+no-ops and deep copy is a `memcpy`). The compiler uses the `_SHOW` forms of
+these macros (`SD_STRUCT_TYPE_SHOW(NAME, CTYPE, FIELDS, "User", NAMES)`,
+`SD_ENUM_TYPE_SHOW(..., "Shape")`), which also give the Seed name of the
+type and an array of the field names, for `sd_show` and `sd_assert_show`
+(seed_test.c), which turn any value into text for a failed `assert`
+(`User{name: "x", age: 3}`, `[1, 2]`, `Shape.Circle(2.0)`); without them a
+struct shows its C name and its fields by position. Fields of nested struct type point at
 that struct's descriptor; fields of type `S?` use `sd_type_box`.
 
 Enums (tag first, `int32_t`, indexing the variants array):

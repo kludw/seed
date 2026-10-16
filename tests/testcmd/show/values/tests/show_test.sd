@@ -1,0 +1,71 @@
+package values
+
+test "lists" {
+    []int got = squares(4)
+    assert(got == []int{0, 1, 4, 9})
+    assert(got == []int{0, 1, 5, 9})
+}
+
+test "list lengths" {
+    assert(squares(3) == squares(4))
+}
+
+test "list of strings, different lengths and contents" {
+    []string got = "a b c".split(" ")
+    assert(got == []string{"a", "x"})
+}
+
+test "maps" {
+    map[string]int got = map[string]int{"a": 1, "b": 2}
+    assert(got == map[string]int{"a": 1, "b": 3})
+}
+
+test "map with a missing key" {
+    map[string]int got = map[string]int{"a": 1}
+    assert(got == map[string]int{"a": 1, "c": 3})
+}
+
+test "structs" {
+    Point p = Point{x: 1, y: 2}
+    assert(p == Point{x: 1, y: 3})
+}
+
+test "enums" {
+    Shape s = Shape.Rect(Point{x: 0, y: 0}, Point{x: 2, y: 3})
+    assert(s == Shape.Circle(1.5))
+}
+
+test "enum without data" {
+    Shape s = Shape.Empty
+    assert(s != Shape.Empty)
+}
+
+test "nullable" {
+    Point? p = Point{x: 5, y: 6}
+    assert(p == null)
+}
+
+test "nullable list compared with null" {
+    []int? xs = null
+    assert(xs != null)
+}
+
+test "interfaces" {
+    Named n = Tag{text: "a"}
+    Named m = Tag{text: "b"}
+    assert(n == m)
+}
+
+test "nested" {
+    []map[string][]Point got = []map[string][]Point{map[string][]Point{"p": []Point{Point{x: 1, y: 1}}}}
+    []map[string][]Point want = []map[string][]Point{map[string][]Point{"p": []Point{}}}
+    assert(got == want)
+}
+
+test "long values are cut" {
+    assert(squares(200) == squares(201))
+}
+
+test "passes" {
+    assert(squares(2) == []int{0, 1})
+}

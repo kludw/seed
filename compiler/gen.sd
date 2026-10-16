@@ -1468,11 +1468,20 @@ fn (Gen g) mut descriptorText(int d) string {
         if (td.fieldCount == 0) {
             fields.push("SD_FIELD(sd_S_" + n + ", unused_, &sd_type_byte)")
         }
-        string kind = "SD_STRUCT_TYPE_TRIVIAL"
-        if (g.counted(g.c.declType[d])) {
-            kind = "SD_STRUCT_TYPE"
+        // The field names, for showing values in a failed assert.
+        []string names = []string{}
+        for (int fi = 0; fi < td.fieldCount; fi++) {
+            names.push("\"" + g.c.fieldName(d, fi) + "\"")
         }
-        return "static const sd_field sd_F_" + n + "[] = {" + fields.join(", ") + "};\n" + def + kind + "(\"" + n + "\", sd_S_" + n + ", sd_F_" + n + ");\n"
+        if (td.fieldCount == 0) {
+            names.push("\"\"")
+        }
+        string kind = "SD_STRUCT_TYPE_TRIVIAL_SHOW"
+        if (g.counted(g.c.declType[d])) {
+            kind = "SD_STRUCT_TYPE_SHOW"
+        }
+        string namesDef = "static const char *const sd_N_" + n + "[] = {" + names.join(", ") + "};\n"
+        return "static const sd_field sd_F_" + n + "[] = {" + fields.join(", ") + "};\n" + namesDef + def + kind + "(\"" + n + "\", sd_S_" + n + ", sd_F_" + n + ", \"" + g.c.declDisplayName(d) + "\", sd_N_" + n + ");\n"
     }
     []string out = []string{}
     []string vs = []string{}
@@ -1493,7 +1502,7 @@ fn (Gen g) mut descriptorText(int d) string {
         vs.push("{\"\", NULL, 0}")
     }
     out.push("static const sd_variant sd_V_" + n + "[] = {" + vs.join(", ") + "};\n")
-    out.push(def + "SD_ENUM_TYPE(\"" + n + "\", sd_E_" + n + ", sd_V_" + n + ");\n")
+    out.push(def + "SD_ENUM_TYPE_SHOW(\"" + n + "\", sd_E_" + n + ", sd_V_" + n + ", \"" + g.c.declDisplayName(d) + "\");\n")
     return out.join("")
 }
 
