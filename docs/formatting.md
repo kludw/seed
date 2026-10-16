@@ -62,9 +62,39 @@ if (x > 0) {
 }
 ```
 
+## Function literals
+
+A function literal's body is a block like any other: its statements go on lines of their own, one level deeper than the line where the statement that contains the literal starts (or, in a list written one element per line, the line where the element starts), and its `}` goes back to that line's indentation. So a literal that is the last argument of a call ends with `})`, and the call needs no line breaks of its own. The parameters are spaced like a declaration's, with one space before the result and before the `{`.
+
+```
+xs.sortBy(fn(int a,int b) bool { return a<b })
+string s = re.replaceWith(
+text,
+fn(regex.Match m) string {
+return m.text().toUpper()
+},
+)
+```
+
+becomes
+
+```
+xs.sortBy(fn(int a, int b) bool {
+    return a < b
+})
+string s = re.replaceWith(
+    text,
+    fn(regex.Match m) string {
+        return m.text().toUpper()
+    },
+)
+```
+
+A literal called where it is written keeps the call's `(` against its `}`: `spawn fn(int id) error {` ... `}(i)`.
+
 ## switch and select
 
-`case` and `default` are at the same indentation as the `switch` or `select`; the statements of a case are one level deeper, starting on the line after the `:`.
+`case` and `default` are at the same indentation as the `switch` or `select`; the statements of a case are one level deeper, starting on the line after the `:`. A select case's guard follows the operation on the same line: `case jobs.send(next) if (queue.len() > 0):`.
 
 ```
 switch (shape) {
@@ -136,14 +166,14 @@ fn g() {}
 
 ## Spaces
 
-- One space on each side of binary operators (`+ - * / % & | ^ << >> == != < <= > >= && ||`) and of `=`: `x = a + b * c`.
+- One space on each side of binary operators (`+ - * / % & | ^ << >> == != < <= > >= && || is`) and of `=`: `x = a + b * c`, `v is Shape.Circle`.
 - No space after the unary operators `-` and `!`: `-x`, `!done`, `a - -b`. One space after `try`: `try f()`.
 - No space before `,`, `:` and `;`; one space after `,` and after the `:` of a map entry or struct field: `f(a, b)`, `map[string]int{"a": 1}`, `Point{x: 1, y: 2}`.
 - No space inside parentheses and brackets, or inside the braces of a literal: `f(x)`, `xs[i]`, `(a + b) * c`, `[]int{1, 2}`.
 - No space before the `(` of a call or a parameter list, around `.`, or before `?`, `++` and `--`: `xs.len()`, `int? n`, `i++`.
 - One space after a keyword: `if (x)`, `for (`, `switch (v)`, `return x`, `case 1:`. `assert(x)` is written like a call, and so is a function type: `fn(int) bool`.
 - A method's receiver is separated from `fn` by one space: `fn (Point p) mut move(int dx)`.
-- One space before the `{` of a block, none before the `{` of a literal: `if (ok) {`, `Point{x: 1}`.
+- One space before the `{` of a block (a function literal's body included), none before the `{` of a list, map or struct literal: `if (ok) {`, `fn(int x) int {`, `Point{x: 1}`, `[]fn(int) int{f, g}`.
 - Types have no inner spaces except after `chan`, between a function type's parameters and its result, and after commas: `[]int`, `map[string][]int`, `[](string?)`, `chan int`, `fn(int, int) (int, bool)`. A result type follows the parameter list after one space: `fn f() (int, error)`, `fn f() []int`.
 - In a `for` header, `;` is followed by one space, except in `for (;;)`: `for (int i = 0; i < n; i++)`, `for (; i < n; )`, `for (int i = 1; ; i = i * 2)`.
 
