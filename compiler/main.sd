@@ -637,7 +637,9 @@ fn testPackage(string root, string base, string dir, string work, []string opts)
         fmt.println("FAIL " + dir + ": the package or its tests do not compile")
         return []int{0, 1}, null
     }
-    []string argv = []string{exe, results}
+    // The tests run in the package's directory, so that they find their
+    // files (testdata/...) by relative paths wherever seed test is run.
+    []string argv = []string{exe, results, "--dir", dir}
     for (int i = 0; i < opts.len(); i++) {
         argv.push(opts[i])
     }

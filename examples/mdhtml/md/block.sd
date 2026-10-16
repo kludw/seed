@@ -1,0 +1,445 @@
+// Package md turns Markdown into HTML: ATX and setext headings, paragraphs,
+// emphasis, code spans, fenced and indented code blocks, block quotes,
+// ordered and unordered lists (nested, tight or loose), links, images,
+// autolinks, hard line breaks and thematic breaks. It follows CommonMark
+// for the common cases and writes the same HTML as its reference
+// implementation does for them; it is not a complete CommonMark parser
+// (no reference links, HTML blocks or tables).
+package md
+
+import "regex"
+import "strings"
+
+// A block of a document.
+pub type Block enum {
+    Heading(int level, string text)
+    Paragraph(string text)
+    Code(string info, string text)
+    Quote([]Block children)
+    List(bool ordered, int start, bool loose, []Item items)
+    Rule
+}
+
+// One item of a list: the blocks inside it.
+pub type Item struct {
+    pub []Block blocks
+}
+
+// The document's blocks.
+pub fn parse(string text) []Block {
+    []string lines = text.replace("\r\n", "\n").replace("\t", "    ").split("\n")
+    if (lines.len() > 0 && lines[lines.len() - 1] == "") {
+        _ = lines.pop()
+    }
+    return parseLines(lines)
+}
+
+// The HTML of a document.
+pub fn render(string text) string {
+    return renderBlocks(parse(text), false)
+}
+
+// What the start of a line says about it.
+type ListMarker struct {
+    bool ordered
+    int start
+    // the delimiter: '-', '*' or '+' for bullets, '.' or ')' after numbers
+    byte delim
+    // the column where the item's content starts
+    int indent
+}
+
+fn isBlank(string line) bool {
+    return line.trim() == ""
+}
+
+fn leadingSpaces(string line) int {
+    int n = 0
+    for (; n < line.len() && line[n] == ' '; ) {
+        n++
+    }
+    return n
+}
+
+fn atxHeading() regex.Regex {
+    return regex.mustCompile("^ {0,3}(#{1,6})(?:[ \\t]+(.*?))?(?:[ \\t]+#+)?[ \\t]*$")
+}
+
+fn isRule(string line) bool {
+    return regex.mustCompile("^ {0,3}((\\*[ \\t]*){3,}|(-[ \\t]*){3,}|(_[ \\t]*){3,})$").matches(line)
+}
+
+fn fence(string line) string? {
+    regex.Match? m = regex.mustCompile("^ {0,3}(`{3,}|~{3,})").find(line)
+    if (m == null) {
+        return null
+    }
+    return m.groupText(1)
+}
+
+// The list marker that starts line, or null.
+fn listMarker(string line) ListMarker? {
+    regex.Match? m = regex.mustCompile("^( {0,3})([-*+]|(\\d{1,9})([.)]))( +|$)").find(line)
+    if (m == null) {
+        return null
+    }
+    string? number = m.groupText(3)
+    string? spaces = m.groupText(5)
+    int indent = m.end()
+    if (spaces != null && spaces.len() > 4) {
+        // five or more spaces: the content is indented code, one space
+        // belongs to the marker
+        indent = m.end() - spaces.len() + 1
+    } else if (spaces == "") {
+        indent = m.end() + 1
+    }
+    if (number != null) {
+        int? start, _ = number.toInt()
+        string? delim = m.groupText(4)
+        if (start == null || delim == null) {
+            return null
+        }
+        return ListMarker{ordered: true, start: start, delim: delim[0], indent: indent}
+    }
+    string? bullet = m.groupText(2)
+    if (bullet == null) {
+        return null
+    }
+    return ListMarker{ordered: false, start: 0, delim: bullet[0], indent: indent}
+}
+
+// Whether line starts a block that interrupts a paragraph.
+fn interrupts(string line) bool {
+    if (atxHeading().matches(line) || isRule(line) || fence(line) != null) {
+        return true
+    }
+    if (line.trim().startsWith(">") && leadingSpaces(line) < 4) {
+        return true
+    }
+    ListMarker? lm = listMarker(line)
+    // As in CommonMark, only a list starting at 1 interrupts a paragraph,
+    // and only if the item is not empty.
+    return lm != null && (!lm.ordered || lm.start == 1) && lm.indent <= line.len()
+}
+
+// Removes up to n columns of indentation.
+fn dedent(string line, int n) string {
+    int k = leadingSpaces(line)
+    if (k > n) {
+        k = n
+    }
+    return line.slice(k, line.len())
+}
+
+fn parseLines([]string lines) []Block {
+    []Block blocks = []Block{}
+    int i = 0
+    for (; i < lines.len(); ) {
+        string line = lines[i]
+        if (isBlank(line)) {
+            i++
+            continue
+        }
+        // indented code
+        if (leadingSpaces(line) >= 4) {
+            []string code = []string{}
+            int end = i
+            for (int j = i; j < lines.len() && (isBlank(lines[j]) || leadingSpaces(lines[j]) >= 4); j++) {
+                code.push(dedent(lines[j], 4))
+                if (!isBlank(lines[j])) {
+                    end = j
+                }
+            }
+            blocks.push(Block.Code("", code.slice(0, end - i + 1).join("\n") + "\n"))
+            i = end + 1
+            continue
+        }
+        string? open = fence(line)
+        if (open != null) {
+            int indent = leadingSpaces(line)
+            string info = line.slice(indent + open.len(), line.len()).trim()
+            []string code = []string{}
+            int j = i + 1
+            for (; j < lines.len(); j++) {
+                string? close = fence(lines[j])
+                if (close != null && close[0] == open[0] && close.len() >= open.len() && lines[j].trim() == close) {
+                    break
+                }
+                code.push(dedent(lines[j], indent))
+            }
+            string body = code.join("\n")
+            if (code.len() > 0) {
+                body = body + "\n"
+            }
+            []string words = strings.fields(info)
+            string lang = ""
+            if (words.len() > 0) {
+                lang = words[0]
+            }
+            blocks.push(Block.Code(lang, body))
+            i = j + 1
+            continue
+        }
+        regex.Match? h = atxHeading().find(line)
+        if (h != null) {
+            string? hashes = h.groupText(1)
+            string? title = h.groupText(2)
+            if (hashes != null) {
+                string t = ""
+                if (title != null) {
+                    t = title.trim()
+                }
+                blocks.push(Block.Heading(hashes.len(), t))
+            }
+            i++
+            continue
+        }
+        if (isRule(line)) {
+            blocks.push(Block.Rule)
+            i++
+            continue
+        }
+        if (line.trim().startsWith(">")) {
+            []string inner = []string{}
+            int j = i
+            for (; j < lines.len(); j++) {
+                string l = lines[j]
+                string t = l.trim()
+                if (t.startsWith(">") && leadingSpaces(l) < 4) {
+                    string rest = t.slice(1, t.len())
+                    if (rest.startsWith(" ")) {
+                        rest = rest.slice(1, rest.len())
+                    }
+                    inner.push(rest)
+                } else if (!isBlank(l) && inner.len() > 0 && !isBlank(inner[inner.len() - 1]) && !interrupts(l)) {
+                    // a lazy continuation line of a paragraph in the quote
+                    inner.push(l)
+                } else {
+                    break
+                }
+            }
+            blocks.push(Block.Quote(parseLines(inner)))
+            i = j
+            continue
+        }
+        ListMarker? lm = listMarker(line)
+        if (lm != null) {
+            int next = 0
+            Block list = Block.Rule
+            list, next = parseList(lines, i, lm)
+            blocks.push(list)
+            i = next
+            continue
+        }
+        // a paragraph, maybe a setext heading
+        []string para = []string{line.trim()}
+        int j = i + 1
+        int level = 0
+        for (; j < lines.len(); j++) {
+            string l = lines[j]
+            if (isBlank(l)) {
+                break
+            }
+            string t = l.trim()
+            if (leadingSpaces(l) < 4 && regex.mustCompile("^(=+|-+)$").matches(t)) {
+                level = 2
+                if (t[0] == '=') {
+                    level = 1
+                }
+                j++
+                break
+            }
+            if (interrupts(l)) {
+                break
+            }
+            para.push(trimStart(l))
+        }
+        string text = para.join("\n")
+        if (level > 0) {
+            blocks.push(Block.Heading(level, text))
+        } else {
+            blocks.push(Block.Paragraph(text))
+        }
+        i = j
+    }
+    return blocks
+}
+
+fn trimStart(string s) string {
+    return s.slice(leadingSpaces(s), s.len())
+}
+
+// Parses the list that starts at lines[at] with marker first. Returns the
+// list and the index of the first line after it.
+fn parseList([]string lines, int at, ListMarker first) (Block, int) {
+    []Item items = []Item{}
+    bool loose = false
+    int i = at
+    for (; i < lines.len(); ) {
+        ListMarker? lm = listMarker(lines[i])
+        if (lm == null || lm.ordered != first.ordered || lm.delim != first.delim) {
+            break
+        }
+        // The item: its first line without the marker, then every line
+        // indented at least as far as its content, or a lazy continuation.
+        []string body = []string{lines[i].slice(minInt(lm.indent, lines[i].len()), lines[i].len())}
+        int j = i + 1
+        for (; j < lines.len(); j++) {
+            string l = lines[j]
+            if (isBlank(l)) {
+                body.push("")
+                continue
+            }
+            if (leadingSpaces(l) >= lm.indent) {
+                body.push(dedent(l, lm.indent))
+                continue
+            }
+            if (lazyAfter(body) && !interrupts(l) && listMarker(l) == null) {
+                body.push(l)
+                continue
+            }
+            break
+        }
+        // Trailing blank lines belong between items, not to this one.
+        int end = body.len()
+        for (; end > 1 && isBlank(body[end - 1]); ) {
+            end--
+        }
+        bool gapAfter = end < body.len() && j < lines.len()
+        []Block blocks = parseLines(body.slice(0, end))
+        if (blocks.len() > 1 && hasInnerGap(body.slice(0, end))) {
+            loose = true
+        }
+        items.push(Item{blocks: blocks})
+        i = j
+        if (gapAfter) {
+            ListMarker? again = listMarker(lines[j])
+            if (again != null && again.ordered == first.ordered && again.delim == first.delim) {
+                loose = true
+            } else {
+                // the blank lines end the list, so they were no gap
+                break
+            }
+        }
+    }
+    return Block.List(first.ordered, first.start, loose, items), i
+}
+
+// Whether the lines so far end in a paragraph, which an unindented line can
+// continue lazily: the last line is text, not code (indented, or inside a
+// fence that is still open).
+fn lazyAfter([]string body) bool {
+    string last = body[body.len() - 1]
+    if (isBlank(last) || leadingSpaces(last) >= 4) {
+        return false
+    }
+    bool open = false
+    for (int i = 0; i < body.len(); i++) {
+        if (fence(body[i]) != null) {
+            open = !open
+        }
+    }
+    return !open && fence(last) == null
+}
+
+// Whether blank lines separate two of the item's direct blocks. A blank
+// line inside a nested block (a code block, a sub-list) doesn't count; this
+// approximation looks only at lines that are not indented.
+fn hasInnerGap([]string body) bool {
+    bool sawBlank = false
+    bool sawText = false
+    for (int i = 0; i < body.len(); i++) {
+        if (isBlank(body[i])) {
+            sawBlank = sawText
+        } else if (leadingSpaces(body[i]) == 0 && listMarker(body[i]) == null) {
+            if (sawBlank) {
+                return true
+            }
+            sawText = true
+        } else if (sawBlank && leadingSpaces(body[i]) == 0) {
+            return true
+        }
+    }
+    return false
+}
+
+fn minInt(int a, int b) int {
+    if (a < b) {
+        return a
+    }
+    return b
+}
+
+fn renderBlocks([]Block blocks, bool tight) string {
+    []string out = []string{}
+    for (int i = 0; i < blocks.len(); i++) {
+        out.push(renderBlock(blocks[i], tight))
+    }
+    return out.join("")
+}
+
+fn renderBlock(Block b, bool tight) string {
+    switch (b) {
+    case Block.Heading(int level, string text):
+        string tag = "h" + level.string()
+        return "<" + tag + ">" + inline(text) + "</" + tag + ">\n"
+    case Block.Paragraph(string text):
+        if (tight) {
+            return inline(text) + "\n"
+        }
+        return "<p>" + inline(text) + "</p>\n"
+    case Block.Code(string info, string text):
+        string attr = ""
+        if (info != "") {
+            attr = " class=\"language-" + escape(info) + "\""
+        }
+        return "<pre><code" + attr + ">" + escape(text) + "</code></pre>\n"
+    case Block.Quote([]Block children):
+        return "<blockquote>\n" + renderBlocks(children, false) + "</blockquote>\n"
+    case Block.List(bool ordered, int start, bool loose, []Item items):
+        string open = "<ul>\n"
+        string close = "</ul>\n"
+        if (ordered) {
+            open = "<ol>\n"
+            if (start != 1) {
+                open = "<ol start=\"" + start.string() + "\">\n"
+            }
+            close = "</ol>\n"
+        }
+        []string parts = []string{open}
+        for (int i = 0; i < items.len(); i++) {
+            parts.push(renderItem(items[i], !loose))
+        }
+        parts.push(close)
+        return parts.join("")
+    case Block.Rule:
+        return "<hr />\n"
+    }
+}
+
+// An item of a tight list shows its paragraphs without <p>, and starts on
+// the line of <li> when its first block is a paragraph.
+fn renderItem(Item item, bool tight) string {
+    if (item.blocks.len() == 0) {
+        return "<li></li>\n"
+    }
+    string body = renderBlocks(item.blocks, tight)
+    bool firstIsText = false
+    switch (item.blocks[0]) {
+    case Block.Paragraph(string _):
+        firstIsText = tight
+    case Block.Heading(int _, string _), Block.Code(string _, string _), Block.Quote([]Block _), Block.List(bool _, int _, bool _, []Item _), Block.Rule:
+    }
+    if (!firstIsText) {
+        body = "\n" + body
+    }
+    Block last = item.blocks[item.blocks.len() - 1]
+    switch (last) {
+    case Block.Paragraph(string _):
+        if (tight) {
+            body = body.slice(0, body.len() - 1)
+        }
+    case Block.Heading(int _, string _), Block.Code(string _, string _), Block.Quote([]Block _), Block.List(bool _, int _, bool _, []Item _), Block.Rule:
+    }
+    return "<li>" + body + "</li>\n"
+}

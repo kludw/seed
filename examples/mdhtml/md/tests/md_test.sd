@@ -1,0 +1,63 @@
+package md
+
+import "fs"
+
+// Each testdata/NAME.md must render as testdata/NAME.html. The tests run in
+// the package's directory, so the paths are relative to it.
+test "golden files" {
+    []string names = try fs.list("testdata")
+    int checked = 0
+    for (int i = 0; i < names.len(); i++) {
+        if (!names[i].endsWith(".md")) {
+            continue
+        }
+        string stem = names[i].slice(0, names[i].len() - 3)
+        string input = try fs.read("testdata/" + names[i])
+        string want = try fs.read("testdata/" + stem + ".html")
+        string got = render(input)
+        if (got != want) {
+            // Show the first line that differs.
+            []string g = got.split("\n")
+            []string w = want.split("\n")
+            for (int j = 0; j < g.len() && j < w.len(); j++) {
+                assert(stem + ":" + (j + 1).string() + ": " + g[j] == stem + ":" + (j + 1).string() + ": " + w[j])
+            }
+            assert(g.len() == w.len())
+        }
+        checked++
+    }
+    assert(checked == 3)
+}
+
+test "headings" {
+    assert(render("# One\n###### Six\n####### seven") == "<h1>One</h1>\n<h6>Six</h6>\n<p>####### seven</p>\n")
+    assert(render("#\n") == "<h1></h1>\n")
+    assert(render("#hashtag") == "<p>#hashtag</p>\n")
+}
+
+test "emphasis does not cross words or HTML" {
+    assert(render("a * b * c") == "<p>a * b * c</p>\n")
+    assert(render("**bold** and *em* and __b__ and _e_") == "<p><strong>bold</strong> and <em>em</em> and <strong>b</strong> and <em>e</em></p>\n")
+    assert(render("[x_y](http://a/b_c_d)") == "<p><a href=\"http://a/b_c_d\">x_y</a></p>\n")
+    assert(render("`*not*` *yes*") == "<p><code>*not*</code> <em>yes</em></p>\n")
+}
+
+test "html is escaped" {
+    assert(render("<script>alert(1)</script>") == "<p>&lt;script&gt;alert(1)&lt;/script&gt;</p>\n")
+    assert(render("    <b>\n") == "<pre><code>&lt;b&gt;\n</code></pre>\n")
+}
+
+test "a paragraph is interrupted by a list, a quote or a fence" {
+    assert(render("text\n- item") == "<p>text</p>\n<ul>\n<li>item</li>\n</ul>\n")
+    assert(render("text\n2. not a list") == "<p>text\n2. not a list</p>\n")
+    assert(render("text\n> quote") == "<p>text</p>\n<blockquote>\n<p>quote</p>\n</blockquote>\n")
+}
+
+test "only a paragraph continues lazily in a list item" {
+    assert(render("-     code\nnot code") == "<ul>\n<li>\n<pre><code>code\n</code></pre>\n</li>\n</ul>\n<p>not code</p>\n")
+    assert(render("- text\nlazy") == "<ul>\n<li>text\nlazy</li>\n</ul>\n")
+}
+
+test "an unclosed fence runs to the end" {
+    assert(render("```\ncode") == "<pre><code>code\n</code></pre>\n")
+}

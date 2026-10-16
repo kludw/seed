@@ -1,0 +1,195 @@
+package md
+
+import "regex"
+
+// Inline markup is rewritten in passes over the text. HTML that a pass has
+// produced must not be touched by the later ones (an `_` in a URL is not
+// emphasis), so each pass stashes what it made and leaves a placeholder,
+// "\x02" + the stash index + "\x03", which the last step expands.
+type Stash struct {
+    []string items
+}
+
+fn (Stash s) mut put(string html) string {
+    s.items.push(html)
+    return "\x02" + (s.items.len() - 1).string() + "\x03"
+}
+
+fn (Stash s) expand(string text) string {
+    regex.Regex mark = regex.mustCompile("\\x02(\\d+)\\x03")
+    string out = text
+    // Stashed HTML may itself hold placeholders (a link's text), so expand
+    // until none is left.
+    for (; mark.matches(out); ) {
+        []regex.Match ms = mark.findAll(out)
+        []string parts = []string{}
+        int at = 0
+        for (int i = 0; i < ms.len(); i++) {
+            parts.push(out.slice(at, ms[i].start()))
+            string? n = ms[i].groupText(1)
+            int idx = 0
+            if (n != null) {
+                int? k, _ = n.toInt()
+                if (k != null) {
+                    idx = k
+                }
+            }
+            parts.push(s.items[idx])
+            at = ms[i].end()
+        }
+        parts.push(out.slice(at, out.len()))
+        out = parts.join("")
+    }
+    return out
+}
+
+// What a pass does with each match.
+type Pass enum {
+    Escaped
+    CodeSpan
+    Autolink
+    Image
+    Link
+    Strong
+    Emphasis
+    HardBreak
+}
+
+fn (Pass p) pattern() regex.Regex {
+    switch (p) {
+    case Pass.Escaped:
+        return regex.mustCompile("\\\\([!-/:-@\\[-`{-~])")
+    case Pass.CodeSpan:
+        // a run of backticks, the shortest text, and a run of the same length
+        return regex.mustCompile("(`+)")
+    case Pass.Autolink:
+        return regex.mustCompile("<((?:https?|mailto):[^<>\\s]+)>")
+    case Pass.Image:
+        return regex.mustCompile("!\\[([^\\]]*)\\]\\(\\s*([^)\\s]*)(?:\\s+&quot;([^&]*)&quot;)?\\s*\\)")
+    case Pass.Link:
+        return regex.mustCompile("\\[([^\\]]+)\\]\\(\\s*([^)\\s]*)(?:\\s+&quot;([^&]*)&quot;)?\\s*\\)")
+    case Pass.Strong:
+        return regex.mustCompile("\\*\\*([^\\s*](?:[^*]*[^\\s*])?)\\*\\*|\\b__([^\\s_](?:[^_]*[^\\s_])?)__\\b")
+    case Pass.Emphasis:
+        return regex.mustCompile("\\*([^\\s*](?:[^*\n]*[^\\s*])?)\\*|\\b_([^\\s_](?:[^_\n]*[^\\s_])?)_\\b")
+    case Pass.HardBreak:
+        return regex.mustCompile("(?: {2,}|\\\\)\\n")
+    }
+}
+
+// The first group of m that took part, or "".
+fn firstGroup(regex.Match m, int first, int last) string {
+    for (int i = first; i <= last; i++) {
+        string? t = m.groupText(i)
+        if (t != null) {
+            return t
+        }
+    }
+    return ""
+}
+
+fn titleAttr(regex.Match m) string {
+    string? title = m.groupText(3)
+    if (title == null) {
+        return ""
+    }
+    return " title=\"" + title + "\""
+}
+
+// Applies one pass to text.
+fn (Stash s) mut apply(Pass p, string text) string {
+    regex.Regex re = p.pattern()
+    []string parts = []string{}
+    int at = 0
+    for (;;) {
+        regex.Match? m = re.findAt(text, at)
+        if (m == null) {
+            break
+        }
+        parts.push(text.slice(at, m.start()))
+        at = m.end()
+        switch (p) {
+        case Pass.Escaped:
+            parts.push(s.put(escape(firstGroup(m, 1, 1))))
+        case Pass.CodeSpan:
+            // Find the closing run of exactly as many backticks.
+            string ticks = m.text()
+            int? close = closingRun(text, m.end(), ticks.len())
+            if (close == null) {
+                parts.push(ticks)
+            } else {
+                parts.push(s.put("<code>" + escape(codeText(text.slice(m.end(), close))) + "</code>"))
+                at = close + ticks.len()
+            }
+        case Pass.Autolink:
+            string target = firstGroup(m, 1, 1)
+            string label = target
+            if (label.startsWith("mailto:")) {
+                label = label.slice(7, label.len())
+            }
+            parts.push(s.put("<a href=\"" + escape(target) + "\">" + escape(label) + "</a>"))
+        case Pass.Image:
+            parts.push(s.put("<img src=\"" + firstGroup(m, 2, 2) + "\" alt=\"" + firstGroup(m, 1, 1) + "\"" + titleAttr(m) + " />"))
+        case Pass.Link:
+            parts.push(s.put("<a href=\"" + firstGroup(m, 2, 2) + "\"" + titleAttr(m) + ">") + firstGroup(m, 1, 1) + s.put("</a>"))
+        case Pass.Strong:
+            parts.push("<strong>" + firstGroup(m, 1, 2) + "</strong>")
+        case Pass.Emphasis:
+            parts.push("<em>" + firstGroup(m, 1, 2) + "</em>")
+        case Pass.HardBreak:
+            parts.push("<br />\n")
+        }
+    }
+    parts.push(text.slice(at, text.len()))
+    return parts.join("")
+}
+
+// Where the next run of exactly n backticks starts, at or after from.
+fn closingRun(string text, int from, int n) int? {
+    int i = from
+    for (; i < text.len(); ) {
+        if (text[i] != '`') {
+            i++
+            continue
+        }
+        int j = i
+        for (; j < text.len() && text[j] == '`'; ) {
+            j++
+        }
+        if (j - i == n) {
+            return i
+        }
+        i = j
+    }
+    return null
+}
+
+// The text of a code span: line endings become spaces, and one space is
+// stripped from both ends when both have one (and it isn't all spaces).
+fn codeText(string raw) string {
+    string t = raw.replace("\n", " ")
+    if (t.len() >= 2 && t.startsWith(" ") && t.endsWith(" ") && t.trim() != "") {
+        return t.slice(1, t.len() - 1)
+    }
+    return t
+}
+
+// Escapes the characters that are special in HTML.
+pub fn escape(string s) string {
+    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;")
+}
+
+// The HTML of a paragraph's or heading's text.
+fn inline(string text) string {
+    Stash s = Stash{items: []string{}}
+    string t = s.apply(Pass.CodeSpan, text)
+    t = s.apply(Pass.Escaped, t)
+    t = s.apply(Pass.Autolink, t)
+    t = escape(t)
+    t = s.apply(Pass.Image, t)
+    t = s.apply(Pass.Link, t)
+    t = s.apply(Pass.Strong, t)
+    t = s.apply(Pass.Emphasis, t)
+    t = s.apply(Pass.HardBreak, t)
+    return s.expand(t)
+}

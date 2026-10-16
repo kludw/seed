@@ -1,6 +1,7 @@
 /* seed test: the runner of test programs, and the values a failed assert
  * shows. */
 #include "seed_internal.h"
+#include <unistd.h>
 
 static sd_str sd_assert_message(const void *self) { return sd_str_retain(*(sd_str const *)self); }
 
@@ -71,17 +72,28 @@ static sd_err test_trampoline(void *p) {
  * crash fails only that test. Prints one line per failed test; writes
  * "<passed> <failed>\n" to the file named by args[1], if any. The
  * arguments after it are options: "-v" prints a line for every test that
- * passes too, and "--run TEXT" runs only the tests whose description
- * contains TEXT. */
+ * passes too, "--run TEXT" runs only the tests whose description contains
+ * TEXT, and "--dir DIR" runs the tests in the directory DIR (seed test
+ * passes the package's directory, so that tests read their files by paths
+ * relative to it, as Go's do; the results file is opened before that). */
 static sd_err test_run_all(sd_list *args) {
   int passed = 0, failed = 0;
   bool verbose = false;
   const char *filter = NULL;
+  const char *dir = NULL;
+  FILE *results = NULL;
   sd_task_set_name_("the test runner");
   for (int64_t a = 2; a < args->len; a++) {
     const char *opt = sd_str_cstr(SD_LIST_GET(args, sd_str, SD_INT(a)));
     if (strcmp(opt, "-v") == 0) verbose = true;
     else if (strcmp(opt, "--run") == 0 && a + 1 < args->len) filter = sd_str_cstr(SD_LIST_GET(args, sd_str, SD_INT(++a)));
+    else if (strcmp(opt, "--dir") == 0 && a + 1 < args->len) dir = sd_str_cstr(SD_LIST_GET(args, sd_str, SD_INT(++a)));
+  }
+  if (args->len > 1) results = fopen(sd_str_cstr(SD_LIST_GET(args, sd_str, SD_INT(1))), "w");
+  if (dir && chdir(dir) != 0) {
+    fprintf(stderr, "seed test: cannot enter %s: %s\n", dir, strerror(errno));
+    if (results) fclose(results);
+    sd_exit_process(2);
   }
   for (int i = 0; i < test_count; i++) {
     const sd_test *t = &test_list[i];
@@ -121,13 +133,9 @@ static sd_err test_run_all(sd_list *args) {
     sd_str_release(m);
     sd_err_release(e);
   }
-  if (args->len > 1) {
-    const char *path = sd_str_cstr(SD_LIST_GET(args, sd_str, SD_INT(1)));
-    FILE *f = fopen(path, "w");
-    if (f) {
-      fprintf(f, "%d %d\n", passed, failed);
-      fclose(f);
-    }
+  if (results) {
+    fprintf(results, "%d %d\n", passed, failed);
+    fclose(results);
   }
   fflush(stdout);
   sd_exit_process(failed > 0 ? 1 : 0);

@@ -1,0 +1,56 @@
+// mdhtml converts Markdown to HTML.
+//
+//     mdhtml [-s] [-t TITLE] [-o OUT] [FILE...]
+//
+// Without files it reads stdin. With -o the HTML goes to a file instead of
+// stdout; with -s it is a complete page, titled after -t or the document's
+// first heading.
+package main
+
+import "flags"
+import "fmt"
+import "fs"
+import "io"
+import "md"
+
+fn main([]string args) error {
+    flags.Spec spec = flags.spec("mdhtml", "[FILE...]", "Converts Markdown to HTML. Reads stdin when no file is given.")
+    spec.addString("output", 'o', "", "write the HTML to this file instead of stdout")
+    spec.addBool("standalone", 's', "write a complete HTML page")
+    spec.addString("title", 't', "", "the page's title (default: its first heading)")
+    flags.Parsed p = spec.parseOrExit(args)
+    []string files = p.args()
+    []string sources = []string{}
+    if (files.len() == 0) {
+        sources.push(try io.readAll())
+    }
+    for (int i = 0; i < files.len(); i++) {
+        sources.push(try fs.read(files[i]))
+    }
+    string text = sources.join("\n")
+    string html = md.render(text)
+    if (p.getBool("standalone")) {
+        string title = p.getString("title")
+        if (title == "") {
+            title = firstHeading(md.parse(text))
+        }
+        html = "<!DOCTYPE html>\n<html>\n<head>\n<meta charset=\"utf-8\">\n<title>" + md.escape(title) + "</title>\n</head>\n<body>\n" + html + "</body>\n</html>\n"
+    }
+    string out = p.getString("output")
+    if (out == "") {
+        fmt.print(html)
+        return null
+    }
+    return fs.write(out, html)
+}
+
+fn firstHeading([]md.Block blocks) string {
+    for (int i = 0; i < blocks.len(); i++) {
+        switch (blocks[i]) {
+        case md.Block.Heading(int _, string text):
+            return text
+        case md.Block.Paragraph(string _), md.Block.Code(string _, string _), md.Block.Quote([]md.Block _), md.Block.List(bool _, int _, bool _, []md.Item _), md.Block.Rule:
+        }
+    }
+    return "untitled"
+}
