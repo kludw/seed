@@ -4,6 +4,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <signal.h>
 #include <spawn.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -143,6 +144,15 @@ sd_err sd_lib_os_output(sd_list *argv, sd_str *out, sd_int *code) {
   free(buf);
   *code = SD_INT(WIFEXITED(st) ? WEXITSTATUS(st) : 128 + (WIFSIGNALED(st) ? WTERMSIG(st) : 0));
   return SD_ERR_NULL;
+}
+
+/* os.signals: s is an os.Signal, an enum in a box whose tag is the index of
+ * its case, in the order of os.sd. */
+void sd_lib_os_watchSignal(sd_box *s, sd_chan *c) {
+  static const int numbers[] = {SIGINT, SIGTERM, SIGHUP, SIGUSR1, SIGUSR2};
+  int32_t tag = *(const int32_t *)sd_box_data(s);
+  if (tag < 0 || tag >= (int32_t)(sizeof numbers / sizeof numbers[0])) sd_crash("os.signals: unknown signal %d", (int)tag);
+  sd_signal_watch(numbers[tag], c, &s);
 }
 
 sd_err sd_lib_os_hostname(sd_str *out) {

@@ -5,6 +5,8 @@
 #   wordcount   on a fixed text given on stdin
 #   todo        add, done, remove and list, on a list file in a temporary directory
 #   server      on a free loopback port, with fetch (and curl, if installed) as clients
+#   kv          serve, stopped by SIGTERM and SIGINT, which it catches to shut
+#               down in order, then restarted from its log
 #
 #   tests/examples.sh [seed]        (make test-examples runs it with build/seed2,
 #                                    then examples/run.sh for the other examples)
@@ -99,6 +101,54 @@ if [ -x "$out/server" ] && [ -x "$out/fetch" ]; then
     wait "$server_pid" 2>/dev/null
     server_pid=
   fi
+fi
+
+# --- kv: shut down in order by SIGTERM and SIGINT (os.signals), then the
+# data is back after a restart
+if (cd "$tmp" && "$seed" build -o "$out/kv" "$root/examples/kv") > "$tmp/build.out" 2>&1; then ok; else
+  failed "build examples/kv" "$(head -c 600 "$tmp/build.out")"
+fi
+# kv_signal NAME SIGNAL: starts kv serve, sets NAME=SIGNAL, sends SIGNAL and
+# checks that it said so, stopped and exited with 0.
+kv_signal() {
+  "$out/kv" serve --addr 127.0.0.1:0 --data "$tmp/kv.log" 2> "$tmp/kv.err" &
+  server_pid=$!
+  addr=
+  for _ in $(seq 1 100); do
+    addr=$(sed -n 's/.*msg=serving addr=\([^ ]*\).*/\1/p' "$tmp/kv.err")
+    [ -n "$addr" ] && break
+    sleep 0.05
+  done
+  if [ -z "$addr" ]; then
+    failed "kv serve ($2)" "did not start: $(head -c 300 "$tmp/kv.err")"; return
+  fi
+  got=$("$out/kv" --addr "$addr" set "$1" "$2" 2>&1)
+  expect "kv set before $2" "OK" "$got"
+  kill -"$2" "$server_pid"
+  wait "$server_pid"
+  code=$?
+  server_pid=
+  expect "kv serve exit code after $2" "0" "$code"
+  got=$(sed -n 's/.*level=INFO msg=\(.*\)/\1/p' "$tmp/kv.err" | sed 's/ addr=.*//')
+  want=$(printf 'serving\n"shutting down" signal=%s\nstopped' "$3")
+  expect "kv serve log after $2" "$want" "$got"
+}
+if [ -x "$out/kv" ]; then
+  kv_signal term TERM Terminate
+  kv_signal int INT Interrupt
+  "$out/kv" serve --addr 127.0.0.1:0 --data "$tmp/kv.log" 2> "$tmp/kv.err" &
+  server_pid=$!
+  addr=
+  for _ in $(seq 1 100); do
+    addr=$(sed -n 's/.*msg=serving addr=\([^ ]*\).*/\1/p' "$tmp/kv.err")
+    [ -n "$addr" ] && break
+    sleep 0.05
+  done
+  got=$("$out/kv" --addr "$addr" keys 2>&1)
+  expect "kv keys after the restarts" "$(printf 'int\nterm')" "$got"
+  kill -TERM "$server_pid"
+  wait "$server_pid"
+  server_pid=
 fi
 
 echo "examples: $pass passed, $fail failed"

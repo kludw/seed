@@ -3,14 +3,23 @@
 // One goroutine owns the store and applies the requests one at a time, so
 // they never interleave; every client connection has a goroutine of its own
 // that reads requests, sends each one to the owner with a channel for the
-// reply, and writes the reply back.
+// reply, and writes the reply back. A signal (SIGINT or SIGTERM, from
+// os.signals) shuts the server down in order: it stops accepting, the owner
+// finishes the request in hand, closes the log and stops, and that stops the
+// connections.
 package server
 
+import "errors"
 import "log"
 import "net"
+import "os"
 import "store"
 import "time"
 import "wire"
+
+// The error the owner stops with on a signal, which fails the server's
+// group and so stops the connections; serve then returns null.
+const string shutdownMessage = "server: shutting down"
 
 // Config says where the data lives and where the log lines go.
 pub type Config struct {
@@ -18,6 +27,10 @@ pub type Config struct {
     pub log.Logger logger
     // a connection that sends nothing for this long is closed (0: never)
     pub int idle = 5 * time.minute
+    // a signal on this channel shuts the server down (main passes
+    // os.signals(...); a test can send one itself); null: only closing the
+    // listener stops it
+    pub chan os.Signal? signals = null
 }
 
 // A request on its way to the owner, with the channel for its reply.
@@ -36,19 +49,54 @@ pub fn serve(net.Listener ln, Config cfg) error {
     }
     cfg.logger.with("addr", ln.addr()).with("keys", st.len().string()).info("serving")
     chan Call calls = chan Call(256)
-    return group {
-        spawn own(st, calls, cfg.logger)
+    // stop: closed on a signal; done: closed when the owner ends.
+    chan bool stop = chan bool(1)
+    chan bool done = chan bool(1)
+    error err = group {
+        spawn own(st, calls, stop, done, cfg.logger)
         spawn acceptAll(ln, calls, cfg)
+        if (cfg.signals != null) {
+            spawn watch(cfg.signals, ln, stop, done, cfg.logger)
+        }
+    }
+    if (err != null && err.message() == shutdownMessage) {
+        cfg.logger.info("stopped")
+        return null
+    }
+    return err
+}
+
+// Waits for a signal, or for the owner to end. On a signal it stops
+// accepting new connections and tells the owner to stop.
+fn watch(chan os.Signal signals, net.Listener ln, chan bool stop, chan bool done, log.Logger logger) {
+    select {
+    case os.Signal? sig = signals.receive():
+        if (sig != null) {
+            logger.with("signal", sig.name()).info("shutting down")
+            ln.close()
+            stop.close()
+        }
+    case _ = done.receive():
     }
 }
 
-// Applies the calls to the store until calls is closed.
-fn own(store.Store initial, chan Call calls, log.Logger logger) error {
+// Applies the calls to the store until calls is closed, or stop is: then it
+// closes the store and fails the server's group, which stops the
+// connections (a request that was not answered was not applied).
+fn own(store.Store initial, chan Call calls, chan bool stop, chan bool done, log.Logger logger) error {
+    defer done.close()
     // Not "defer st.close()": a deferred call takes its receiver when the
     // defer statement runs, and compaction replaces the store's open log.
     store.Store st = initial
     for (;;) {
-        Call? call = calls.receive()
+        Call? call = null
+        select {
+        case call = calls.receive():
+        case _ = stop.receive():
+            st.close()
+            logger.debug("log closed")
+            return errors.new(shutdownMessage)
+        }
         if (call == null) {
             st.close()
             return null

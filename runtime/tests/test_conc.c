@@ -3,8 +3,10 @@
 #include "check.h"
 
 #include <pthread.h>
+#include <signal.h>
 #include <stdatomic.h>
 #include <time.h>
+#include <unistd.h>
 
 /* Test-only shared state (Seed code can't have any; the tests use it to
  * observe deferred calls). */
@@ -664,6 +666,64 @@ static void test_preempt(void) {
   printf("preemption: a 10 ms sleep took %.1f ms beside 64 spinning goroutines\n", sleep_took * 1e3);
 }
 
+/* ---- signals (os.signals) ---- */
+
+static void *signal_later(void *p) {
+  (void)p;
+  struct timespec ts = {0, 50000000};
+  nanosleep(&ts, NULL);
+  kill(getpid(), SIGUSR2);
+  return NULL;
+}
+
+/* Receives from c, or gives up after 100 ms: false then. */
+static bool receive_within(sd_chan *c, sd_int *out) {
+  sd_chan *timer = sd_time_after(SD_INT(100000000));
+  sd_int tick = SD_INT_NULL;
+  sd_select_case cs[2] = {{c, SD_RECV, out, false}, {timer, SD_RECV, &tick, false}};
+  int k = sd_select(cs, 2);
+  sd_chan_release(timer);
+  return k == 0 && cs[0].ok;
+}
+
+static void test_signals(void) {
+  sd_chan *a = sd_chan_new(&sd_type_int, SD_INT(1));
+  sd_chan *b = sd_chan_new(&sd_type_int, SD_INT(1));
+  sd_int seven = SD_INT(7), eight = SD_INT(8), nine = SD_INT(9);
+  sd_signal_watch(SIGUSR1, a, &seven);
+  sd_signal_watch(SIGUSR1, b, &eight);
+  sd_signal_watch(SIGUSR2, a, &nine);
+  /* Every channel that asked for the signal receives it. */
+  raise(SIGUSR1);
+  sd_int v = SD_INT_NULL;
+  CHECK(receive_within(a, &v) && sd_int_eq(v, SD_INT(7)));
+  CHECK(receive_within(b, &v) && sd_int_eq(v, SD_INT(8)));
+  /* A full channel drops the signal: one of the three is received. */
+  raise(SIGUSR1);
+  struct timespec ts = {0, 20000000};
+  nanosleep(&ts, NULL);
+  raise(SIGUSR1);
+  raise(SIGUSR1);
+  ts.tv_nsec = 100000000; /* the poller has seen them before the receive makes room */
+  nanosleep(&ts, NULL);
+  CHECK(receive_within(a, &v) && sd_int_eq(v, SD_INT(7)));
+  CHECK(!receive_within(a, &v));
+  CHECK(receive_within(b, &v) && sd_int_eq(v, SD_INT(8)));
+  /* Waiting for a signal alone is not a deadlock. */
+  pthread_t th;
+  CHECK(pthread_create(&th, NULL, signal_later, NULL) == 0);
+  CHECK(sd_chan_receive(a, &v) && sd_int_eq(v, SD_INT(9)));
+  pthread_join(th, NULL);
+  /* A closed channel is skipped. */
+  sd_chan_close(b);
+  raise(SIGUSR1);
+  CHECK(receive_within(a, &v) && sd_int_eq(v, SD_INT(7)));
+  CHECK(!sd_chan_receive(b, &v));
+  sd_chan_release(a);
+  sd_chan_release(b);
+  printf("signals: delivered to every channel, coalesced when full, skipped when closed\n");
+}
+
 int main(int argc, char **argv) {
   int64_t live0 = sd_live_objects();
   int64_t pp = argc > 1 ? atol(argv[1]) : 20000;
@@ -687,5 +747,6 @@ int main(int argc, char **argv) {
   if (live0 >= 0) CHECK(live1 == live0);
   test_channel_crashes();
   if (live0 >= 0) CHECK(sd_live_objects() == live0);
+  test_signals(); /* last: the watched channels live as long as the program */
   return check_done("test_conc");
 }

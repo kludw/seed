@@ -392,7 +392,7 @@ if (err != null) {
 - Goroutines share nothing. Sending a value on a channel copies it, so data races are impossible.
 - A `group` block is ordinary code: `spawn` may appear anywhere inside it, including in loops and `if`s.
 - Channels are the one reference type. Copying a channel value (into a struct, an enum, a list, another channel) gives another handle to the same channel, which is how reply channels work.
-- When every goroutine is blocked on a channel or waiting for a group, and no timer is pending, nothing can happen any more: the program prints `crash: deadlock: all goroutines are blocked` (followed by a list of the blocked goroutines and what each waits for) and exits with code 2, without running `defer`s.
+- When every goroutine is blocked on a channel or waiting for a group, and no timer is pending (and no signal is caught with `os.signals`, since one can arrive at any time), nothing can happen any more: the program prints `crash: deadlock: all goroutines are blocked` (followed by a list of the blocked goroutines and what each waits for) and exits with code 2, without running `defer`s.
 
 ### Groups
 

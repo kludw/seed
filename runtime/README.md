@@ -1015,6 +1015,28 @@ instead of waiting forever (the poller thread serves all timers: section 10).
 `sd_time_now()` is the monotonic clock in nanoseconds. The compiler exposes
 them as `time.after` and `time.sleep`.
 
+**Signals.** `sd_signal_watch(signo, c, &val)` (`os.signals`, lib/os/os.c)
+catches `signo` for the rest of the program and sends a copy of `val` on
+`c` each time it arrives. The handler, installed with `sigaction` and
+`SA_RESTART` on the first watch of that signal, is async-signal-safe: it
+sets the signal's flag (an atomic int per signal number) and writes a byte
+to a non-blocking self-pipe, saving `errno`. The poller watches the pipe's
+read end permanently (epoll level-triggered, or a kqueue `EVFILT_READ`, with
+a token of its own); when it is readable the poller drains it, then takes
+each flag that is set (drain first, so a byte read always has its flag set)
+and, under `sig_mu` and each channel's lock, sends with `try_send`, which
+never waits: a full channel drops the signal (coalescing it with those not
+yet received), a closed one skips it. The first watch adds 1 to
+`sd_running` for good, like a timer that never fires: a goroutine waiting
+for a signal waits for the world outside, so the deadlock check stays off
+from then on. Default dispositions are untouched until a signal is watched;
+children started by `os.run` get the defaults back at `exec`. The runtime's
+own signals are not offered: `SIGURG` (interrupting a blocked file call,
+section 13) and `SIGSEGV`/`SIGBUS` (the fault handler, section 9). With
+`SA_RESTART`, a caught signal makes most interrupted system calls continue;
+the waits that fail with `EINTR` regardless (`epoll_wait`, `kevent`, `poll`,
+`nanosleep`) are retried or loop.
+
 ## 12. Program entry and exit
 
 ```c

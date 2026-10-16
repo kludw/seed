@@ -197,6 +197,33 @@ if (code != 0) {
 fmt.println("building " + rev.trim())
 ```
 
+### Signals
+
+| Name | Meaning |
+|---|---|
+| `os.Signal` | An enum of the signals a program can catch: `Interrupt` (SIGINT, Ctrl-C), `Terminate` (SIGTERM, `kill` or a service manager), `Hangup` (SIGHUP), `User1` and `User2` (SIGUSR1, SIGUSR2). |
+| `os.signals([]os.Signal which) chan os.Signal` | Catches the signals in `which`: from then on each one that arrives is sent on the returned channel instead of having its default effect (ending the program). |
+
+- Without a call, every signal keeps its default effect. A signal stays caught for the rest of the program; there is no way to give it back its default effect.
+- The channel has room for one signal per kind in `which`. A signal that arrives while the channel is full is dropped: one is still waiting to be received, so nothing is lost but the count (as in Go's `signal.Notify` with a buffered channel). A signal for a closed channel is dropped too.
+- Each call makes a new channel; every channel that asked for a signal receives it. Crashes if `which` is empty.
+- A goroutine waiting for a signal waits for something outside the program, like one reading a socket: once a signal is caught, the program is never reported as deadlocked.
+- The runtime's handler only records the signal; the poller thread sends it on the channels (runtime/README.md, section 11), so a signal never interrupts a goroutine in the middle of its work, and the goroutine that receives it decides what to do: typically stop accepting, close files and return, through the usual paths (closing a listener, failing a group).
+
+```
+chan os.Signal signals = os.signals([]os.Signal{os.Signal.Interrupt, os.Signal.Terminate})
+select {
+case os.Signal? sig = signals.receive():
+    if (sig != null) {
+        logger.with("signal", sig.name()).info("shutting down")
+        ln.close()
+    }
+case _ = done.receive():
+}
+```
+
+`examples/kv` shuts its server down this way: on SIGINT or SIGTERM it stops accepting, its store's owner finishes the request in hand, closes the log and fails the server's group, which stops the connections.
+
 ## fs
 
 Files and directories. Most programs only need the whole-file functions; `fs.File` is for files too large to read at once and for writing a file piece by piece.

@@ -915,6 +915,11 @@ SD_CRASHES int sd_select(sd_select_case *cases, int n);
 
 /* ---- time ---- */
 sd_chan *sd_time_after(sd_int ns);  /* chan int receiving the wall-clock time once, after ns, then closed */
+/* os.signals: from now on, catch signal signo and send a copy of *val (of
+ * c's element type, borrowed) on c each time it arrives, without waiting
+ * (dropped when c is full, skipped once c is closed). For the life of the
+ * program; the deadlock check is off from the first call. */
+void sd_signal_watch(int signo, sd_chan *c, const void *val);
 void sd_time_sleep(sd_int ns);      /* a cancellation point, like a receive */
 sd_int sd_time_now(void);           /* monotonic nanoseconds */
 
