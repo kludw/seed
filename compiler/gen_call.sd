@@ -439,6 +439,13 @@ fn (Gen g) mut gmutBuiltin(int e, Builtin b, int r, int rt, []int args) string {
         return ""
     case Builtin.SortBy:
         g.preemptCall(e)
+        ExprInfo fi = g.c.info[args[0]]
+        if (fi.res == Res.Func && !fi.wrap && g.c.ast.exprs[args[0]].kind != ExprKind.Call) {
+            // A named function: an adapter that calls it directly (no
+            // function value, and the C compiler can inline it).
+            g.emit("sd_list_sort_by(" + place + ", " + g.directLess(fi.ref) + ", NULL);")
+            return ""
+        }
         g.emit("sd_list_sort_by(" + place + ", " + g.lessFn(g.typeOf(args[0])) + ", (void *)" + vals[0] + ");")
         return ""
     case Builtin.Delete:

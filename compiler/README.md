@@ -766,7 +766,10 @@ the enclosing function see a literal as an expression without children
 that reads its captures (`mentionsVar`, `countVarExpr` of the loop
 accumulators, `mvExpr`); the literal's body is analysed when its own
 function is generated. Literals never get fast versions. The `sortBy`
-adapter calls the comparator the same way as any function value.
+adapter calls the comparator the same way as any function value, except
+for a named function written as the argument (`xs.sortBy(byAge)`), which
+gets an adapter that calls it directly (`directLess`), as fast as before
+function values were boxes.
 
 `v is E.Case` (`genIs`) compares the tag of the box, with a null test
 first for an `E?`. A select with a guard on any case (`genGuardedSelect`)

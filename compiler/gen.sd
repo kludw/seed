@@ -1429,6 +1429,20 @@ fn (Gen g) mut fnValueText(int f, string base) string {
     return "static " + g.ctype(r) + " " + w + "(" + ps.join(", ") + ") { (void)env_; " + call + "; }\nSD_FN_STATIC(sd_fv_" + base + ", " + w + ");\n"
 }
 
+// The comparison adapter of xs.sortBy(f) for a named function f, which calls
+// it directly; static in the C file or unit that uses it, like the boxes of
+// namedFnValue (keyed by -1 - f in Gen.fnValues).
+fn (Gen g) mut directLess(int f) string {
+    string cn = g.c.fnCName[f]
+    string name = "sd_lessf_" + cn.slice(3, cn.len())
+    if (g.fnValues[-1 - f] == null) {
+        g.fnValues[-1 - f] = true
+        string et = g.ctype(g.c.paramType(f, 0))
+        g.thunks.push("static bool " + name + "(void *ctx, const void *a, const void *b) { (void)ctx; return " + cn + "(*(" + et + " const *)a, *(" + et + " const *)b); }\n")
+    }
+    return name
+}
+
 // How deep function pointer types nest in the function type f: its typedef
 // needs those of the function types in its signature first.
 fn (Gen g) funcRank(int f) int {
