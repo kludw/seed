@@ -338,6 +338,10 @@ fn (Gen g) countVarExpr(int e, int v) int {
     if (x.kind == ExprKind.Group) {
         return n + g.countVarBlock(x.block, v)
     }
+    if (x.kind == ExprKind.FnLit && g.c.litReads(x.lit, v)) {
+        // The literal captures v.
+        return 1
+    }
     n = n + g.countVarExpr(x.a, v) + g.countVarExpr(x.b, v)
     for (int k = 0; k < x.count; k++) {
         n = n + g.countVarExpr(g.c.ast.at(x.list, k), v)

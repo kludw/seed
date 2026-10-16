@@ -192,6 +192,7 @@ static void show_value(show_buf *b, const sd_type *t, const void *v, int depth) 
   case SD_K_BOX: {
     const sd_box *x = *(sd_box *const *)v;
     if (!x) show_cstr(b, "null");
+    else if (x->t->kind == SD_K_STRUCT && x->t->nfields > 0 && x->t->fields[0].type == &sd_type_fn) show_cstr(b, "fn"); /* a function value */
     else show_value(b, x->t, sd_box_data(x), depth);
     return;
   }

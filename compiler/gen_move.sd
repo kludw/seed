@@ -193,6 +193,14 @@ fn (Gen g) mut mvExpr(int e, bool cond) {
         g.mvBlock(x.block)
         return
     }
+    if (x.kind == ExprKind.FnLit) {
+        // Evaluating a function literal reads the variables it captures.
+        []int caps = g.c.capturesOf(x.lit)
+        for (int c = 0; c < caps.len(); c++) {
+            g.mvMention(g.c.vars[caps[c]].src, cond)
+        }
+        return
+    }
     g.mvExpr(x.a, cond)
     bool short = x.kind == ExprKind.Binary && (x.op == Tok.AndAnd || x.op == Tok.OrOr)
     g.mvExpr(x.b, cond || short)

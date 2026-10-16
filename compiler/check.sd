@@ -35,14 +35,23 @@ type VarKind enum {
     Recv
     MutRecv
     LocalConst
+    Capture
 }
 
+// A variable. lit is the function literal whose body declares it (-1 in a
+// function's own body). A Capture is the copy that a function literal (lit)
+// has of a variable of the code around it (src: a variable of the enclosing
+// function, or a Capture of the enclosing literal): read-only, with the
+// value src had when the literal was evaluated. Its pos is src's, so that
+// the language server finds one declaration.
 type Var struct {
     string name
     int ty
     VarKind kind
     Pos pos
     bool used
+    int lit
+    int src
 }
 
 // A narrowed path (see pathKey). dead marks a path that was assigned after
@@ -234,6 +243,16 @@ type Checker struct {
     []int loopScopes
     []Guard caseGuards
     []DeferWatch deferWatch
+    // Function literals (checkFnLit): the literals whose bodies are being
+    // checked, innermost last; the Capture of a variable in a literal, by
+    // "<literal>:<variable>"; the captures of each literal, in order; the
+    // function or literal each literal is in (-1 for none, parallel to
+    // fns); the literals checked already.
+    []int litStack
+    map[string]int capIdx
+    map[int][]int litCaps
+    []int fnOuter
+    map[int]bool litDone
     int curFn
     int loopDepth
     int groupDepth
@@ -294,6 +313,11 @@ fn newChecker(Ast ast, Diags diags, bool testMode) Checker {
         loopScopes: []int{},
         caseGuards: []Guard{},
         deferWatch: []DeferWatch{},
+        litStack: []int{},
+        capIdx: map[string]int{},
+        litCaps: map[int][]int{},
+        fnOuter: []int{},
+        litDone: map[int]bool{},
         curFn: -1,
         loopDepth: 0,
         groupDepth: 0,
@@ -391,6 +415,7 @@ fn (Checker c) mut checkProgram() {
     for (int f = 0; f < c.ast.fns.len(); f++) {
         c.resolveSignature(f)
         c.recvVar.push(-1)
+        c.fnOuter.push(-1)
     }
     c.checkImplements()
     c.checkMain()
@@ -581,7 +606,7 @@ fn (Checker c) mut collectGlobals() {
     }
     for (int j = 0; j < c.ast.fns.len(); j++) {
         FnDecl fd = c.ast.fns[j]
-        if (!fd.isMethod && !fd.isTest) {
+        if (!fd.isMethod && !fd.isTest && !fd.isLit) {
             c.addGlobal(fd.name, GlobalKind.Fn, j, fd.pos)
         }
     }
@@ -675,6 +700,13 @@ fn (Checker c) mut resolveSignature(int f) {
     }
     c.fnRet.push(c.resultOf(rs))
     string prefix = c.ast.pkgs[c.fnPkg(f)].cprefix
+    if (fd.isLit) {
+        // Named after the function it is in when its body is checked
+        // (checkFnLit).
+        c.fnRecv.push(-1)
+        c.fnCName.push("sd_cl_" + prefix + f.string())
+        return
+    }
     if (fd.isTest) {
         c.fnRecv.push(-1)
         c.fnCName.push("sd_test_" + f.string())
@@ -1059,6 +1091,8 @@ fn (Checker c) mut requireConstant(int e, string name) {
         what = "a group"
     } else if (x.kind == ExprKind.ChanMake) {
         what = "a new channel"
+    } else if (x.kind == ExprKind.FnLit) {
+        what = "a function literal"
     }
     c.errorHint(x.pos, "the value of the constant " + name + " must be computable when the program is compiled, but it uses " + what, "declare a variable instead, or compute the constant from literals and other constants")
 }
@@ -1078,8 +1112,10 @@ fn (Checker c) nonConstant(int e) int {
             return e
         }
         return -1
-    case ExprKind.Try, ExprKind.Group, ExprKind.ChanMake:
+    case ExprKind.Try, ExprKind.Group, ExprKind.ChanMake, ExprKind.FnLit:
         return e
+    case ExprKind.Is:
+        return c.nonConstant(x.a)
     case ExprKind.Call:
         if (i.res == Res.Func || i.res == Res.Method || i.res == Res.ValueCall || i.res == Res.IfaceMethod) {
             return e
@@ -1164,6 +1200,8 @@ fn (Checker c) mut requireDefault(int e, string field) {
         what = "a group"
     } else if (x.kind == ExprKind.ChanMake) {
         what = "a new channel"
+    } else if (x.kind == ExprKind.FnLit) {
+        what = "a function literal"
     }
     c.errorHint(x.pos, "the default value of " + field + " must be computable without running code, but it uses " + what, "a default may use literals, constants, operators, conversions and list, map and struct literals; set the field in each literal instead")
 }
@@ -1270,6 +1308,10 @@ fn (Checker c) litFieldsSet(int e, int d) []bool {
 
 fn (Checker c) mut checkFnBody(int f) {
     FnDecl fd = c.ast.fns[f]
+    if (fd.isLit) {
+        // Checked where it is written (checkFnLit).
+        return
+    }
     if (fd.body < 0) {
         Package pk = c.ast.pkgs[c.fnPkg(f)]
         if (!pk.isLib) {
@@ -1418,10 +1460,198 @@ fn (Checker c) mut declare(string name, int t, VarKind kind, Pos pos) int {
         }
         c.errorHint(pos, name + " is already declared at line " + c.vars[old].pos.line.string() + what + "; shadowing is not allowed", hint)
     }
-    c.vars.push(Var{name: name, ty: t, kind: kind, pos: pos, used: false})
+    c.vars.push(Var{name: name, ty: t, kind: kind, pos: pos, used: false, lit: c.curLit(), src: -1})
     int v = c.vars.len() - 1
     c.scope.push(v)
     return v
+}
+
+// ---- function literals and their captures ----
+
+// The function literal whose body is being checked, or -1.
+fn (Checker c) curLit() int {
+    if (c.litStack.len() == 0) {
+        return -1
+    }
+    return c.litStack[c.litStack.len() - 1]
+}
+
+// The name of function f in messages: its name, or "the function literal".
+fn (Checker c) fnLabel(int f) string {
+    if (f >= 0 && c.ast.fns[f].isLit) {
+        return "the function literal"
+    }
+    return c.ast.fns[f].name
+}
+
+// The variable that a name found in scope (v, from lookupVar) means at this
+// point: v itself, or, inside a function literal that v is declared outside
+// of, the literal's Capture of it.
+fn (Checker c) mut useVar(int v, Pos pos) int {
+    if (v < 0 || c.litStack.len() == 0) {
+        return v
+    }
+    return c.captureIn(c.litStack.len() - 1, v, pos)
+}
+
+// The Capture of variable v in the literal at litStack[level] (v itself if
+// the literal declares it), made when first needed: a literal inside
+// another one captures from the enclosing literal's Capture. Narrowings of
+// the captured value hold for the Capture too (it never changes), and the
+// value must be readable where the literal is evaluated (an error guard).
+fn (Checker c) mut captureIn(int level, int v, Pos pos) int {
+    int lit = c.litStack[level]
+    if (c.vars[v].lit == lit) {
+        return v
+    }
+    string key = lit.string() + ":" + v.string()
+    int? known = c.capIdx[key]
+    if (known != null) {
+        return known
+    }
+    int src = v
+    if (level > 0) {
+        src = c.captureIn(level - 1, v, pos)
+    } else {
+        int g = c.guardOf(v)
+        if (g >= 0) {
+            c.guardError(g, c.vars[v].name, pos)
+        }
+    }
+    c.vars[v].used = true
+    c.vars[src].used = true
+    Var ov = c.vars[src]
+    c.vars.push(Var{name: ov.name, ty: ov.ty, kind: VarKind.Capture, pos: ov.pos, used: true, lit: lit, src: src})
+    int cv = c.vars.len() - 1
+    c.capIdx[key] = cv
+    []int? caps = c.litCaps[lit]
+    if (caps == null) {
+        c.litCaps[lit] = []int{cv}
+    } else {
+        []int more = caps
+        more.push(cv)
+        c.litCaps[lit] = more
+    }
+    string sk = "v" + src.string()
+    string nk = "v" + cv.string()
+    []string live = c.liveNarrows()
+    for (int i = live.len() - 1; i >= 0; i--) {
+        string k = live[i]
+        string bang = ""
+        if (k.startsWith("!")) {
+            bang = "!"
+            k = k.slice(1, k.len())
+        }
+        if (keyExtends(k, sk, false)) {
+            c.addNarrow(bang + nk + k.slice(sk.len(), k.len()))
+        }
+    }
+    return cv
+}
+
+// The captures of literal f (Capture variables, in the order they were
+// made).
+fn (Checker c) capturesOf(int f) []int {
+    []int? caps = c.litCaps[f]
+    if (caps == null) {
+        return []int{}
+    }
+    return caps
+}
+
+// Whether the function literal f captures variable v (of the code around
+// it), so that evaluating the literal reads v.
+fn (Checker c) litReads(int f, int v) bool {
+    []int caps = c.capturesOf(f)
+    for (int i = 0; i < caps.len(); i++) {
+        if (c.vars[caps[i]].src == v) {
+            return true
+        }
+    }
+    return false
+}
+
+// The names a function literal's body mentions (identifiers, also in the
+// literals inside it), with the position of the first mention, so that its
+// captures can be made where it starts (checkFnLit).
+fn (Checker c) namesInBlock(int b, map[string]Pos out) map[string]Pos {
+    if (b < 0) {
+        return out
+    }
+    map[string]Pos m = out
+    Block bl = c.ast.blocks[b]
+    for (int i = 0; i < bl.count; i++) {
+        m = c.namesInStmt(c.ast.at(bl.list, i), m)
+    }
+    return m
+}
+
+fn (Checker c) namesInStmt(int s, map[string]Pos out) map[string]Pos {
+    if (s < 0) {
+        return out
+    }
+    map[string]Pos m = out
+    Stmt st = c.ast.stmts[s]
+    m = c.namesInExpr(st.expr, m)
+    switch (st.kind) {
+    case StmtKind.Assign:
+        for (int i = 0; i < st.count; i++) {
+            Target tg = c.ast.targets[c.ast.at(st.list, i)]
+            if (tg.kind == TargetKind.Place) {
+                m = c.namesInExpr(tg.expr, m)
+            }
+        }
+    case StmtKind.Return:
+        for (int j = 0; j < st.count; j++) {
+            m = c.namesInExpr(c.ast.at(st.list, j), m)
+        }
+    case StmtKind.If:
+        m = c.namesInBlock(st.body, m)
+        m = c.namesInStmt(st.elseIf, m)
+        m = c.namesInBlock(st.els, m)
+    case StmtKind.For:
+        m = c.namesInStmt(st.init, m)
+        m = c.namesInStmt(st.post, m)
+        m = c.namesInBlock(st.body, m)
+    case StmtKind.Switch, StmtKind.Select:
+        for (int k = 0; k < st.count; k++) {
+            Case cs = c.ast.cases[c.ast.at(st.list, k)]
+            for (int l = 0; l < cs.labelCount; l++) {
+                m = c.namesInExpr(c.ast.labels[c.ast.at(cs.labels, l)].expr, m)
+            }
+            m = c.namesInStmt(cs.comm, m)
+            m = c.namesInExpr(cs.guard, m)
+            m = c.namesInBlock(cs.body, m)
+        }
+    case StmtKind.Bad, StmtKind.ExprStmt, StmtKind.IncDec, StmtKind.Defer, StmtKind.Spawn, StmtKind.Break, StmtKind.Continue, StmtKind.Assert, StmtKind.Const:
+    }
+    return m
+}
+
+fn (Checker c) namesInExpr(int e, map[string]Pos out) map[string]Pos {
+    if (e < 0) {
+        return out
+    }
+    map[string]Pos m = out
+    Expr x = c.ast.exprs[e]
+    if (x.kind == ExprKind.Ident) {
+        if (m[x.text] == null) {
+            m[x.text] = x.pos
+        }
+        return m
+    }
+    if (x.kind == ExprKind.Group) {
+        return c.namesInBlock(x.block, m)
+    }
+    if (x.kind == ExprKind.FnLit) {
+        return c.namesInBlock(c.ast.fns[x.lit].body, m)
+    }
+    m = c.namesInExpr(x.a, m)
+    m = c.namesInExpr(x.b, m)
+    for (int i = 0; i < x.count; i++) {
+        m = c.namesInExpr(c.ast.at(x.list, i), m)
+    }
+    return m
 }
 
 // ---- narrowing ----
@@ -1436,6 +1666,14 @@ fn (Checker c) pathKey(int e) string {
             v = c.info[e].ref
         } else {
             v = c.lookupVar(x.text)
+            if (v >= 0 && c.litStack.len() > 0) {
+                // A name inside a function literal that is declared outside
+                // it means the literal's capture, if it has one.
+                int? cv = c.capIdx[c.curLit().string() + ":" + v.string()]
+                if (cv != null) {
+                    v = cv
+                }
+            }
         }
         if (v < 0) {
             return ""
@@ -1715,6 +1953,12 @@ fn (Checker c) condKeys(int cond, bool when, []string out) []string {
         }
     } else if (x.kind == ExprKind.Unary && x.op == Tok.Not) {
         keys = c.condKeys(x.a, !when, keys)
+    } else if (x.kind == ExprKind.Is && when) {
+        // v is E.Case is false when v is null.
+        string ik = c.pathKey(x.a)
+        if (ik != "") {
+            keys.push(ik)
+        }
     }
     return keys
 }

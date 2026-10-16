@@ -118,6 +118,11 @@ fn (Ast a) dumpExpr(int e) string {
         return "(make-chan " + a.dumpType(x.typeExpr) + " " + a.dumpExpr(x.a) + ")"
     case ExprKind.Group:
         return "(group " + a.dumpBlock(x.block, "") + ")"
+    case ExprKind.FnLit:
+        FnDecl fd = a.fns[x.lit]
+        return "(fn-lit " + a.dumpParams(fd.params, fd.paramCount) + " " + a.dumpTypes(fd.results, fd.resultCount) + " " + a.dumpBlock(fd.body, "") + ")"
+    case ExprKind.Is:
+        return "(is " + a.dumpExpr(x.a) + " " + a.dumpExpr(x.b) + ")"
     }
 }
 
@@ -165,6 +170,9 @@ fn (Ast a) dumpCase(int c, string indent) string {
     }
     if (cs.comm >= 0) {
         head = "(case " + a.dumpStmt(cs.comm, indent)
+    }
+    if (cs.guard >= 0) {
+        head = head + " (if " + a.dumpExpr(cs.guard) + ")"
     }
     return head + " " + a.dumpBlock(cs.body, indent) + ")"
 }

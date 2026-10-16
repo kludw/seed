@@ -82,7 +82,7 @@ fn (Gen g) mut callFrom(int e, []string vals) string {
         return g.c.fnCName[i.ref] + "(" + vals.join(", ") + ")"
     }
     if (i.res == Res.ValueCall) {
-        return "(" + vals[0] + ")(" + vals.slice(1, vals.len()).join(", ") + ")"
+        return g.fnValueCall(g.typeOf(g.c.ast.exprs[e].a), vals[0], vals.slice(1, vals.len()))
     }
     if (i.res == Res.IfaceMethod) {
         []string args = []string{"sd_iface_self(" + vals[0] + ")"}

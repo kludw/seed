@@ -5,7 +5,8 @@
 //   int sd_int (tagged, grows), float double, bool bool, byte uint8_t,
 //   string sd_str, []T sd_list*, map sd_map*, struct sd_S_Name (by value),
 //   enum sd_box* (a box holding sd_E_Name), interface sd_iface, error
-//   sd_err, fn(...) R a C function pointer sd_fn_<mangle>, int? sd_int
+//   sd_err, fn(...) R a box (sd_box*) with the code and the captures of a
+//   function literal (called through sd_fn_<mangle>), int? sd_int
 //   (SD_INT_NULL), float?/bool?/byte? sd_opt_*, Struct? sd_box*, other T?
 //   the same C type with NULL (or a null vt) for null, several results
 //   sd_T_<mangle> with fields r0, r1, ...
@@ -150,6 +151,9 @@ type Gen struct {
     // per package, and the identifiers the unit being assembled refers to.
     bool split
     map[string]bool refs
+    // The named functions used as values in the C file or unit being
+    // generated (their boxes are static there: namedFnValue).
+    map[int]bool fnValues
     // Crash traces (see emit and siteRef): the position in the source of
     // the code being generated, the Seed name of the current function,
     // whether its lines are marked, the C name of the unit's table of
@@ -234,6 +238,7 @@ fn newGen(Checker c) Gen {
         pcCond: 0,
         split: false,
         refs: map[string]bool{},
+        fnValues: map[int]bool{},
         pos: Pos{file: -1, line: 0, col: 0},
         fnLabel: "",
         siteOn: false,
@@ -668,7 +673,7 @@ fn (Gen g) ctype(int t) string {
     case Kind.Tuple:
         return "sd_T_" + g.c.types.mangle(t)
     case Kind.Func:
-        return "sd_fn_" + g.c.types.mangle(t)
+        return "sd_box *"
     case Kind.Opt:
         int el = g.elemOf(t)
         Kind k = g.kindOf(el)
@@ -706,9 +711,9 @@ fn (Gen g) isBoxOpt(int t) bool {
 // and drops released). Cached in Type.rt for structs and tuples.
 fn (Gen g) mut counted(int t) bool {
     switch (g.kindOf(t)) {
-    case Kind.Int, Kind.String, Kind.Error, Kind.List, Kind.Map, Kind.Chan, Kind.Enum, Kind.Interface:
+    case Kind.Int, Kind.String, Kind.Error, Kind.List, Kind.Map, Kind.Chan, Kind.Enum, Kind.Interface, Kind.Func:
         return true
-    case Kind.Void, Kind.Float, Kind.Bool, Kind.Byte, Kind.Null, Kind.Invalid, Kind.Func:
+    case Kind.Void, Kind.Float, Kind.Bool, Kind.Byte, Kind.Null, Kind.Invalid:
         return false
     case Kind.Opt:
         if (g.isBoxOpt(t)) {
@@ -759,9 +764,9 @@ fn (Gen g) mut frameCounted(int t) bool {
             }
         }
         return false
-    case Kind.String, Kind.Error, Kind.List, Kind.Map, Kind.Chan, Kind.Interface, Kind.Int:
+    case Kind.String, Kind.Error, Kind.List, Kind.Map, Kind.Chan, Kind.Interface, Kind.Int, Kind.Func:
         return true
-    case Kind.Void, Kind.Float, Kind.Bool, Kind.Byte, Kind.Null, Kind.Invalid, Kind.Func:
+    case Kind.Void, Kind.Float, Kind.Bool, Kind.Byte, Kind.Null, Kind.Invalid:
         return false
     case Kind.Opt:
         if (g.isBoxOpt(t)) {
@@ -875,7 +880,7 @@ fn (Gen g) mut retainExpr(int t, string v) string {
         return "sd_map_retain(" + v + ")"
     case Kind.Chan:
         return "sd_chan_retain(" + v + ")"
-    case Kind.Enum:
+    case Kind.Enum, Kind.Func:
         return "sd_box_retain(" + v + ")"
     case Kind.Interface, Kind.Error:
         return "sd_iface_retain(" + v + ")"
@@ -886,7 +891,7 @@ fn (Gen g) mut retainExpr(int t, string v) string {
             return "sd_box_retain(" + v + ")"
         }
         return g.retainExpr(g.elemOf(t), v)
-    case Kind.Void, Kind.Float, Kind.Bool, Kind.Byte, Kind.Null, Kind.Invalid, Kind.Func:
+    case Kind.Void, Kind.Float, Kind.Bool, Kind.Byte, Kind.Null, Kind.Invalid:
         return v
     }
 }
@@ -907,7 +912,7 @@ fn (Gen g) mut releaseCall(int t, string v) string {
         return "sd_map_release(" + v + ")"
     case Kind.Chan:
         return "sd_chan_release(" + v + ")"
-    case Kind.Enum:
+    case Kind.Enum, Kind.Func:
         return "sd_box_release(" + v + ")"
     case Kind.Interface, Kind.Error:
         return "sd_iface_release(" + v + ")"
@@ -918,7 +923,7 @@ fn (Gen g) mut releaseCall(int t, string v) string {
             return "sd_box_release(" + v + ")"
         }
         return g.releaseCall(g.elemOf(t), v)
-    case Kind.Void, Kind.Float, Kind.Bool, Kind.Byte, Kind.Null, Kind.Invalid, Kind.Func:
+    case Kind.Void, Kind.Float, Kind.Bool, Kind.Byte, Kind.Null, Kind.Invalid:
         return ""
     }
 }
@@ -952,7 +957,7 @@ fn (Gen g) desc(int t) string {
     case Kind.Interface:
         return "&sd_type_iface"
     case Kind.Func:
-        return "&sd_type_fn"
+        return "&sd_type_box"
     case Kind.Opt:
         int el = g.elemOf(t)
         Kind k = g.kindOf(el)
@@ -1139,7 +1144,7 @@ fn (Gen g) mut genHelper(int t, int kind) {
     if (kind == helperLess) {
         string et = g.ctype(g.c.types.part(t, 0))
         g.protos.push(attr + " bool sd_less_" + m + "(void *ctx, const void *a, const void *b);\n")
-        g.helpers.push(attr + " bool sd_less_" + m + "(void *ctx, const void *a, const void *b) {\n  return ((" + ct + ")ctx)(*(" + et + " const *)a, *(" + et + " const *)b);\n}\n")
+        g.helpers.push(attr + " bool sd_less_" + m + "(void *ctx, const void *a, const void *b) {\n  return ((" + g.fnPtrType(t) + ")SD_FN_CODE(ctx))(SD_FN_ENV(ctx), *(" + et + " const *)a, *(" + et + " const *)b);\n}\n")
         return
     }
     []string parts = g.partExprs(t, "v")
@@ -1293,14 +1298,12 @@ fn (Gen g) mut genTypes() {
     map[string]CDecl fns = map[string]CDecl{}
     for (int f = 0; f < nt; f++) {
         if (g.kindOf(f) == Kind.Func) {
-            []string ps = []string{}
+            // The code of a function value: the environment first.
+            []string ps = []string{"const void *"}
             for (int p = 0; p < g.c.types.count(f); p++) {
                 ps.push(g.ctype(g.c.types.part(f, p)))
             }
-            if (ps.len() == 0) {
-                ps.push("void")
-            }
-            string fname = g.ctype(f)
+            string fname = g.fnPtrType(f)
             fns[padRank(g.funcRank(f)) + " " + fname] = CDecl{text: "typedef " + g.ctype(g.elemOf(f)) + " (*" + fname + ")(" + ps.join(", ") + ");\n", names: fname, pkg: -1}
         }
     }
@@ -1373,6 +1376,57 @@ fn (Gen g) mut genTypes() {
         }
     }
     g.addDecls(vtypes)
+}
+
+// The C type of the code of a function value of type t (fn(A) R):
+// R (*)(const void *env, A), typedef'd as sd_fn_<mangle>.
+fn (Gen g) fnPtrType(int t) string {
+    int f = t
+    if (g.c.types.isOpt(f)) {
+        f = g.elemOf(f)
+    }
+    return "sd_fn_" + g.c.types.mangle(f)
+}
+
+// The C call of the function value v (a side-effect free C expression
+// for a box) of type t with the arguments args.
+fn (Gen g) fnValueCall(int t, string v, []string args) string {
+    []string all = []string{"SD_FN_ENV(" + v + ")"}
+    for (int i = 0; i < args.len(); i++) {
+        all.push(args[i])
+    }
+    return "((" + g.fnPtrType(t) + ")SD_FN_CODE(" + v + "))(" + all.join(", ") + ")"
+}
+
+// The value of the named function f used as a function value: an immortal
+// box whose code calls f (sd_fw_<name>, which takes the environment it does
+// not need first). Both are static in the C file or unit that uses them
+// (fnValueText, emitted with the thunks).
+fn (Gen g) mut namedFnValue(int f) string {
+    string cn = g.c.fnCName[f]
+    string base = cn.slice(3, cn.len())
+    if (g.fnValues[f] == null) {
+        g.fnValues[f] = true
+        g.thunks.push(g.fnValueText(f, base))
+    }
+    return "SD_BOX_REF(sd_fv_" + base + ")"
+}
+
+fn (Gen g) mut fnValueText(int f, string base) string {
+    FnDecl fd = g.c.ast.fns[f]
+    []string ps = []string{"const void *env_"}
+    []string args = []string{}
+    for (int i = 0; i < fd.paramCount; i++) {
+        ps.push(g.ctype(g.c.paramType(f, i)) + " a" + i.string())
+        args.push("a" + i.string())
+    }
+    int r = g.c.fnRet[f]
+    string call = g.c.fnCName[f] + "(" + args.join(", ") + ")"
+    if (r != tyVoid) {
+        call = "return " + call
+    }
+    string w = "sd_fw_" + base
+    return "static " + g.ctype(r) + " " + w + "(" + ps.join(", ") + ") { (void)env_; " + call + "; }\nSD_FN_STATIC(sd_fv_" + base + ", " + w + ");\n"
 }
 
 // How deep function pointer types nest in the function type f: its typedef
@@ -1700,6 +1754,10 @@ fn (Gen g) mut fnSig(int f) string {
         }
         ps.push(g.ctype(g.c.declType[g.c.fnRecv[f]]) + star + " l_" + fd.recvName)
     }
+    if (fd.isLit) {
+        // A function literal's code: its environment (the captures) first.
+        ps.push("const void *sd_env_")
+    }
     for (int i = 0; i < fd.paramCount; i++) {
         Param p = g.c.ast.params[g.c.ast.at(fd.params, i)]
         string pt = g.ctype(g.c.teType[p.typeExpr])
@@ -1878,6 +1936,9 @@ fn (Gen g) mut genFn(int f) {
     if (g.defers) {
         g.emit("size_t _dm = sd_defer_mark();")
     }
+    if (fd.isLit) {
+        g.litPrologue(f)
+    }
     g.pushScope()
     g.ownParams(f)
     g.genBody(fd.body)
@@ -1958,6 +2019,82 @@ fn (Gen g) mut genFn(int f) {
     }
     text.push(g.lineReset())
     g.fnText.push(text.join(""))
+}
+
+// ---- function literals ----
+//
+// A function literal is a C function of its own (genFn), named after the
+// function it is in and its position (Checker.litCName), whose first
+// parameter is its environment: the payload of the function value's box,
+// sd_CE_<name> {code, c_<captured>...}, with a descriptor sd_CD_<name> so
+// that the box is released, copied and deep-copied (spawn, channels) like
+// any struct. The function reads each capture into a C local l_<name>,
+// borrowed like a parameter (captures are read-only). Evaluating the
+// literal makes the box: owned copies of the captured variables' current
+// values (genFnLit). A literal that captures nothing is an immortal box
+// like a named function's.
+
+// The C name of the environment struct and descriptor of literal f.
+fn (Gen g) litEnvName(int f) string {
+    return g.c.fnCName[f].slice(6, g.c.fnCName[f].len())
+}
+
+// The environment's struct and descriptor (with the thunks), and the lines
+// that read the captures at the top of the literal's function.
+fn (Gen g) mut litPrologue(int f) {
+    []int caps = g.c.capturesOf(f)
+    string n = g.litEnvName(f)
+    []string fields = []string{" sd_code code;"}
+    []string descs = []string{"SD_FIELD(sd_CE_" + n + ", code, &sd_type_fn)"}
+    []string names = []string{"\"code\""}
+    bool anyCounted = false
+    for (int i = 0; i < caps.len(); i++) {
+        Var v = g.c.vars[caps[i]]
+        fields.push(" " + g.ctype(v.ty) + " c_" + v.name + ";")
+        descs.push("SD_FIELD(sd_CE_" + n + ", c_" + v.name + ", " + g.desc(v.ty) + ")")
+        names.push(cString(v.name))
+        if (g.counted(v.ty)) {
+            anyCounted = true
+        }
+    }
+    string kind = "SD_STRUCT_TYPE_TRIVIAL_SHOW"
+    if (anyCounted) {
+        kind = "SD_STRUCT_TYPE_SHOW"
+    }
+    []string defs = []string{"typedef struct {" + fields.join("") + " } sd_CE_" + n + ";\n"}
+    defs.push("static const sd_field sd_CF_" + n + "[] = {" + descs.join(", ") + "};\n")
+    defs.push("static const char *const sd_CN_" + n + "[] = {" + names.join(", ") + "};\n")
+    defs.push("static const sd_type sd_CD_" + n + " = " + kind + "(\"fn\", sd_CE_" + n + ", sd_CF_" + n + ", \"fn\", sd_CN_" + n + ");\n")
+    if (caps.len() == 0) {
+        defs.push("SD_FN_STATIC(sd_CZ_" + n + ", " + g.c.fnCName[f] + ");\n")
+        g.emit("(void)sd_env_;")
+    } else {
+        g.emit("const sd_CE_" + n + " *sd_e_ = sd_env_;")
+    }
+    g.thunks.push(defs.join(""))
+    for (int j = 0; j < caps.len(); j++) {
+        Var cv = g.c.vars[caps[j]]
+        g.emit(g.ctype(cv.ty) + " l_" + cv.name + " = sd_e_->c_" + cv.name + ";")
+    }
+}
+
+// The value of a function literal: a new box with owned copies of the
+// values of the variables it captures (or the literal's immortal box when
+// it captures nothing).
+fn (Gen g) mut genFnLit(int e) string {
+    int f = g.c.ast.exprs[e].lit
+    []int caps = g.c.capturesOf(f)
+    string n = g.litEnvName(f)
+    if (caps.len() == 0) {
+        return "SD_BOX_REF(sd_CZ_" + n + ")"
+    }
+    []string vals = []string{"(sd_code)" + g.c.fnCName[f]}
+    for (int i = 0; i < caps.len(); i++) {
+        int src = g.c.vars[caps[i]].src
+        int t = g.c.vars[src].ty
+        vals.push(g.ownVal(g.varRead(src), t))
+    }
+    return g.temp(g.typeOf(e), "sd_box_new(&sd_CD_" + n + ", &(sd_CE_" + n + "){" + vals.join(", ") + "})")
 }
 
 // The parameters of f that its body assigns (as a whole: the checker

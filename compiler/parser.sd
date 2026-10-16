@@ -720,6 +720,7 @@ fn (Parser p) mut parseSwitchBody(Stmt header) int {
             labels: p.ast.addList(labels),
             labelCount: labels.len(),
             comm: -1,
+            guard: -1,
             body: body,
         })
         cases.push(p.ast.cases.len() - 1)
@@ -887,14 +888,23 @@ fn (Parser p) mut parseSelect() int {
     for (; !p.failed && (p.kind() == Tok.KwCase || p.kind() == Tok.KwDefault); ) {
         Token ct = p.next()
         int comm = -1
+        int guard = -1
         if (ct.kind == Tok.KwDefault) {
             p.errorHint(ct.pos, "select has no default case", "select always waits; use a timeout channel such as time.after(...) instead")
         } else {
             comm = p.parseSimple()
+            if (!p.failed && p.kind() == Tok.KwIf) {
+                // case ch.send(v) if (cond): the case takes part only when
+                // cond is true.
+                p.pos++
+                p.expect(Tok.LParen, " after if (a select case's guard is written if (condition))")
+                guard = p.parseExpr()
+                p.expect(Tok.RParen, " to close the guard")
+            }
         }
         p.expect(Tok.Colon, " after the select case")
         int body = p.parseCaseBody(ct.pos)
-        p.ast.cases.push(Case{pos: ct.pos, isDefault: false, labels: 0, labelCount: 0, comm: comm, body: body})
+        p.ast.cases.push(Case{pos: ct.pos, isDefault: false, labels: 0, labelCount: 0, comm: comm, guard: guard, body: body})
         cases.push(p.ast.cases.len() - 1)
     }
     p.expect(Tok.RBrace, " to close the select (expected case or '}')")
@@ -912,7 +922,7 @@ fn binaryPrecedence(Tok k) int {
     if (k == Tok.AndAnd) {
         return 2
     }
-    if (k == Tok.Eq || k == Tok.Ne || k == Tok.Lt || k == Tok.Le || k == Tok.Gt || k == Tok.Ge) {
+    if (k == Tok.Eq || k == Tok.Ne || k == Tok.Lt || k == Tok.Le || k == Tok.Gt || k == Tok.Ge || k == Tok.KwIs) {
         return 3
     }
     if (k == Tok.Plus || k == Tok.Minus || k == Tok.Pipe || k == Tok.Caret) {
@@ -947,7 +957,7 @@ fn (Parser p) mut parseBinary(int minPrec) int {
             break
         }
         Expr l = p.ast.exprs[left]
-        if (prec == 3 && l.kind == ExprKind.Binary && binaryPrecedence(l.op) == 3 && !l.paren) {
+        if (prec == 3 && ((l.kind == ExprKind.Binary && binaryPrecedence(l.op) == 3) || l.kind == ExprKind.Is) && !l.paren) {
             p.errorHint(t.pos, "comparison operators do not chain", "use && to combine comparisons: a < b && b < c")
             break
         }
@@ -959,6 +969,15 @@ fn (Parser p) mut parseBinary(int minPrec) int {
         }
         p.skipNewlines()
         int right = p.parseBinary(prec + 1)
+        if (t.kind == Tok.KwIs) {
+            // v is Type.Case: whether v holds that case (the checker
+            // checks that right names one).
+            Expr is = newExpr(ExprKind.Is, t.pos)
+            is.a = left
+            is.b = right
+            left = p.addExpr(is)
+            continue
+        }
         Expr b = newExpr(ExprKind.Binary, t.pos)
         b.op = t.kind
         b.a = left
@@ -1196,11 +1215,49 @@ fn (Parser p) mut parsePrimary() int {
         return p.addExpr(g)
     }
     if (k == Tok.KwFn) {
-        p.errorHint(t.pos, "there are no anonymous functions", "declare a named function and use its name as the value")
-    } else {
-        p.errorAt(t.pos, "expected an expression, found " + tokenDesc(t))
+        return p.parseFnLit()
     }
+    p.errorAt(t.pos, "expected an expression, found " + tokenDesc(t))
     return p.badExpr()
+}
+
+// FnLit = "fn" "(" [ Params ] ")" [ Result ] Block . A function literal:
+// a FnDecl with isLit set (not a top-level declaration), referred to by the
+// FnLit expression.
+fn (Parser p) mut parseFnLit() int {
+    Token t = p.next()
+    Expr x = newExpr(ExprKind.FnLit, t.pos)
+    p.expect(Tok.LParen, " after fn (a function literal looks like fn(int x) int { ... })")
+    if (p.failed) {
+        return p.badExpr()
+    }
+    []int params = p.parseParams("for the parameter (the parameters of a function literal are written as Type name: fn(int x) int { ... })")
+    []int results = p.parseResult()
+    if (p.failed) {
+        return p.badExpr()
+    }
+    int body = p.parseBlock(" to open the body of the function literal (fn(int x) int { ... })")
+    p.ast.fns.push(FnDecl{
+        pos: t.pos,
+        start: t.pos,
+        file: p.file,
+        isPub: false,
+        isTest: false,
+        name: "",
+        isMethod: false,
+        recvType: -1,
+        recvName: "",
+        recvPos: t.pos,
+        recvMut: false,
+        params: p.ast.addList(params),
+        paramCount: params.len(),
+        results: p.ast.addList(results),
+        resultCount: results.len(),
+        body: body,
+        isLit: true,
+    })
+    x.lit = p.ast.fns.len() - 1
+    return p.addExpr(x)
 }
 
 fn (Parser p) mut parseMapLit() int {

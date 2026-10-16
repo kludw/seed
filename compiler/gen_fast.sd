@@ -71,7 +71,7 @@ fn (Gen g) mut findFastFns() {
 // int or bool parameters (at least one) and an int or bool result.
 fn (Gen g) fastSignature(int f) bool {
     FnDecl fd = g.c.ast.fns[f]
-    if (fd.body < 0 || fd.isMethod || fd.isTest || fd.resultCount != 1 || fd.paramCount == 0) {
+    if (fd.body < 0 || fd.isMethod || fd.isTest || fd.isLit || fd.resultCount != 1 || fd.paramCount == 0) {
         return false
     }
     int r = g.c.fnRet[f]
@@ -217,7 +217,7 @@ fn (Gen g) mut fastExprOk(int e) bool {
         return false
     case ExprKind.Try, ExprKind.ListLit, ExprKind.MapLit, ExprKind.Entry, ExprKind.StructLit, ExprKind.FieldInit, ExprKind.ChanMake:
         return false
-    case ExprKind.Group:
+    case ExprKind.Group, ExprKind.FnLit, ExprKind.Is:
         return false
     }
 }
@@ -512,7 +512,7 @@ fn (Gen g) mut fastExpr(int e) string {
         return "0"
     case ExprKind.Try, ExprKind.ListLit, ExprKind.MapLit, ExprKind.Entry, ExprKind.StructLit, ExprKind.FieldInit, ExprKind.ChanMake:
         return "0"
-    case ExprKind.Group:
+    case ExprKind.Group, ExprKind.FnLit, ExprKind.Is:
         return "0"
     }
 }

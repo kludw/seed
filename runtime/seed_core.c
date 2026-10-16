@@ -374,6 +374,9 @@ const sd_type sd_type_err = {.name = "error", .size = sizeof(sd_err), .kind = SD
 const sd_type sd_type_opt_float = {.name = "float?", .size = sizeof(sd_opt_float), .kind = SD_K_OPT_FLOAT, .trivial = true};
 const sd_type sd_type_opt_bool = {.name = "bool?", .size = sizeof(sd_opt_bool), .kind = SD_K_OPT_BOOL, .trivial = true};
 const sd_type sd_type_opt_byte = {.name = "byte?", .size = sizeof(sd_opt_byte), .kind = SD_K_OPT_BYTE, .trivial = true};
+static const sd_field sd_fnval_fields[] = {SD_FIELD(sd_fnval, code, &sd_type_fn)};
+static const char *const sd_fnval_names[] = {"code"};
+const sd_type sd_type_fnval = SD_STRUCT_TYPE_TRIVIAL_SHOW("fn", sd_fnval, sd_fnval_fields, "fn", sd_fnval_names);
 
 /* ------------------------------------------------------ generic dispatch */
 

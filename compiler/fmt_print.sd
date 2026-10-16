@@ -328,7 +328,7 @@ fn isKeyword(Tok k) bool {
         k == Tok.KwCase || k == Tok.KwDefault || k == Tok.KwBreak || k == Tok.KwContinue ||
         k == Tok.KwReturn || k == Tok.KwDefer || k == Tok.KwTry || k == Tok.KwNull || k == Tok.KwTrue ||
         k == Tok.KwFalse || k == Tok.KwMut || k == Tok.KwTest || k == Tok.KwAssert || k == Tok.KwSelect ||
-        k == Tok.KwSpawn || k == Tok.KwGroup || k == Tok.KwChan || k == Tok.KwMap
+        k == Tok.KwSpawn || k == Tok.KwGroup || k == Tok.KwChan || k == Tok.KwMap || k == Tok.KwIs
 }
 
 // Whether a space separates the token at b from the token at a before it

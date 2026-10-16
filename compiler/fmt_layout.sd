@@ -290,6 +290,7 @@ fn (Formatter f) mut computeRoles() {
                 f.markFnDecl(i)
             } else if (f.kindAt(i + 1) == Tok.LParen) {
                 f.markParams(i + 1)
+                f.markLitBody(i)
             }
         }
         if (fmtOpener(k)) {
@@ -344,6 +345,60 @@ fn (Formatter f) mut markFnDecl(int i) {
     if (f.kindAt(body) == Tok.LBrace) {
         f.brace[body] = FmtBrace.Block
     }
+}
+
+// A function literal whose `fn` is at i: its body is a block. A `fn` after
+// `]` or `chan` is the element type of a list, map or channel literal
+// ([]fn(int) int{f, g}), whose `{` is the literal's.
+fn (Formatter f) mut markLitBody(int i) {
+    Tok before = f.kindAt(i - 1)
+    if (before == Tok.RBrack || before == Tok.KwChan) {
+        return
+    }
+    int close = f.match[i + 1]
+    if (close < 0) {
+        return
+    }
+    int j = f.skipResult(close + 1)
+    if (j >= 0 && f.kindAt(j) == Tok.LBrace) {
+        f.brace[j] = FmtBrace.Block
+    }
+}
+
+// The index after the result type of a function (type or literal) whose
+// parameters end just before i: i itself when there is none, or -1.
+fn (Formatter f) skipResult(int i) int {
+    Tok k = f.kindAt(i)
+    if (k == Tok.LParen) {
+        if (f.match[i] < 0) {
+            return -1
+        }
+        int j = f.match[i] + 1
+        if (f.kindAt(j) == Tok.Question) {
+            j++
+        }
+        return j
+    }
+    if (k == Tok.Ident || k == Tok.LBrack || k == Tok.KwMap || k == Tok.KwChan || k == Tok.KwFn) {
+        return f.skipFullType(i)
+    }
+    return i
+}
+
+// The index after the type that starts at i (a function type with its
+// result, and a ?), or -1.
+fn (Formatter f) skipFullType(int i) int {
+    if (f.kindAt(i) == Tok.KwFn) {
+        if (f.kindAt(i + 1) != Tok.LParen || f.match[i + 1] < 0) {
+            return -1
+        }
+        return f.skipResult(f.match[i + 1] + 1)
+    }
+    int j = f.skipBaseType(i)
+    if (j >= 0 && f.kindAt(j) == Tok.Question) {
+        j++
+    }
+    return j
 }
 
 // The method signatures of an interface whose body opens at open.

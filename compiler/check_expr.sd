@@ -216,6 +216,11 @@ fn (Checker c) mut requireMutable(int e, string what) {
         c.errorHint(pos, "cannot " + what + " " + target + ": a parameter can be assigned a new value, but not changed in place", "copy it into a local variable and change that; return the new value if the caller needs it")
     } else if (v.kind == VarKind.LocalConst) {
         c.error(pos, "cannot " + what + " the constant " + v.name)
+    } else if (v.kind == VarKind.Capture) {
+        // A function literal has its own copy of the variables it uses
+        // from around it, taken when it was evaluated: changing the copy
+        // would change nothing outside, so it is read-only.
+        c.errorHint(pos, "cannot " + what + " " + target + ": " + v.name + " is captured by the function literal, which has a read-only copy of its value", "declare a local copy inside the literal (" + c.typeName(v.ty) + " " + v.name + "Copy = " + v.name + ") and change that, or return the new value")
     }
 }
 
@@ -225,7 +230,7 @@ fn (Checker c) mut checkLvalue(int e) {
     Pos pos = x.pos
     switch (x.kind) {
     case ExprKind.Ident:
-        int v = c.lookupVar(x.text)
+        int v = c.useVar(c.lookupVar(x.text), pos)
         if (v < 0) {
             int? g = c.global(c.pkgOf(pos), x.text)
             if (g != null && c.globalList[g].kind == GlobalKind.Const) {
@@ -306,7 +311,7 @@ fn (Checker c) mut checkLvalue(int e) {
     case ExprKind.Call, ExprKind.Unary, ExprKind.Binary, ExprKind.Try, ExprKind.ListLit, ExprKind.MapLit, ExprKind.Entry:
         c.error(pos, "cannot assign to this expression")
         return
-    case ExprKind.StructLit, ExprKind.FieldInit, ExprKind.ChanMake, ExprKind.Group:
+    case ExprKind.StructLit, ExprKind.FieldInit, ExprKind.ChanMake, ExprKind.Group, ExprKind.FnLit, ExprKind.Is:
         c.error(pos, "cannot assign to this expression")
         return
     }
@@ -415,6 +420,163 @@ fn (Checker c) mut checkExpr(int e) {
         c.setType(e, c.types.chanOf(ct))
     case ExprKind.Group:
         c.checkGroup(e)
+    case ExprKind.FnLit:
+        c.checkFnLit(e)
+    case ExprKind.Is:
+        c.checkIs(e)
+    }
+}
+
+// A function literal: its body is checked here, with the variables around
+// it in scope; those it uses become its captures (captureIn), made when it
+// starts so that they have the narrowings of this point. Inside, the body
+// is a function of its own: return and try are the literal's, and break,
+// continue and spawn need a loop or a group inside it.
+fn (Checker c) mut checkFnLit(int e) {
+    Expr x = c.ast.exprs[e]
+    int f = x.lit
+    if (c.litDone[f] != null) {
+        c.setType(e, c.fnType(f))
+        return
+    }
+    c.litDone[f] = true
+    FnDecl fd = c.ast.fns[f]
+    c.fnOuter[f] = c.curFn
+    c.fnCName[f] = c.litCName(f)
+    int savedFn = c.curFn
+    int savedLoop = c.loopDepth
+    int savedGroups = c.groupDepth
+    int savedGroupLoop = c.groupLoop
+    int savedAllow = c.allowGroup
+    int savedPass = c.passExpr
+    string savedPassKey = c.passErrKey
+    []Narrow savedNarrows = c.narrows
+    []Guard savedGuards = c.guards
+    []Guard savedBreak = c.breakGuards
+    []int savedBreakMarks = c.breakMarks
+    []Guard savedCont = c.contGuards
+    []int savedContMarks = c.contMarks
+    []int savedLoopScopes = c.loopScopes
+    []Guard savedCase = c.caseGuards
+    []DeferWatch savedWatch = c.deferWatch
+    c.curFn = f
+    c.loopDepth = 0
+    c.groupDepth = 0
+    c.groupLoop = -1
+    c.allowGroup = -1
+    c.passExpr = -1
+    c.passErrKey = ""
+    c.breakGuards = []Guard{}
+    c.breakMarks = []int{}
+    c.contGuards = []Guard{}
+    c.contMarks = []int{}
+    c.loopScopes = []int{}
+    c.caseGuards = []Guard{}
+    c.deferWatch = []DeferWatch{}
+    int firstVar = c.vars.len()
+    c.litStack.push(f)
+    c.pushScope()
+    map[string]Pos names = c.namesInBlock(fd.body, map[string]Pos{})
+    []string keys = names.keys()
+    for (int k = 0; k < keys.len(); k++) {
+        int v = c.lookupVar(keys[k])
+        Pos? at = names[keys[k]]
+        if (v >= 0 && at != null) {
+            _ = c.useVar(v, at)
+        }
+    }
+    for (int i = 0; i < fd.paramCount; i++) {
+        int pi = c.ast.at(fd.params, i)
+        Param p = c.ast.params[pi]
+        c.paramVar[pi] = c.declare(p.name, c.teType[p.typeExpr], VarKind.Param, p.pos)
+    }
+    c.checkBlock(fd.body)
+    if (fd.resultCount > 0 && !c.blockExits(fd.body)) {
+        c.errorHint(c.ast.blocks[fd.body].end, "missing return at the end of the function literal", "every path through a function with results must end in return")
+    }
+    c.popScope()
+    _ = c.litStack.pop()
+    c.checkUnusedVars(firstVar)
+    for (int u = firstVar; u < c.vars.len(); u++) {
+        c.vars[u].used = true
+    }
+    c.curFn = savedFn
+    c.loopDepth = savedLoop
+    c.groupDepth = savedGroups
+    c.groupLoop = savedGroupLoop
+    c.allowGroup = savedAllow
+    c.passExpr = savedPass
+    c.passErrKey = savedPassKey
+    c.narrows = savedNarrows
+    c.guards = savedGuards
+    c.breakGuards = savedBreak
+    c.breakMarks = savedBreakMarks
+    c.contGuards = savedCont
+    c.contMarks = savedContMarks
+    c.loopScopes = savedLoopScopes
+    c.caseGuards = savedCase
+    c.deferWatch = savedWatch
+    c.setType(e, c.fnType(f))
+}
+
+// The C name of function literal f, from the function it is in and its
+// position there (so that it does not depend on the rest of the program):
+// sd_cl_f_main_12_9, sd_cl_m_Cart__add_3_14, and for a literal in a
+// literal, the outer one's name and the position.
+fn (Checker c) litCName(int f) string {
+    FnDecl fd = c.ast.fns[f]
+    string at = "_" + fd.pos.line.string() + "_" + fd.pos.col.string()
+    int outer = c.fnOuter[f]
+    if (outer < 0) {
+        // In a constant or a default value.
+        return "sd_cl_" + c.ast.pkgs[c.fnPkg(f)].cprefix + "c" + at
+    }
+    string on = c.fnCName[outer]
+    if (on.startsWith("sd_cl_")) {
+        return on + at
+    }
+    return "sd_cl_" + on.slice(3, on.len()) + at
+}
+
+// v is Type.Case: whether the enum value v (or E?, false when null) holds
+// that case, whatever its data. The case is written as in a pattern,
+// without data or bindings.
+fn (Checker c) mut checkIs(int e) {
+    Expr x = c.ast.exprs[e]
+    c.setType(e, tyBool)
+    c.checkExpr(x.a)
+    Expr cx = c.ast.exprs[x.b]
+    int d = -1
+    if (cx.kind == ExprKind.Field) {
+        d = c.typeNamed(cx.a)
+    }
+    if (d < 0 || c.ast.typeDecls[d].kind != DeclKind.Enum) {
+        string hint = "write the case with its type, as in a switch: v is Shape.Circle"
+        if (cx.kind == ExprKind.Call) {
+            hint = "is tests the case only; leave out the data (v is " + c.ast.exprText(cx.a) + "), and use a switch to read it"
+        }
+        c.errorHint(cx.pos, "is needs an enum case after it, such as Shape.Circle", hint)
+        return
+    }
+    int ci = c.findCase(d, cx.text)
+    if (ci < 0) {
+        c.unknownCase(cx.pos, d, cx.text)
+        return
+    }
+    c.info[x.b].res = Res.EnumVal
+    c.info[x.b].ref = d
+    c.info[x.b].sub = ci
+    c.setType(x.b, c.declType[d])
+    if (!c.isValue(x.a)) {
+        return
+    }
+    int t = c.typeOf(x.a)
+    int et = t
+    if (c.types.isOpt(t)) {
+        et = c.types.elem(t)
+    }
+    if (et != c.declType[d]) {
+        c.errorHint(x.pos, "is compares " + c.describe(x.a) + " (type " + c.typeName(t) + ") with a case of " + c.declDisplayName(d), "the value must be a " + c.declDisplayName(d) + " (or " + c.declDisplayName(d) + "?)")
     }
 }
 
@@ -463,7 +625,7 @@ fn (Checker c) mut checkIdent(int e) {
         c.setType(e, tyInvalid)
         return
     }
-    int v = c.lookupVar(n)
+    int v = c.useVar(c.lookupVar(n), x.pos)
     if (v >= 0) {
         c.info[e].res = Res.Local
         c.info[e].ref = v

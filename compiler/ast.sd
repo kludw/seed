@@ -31,6 +31,8 @@ type ExprKind enum {
     FieldInit
     ChanMake
     Group
+    FnLit
+    Is
 }
 
 // An expression. Which fields are used depends on the kind:
@@ -54,6 +56,9 @@ type ExprKind enum {
 //   FieldInit   text (field name), a (value)
 //   ChanMake    typeExpr (element type), a (buffer size)
 //   Group       block
+//   FnLit       lit (the literal's FnDecl, with isLit set)
+//   Is          a (the value), b (the case: Type.Case or pkg.Type.Case, a
+//               Field expression)
 type Expr struct {
     ExprKind kind
     Pos pos
@@ -68,6 +73,7 @@ type Expr struct {
     int typeExpr
     int typeExpr2
     int block
+    int lit
     int intValue
     bool neg
     bool paren
@@ -147,13 +153,15 @@ type Block struct {
     int count
 }
 
-// A `case` or `default` clause of a switch or select.
+// A `case` or `default` clause of a switch or select. A select case may
+// have a guard (`case ch.send(v) if (cond):`, -1 when it has none).
 type Case struct {
     Pos pos
     bool isDefault
     int labels
     int labelCount
     int comm
+    int guard
     int body
 }
 
@@ -221,7 +229,11 @@ type Param struct {
 // A function or method. body is -1 for a native function (declared
 // without a body). A test block is also recorded as a FnDecl with isTest
 // set (no parameters, result error, name = the description), so that the
-// checker and the generator treat its body like a function's.
+// checker and the generator treat its body like a function's. A function
+// literal (`fn(int x) int { ... }` in an expression) is a FnDecl too, with
+// isLit set, an empty name, and no place in Ast.tops: the checker checks
+// its body where the expression is, and the generator makes it a C
+// function of its own.
 type FnDecl struct {
     Pos pos
     Pos start
@@ -239,6 +251,7 @@ type FnDecl struct {
     int results
     int resultCount
     int body
+    bool isLit
 }
 
 type DeclKind enum {
@@ -415,6 +428,7 @@ fn newExpr(ExprKind kind, Pos pos) Expr {
         typeExpr: -1,
         typeExpr2: -1,
         block: -1,
+        lit: -1,
         intValue: 0,
         neg: false,
         paren: false,
@@ -531,7 +545,7 @@ fn (Ast a) exprText(int e) string {
         return ""
     case ExprKind.ChanMake:
         return "chan " + a.typeExprText(x.typeExpr) + "(...)"
-    case ExprKind.Entry, ExprKind.FieldInit, ExprKind.Group:
+    case ExprKind.Entry, ExprKind.FieldInit, ExprKind.Group, ExprKind.Is, ExprKind.FnLit:
         return ""
     }
 }

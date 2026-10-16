@@ -447,6 +447,9 @@ fn (Checker c) exprReads(int e, int v) bool {
     if (x.kind == ExprKind.Group) {
         return c.blockReads(x.block, v)
     }
+    if (x.kind == ExprKind.FnLit) {
+        return c.litReads(x.lit, v)
+    }
     if (c.exprReads(x.a, v) || c.exprReads(x.b, v)) {
         return true
     }
@@ -531,12 +534,12 @@ fn (Checker c) mut checkReturn(Stmt st) {
     bool hasErr = n > 0 && c.resultType(c.curFn, n - 1) == tyError
     if (st.count == 0) {
         if (n > 0) {
-            c.error(st.pos, "missing return value: " + fd.name + " returns " + c.typeName(ret))
+            c.error(st.pos, "missing return value: " + c.fnLabel(c.curFn) + " returns " + c.typeName(ret))
         }
         return
     }
     if (n == 0) {
-        c.errorHint(st.pos, fd.name + " does not return a value", "write return on its own, or declare a result type")
+        c.errorHint(st.pos, c.fnLabel(c.curFn) + " does not return a value", "write return on its own, or declare a result type")
         for (int i = 0; i < st.count; i++) {
             c.checkExpr(c.ast.at(st.list, i))
         }
@@ -550,7 +553,7 @@ fn (Checker c) mut checkReturn(Stmt st) {
         c.checkExpr(only)
         int ot = c.typeOf(only)
         if (ot != tyInvalid && ot != ret) {
-            c.error(st.pos, fd.name + " returns " + n.string() + " values " + c.typeName(ret) + ", but this returns " + c.typeName(ot))
+            c.error(st.pos, c.fnLabel(c.curFn) + " returns " + n.string() + " values " + c.typeName(ret) + ", but this returns " + c.typeName(ot))
         }
         return
     }
@@ -559,7 +562,7 @@ fn (Checker c) mut checkReturn(Stmt st) {
         if (n == 1) {
             s = ""
         }
-        c.error(st.pos, fd.name + " returns " + n.string() + " value" + s + " but this returns " + st.count.string())
+        c.error(st.pos, c.fnLabel(c.curFn) + " returns " + n.string() + " value" + s + " but this returns " + st.count.string())
         for (int j = 0; j < st.count; j++) {
             c.checkExpr(c.ast.at(st.list, j))
         }
@@ -579,7 +582,7 @@ fn (Checker c) mut checkReturn(Stmt st) {
             // came: when err is not null, v is null and so is the result.
             // Only into a slot of v's own type: widened to a T?, a null v
             // would become a value the caller can read.
-            int pv = c.lookupVar(c.ast.exprs[e].text)
+            int pv = c.useVar(c.lookupVar(c.ast.exprs[e].text), c.ast.exprs[e].pos)
             if (pv >= 0 && c.vars[pv].ty == rt) {
                 c.passExpr = e
                 c.passErrKey = lastKey
@@ -593,7 +596,7 @@ fn (Checker c) mut checkReturn(Stmt st) {
             // function returns; see genReturn).
             c.setType(e, rt)
             if (errIsNull) {
-                c.errorHint(c.ast.exprs[e].pos, fd.name + " returns null as its " + c.typeName(rt) + " result beside an error that is null, so the caller would read a null " + c.typeName(rt), "return " + withArticle(c.typeName(rt)) + " value, or return an error such as errors.new(...)")
+                c.errorHint(c.ast.exprs[e].pos, c.fnLabel(c.curFn) + " returns null as its " + c.typeName(rt) + " result beside an error that is null, so the caller would read a null " + c.typeName(rt), "return " + withArticle(c.typeName(rt)) + " value, or return an error such as errors.new(...)")
             }
             continue
         }
@@ -1139,6 +1142,13 @@ fn (Checker c) mut checkSelect(Stmt st) {
     for (int i = 0; i < st.count; i++) {
         Case cs = c.ast.cases[c.ast.at(st.list, i)]
         c.pushScope()
+        if (cs.guard >= 0) {
+            // case ... if (cond): the guard is evaluated first; the case's
+            // channel and value, and its body, see what it established.
+            c.checkValue(cs.guard, tyBool, "as the guard of the select case")
+            c.narrowOn(cs.guard, true)
+            c.latchGuards(cs.guard, true)
+        }
         c.checkSelectComm(cs.comm)
         c.checkBlock(cs.body)
         c.popScope()

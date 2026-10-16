@@ -406,6 +406,9 @@ fn (Gen g) mentionsVar(int e, int v) bool {
     if (x.kind == ExprKind.Ident && g.c.info[e].res == Res.Local && g.c.info[e].ref == v) {
         return true
     }
+    if (x.kind == ExprKind.FnLit) {
+        return g.c.litReads(x.lit, v)
+    }
     if (g.mentionsVar(x.a, v) || g.mentionsVar(x.b, v)) {
         return true
     }

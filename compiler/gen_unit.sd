@@ -54,6 +54,7 @@ fn (Gen g) mut genUnit(int p, string natives) string {
     g.helpers = []string{}
     g.protos = []string{}
     g.queue = []HelperReq{}
+    g.fnValues = map[int]bool{}
     g.ndefer = 0
     g.nspawn = 0
     g.sites = []string{}

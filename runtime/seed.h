@@ -741,6 +741,21 @@ struct sd_box {
   static struct { sd_box h; CTYPE v; } NAME = {{SD_RC_IMMORTAL, TYPE}, __VA_ARGS__}
 #define SD_BOX_REF(NAME) (&(NAME).h)
 
+/* Function values (fn(A) R): a box whose payload starts with the code
+ * pointer, followed by the values a function literal captured (its
+ * environment, described by a struct descriptor of the generated code). The
+ * code takes a pointer to the payload first, then the parameters:
+ * R code(const void *env, A a). A named function used as a value is an
+ * immortal box with only the code (SD_FN_STATIC, whose code calls the
+ * function), so it never allocates. Calling v:
+ * ((R (*)(const void *, A))SD_FN_CODE(v))(SD_FN_ENV(v), a). */
+typedef void (*sd_code)(void);
+typedef struct { sd_code code; } sd_fnval;
+extern const sd_type sd_type_fnval;
+#define SD_FN_CODE(b) (((const sd_fnval *)sd_box_data(b))->code)
+#define SD_FN_ENV(b) ((const void *)sd_box_data(b))
+#define SD_FN_STATIC(NAME, CODE) SD_BOX_STATIC(NAME, &sd_type_fnval, sd_fnval, {(sd_code)(CODE)})
+
 void sd_box_free_(sd_box *b);
 SD_INLINE sd_box *sd_box_retain(sd_box *b) {
   if (b && b->rc > 0) b->rc++;

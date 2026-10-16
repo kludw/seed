@@ -526,22 +526,27 @@ fn (Gen g) mut toIface(int t, int iface, string v) string {
     return g.temp(iface, "sd_iface_new(&" + g.vtableOf(t, iface) + ".hdr, " + g.desc(t) + ", &" + a + ")")
 }
 
-fn (Gen g) varValue(int e) string {
+fn (Gen g) mut varValue(int e) string {
     ExprInfo i = g.c.info[e]
     if (i.res == Res.Const) {
         return g.constCName(i.ref) + "()"
     }
     if (i.res == Res.Func) {
-        return g.c.fnCName[i.ref]
+        return g.namedFnValue(i.ref)
     }
-    Var v = g.c.vars[i.ref]
-    if (v.kind == VarKind.MutRecv) {
-        return "(*l_" + v.name + ")"
+    return g.varRead(i.ref)
+}
+
+// The C value of local variable v (borrowed).
+fn (Gen g) varRead(int v) string {
+    Var x = g.c.vars[v]
+    if (x.kind == VarKind.MutRecv) {
+        return "(*l_" + x.name + ")"
     }
-    if (g.isUnboxed(i.ref)) {
-        return "SD_INT_S(l_" + v.name + ")"
+    if (g.isUnboxed(v)) {
+        return "SD_INT_S(l_" + x.name + ")"
     }
-    return g.lname(i.ref)
+    return g.lname(v)
 }
 
 // The C name of local variable v: a field of the frame (see genFn), or
@@ -667,6 +672,10 @@ fn (Gen g) mut gcore(int e) string {
         return g.temp(g.coreType(e), "sd_chan_new(" + g.desc(g.elemOf(g.coreType(e))) + ", " + size + ")")
     case ExprKind.Group:
         return g.ggroup(e)
+    case ExprKind.FnLit:
+        return g.genFnLit(e)
+    case ExprKind.Is:
+        return g.genIs(e)
     case ExprKind.Bad, ExprKind.Entry, ExprKind.FieldInit:
         return "/* internal error: expression */"
     }
@@ -861,6 +870,23 @@ fn (Gen g) mut genumIs(int e) string {
         return "(!" + c + ")"
     }
     return c
+}
+
+// v is E.Case: a test of the tag (false for a null E?).
+fn (Gen g) mut genIs(int e) string {
+    Expr x = g.c.ast.exprs[e]
+    ExprInfo ci = g.c.info[x.b]
+    int t = g.typeOf(x.a)
+    int et = t
+    if (g.c.types.isOpt(t)) {
+        et = g.elemOf(t)
+    }
+    string v = g.gexpr(x.a)
+    string c = "SD_BOX_GET(" + v + ", sd_E_" + g.declName(et) + ").tag == " + ci.sub.string()
+    if (g.c.types.isOpt(t)) {
+        return "(" + v + " != NULL && " + c + ")"
+    }
+    return "(" + c + ")"
 }
 
 // The operator op (not &&, || or string +) on two evaluated operands of

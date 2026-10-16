@@ -273,7 +273,7 @@ fn (Gen g) rangeIn(int e, map[int]IntRange vars) IntRange {
         return topRange()
     case ExprKind.Index, ExprKind.Try, ExprKind.ListLit, ExprKind.MapLit, ExprKind.Entry, ExprKind.StructLit, ExprKind.FieldInit:
         return topRange()
-    case ExprKind.ChanMake, ExprKind.Group:
+    case ExprKind.ChanMake, ExprKind.Group, ExprKind.FnLit, ExprKind.Is:
         return topRange()
     }
 }

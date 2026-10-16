@@ -128,6 +128,7 @@ fn (Parser p) mut parseFn(bool isPub, Pos start) {
         results: 0,
         resultCount: 0,
         body: -1,
+        isLit: false,
     }
     if (p.accept(Tok.LParen)) {
         f.isMethod = true
@@ -432,6 +433,7 @@ fn (Parser p) mut parseTest() {
         results: p.ast.addList([]int{result}),
         resultCount: 1,
         body: body,
+        isLit: false,
     })
 }
 

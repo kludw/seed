@@ -43,6 +43,7 @@ type Tok enum {
     KwGroup
     KwChan
     KwMap
+    KwIs
     Plus
     Minus
     Star
@@ -160,6 +161,8 @@ fn (Tok k) text() string {
         return "chan"
     case Tok.KwMap:
         return "map"
+    case Tok.KwIs:
+        return "is"
     case Tok.Plus:
         return "+"
     case Tok.Minus:
@@ -262,6 +265,7 @@ const map[string]Tok keywords = map[string]Tok{
     "group": Tok.KwGroup,
     "chan": Tok.KwChan,
     "map": Tok.KwMap,
+    "is": Tok.KwIs,
 }
 
 // A token. For identifiers text is the name, for string and byte literals
