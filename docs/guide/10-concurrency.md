@@ -138,6 +138,55 @@ On a `chan error` the received error must be handled like any other: `case error
 
 When several cases are ready, any one of them may run. There is no `default` case: `select` always waits. To wait with a limit, add a timer channel as one more case (see [timeouts](#timeouts)).
 
+A case can have a *guard*, a condition after the operation: the case takes part only when the condition is true. A coordinator that hands out jobs from a queue sends only while there is a job:
+
+```seed
+// A select case with a guard takes part only when its condition holds:
+// jobs are sent only while the queue has one.
+package main
+
+import "fmt"
+
+fn square(chan int jobs, chan int results) error {
+    for (int? j = jobs.receive(); j != null; j = jobs.receive()) {
+        results.send(j * j)
+    }
+    return null
+}
+
+fn main([]string args) error {
+    chan int jobs = chan int(0)
+    chan int results = chan int(0)
+    []int queue = []int{1, 2, 3, 4}
+    int pending = queue.len()
+    int sum = 0
+    try group {
+        spawn square(jobs, results)
+        spawn square(jobs, results)
+        for (; pending > 0; ) {
+            select {
+            case jobs.send(queue[0]) if (queue.len() > 0):
+                queue.remove(0)
+            case int? r = results.receive():
+                if (r != null) {
+                    sum = sum + r
+                }
+                pending--
+            }
+        }
+        jobs.close()
+    }
+    fmt.println("sum of squares: " + sum.string())
+    return null
+}
+```
+
+```
+sum of squares: 30
+```
+
+The guard is evaluated first, and the case's channel and value only when it is true, so `queue[0]` is never read from an empty queue; the guard also narrows like an `if` (`case out.send(next) if (next != null):` sends a plain `int`). The guards and operations are evaluated case by case, in order, before `select` waits. If every case is disabled, the `select` could never go on, so it crashes with `select: every case is disabled` rather than wait forever.
+
 ## When a goroutine fails
 
 A goroutine fails when it returns an error or crashes. Then:
@@ -540,6 +589,7 @@ Only the signals you name are caught, and they stay caught for the rest of the p
 | `context.Context` for cancellation | The group stops its goroutines at stop points |
 | `v, ok := <-ch` | `T? v = ch.receive()` |
 | `select` with `default` | No `default`; use a timer channel |
+| A `nil` channel to disable a `select` case | A guard: `case ch.send(v) if (cond):` |
 | `signal.Notify(c, os.Interrupt)` | `chan os.Signal c = os.signals([]os.Signal{os.Signal.Interrupt})` |
 
 Next: [Packages and visibility](11-packages.md).

@@ -115,6 +115,19 @@ Every enum has a built-in method `name()`, which returns the name of the value's
 
 Because `name()` is built in, an enum can't declare a method of its own called `name` (the compiler says so and suggests another name). It does count for `implements`: an enum satisfies an interface that asks for `name() string`, as `Blob` does in [chapter 9](09-interfaces-and-functions.md#interfaces).
 
+### Testing for one case: is
+
+When only one case matters, `v is Type.Case` says whether `v` holds it, whatever its data, without a `switch` over every case:
+
+```seed
+if (v is Value.Closure || v is Value.Prim) {
+    return "procedure"
+}
+bool empty = token is Token.Eof
+```
+
+The case is written as in a pattern, with its type and without data or bindings: `v is Shape.Circle`, never `v is Shape.Circle(...)`. To read the data, use a `switch`. On a nullable enum (`Shape? s`), `s is Shape.Circle` is false when `s` is null, and where it is true, `s` is known not to be null. Unlike `v.name() == "Circle"`, the compiler checks the case's name, and finds every `is` when a case is renamed.
+
 ### Exhaustive, with no default
 
 A switch over an enum must list every case, and it may not have `default`. This is deliberate: when you add `Shape.Triangle` later, every switch that doesn't handle it stops compiling, and the compiler lists them for you:

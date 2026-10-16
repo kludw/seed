@@ -1,0 +1,13 @@
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    int count = 0
+    fn() next = fn() {
+        count = count + 1
+    }
+    next()
+    fmt.println(count.string())
+    return null
+}

@@ -1,0 +1,79 @@
+package main
+
+import "fmt"
+import "regex"
+
+type Person struct {
+    string name
+    int age
+}
+
+// Returns a function that remembers min: a copy of it, taken now.
+fn olderThan(int min) fn(Person) bool {
+    return fn(Person p) bool {
+        return p.age > min
+    }
+}
+
+fn filter([]Person people, fn(Person) bool keep) []Person {
+    []Person out = []Person{}
+    for (int i = 0; i < people.len(); i++) {
+        if (keep(people[i])) {
+            out.push(people[i])
+        }
+    }
+    return out
+}
+
+fn names([]Person people) string {
+    []string out = []string{}
+    for (int i = 0; i < people.len(); i++) {
+        out.push(people[i].name)
+    }
+    return out.join(" ")
+}
+
+fn main([]string args) error {
+    []Person people = []Person{
+        Person{name: "Cy", age: 25},
+        Person{name: "Ann", age: 29},
+        Person{name: "Bo", age: 35},
+    }
+
+    // A comparator that needs a value from around it.
+    string first = "Bo"
+    people.sortBy(fn(Person a, Person b) bool {
+        if (a.name == first || b.name == first) {
+            return a.name == first
+        }
+        return a.name < b.name
+    })
+    fmt.println(names(people))
+
+    fmt.println(names(filter(people, olderThan(26))))
+
+    // Each evaluation captures the values of that moment.
+    []fn() string greeters = []fn() string{}
+    for (int i = 0; i < people.len(); i++) {
+        string name = people[i].name
+        greeters.push(fn() string {
+            return "hi " + name + " (" + i.string() + ")"
+        })
+    }
+    for (int j = 0; j < greeters.len(); j++) {
+        fmt.println(greeters[j]())
+    }
+
+    // State for regex.replaceWith: a map captured by the literal.
+    map[string]string vars = map[string]string{"name": "Ann", "city": "Oslo"}
+    regex.Regex re = regex.mustCompile("\\{([a-z]+)\\}")
+    string text = re.replaceWith("{name} lives in {city}, {country}", fn(regex.Match m) string {
+        string? key = m.groupText(1)
+        if (key == null) {
+            return ""
+        }
+        return vars.getOr(key, "?")
+    })
+    fmt.println(text)
+    return null
+}

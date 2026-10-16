@@ -305,10 +305,149 @@ fn byCountThenWord(WordCount a, WordCount b) bool {
 }
 ```
 
-### No closures
+## Function literals
 
-There are no anonymous functions and no closures. A function value is always a named, top-level function, so it never carries hidden state: what it does depends only on its arguments. When a function needs extra data, pass it in explicitly, or use an interface whose implementing struct carries the data in its fields.
+A *function literal* is a function written where a value is needed: `fn`, the parameters, the results and a body, like a declaration without a name. Its type comes from its parameters and results: `fn(Person a, Person b) bool { ... }` is a `fn(Person, Person) bool`.
 
-Function values can't be compared with `==`.
+```seed
+people.sortBy(fn(Person a, Person b) bool {
+    return a.age > b.age
+})
+```
+
+The body goes on lines of its own, like every block, and a literal that is the last argument of a call closes with `})`.
+
+A literal can use the variables around it. It **captures them by value**: when the literal is evaluated, it takes a copy of the value each variable has at that moment (cheap, because values are copy-on-write), and from then on the literal and the variable are independent. This is what makes literals useful for the callbacks that need some data: a comparator that depends on a parameter, a filter, the function given to `regex.replaceWith`.
+
+```seed
+package main
+
+import "fmt"
+import "regex"
+
+type Person struct {
+    string name
+    int age
+}
+
+// Returns a function that remembers min: a copy of it, taken now.
+fn olderThan(int min) fn(Person) bool {
+    return fn(Person p) bool {
+        return p.age > min
+    }
+}
+
+fn filter([]Person people, fn(Person) bool keep) []Person {
+    []Person out = []Person{}
+    for (int i = 0; i < people.len(); i++) {
+        if (keep(people[i])) {
+            out.push(people[i])
+        }
+    }
+    return out
+}
+
+fn names([]Person people) string {
+    []string out = []string{}
+    for (int i = 0; i < people.len(); i++) {
+        out.push(people[i].name)
+    }
+    return out.join(" ")
+}
+
+fn main([]string args) error {
+    []Person people = []Person{
+        Person{name: "Cy", age: 25},
+        Person{name: "Ann", age: 29},
+        Person{name: "Bo", age: 35},
+    }
+
+    // A comparator that needs a value from around it.
+    string first = "Bo"
+    people.sortBy(fn(Person a, Person b) bool {
+        if (a.name == first || b.name == first) {
+            return a.name == first
+        }
+        return a.name < b.name
+    })
+    fmt.println(names(people))
+
+    fmt.println(names(filter(people, olderThan(26))))
+
+    // Each evaluation captures the values of that moment.
+    []fn() string greeters = []fn() string{}
+    for (int i = 0; i < people.len(); i++) {
+        string name = people[i].name
+        greeters.push(fn() string {
+            return "hi " + name + " (" + i.string() + ")"
+        })
+    }
+    for (int j = 0; j < greeters.len(); j++) {
+        fmt.println(greeters[j]())
+    }
+
+    // State for regex.replaceWith: a map captured by the literal.
+    map[string]string vars = map[string]string{"name": "Ann", "city": "Oslo"}
+    regex.Regex re = regex.mustCompile("\\{([a-z]+)\\}")
+    string text = re.replaceWith("{name} lives in {city}, {country}", fn(regex.Match m) string {
+        string? key = m.groupText(1)
+        if (key == null) {
+            return ""
+        }
+        return vars.getOr(key, "?")
+    })
+    fmt.println(text)
+    return null
+}
+```
+
+```
+Bo Ann Cy
+Bo Ann
+hi Bo (0)
+hi Ann (1)
+hi Cy (2)
+Ann lives in Oslo, ?
+```
+
+`olderThan` returns a literal that keeps its own copy of `min`. The loop makes three literals, and each one has the `name` and `i` of its own iteration, so there is no Go-style surprise where every function sees the last value of the loop variable.
+
+Captured variables are read-only inside the literal. Changing one would change only the literal's copy, which is almost never what was meant, so the compiler rejects it:
+
+```seed
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    int count = 0
+    fn() next = fn() {
+        count = count + 1
+    }
+    next()
+    fmt.println(count.string())
+    return null
+}
+```
+
+```
+09_closure_counter.sd:8:9: error: cannot assign to count: count is captured by the function literal, which has a read-only copy of its value
+    8 |         count = count + 1
+      |         ^
+    hint: declare a local copy inside the literal (int countCopy = count) and change that, or return the new value
+```
+
+A function value therefore never shares mutable state with anything: calling it twice with the same arguments does the same thing, and goroutines stay share-nothing. For a counter, keep the count in a variable and let the function return the new value (`count = next(count)`), or keep it in a struct with a `mut` method.
+
+The rest follows from a literal being an ordinary function:
+
+- Its parameters and locals follow the usual rules: no shadowing of the variables around it, no unused locals.
+- `return` and `try` belong to the literal (`try` needs the literal's own last result to be `error`); `break` and `continue` need a loop inside the literal, and `spawn` a `group` inside it. A `defer` in a literal runs when the literal returns.
+- What the compiler knew about a captured variable where the literal was evaluated still holds: a `T?` checked against `null` before the literal is a `T` inside it.
+- A literal can't call itself through the variable it is assigned to (that variable is declared after its value); recursion goes through a named function.
+- A function value can be sent on a channel, stored anywhere, and passed to `spawn`, which copies it with its captures for the new goroutine: `spawn fn(int id) error { ... }(i)` starts a literal in a goroutine.
+- In a crash's trace, a literal is named after the function it is in and its line: `at sortByRank.<fn at line 16> (rank.sd:18:16)`.
+
+Function values, literals included, can't be compared with `==`.
 
 Next: [Concurrency](10-concurrency.md).

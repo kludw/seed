@@ -89,10 +89,6 @@ fn stringArg(string name, Value v, Pos pos) (string, error) {
     }
 }
 
-fn isKind(Value v, string kind) bool {
-    return v.name() == kind
-}
-
 fn (Interp in) mut builtin(string name, []Value args, Pos pos, int depth) (Value, error) {
     switch (name) {
     case "+", "*":
@@ -208,25 +204,25 @@ fn (Interp in) mut builtin(string name, []Value args, Pos pos, int depth) (Value
         return Value.Bool(args[0] == Value.Nil), null
     case "pair?":
         try count(name, args, 1, pos)
-        return Value.Bool(isKind(args[0], "List")), null
+        return Value.Bool(args[0] is Value.List), null
     case "list?":
         try count(name, args, 1, pos)
         return Value.Bool(listItems(args[0]) != null), null
     case "number?":
         try count(name, args, 1, pos)
-        return Value.Bool(isKind(args[0], "Int")), null
+        return Value.Bool(args[0] is Value.Int), null
     case "string?":
         try count(name, args, 1, pos)
-        return Value.Bool(isKind(args[0], "Str")), null
+        return Value.Bool(args[0] is Value.Str), null
     case "symbol?":
         try count(name, args, 1, pos)
-        return Value.Bool(isKind(args[0], "Sym")), null
+        return Value.Bool(args[0] is Value.Sym), null
     case "boolean?":
         try count(name, args, 1, pos)
-        return Value.Bool(isKind(args[0], "Bool")), null
+        return Value.Bool(args[0] is Value.Bool), null
     case "procedure?":
         try count(name, args, 1, pos)
-        return Value.Bool(isKind(args[0], "Closure") || isKind(args[0], "Prim")), null
+        return Value.Bool(args[0] is Value.Closure || args[0] is Value.Prim), null
     case "display":
         try count(name, args, 1, pos)
         in.write(args[0].display())

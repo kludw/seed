@@ -102,16 +102,13 @@ fn coordinate(string start, Config cfg, chan Job jobs, chan Page results, chan [
     []Page pages = []Page{}
     for (; queue.len() > 0 || pending > 0; ) {
         Page? page = null
-        if (queue.len() == 0) {
-            page = results.receive()
-        } else {
-            select {
-            case jobs.send(queue[0]):
-                queue.remove(0)
-                pending++
-            case Page? p = results.receive():
-                page = p
-            }
+        // The send takes part only while there is a job to send.
+        select {
+        case jobs.send(queue[0]) if (queue.len() > 0):
+            queue.remove(0)
+            pending++
+        case Page? p = results.receive():
+            page = p
         }
         if (page == null) {
             continue

@@ -1,0 +1,4 @@
+09_closure_counter.sd:8:9: error: cannot assign to count: count is captured by the function literal, which has a read-only copy of its value
+    8 |         count = count + 1
+      |         ^
+    hint: declare a local copy inside the literal (int countCopy = count) and change that, or return the new value

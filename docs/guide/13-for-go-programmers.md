@@ -26,8 +26,9 @@ Seed started from Go and kept most of its spirit: a small language, fast to lear
 | `const ( A = iota ... )` | `enum`, whose cases can carry data | Real sum types, checked by the compiler. |
 | Implicit interface satisfaction | `type T struct implements I` | The intent is written down and checked where the type is defined. |
 | Type switches, type assertions | None | Use an enum when the set of kinds matters. |
+| Testing one case of a sum type | `v is Shape.Circle` | No `switch` over every case for a yes/no question. |
 | Generics | Only the built-in generic types (`[]T`, `map[K]V`, `chan T`, `T?`) | Keeps the language small. |
-| Closures and func literals | Named functions as values only; no closures | A function value never carries hidden state. |
+| Closures and func literals | Function literals that capture by value: `fn(int x) int { return x + offset }` | A literal copies the variables it uses when it is evaluated, and can't change them, so closures never share mutable state and a loop variable is captured per iteration. |
 | `if err != nil { return ..., err }` | Same, or `try f()` | Passing an error up is the common case, so it gets the one piece of sugar. |
 | `f()` silently drops a returned error; `v, _ :=` | Every error must be handled; `_` is explicit, and the value becomes `T?` | Errors can't be lost by accident. |
 | `panic`, `recover` | Crashes (exit code 2, or the group's error); no recover | Bugs crash; expected failures are errors. |
@@ -40,6 +41,7 @@ Seed started from Go and kept most of its spirit: a small language, fast to lear
 | `go f()` anywhere | `spawn f()` only inside a `group` | Structured concurrency: goroutines can't leak. |
 | Shared memory, `sync.Mutex`, `WaitGroup`, `errgroup`, `context` | Goroutines share nothing; `group` waits and returns the first error, stopping the others | No data races; failures propagate like in Erlang. |
 | `select` with `default` | `select` always waits; timeouts are channels | One way to wait. |
+| A `nil` channel to disable a `select` case | `case ch.send(v) if (cond):` | The case's channel and value are evaluated only when the guard holds. |
 | `_test.go` files, `func TestX(t *testing.T)` | `<package>/tests/`, `test "description" { ... }`, `assert` | Tests stay out of the package's code, and nothing depends on naming conventions. |
 | `go vet`, linters, warnings | One strict compiler: unused names, shadowing, unreachable code, naming | Everything worth flagging is an error, so nothing gets ignored. |
 | `gofmt` is a separate step | Formatting is part of the language | Unformatted code doesn't compile. |
@@ -60,6 +62,6 @@ Seed started from Go and kept most of its spirit: a small language, fast to lear
 
 ## What you give up, and what you get
 
-You give up some convenience: a few more characters for declarations, no closures for quick callbacks, no type switches, and a little more ceremony around maps and nullable values. In return, a Seed program reads the same no matter who wrote it, a function call can't change your variables behind your back, nothing is `nil` unless its type says so, no error is silently dropped, goroutines can't race or leak, and the compiler tells you about most mistakes before you run anything.
+You give up some convenience: a few more characters for declarations, closures that can't update the variables around them, no type switches, and a little more ceremony around maps and nullable values. In return, a Seed program reads the same no matter who wrote it, a function call can't change your variables behind your back, nothing is `nil` unless its type says so, no error is silently dropped, goroutines can't race or leak, and the compiler tells you about most mistakes before you run anything.
 
 Next: [Crashes and debugging](14-crashes-and-debugging.md).

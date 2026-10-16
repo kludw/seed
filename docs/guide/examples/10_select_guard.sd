@@ -1,0 +1,38 @@
+// A select case with a guard takes part only when its condition holds:
+// jobs are sent only while the queue has one.
+package main
+
+import "fmt"
+
+fn square(chan int jobs, chan int results) error {
+    for (int? j = jobs.receive(); j != null; j = jobs.receive()) {
+        results.send(j * j)
+    }
+    return null
+}
+
+fn main([]string args) error {
+    chan int jobs = chan int(0)
+    chan int results = chan int(0)
+    []int queue = []int{1, 2, 3, 4}
+    int pending = queue.len()
+    int sum = 0
+    try group {
+        spawn square(jobs, results)
+        spawn square(jobs, results)
+        for (; pending > 0; ) {
+            select {
+            case jobs.send(queue[0]) if (queue.len() > 0):
+                queue.remove(0)
+            case int? r = results.receive():
+                if (r != null) {
+                    sum = sum + r
+                }
+                pending--
+            }
+        }
+        jobs.close()
+    }
+    fmt.println("sum of squares: " + sum.string())
+    return null
+}
