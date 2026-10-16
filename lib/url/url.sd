@@ -71,12 +71,31 @@ fn showByte(byte b) string {
     return "byte " + int(b).string()
 }
 
-// The first problem in text at or after offset base: a control character,
-// a space, or a '%' without two hex digits after it; "" if none.
-fn checkChars(string text, int base) string {
+// Whether b may appear as it is in a part of a URL (RFC 3986, section 2):
+// the unreserved characters (letters, digits, "-._~"), the sub-delimiters
+// ("!$&'()*+,;="), '%' (checked by checkChars) and the delimiters in extra
+// that the part allows (":@/?" in a query, for example).
+fn allowedRaw(byte b, string extra) bool {
+    if (isAlpha(b) || isDigit(b)) {
+        return true
+    }
+    if (int(b) >= 0x80) {
+        return false
+    }
+    string c = string([]byte{b})
+    return "-._~!$&'()*+,;=%".contains(c) || extra.contains(c)
+}
+
+// The first problem in text at or after offset base: a character RFC 3986
+// does not allow in the part (a control character, a space, '"', '<', '>',
+// '\\', '^', '`', '{', '|', '}', a byte outside ASCII, or a delimiter the
+// part cannot hold, such as '[' outside an IPv6 host), or a '%' without two
+// hex digits after it; "" if none. extra lists the delimiters the part
+// allows (see allowedRaw).
+fn checkChars(string text, int base, string extra) string {
     for (int i = 0; i < text.len(); i++) {
         byte b = text[i]
-        if (int(b) <= 0x20 || int(b) == 0x7f) {
+        if (!allowedRaw(b, extra)) {
             return "invalid character (" + showByte(b) + ") at offset " + (base + i).string() + "; percent-encode it"
         }
         if (b == '%' && (i + 2 >= text.len() || hexValue(text[i + 1]) < 0 || hexValue(text[i + 2]) < 0)) {
@@ -151,7 +170,7 @@ pub fn parse(string text) (Url, error) {
         string hostPort = authority
         if (at >= 0) {
             string ui = authority.slice(0, at)
-            string bad = checkChars(ui, authOffset)
+            string bad = checkChars(ui, authOffset, ":")
             if (bad != "") {
                 return null, fail(text, bad)
             }
@@ -191,15 +210,14 @@ pub fn parse(string text) (Url, error) {
             }
         }
         if (host != null) {
-            string bad = checkChars(host, authOffset)
+            // An IPv6 address (or a future form) in brackets has ':'.
+            string hostExtra = ""
+            if (hostPort.startsWith("[")) {
+                hostExtra = ":"
+            }
+            string bad = checkChars(host, authOffset, hostExtra)
             if (bad != "") {
                 return null, fail(text, bad)
-            }
-            for (int i = 0; i < host.len(); i++) {
-                byte b = host[i]
-                if (b == '[' || b == ']' || b == '/' || b == '?' || b == '#' || b == '@') {
-                    return null, fail(text, "invalid character " + showByte(b) + " in host")
-                }
             }
         }
         if (hasPort && portText != "") {
@@ -226,18 +244,18 @@ pub fn parse(string text) (Url, error) {
             return null, fail(text, "first path segment contains ':' (write ./ before it)")
         }
     }
-    string bad = checkChars(rest, offset)
+    string bad = checkChars(rest, offset, ":@/")
     if (bad != "") {
         return null, fail(text, bad)
     }
     if (query != null && qmark != null) {
-        bad = checkChars(query, qmark + 1)
+        bad = checkChars(query, qmark + 1, ":@/?")
         if (bad != "") {
             return null, fail(text, bad)
         }
     }
     if (fragment != null && hash != null) {
-        bad = checkChars(fragment, hash + 1)
+        bad = checkChars(fragment, hash + 1, ":@/?")
         if (bad != "") {
             return null, fail(text, bad)
         }
