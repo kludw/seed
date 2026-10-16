@@ -167,6 +167,9 @@ fn (Gen g) mut mvStmt(int s) {
             for (int l = 0; l < cs.labelCount; l++) {
                 g.mvExpr(g.c.ast.labels[g.c.ast.at(cs.labels, l)].expr, true)
             }
+            // The guard is evaluated before the case's comm, maybe not at
+            // all for another case's: a mention there is conditional.
+            g.mvExpr(cs.guard, true)
             g.mvNested(cs.comm)
             g.mvBlock(cs.body)
         }
@@ -556,6 +559,7 @@ fn (Gen g) mut bwStmt(int s) {
             for (int l = 0; l < cs.labelCount; l++) {
                 g.bwExpr(g.c.ast.labels[g.c.ast.at(cs.labels, l)].expr)
             }
+            g.bwExpr(cs.guard)
             g.bwStmt(cs.comm)
             g.bwBlock(cs.body)
         }

@@ -507,7 +507,7 @@ fn (Checker c) stmtReads(int s, int v) bool {
         }
         for (int k = 0; k < st.count; k++) {
             Case cs = c.ast.cases[c.ast.at(st.list, k)]
-            if (c.stmtReads(cs.comm, v) || c.blockReads(cs.body, v)) {
+            if (c.exprReads(cs.guard, v) || c.stmtReads(cs.comm, v) || c.blockReads(cs.body, v)) {
                 return true
             }
             for (int m = 0; m < cs.labelCount; m++) {

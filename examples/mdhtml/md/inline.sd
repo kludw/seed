@@ -21,12 +21,8 @@ fn (Stash s) expand(string text) string {
     // Stashed HTML may itself hold placeholders (a link's text), so expand
     // until none is left.
     for (; mark.matches(out); ) {
-        []regex.Match ms = mark.findAll(out)
-        []string parts = []string{}
-        int at = 0
-        for (int i = 0; i < ms.len(); i++) {
-            parts.push(out.slice(at, ms[i].start()))
-            string? n = ms[i].groupText(1)
+        out = mark.replaceWith(out, fn(regex.Match m) string {
+            string? n = m.groupText(1)
             int idx = 0
             if (n != null) {
                 int? k, _ = n.toInt()
@@ -34,11 +30,8 @@ fn (Stash s) expand(string text) string {
                     idx = k
                 }
             }
-            parts.push(s.items[idx])
-            at = ms[i].end()
-        }
-        parts.push(out.slice(at, out.len()))
-        out = parts.join("")
+            return s.items[idx]
+        })
     }
     return out
 }

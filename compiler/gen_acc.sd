@@ -386,7 +386,7 @@ fn (Gen g) countVarStmt(int s, int v) int {
             for (int l = 0; l < cs.labelCount; l++) {
                 n = n + g.countVarExpr(g.c.ast.labels[g.c.ast.at(cs.labels, l)].expr, v)
             }
-            n = n + g.countVarStmt(cs.comm, v) + g.countVarBlock(cs.body, v)
+            n = n + g.countVarExpr(cs.guard, v) + g.countVarStmt(cs.comm, v) + g.countVarBlock(cs.body, v)
         }
     case StmtKind.Bad, StmtKind.ExprStmt, StmtKind.IncDec, StmtKind.Defer, StmtKind.Spawn:
         return n

@@ -2033,6 +2033,7 @@ fn (Checker c) mut scanStmtKills(int s) {
         for (int k = 0; k < st.count; k++) {
             Case cs = c.ast.cases[c.ast.at(st.list, k)]
             c.scanStmtKills(cs.comm)
+            c.scanExprKills(cs.guard)
             for (int m = 0; m < cs.labelCount; m++) {
                 c.scanExprKills(c.ast.labels[c.ast.at(cs.labels, m)].expr)
             }

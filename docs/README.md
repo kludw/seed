@@ -13,7 +13,7 @@ Start with the guide if you want to learn Seed; use the reference when you need 
   6. [Lists and maps](guide/06-lists-and-maps.md): every method, value semantics and copy-on-write.
   7. [Structs, methods and `mut`](guide/07-structs-and-methods.md): why there are no pointers, and how to model shared state.
   8. [Enums](guide/08-enums.md): enums with data, exhaustive `switch`, trees without pointers.
-  9. [Interfaces and function values](guide/09-interfaces-and-functions.md): `implements`, `error` as an interface, `sortBy`.
+  9. [Interfaces and function values](guide/09-interfaces-and-functions.md): `implements`, `error` as an interface, `sortBy`, function literals.
   10. [Concurrency](guide/10-concurrency.md): goroutines that share nothing, channels, `select`, groups and Erlang-style failure.
   11. [Packages and visibility](guide/11-packages.md): `pub`, imports, package layout, tests.
   12. [The compiler is your friend](guide/12-the-compiler.md): the pedantic checks, reading error messages, formatting.

@@ -1,0 +1,25 @@
+// A variable that only a select guard reads after a store: the store must
+// copy it, not move it (the guard counts as a mention of the variable for
+// the move analysis), and the guard reads the current value.
+package main
+
+import "fmt"
+
+type Box struct {
+    []string items
+}
+
+fn main([]string args) error {
+    []string names = []string{"a", "b"}
+    Box b = Box{items: names}
+    chan int out = chan int(1)
+    select {
+    case out.send(1) if (names.len() > 1):
+        fmt.println("sent " + b.items.len().string())
+    }
+    int? n = out.receive()
+    if (n != null) {
+        fmt.println("got " + n.string())
+    }
+    return null
+}

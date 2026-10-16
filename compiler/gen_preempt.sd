@@ -248,6 +248,7 @@ fn (Gen g) mut pcStmt(int s) {
             for (int l = 0; l < cs.labelCount; l++) {
                 g.pcExpr(g.c.ast.labels[g.c.ast.at(cs.labels, l)].expr)
             }
+            g.pcExpr(cs.guard)
             g.pcStmt(cs.comm)
             g.pcBlock(cs.body)
         }

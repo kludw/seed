@@ -444,6 +444,7 @@ fn (Gen g) mut intWalkStmt(int s) {
     case StmtKind.Select:
         for (int k = 0; k < st.count; k++) {
             Case cs = g.c.ast.cases[g.c.ast.at(st.list, k)]
+            g.intWalkExpr(cs.guard)
             g.intWalkStmt(cs.comm)
             g.intWalkBlock(cs.body)
         }
