@@ -1,0 +1,149 @@
+// return v, err passes on a value with the error that guards it, as it
+// came: when err is not null, v is null and the caller can't read it.
+package main
+
+import "errors"
+import "fmt"
+
+type Point struct {
+    int x
+    string label
+}
+
+type Shape enum {
+    Dot
+    Circle(int r)
+}
+
+fn parse(string s) (int, error) {
+    if (s == "bad") {
+        return null, errors.new("bad number")
+    }
+    return s.len(), null
+}
+
+fn text(bool fail) (string, error) {
+    if (fail) {
+        return null, errors.new("no text")
+    }
+    return "text", null
+}
+
+fn items(bool fail) ([]string, error) {
+    if (fail) {
+        return null, errors.new("no items")
+    }
+    return []string{"a", "b"}, null
+}
+
+fn point(bool fail) (Point, error) {
+    if (fail) {
+        return null, errors.new("no point")
+    }
+    return Point{x: 1, label: "p"}, null
+}
+
+fn shape(bool fail) (Shape, error) {
+    if (fail) {
+        return null, errors.new("no shape")
+    }
+    return Shape.Circle(3), null
+}
+
+fn big(bool fail) (int, error) {
+    if (fail) {
+        return null, errors.new("no big")
+    }
+    return 1 << 200, null
+}
+
+fn passInt(string s) (int, error) {
+    int n, error err = parse(s)
+    return n, err
+}
+
+fn passString(bool fail) (string, error) {
+    string t, error err = text(fail)
+    return t, err
+}
+
+fn passList(bool fail) ([]string, error) {
+    []string xs, error err = items(fail)
+    return xs, err
+}
+
+fn passPoint(bool fail) (Point, error) {
+    Point p, error err = point(fail)
+    return p, err
+}
+
+fn passShape(bool fail) (Shape, error) {
+    Shape s, error err = shape(fail)
+    return s, err
+}
+
+fn passBig(bool fail) (int, error) {
+    int b, error err = big(fail)
+    return b, err
+}
+
+// Two values, each guarded by the same error.
+fn passTwo(bool fail) (string, []string, error) {
+    string t, error err = text(fail)
+    if (err != null) {
+        return null, null, err
+    }
+    []string xs, err = items(fail)
+    return t, xs, err
+}
+
+fn main([]string args) error {
+    int n, error err = passInt("seed")
+    if (err == null) {
+        fmt.println("int " + n.string())
+    }
+    _, err = passInt("bad")
+    if (err != null) {
+        fmt.println(err.message())
+    }
+    for (int i = 0; i < 2; i++) {
+        bool fail = i == 1
+        string t, error e1 = passString(fail)
+        if (e1 == null) {
+            fmt.println(t)
+        } else {
+            fmt.println(e1.message())
+        }
+        []string xs, error e2 = passList(fail)
+        if (e2 == null) {
+            fmt.println(xs.join(","))
+        } else {
+            fmt.println(e2.message())
+        }
+        Point p, error e3 = passPoint(fail)
+        if (e3 == null) {
+            fmt.println(p.label + p.x.string())
+        } else {
+            fmt.println(e3.message())
+        }
+        Shape s, error e4 = passShape(fail)
+        if (e4 == null) {
+            fmt.println(s.name())
+        } else {
+            fmt.println(e4.message())
+        }
+        int b, error e5 = passBig(fail)
+        if (e5 == null) {
+            fmt.println((b >> 199).string())
+        } else {
+            fmt.println(e5.message())
+        }
+        string u, []string ys, error e6 = passTwo(fail)
+        if (e6 == null) {
+            fmt.println(u + " " + ys.len().string())
+        } else {
+            fmt.println(e6.message())
+        }
+    }
+    return null
+}

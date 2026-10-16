@@ -75,13 +75,15 @@ static sd_err test_trampoline(void *p) {
  * passes too, "--run TEXT" runs only the tests whose description contains
  * TEXT, and "--dir DIR" runs the tests in the directory DIR (seed test
  * passes the package's directory, so that tests read their files by paths
- * relative to it, as Go's do; the results file is opened before that). */
+ * relative to it, as Go's do; a relative results path is made absolute
+ * before that, and the file is written only at the end, so that a test
+ * program that dies leaves none). */
 static sd_err test_run_all(sd_list *args) {
   int passed = 0, failed = 0;
   bool verbose = false;
   const char *filter = NULL;
   const char *dir = NULL;
-  FILE *results = NULL;
+  char *results = NULL;
   sd_task_set_name_("the test runner");
   for (int64_t a = 2; a < args->len; a++) {
     const char *opt = sd_str_cstr(SD_LIST_GET(args, sd_str, SD_INT(a)));
@@ -89,10 +91,15 @@ static sd_err test_run_all(sd_list *args) {
     else if (strcmp(opt, "--run") == 0 && a + 1 < args->len) filter = sd_str_cstr(SD_LIST_GET(args, sd_str, SD_INT(++a)));
     else if (strcmp(opt, "--dir") == 0 && a + 1 < args->len) dir = sd_str_cstr(SD_LIST_GET(args, sd_str, SD_INT(++a)));
   }
-  if (args->len > 1) results = fopen(sd_str_cstr(SD_LIST_GET(args, sd_str, SD_INT(1))), "w");
+  if (args->len > 1) {
+    const char *path = sd_str_cstr(SD_LIST_GET(args, sd_str, SD_INT(1)));
+    char cwd[4096];
+    if (dir && path[0] != '/' && getcwd(cwd, sizeof cwd)) results = sd_fmt("%s/%s", cwd, path);
+    else results = sd_fmt("%s", path);
+  }
   if (dir && chdir(dir) != 0) {
     fprintf(stderr, "seed test: cannot enter %s: %s\n", dir, strerror(errno));
-    if (results) fclose(results);
+    free(results);
     sd_exit_process(2);
   }
   for (int i = 0; i < test_count; i++) {
@@ -134,8 +141,12 @@ static sd_err test_run_all(sd_list *args) {
     sd_err_release(e);
   }
   if (results) {
-    fprintf(results, "%d %d\n", passed, failed);
-    fclose(results);
+    FILE *f = fopen(results, "w");
+    if (f) {
+      fprintf(f, "%d %d\n", passed, failed);
+      fclose(f);
+    }
+    free(results);
   }
   fflush(stdout);
   sd_exit_process(failed > 0 ? 1 : 0);

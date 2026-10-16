@@ -1,0 +1,13 @@
+// expect-error: discard_plain_no_cascade.sd:8:9: error: the error is discarded with _, so n may be null
+// expect-errors: 1
+// After that error, a null check of n is not reported as well ("n has type
+// int, which is never null").
+package main
+
+fn main([]string args) error {
+    int n, _ = "12".toInt()
+    if (n != null) {
+        return null
+    }
+    return null
+}

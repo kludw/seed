@@ -58,6 +58,7 @@ You asked not to be woken up, so these are the language and toolchain decisions 
 - **Error guards:** a plain `T` returned beside an error can be read only once the error is known to be null (`if (err == null)`, after `if (err != null) { return ... }`, right of `err == null &&`), or after it is assigned again. A `T?` beside an error is not guarded.
 - **Only a local variable can receive a plain `T` beside an error;** a field or element can't (`b.s, err = f()`), because it would hold null until the check. A `T?` field or element can.
 - **Every result must be used,** not only errors: discard with `_ = f()`. A value beside a discarded error must be declared `T?`. A typed `_` (`string _, int _, error err = f()`) discards like `_`, any number of times, and `error _` discards the error like `_` does.
+- **`return v, err` passes on a guarded value beside the error that guards it** (`int n, error err = parse(s)` then `return n, err`), as Go code does: when `err` is not null, `n` is null and so is the result, which the caller's own guard keeps it from reading. Only for a variable returned in a slot of its own type and beside that same error variable (not another error, not widened into a `T?`, where the caller could read the null). Would change if every guarded read should go through a visible check.
 - **`return null, null` for a plain `T` result is an error;** `return null, err` with an `err` that turns out to be null crashes (`f returned null as result 1 without an error`).
 - **`try` works anywhere in an expression** in a function whose last result is `error`, including `try group {...}`.
 - **Crash vs error exit codes:** an error returned from `main` exits with 1 (`error: ...`), a crash with 2 (`crash: ...`).
@@ -105,6 +106,7 @@ You asked not to be woken up, so these are the language and toolchain decisions 
 - **A local or package-level name can't take an imported package's name.**
 - **The core packages (`fmt`, `os`, `fs`, `errors`, `time`) are ordinary standard library packages** and must be imported.
 - **Tests:** `test "name" { ... }` blocks in the package's `tests/` directory; the body works like a function returning `error` (`try` works, `return` doesn't); `assert` only in tests (not in a group), showing both sides of a failed comparison as `.string()` gives them (a byte as its number).
+- **`seed test` runs a package's tests in the package's directory** (the test program enters it before running), as `go test` does, so a test reads its files by paths relative to its package (`fs.read("testdata/input.md")`) wherever `seed test` is run from. The process's current directory is shared, but each package's tests are a program of their own, so nothing else sees it. Would change if tests should find their files some other way (a built-in for the package's path).
 - **`seed test` runs each test in a goroutine of its own group,** one after the other, prints `FAIL "<name>": <where>: <reason>` per failure and `N passed, M failed`, and exits with 1 on any failure.
 
 ## Standard library

@@ -1,0 +1,16 @@
+// expect-error: guard_return_other_error.sd:10:12: error: n is read before err is checked
+// return n, err passes n on only beside the error that guards it.
+package main
+
+import "errors"
+
+fn parse(string s) (int, error) {
+    int n, error err = s.toInt()
+    error other = errors.new("other")
+    return n, other
+}
+
+fn main([]string args) error {
+    _ = try parse("1")
+    return null
+}

@@ -418,6 +418,32 @@ fn (Checker c) mut checkExpr(int e) {
     }
 }
 
+// The hint for an operator between a byte and an int: a number literal is
+// an int, so a byte is compared with a byte literal ('\x7f') or converted.
+// Other pairs get fallback.
+fn (Checker c) byteIntHint(int a, int at, int b, int bt, string fallback) string {
+    int lit = b
+    if (at == tyInt && bt == tyByte) {
+        lit = a
+    } else if (!(at == tyByte && bt == tyInt)) {
+        return fallback
+    }
+    Expr x = c.ast.exprs[lit]
+    if (x.kind == ExprKind.IntLit && x.intValue >= 0 && x.intValue <= 255) {
+        return "a number is an int; write the byte as " + byteLiteral(x.intValue) + " or byte(" + x.intValue.string() + ")"
+    }
+    return "a number is an int; convert one side: byte(n) (which crashes outside 0..255) or int(b)"
+}
+
+// The byte literal for a value 0..255: 'a', or '\x7f' when not printable.
+fn byteLiteral(int v) string {
+    if (v >= 32 && v < 127 && v != 39 && v != 92) {
+        return "'" + string([]byte{byte(v)}) + "'"
+    }
+    string digits = "0123456789abcdef"
+    return "'\\x" + string([]byte{digits[v / 16], digits[v % 16]}) + "'"
+}
+
 // Reports a read of the variable n while the guard g is in effect.
 fn (Checker c) mut guardError(int g, string n, Pos pos) {
     string en = c.guards[g].errName
@@ -445,7 +471,7 @@ fn (Checker c) mut checkIdent(int e) {
         c.setType(e, c.vars[v].ty)
         c.applyNarrowing(e)
         int g = c.guardOf(v)
-        if (g >= 0) {
+        if (g >= 0 && !(e == c.passExpr && c.guards[g].errKey == c.passErrKey && !c.guards[g].lost)) {
             c.guardError(g, n, x.pos)
         }
         return
@@ -677,7 +703,7 @@ fn (Checker c) mut checkBinary(int e) {
                 }
                 c.coerce(plain, nt, "in the comparison")
             } else {
-                c.error(x.pos, "mismatched types " + c.typeName(at) + " and " + c.typeName(bt) + " for " + ops)
+                c.errorHint(x.pos, "mismatched types " + c.typeName(at) + " and " + c.typeName(bt) + " for " + ops, c.byteIntHint(a, at, b, bt, ""))
             }
             return
         }
@@ -692,7 +718,7 @@ fn (Checker c) mut checkBinary(int e) {
         } else if (c.types.isOpt(bt) && c.types.elem(bt) == at) {
             c.errorHint(c.ast.exprs[b].pos, c.describe(b) + " is nullable (" + c.typeName(bt) + ")", "check " + c.describe(b) + " != null first")
         } else {
-            c.errorHint(x.pos, "mismatched types " + c.typeName(at) + " and " + c.typeName(bt) + " for " + ops, "there are no implicit conversions; use float(x), int(x), x.string(), ...")
+            c.errorHint(x.pos, "mismatched types " + c.typeName(at) + " and " + c.typeName(bt) + " for " + ops, c.byteIntHint(a, at, b, bt, "there are no implicit conversions; use float(x), int(x), x.string(), ..."))
         }
         c.setType(e, tyInvalid)
         return

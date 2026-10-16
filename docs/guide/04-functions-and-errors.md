@@ -115,7 +115,7 @@ fn main([]string args) error {
     hint: check err != null first (and return or handle it), or use try
 ```
 
-The value can be read once the error is known to be null: inside `if (err == null) { ... }`, after `if (err != null) { return ... }`, or to the right of `err == null &&`. Assigning the variable a new value also makes it readable. A value declared as a nullable `T?` (`string? s, error err = f()`) is not guarded at all, because it has to be checked against `null` before use anyway.
+The value can be read once the error is known to be null: inside `if (err == null) { ... }`, after `if (err != null) { return ... }`, or to the right of `err == null &&`. Assigning the variable a new value also makes it readable. Passing both on unchanged, `return n, err`, is fine too: when `err` is not null, the caller gets a null `n` beside it, and its own check applies. A value declared as a nullable `T?` (`string? s, error err = f()`) is not guarded at all, because it has to be checked against `null` before use anyway.
 
 ## Every error must be handled
 

@@ -1,0 +1,14 @@
+// expect-error: guard_return_widened.sd:8:12: error: n is read before err is checked
+// return n, err into an int? result would hand the caller a null n it could
+// read without checking err, so the pair passes on only into an int slot.
+package main
+
+fn parse(string s) (int?, error) {
+    int n, error err = s.toInt()
+    return n, err
+}
+
+fn main([]string args) error {
+    _ = try parse("1")
+    return null
+}

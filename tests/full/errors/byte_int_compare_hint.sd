@@ -1,0 +1,12 @@
+// expect-error: hint: a number is an int; write the byte as '\x7f' or byte(127)
+// Comparing a byte with a number (mismatched types byte and int) suggests the byte literal.
+package main
+
+fn isDel(byte b) bool {
+    return b == 127
+}
+
+fn main([]string args) error {
+    _ = isDel('a')
+    return null
+}

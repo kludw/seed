@@ -130,10 +130,7 @@ pub fn (Interp in) mut eval(Value x, int env, int depth) (Value, error) {
     int mark = in.pending.len()
     Value v, error err = in.evalLoop(x, env, depth, mark)
     in.releaseFrom(mark)
-    if (err != null) {
-        return null, err
-    }
-    return v, null
+    return v, err
 }
 
 // Gives back the frames pending above mark.

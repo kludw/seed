@@ -1,0 +1,14 @@
+package words
+
+import "fs"
+import "os"
+
+// seed test runs a package's tests in the package's directory, wherever it
+// is run from, so that testdata/ is found by a relative path.
+test "testdata is next to the package" {
+    []string fruit = try load("testdata/fruit.txt")
+    assert(fruit.len() == 2)
+    assert(fs.isDir("tests"))
+    string cwd = try os.cwd()
+    assert(cwd.endsWith("/testcmd/testdata/words"))
+}

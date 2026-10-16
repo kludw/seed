@@ -1,0 +1,10 @@
+// Package words reads word lists.
+package words
+
+import "fs"
+
+// The lines of the file at path.
+pub fn load(string path) ([]string, error) {
+    string text = try fs.read(path)
+    return text.trim().split("\n"), null
+}

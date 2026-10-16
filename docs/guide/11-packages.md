@@ -258,6 +258,8 @@ test "repeat rejects a negative count" {
 
 Library code reports such mistakes with `os.crash(message)`, which crashes the goroutine exactly like an index out of range.
 
+Tests run in their package's directory, wherever `seed test` is started, as in Go: a test of `cart` that reads `fs.read("testdata/prices.csv")` finds `cart/testdata/prices.csv`. That is the place for input files and golden files that tests compare their output with.
+
 A test that needs files makes a temporary directory with `fs.makeTemp` and removes it with a deferred `fs.removeAll`, discarding its error explicitly ([stdlib.md](../stdlib.md#tests)):
 
 ```seed

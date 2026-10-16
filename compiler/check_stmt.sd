@@ -573,7 +573,19 @@ fn (Checker c) mut checkReturn(Stmt st) {
     for (int k = 0; k < n; k++) {
         int e = c.ast.at(st.list, k)
         int rt = c.resultType(c.curFn, k)
+        if (hasErr && k < n - 1 && lastKey != "" && c.ast.exprs[e].kind == ExprKind.Ident) {
+            // return v, err with v guarded by err passes the pair on as it
+            // came: when err is not null, v is null and so is the result.
+            // Only into a slot of v's own type: widened to a T?, a null v
+            // would become a value the caller can read.
+            int pv = c.lookupVar(c.ast.exprs[e].text)
+            if (pv >= 0 && c.vars[pv].ty == rt) {
+                c.passExpr = e
+                c.passErrKey = lastKey
+            }
+        }
         c.checkExpr(e)
+        c.passExpr = -1
         if (c.ast.exprs[e].kind == ExprKind.NullLit && n > 1 && hasErr && !c.types.isOpt(rt) && rt != tyError) {
             // null in a plain slot next to an error: the value is never
             // read, because the error is not null (checked when the
@@ -687,6 +699,11 @@ fn (Checker c) mut checkAssign(int s) {
         bool discarded = tg2.kind == TargetKind.Decl && tg2.name == "_"
         if (errSlot && i < n - 1 && !discarded && !c.types.isOpt(tt) && tt != tyError) {
             c.errorHint(tg2.pos, "the error is discarded with _, so " + what + " may be null and must be declared as " + c.types.optName(tt), "declare it as " + c.types.optName(tt) + " and check it against null before using it")
+            if (tg2.kind == TargetKind.Decl) {
+                // Its type is in doubt: no more errors about its uses (a
+                // null check of it would say "int is never null").
+                c.targetType[ti2] = tyInvalid
+            }
         }
     }
     for (int j = 0; j < n; j++) {

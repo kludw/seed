@@ -228,6 +228,10 @@ type Checker struct {
     int groupDepth
     int groupLoop
     int allowGroup
+    // return v, err: the result expression v may be read although err
+    // guards it, since it is returned beside that same error (checkReturn)
+    int passExpr
+    string passErrKey
     bool inDefault
     []int defaultState
     bool testMode
@@ -283,6 +287,8 @@ fn newChecker(Ast ast, Diags diags, bool testMode) Checker {
         groupDepth: 0,
         groupLoop: -1,
         allowGroup: -1,
+        passExpr: -1,
+        passErrKey: "",
         inDefault: false,
         defaultState: []int{},
         testMode: testMode,
