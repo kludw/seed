@@ -1,0 +1,54 @@
+// Package site serves a small web site for crawling: a few pages that link
+// to each other (with a cycle, relative links, fragments and a <base>), a
+// missing page, a page that never answers in time, a redirect, a page that
+// is not HTML, and links to another host.
+package site
+
+import "http"
+import "net"
+import "time"
+
+// The site, as an http.Handler.
+pub type Site struct implements http.Handler {
+    // how long /slow takes to answer
+    pub int delay = 10 * time.second
+}
+
+fn page(string title, string body) http.Response {
+    http.Response r = http.Response{status: http.statusOk, body: "<!DOCTYPE html>\n<html><head><title>" + title + "</title></head>\n<body>\n" + body + "\n</body></html>\n"}
+    r.headers["content-type"] = "text/html; charset=utf-8"
+    return r
+}
+
+pub fn (Site s) handle(http.Request req) (http.Response, error) {
+    switch (req.path()) {
+    case "/", "/index.html":
+        return page("home", "<a href=\"/about\">About</a> <A HREF='docs/'>Docs</A>\n<a href=\"#top\">top</a> <a href=\"/missing\">gone</a>\n<a href=\"http://elsewhere.invalid/\">away</a> <a href=\"mailto:me@example.com\">mail</a>"), null
+    case "/about":
+        return page("about", "<p>Back <a href=\"/\">home</a>, or see the <a href=\"/docs/guide?ch=1#intro\">guide</a>.</p>"), null
+    case "/docs/":
+        return page("docs", "<a href=guide?ch=1>guide</a> <a href=\"../about\">about</a> <a href=\"api.json\">api</a> <a href=\"/old\">old</a>"), null
+    case "/docs/guide":
+        return page("guide", "<base href=\"/docs/deep/\">\n<a href=\"one.html\">one</a> <a href=\"/slow\">slow</a> <a href=\"&quot;odd&quot;.html\">odd</a>"), null
+    case "/docs/deep/one.html":
+        return page("one", "<a href=\"two.html\">two</a>"), null
+    case "/docs/deep/two.html":
+        return page("two", "<a href=\"/\">home</a>"), null
+    case "/docs/api.json":
+        http.Response r = http.Response{status: http.statusOk, body: "{\"links\": \"<a href='/nope'>\"}"}
+        r.headers["content-type"] = "application/json"
+        return r, null
+    case "/old":
+        return http.Response{status: http.statusMovedPermanently, headers: map[string]string{"location": "/about"}}, null
+    case "/slow":
+        time.sleep(s.delay)
+        return page("slow", "finally"), null
+    default:
+        return http.textResponse(http.statusNotFound, "not found\n"), null
+    }
+}
+
+// Serves the site on ln until ln is closed.
+pub fn serve(net.Listener ln, int delay) error {
+    return http.serveListener(ln, Site{delay: delay})
+}

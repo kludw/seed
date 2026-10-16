@@ -1,0 +1,236 @@
+// Package crawl walks a web site: a pool of workers fetches pages, and one
+// coordinator, which owns the set of pages seen, decides which links to
+// follow, within a depth, a page count and a set of hosts.
+package crawl
+
+import "errors"
+import "http"
+import "regex"
+import "time"
+import "url"
+
+// The limits of a crawl.
+pub type Config struct {
+    // pages fetched at a time
+    pub int workers = 4
+    // links followed from the start page: 0 fetches only the start page
+    pub int maxDepth = 2
+    // pages fetched in all
+    pub int maxPages = 100
+    // the limit on each request
+    pub int timeout = 5 * time.second
+    // the hosts (host:port) whose pages are fetched; empty means the start
+    // page's host only
+    pub []string hosts = []string{}
+}
+
+// What fetching one page gave.
+pub type Outcome enum {
+    Status(int code)
+    Failed(string reason)
+}
+
+// One page of the crawl.
+pub type Page struct {
+    pub string url
+    // the number of links followed to reach it
+    pub int depth
+    pub Outcome outcome
+    // the links of the page, resolved, without fragments, in order, once each
+    pub []string links
+}
+
+// What the coordinator gives a worker.
+type Job struct {
+    string url
+    int depth
+}
+
+// Crawls from start and returns every page fetched, sorted by URL. The
+// error is for a start URL that cannot be crawled; pages that fail are
+// pages with a Failed outcome.
+pub fn crawl(string start, Config cfg) ([]Page, error) {
+    url.Url u = try url.parse(start)
+    if (u.scheme != "http" || u.host == null) {
+        return null, errors.new("crawl: " + start + ": only http:// URLs can be crawled")
+    }
+    if (cfg.workers < 1) {
+        return null, errors.new("crawl: workers must be at least 1")
+    }
+    Config c = cfg
+    if (c.hosts.len() == 0) {
+        c.hosts = []string{u.hostPort()}
+    }
+    chan Job jobs = chan Job(0)
+    chan Page results = chan Page(cfg.workers)
+    chan []Page done = chan []Page(1)
+    try group {
+        spawn coordinate(clean(u), c, jobs, results, done)
+        for (int i = 0; i < cfg.workers; i++) {
+            spawn work(jobs, results, c)
+        }
+    }
+    []Page? pages = done.receive()
+    if (pages == null) {
+        return null, errors.new("crawl: the coordinator gave no result")
+    }
+    []Page sorted = pages
+    sorted.sortBy(byUrl)
+    return sorted, null
+}
+
+fn byUrl(Page a, Page b) bool {
+    return a.url < b.url
+}
+
+// The URL as the crawl compares it: without its fragment.
+fn clean(url.Url u) string {
+    url.Url c = u
+    c.fragment = null
+    if (c.path == "") {
+        c.path = "/"
+    }
+    return c.string()
+}
+
+// Hands out jobs and collects results until no job is pending, then closes
+// jobs, which ends the workers, and sends the pages.
+fn coordinate(string start, Config cfg, chan Job jobs, chan Page results, chan []Page done) error {
+    map[string]bool seen = map[string]bool{start: true}
+    []Job queue = []Job{Job{url: start, depth: 0}}
+    int pending = 0
+    []Page pages = []Page{}
+    for (; queue.len() > 0 || pending > 0; ) {
+        Page? page = null
+        if (queue.len() == 0) {
+            page = results.receive()
+        } else {
+            select {
+            case jobs.send(queue[0]):
+                queue.remove(0)
+                pending++
+            case Page? p = results.receive():
+                page = p
+            }
+        }
+        if (page == null) {
+            continue
+        }
+        pending--
+        pages.push(page)
+        if (page.depth >= cfg.maxDepth) {
+            continue
+        }
+        for (int i = 0; i < page.links.len(); i++) {
+            string link = page.links[i]
+            if (seen[link] != null || seen.len() >= cfg.maxPages || !allowed(link, cfg.hosts)) {
+                continue
+            }
+            seen[link] = true
+            queue.push(Job{url: link, depth: page.depth + 1})
+        }
+    }
+    jobs.close()
+    done.send(pages)
+    return null
+}
+
+fn allowed(string link, []string hosts) bool {
+    url.Url? u, _ = url.parse(link)
+    return u != null && u.scheme == "http" && hosts.contains(u.hostPort())
+}
+
+// Fetches pages until jobs is closed.
+fn work(chan Job jobs, chan Page results, Config cfg) error {
+    for (;;) {
+        Job? job = jobs.receive()
+        if (job == null) {
+            return null
+        }
+        results.send(fetch(job, cfg.timeout))
+    }
+}
+
+fn fetch(Job job, int timeout) Page {
+    Page page = Page{url: job.url, depth: job.depth, outcome: Outcome.Failed(""), links: []string{}}
+    http.Response resp, error err = http.send(http.Request{url: job.url, timeout: timeout})
+    if (err != null) {
+        page.outcome = Outcome.Failed(lastPart(err.message()))
+        return page
+    }
+    page.outcome = Outcome.Status(resp.status)
+    string? kind = resp.headers["content-type"]
+    if (resp.status == http.statusOk && (kind == null || kind.startsWith("text/html"))) {
+        page.links = links(job.url, resp.body)
+    }
+    return page
+}
+
+// The last part of an error message: "timeout after 2 s" rather than the
+// whole "http.send: http://...: timeout after 2 s".
+fn lastPart(string message) string {
+    []string parts = message.split(": ")
+    return parts[parts.len() - 1]
+}
+
+// The links of an HTML page at base, resolved against it (or against its
+// <base href>), without fragments, each once, in the order of the page.
+pub fn links(string base, string html) []string {
+    url.Url? from, _ = url.parse(base)
+    if (from == null) {
+        return []string{}
+    }
+    regex.Regex baseTag = regex.mustCompile("(?i)<base\\s[^>]*href\\s*=\\s*[\"']([^\"']*)[\"']")
+    regex.Match? b = baseTag.find(html)
+    if (b != null) {
+        string? href = b.groupText(1)
+        if (href != null) {
+            url.Url? ref, _ = url.parse(href.trim())
+            if (ref != null) {
+                from = from.resolve(ref)
+            }
+        }
+    }
+    regex.Regex anchor = regex.mustCompile("(?is)<a\\s[^>]*?href\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\s>\"']+))")
+    []regex.Match ms = anchor.findAll(html)
+    []string out = []string{}
+    map[string]bool seen = map[string]bool{}
+    for (int i = 0; i < ms.len(); i++) {
+        string? href = ms[i].groupText(1)
+        for (int g = 2; g <= 3 && href == null; g++) {
+            href = ms[i].groupText(g)
+        }
+        if (href == null) {
+            continue
+        }
+        url.Url? ref, _ = url.parse(unescape(href.trim()))
+        if (ref == null) {
+            continue
+        }
+        url.Url target = from.resolve(ref)
+        if (target.scheme != "http" && target.scheme != "https") {
+            continue
+        }
+        string link = clean(target)
+        if (seen[link] == null) {
+            seen[link] = true
+            out.push(link)
+        }
+    }
+    return out
+}
+
+// The few character references that show up in attribute values.
+fn unescape(string s) string {
+    return s.replace("&quot;", "\"").replace("&#39;", "'").replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
+}
+
+// The outcome as text: "200", "404", or "error: timeout after 2 s".
+pub fn (Outcome o) string() string {
+    switch (o) {
+    case Outcome.Status(int code):
+        return code.string()
+    case Outcome.Failed(string reason):
+        return "error: " + reason
+    }
+}

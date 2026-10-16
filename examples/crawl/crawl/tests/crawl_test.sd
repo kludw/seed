@@ -1,0 +1,97 @@
+package crawl
+
+import "net"
+import "site"
+import "time"
+
+fn crawlSite(net.Listener ln, Config cfg, chan []Page out) error {
+    defer ln.close()
+    out.send(try crawl("http://" + ln.addr() + "/index.html#x", cfg))
+    return null
+}
+
+// Crawls the demo site with cfg; /slow answers after delay.
+fn crawlWith(Config cfg, int delay) ([]Page, string, error) {
+    net.Listener ln = try net.listen("127.0.0.1:0")
+    string base = "http://" + ln.addr()
+    chan []Page out = chan []Page(1)
+    try group {
+        spawn site.serve(ln, delay)
+        spawn crawlSite(ln, cfg, out)
+    }
+    []Page? pages = out.receive()
+    if (pages == null) {
+        return []Page{}, base, null
+    }
+    return pages, base, null
+}
+
+fn find([]Page pages, string url) Page? {
+    for (int i = 0; i < pages.len(); i++) {
+        if (pages[i].url == url) {
+            return pages[i]
+        }
+    }
+    return null
+}
+
+test "the whole site, with a timeout on the slow page" {
+    int start = time.monotonic()
+    []Page pages, string base = try crawlWith(Config{workers: 3, maxDepth: 10, timeout: 200 * time.millisecond}, 5 * time.second)
+    // The slow page is cut off after 200 ms, and the server is stopped
+    // with its handler still sleeping.
+    assert(time.monotonic() - start < 2 * time.second)
+    // "/" and "/index.html" are two pages
+    assert(pages.len() == 12)
+    for (int i = 1; i < pages.len(); i++) {
+        assert(pages[i - 1].url < pages[i].url)
+    }
+    Page? home = find(pages, base + "/index.html")
+    assert(home != null)
+    assert(home.depth == 0)
+    assert(home.outcome == Outcome.Status(200))
+    // resolved, fragments dropped, mailto and other schemes skipped,
+    // the other host listed but not fetched
+    assert(home.links == []string{base + "/about", base + "/docs/", base + "/index.html", base + "/missing", "http://elsewhere.invalid/"})
+    Page? slow = find(pages, base + "/slow")
+    assert(slow != null)
+    assert(slow.outcome == Outcome.Failed("timeout after 200 ms"))
+    Page? old = find(pages, base + "/old")
+    assert(old != null)
+    assert(old.outcome.string() == "301")
+    assert(old.links.len() == 0)
+    // links in a JSON body are not followed
+    assert(find(pages, base + "/nope") == null)
+    // <base href> changes where relative links point
+    assert(find(pages, base + "/docs/deep/two.html") != null)
+}
+
+test "depth and page limits" {
+    []Page pages, string base = try crawlWith(Config{workers: 2, maxDepth: 1}, 0)
+    assert(pages.len() == 4)
+    assert(find(pages, base + "/docs/") != null)
+    assert(find(pages, base + "/docs/guide?ch=1") == null)
+    []Page few, string _ = try crawlWith(Config{workers: 4, maxDepth: 10, maxPages: 3}, 0)
+    assert(few.len() == 3)
+    []Page one, string _ = try crawlWith(Config{workers: 1, maxDepth: 0}, 0)
+    assert(one.len() == 1)
+}
+
+test "a start URL that cannot be crawled" {
+    _, error err = crawl("https://example.com/", Config{})
+    assert(err != null)
+    assert(err.message() == "crawl: https://example.com/: only http:// URLs can be crawled")
+    _, error err2 = crawl("http://bad host/", Config{})
+    assert(err2 != null)
+}
+
+test "a refused connection is a failed page" {
+    []Page pages = try crawl("http://127.0.0.1:1/", Config{})
+    assert(pages.len() == 1)
+    assert(pages[0].outcome == Outcome.Failed("connection refused"))
+}
+
+test "link extraction" {
+    string html = "<a href=x.html>1</a><a class=\"c\"\n href = 'y/?a=1&amp;b=2#f'>2</a><a name=n>3</a><a href=\"x.html#again\">4</a><a href=\"ftp://f/\">5</a>"
+    assert(links("http://h/dir/page", html) == []string{"http://h/dir/x.html", "http://h/dir/y/?a=1&b=2"})
+}

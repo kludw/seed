@@ -1,0 +1,76 @@
+// crawl fetches a web site breadth first and reports every page it found.
+//
+//     crawl [-w WORKERS] [-d DEPTH] [-n PAGES] [-t TIMEOUT] [--host HOST]... URL
+//     crawl --demo
+//
+// Only http:// pages on the start page's host (or the --host ones) are
+// fetched. --demo serves a small site on a free local port and crawls it,
+// with URLs shown relative to the site.
+package main
+
+import "crawl"
+import "errors"
+import "flags"
+import "fmt"
+import "net"
+import "site"
+import "strings"
+import "time"
+
+fn main([]string args) error {
+    flags.Spec spec = flags.spec("crawl", "URL", "Crawls a web site and lists its pages with their status.")
+    spec.addInt("workers", 'w', 4, "pages fetched at a time")
+    spec.addInt("depth", 'd', 2, "links followed from the start page")
+    spec.addInt("pages", 'n', 100, "pages fetched in all")
+    spec.addDuration("timeout", 't', 5 * time.second, "the limit on each request")
+    spec.addList("host", null, "also fetch pages on this host:port")
+    spec.addBool("demo", null, "crawl a demo site served on a free local port")
+    flags.Parsed p = spec.parseOrExit(args)
+    crawl.Config cfg = crawl.Config{workers: p.getInt("workers"), maxDepth: p.getInt("depth"), maxPages: p.getInt("pages"), timeout: p.getDuration("timeout"), hosts: p.getList("host")}
+    if (p.getBool("demo")) {
+        return demo(cfg)
+    }
+    if (p.args().len() != 1) {
+        return errors.new("crawl takes one URL; run 'crawl --help' for usage")
+    }
+    []crawl.Page pages = try crawl.crawl(p.args()[0], cfg)
+    report(pages, "")
+    return null
+}
+
+fn report([]crawl.Page pages, string base) {
+    int failed = 0
+    for (int i = 0; i < pages.len(); i++) {
+        crawl.Page pg = pages[i]
+        string status = pg.outcome.string()
+        if (status.startsWith("error") || status.startsWith("4") || status.startsWith("5")) {
+            failed++
+        }
+        fmt.println(strings.padRight(status, 26, ' ') + " " + pg.depth.string() + " " + pg.url.replace(base, "") + " (" + pg.links.len().string() + " links)")
+    }
+    fmt.println(pages.len().string() + " pages, " + failed.string() + " failed")
+}
+
+fn crawlDemo(net.Listener ln, crawl.Config cfg, chan []crawl.Page out) error {
+    defer ln.close()
+    out.send(try crawl.crawl("http://" + ln.addr() + "/", cfg))
+    return null
+}
+
+fn demo(crawl.Config flagged) error {
+    net.Listener ln = try net.listen("127.0.0.1:0")
+    string base = "http://" + ln.addr()
+    crawl.Config cfg = flagged
+    cfg.maxDepth = 4
+    cfg.timeout = 300 * time.millisecond
+    chan []crawl.Page out = chan []crawl.Page(1)
+    try group {
+        spawn site.serve(ln, 5 * time.second)
+        spawn crawlDemo(ln, cfg, out)
+    }
+    []crawl.Page? pages = out.receive()
+    if (pages != null) {
+        report(pages, base)
+    }
+    return null
+}
