@@ -1251,6 +1251,7 @@ const []string lspKeywords = []string{
     "implements",
     "import",
     "interface",
+    "is",
     "map",
     "mut",
     "null",
@@ -1292,7 +1293,7 @@ fn lspScopeItems(Checker c, Pos at) []json.Value {
         // Not checked: the package's declarations from the tree.
         for (int f = 0; f < c.ast.fns.len(); f++) {
             FnDecl fd = c.ast.fns[f]
-            if (!fd.isMethod && !fd.isTest && c.ast.files[fd.file].pkgIndex == here && seen[fd.name] == null) {
+            if (!fd.isMethod && !fd.isTest && !fd.isLit && c.ast.files[fd.file].pkgIndex == here && seen[fd.name] == null) {
                 seen[fd.name] = true
                 items.push(lspItem(fd.name, 3, lspFnSig(c.ast, f), ""))
             }
@@ -1342,7 +1343,9 @@ fn lspLocals(Ast ast, Pos at) []LspLocal {
     []LspLocal out = []LspLocal{}
     for (int f = 0; f < ast.fns.len(); f++) {
         FnDecl fd = ast.fns[f]
-        if (fd.file != at.file || !lspBlockHas(ast, fd.body, at)) {
+        if (fd.isLit || fd.file != at.file || !lspBlockHas(ast, fd.body, at)) {
+            // A function literal is found inside the function it is in
+            // (lspWalkExpr), whose variables it can use too.
             continue
         }
         if (fd.isMethod) {
@@ -1451,6 +1454,20 @@ fn lspWalkExpr(Ast ast, int e, Pos at, []LspLocal found) []LspLocal {
             return lspWalkBlock(ast, x.block, at, found)
         }
         return found
+    }
+    if (x.kind == ExprKind.FnLit) {
+        // Inside a function literal: the variables around it (captured),
+        // its parameters and its locals.
+        FnDecl fd = ast.fns[x.lit]
+        if (!lspBlockHas(ast, fd.body, at)) {
+            return found
+        }
+        []LspLocal inner = found
+        for (int i = 0; i < fd.paramCount; i++) {
+            Param p = ast.params[ast.at(fd.params, i)]
+            inner.push(LspLocal{name: p.name, detail: ast.typeExprText(p.typeExpr)})
+        }
+        return lspWalkBlock(ast, fd.body, at, inner)
     }
     []LspLocal out = lspWalkExpr(ast, x.a, at, found)
     out = lspWalkExpr(ast, x.b, at, out)

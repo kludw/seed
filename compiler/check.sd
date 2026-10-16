@@ -1441,8 +1441,23 @@ fn (Checker c) mut declare(string name, int t, VarKind kind, Pos pos) int {
     } else {
         c.checkCamel(name, pos, "the variable")
     }
-    if (c.global(c.pkgOf(pos), name) != null) {
-        c.errorHint(pos, name + " is already declared at the package level; shadowing is not allowed", "choose another name")
+    int? pg = c.global(c.pkgOf(pos), name)
+    if (pg != null) {
+        // A package-level name means one thing in the whole package, in
+        // every file: the message says where it is declared, since it is
+        // often in another file.
+        Global gl = c.globalList[pg]
+        string what = "fn "
+        if (gl.kind == GlobalKind.Type) {
+            what = "type "
+        } else if (gl.kind == GlobalKind.Const) {
+            what = "const "
+        }
+        string where = "line " + gl.pos.line.string()
+        if (gl.pos.file != pos.file) {
+            where = c.diags.paths[gl.pos.file] + ":" + gl.pos.line.string()
+        }
+        c.errorHint(pos, name + " is already declared at the package level (" + what + name + " at " + where + "); shadowing is not allowed", "a package-level name means the same thing everywhere in its package; give the local another name, such as " + name + "Value, or rename the package-level " + what.trim())
     } else if (c.importedPkg(pos.file, name) >= 0) {
         c.errorHint(pos, name + " is the name of an imported package; shadowing is not allowed", "choose another name")
     }

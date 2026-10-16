@@ -1,0 +1,12 @@
+package main
+
+// Kept apart from main.sd, as in a big package where the package-level
+// names are many.
+
+fn reason(string message) string {
+    return "reason: " + message
+}
+
+fn explain(string s) string {
+    return reason(s)
+}

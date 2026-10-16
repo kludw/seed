@@ -1,0 +1,26 @@
+== initialize
+{"jsonrpc":"2.0","id":0,"result":{"capabilities":{"positionEncoding":"utf-16","textDocumentSync":{"openClose":true,"change":1,"save":{"includeText":false}},"documentFormattingProvider":true,"definitionProvider":true,"hoverProvider":true,"completionProvider":{"triggerCharacters":["."]},"documentSymbolProvider":true,"referencesProvider":true,"documentHighlightProvider":true,"renameProvider":{"prepareProvider":true},"signatureHelpProvider":{"triggerCharacters":["(",","]}},"serverInfo":{"name":"seed lsp"}}}
+== notification textDocument/publishDiagnostics
+{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{"uri":"file://$DIR/closures/main.sd","diagnostics":[]}}
+== hover closures/main.sd 13 23
+{"jsonrpc":"2.0","id":1,"result":{"contents":{"kind":"markdown","value":"```seed\nint offset\n```\n\n(variable)"},"range":{"start":{"line":13,"character":23},"end":{"line":13,"character":29}}}}
+== definition closures/main.sd 13 23
+{"jsonrpc":"2.0","id":2,"result":{"uri":"file://$DIR/closures/main.sd","range":{"start":{"line":10,"character":8},"end":{"line":10,"character":14}}}}
+== hover closures/main.sd 13 17
+{"jsonrpc":"2.0","id":3,"result":{"contents":{"kind":"markdown","value":"```seed\nPoint a\n```\n\n(parameter)"},"range":{"start":{"line":13,"character":17},"end":{"line":13,"character":18}}}}
+== references closures/main.sd 10 8 decl
+{"jsonrpc":"2.0","id":4,"result":[{"uri":"file://$DIR/closures/main.sd","range":{"start":{"line":10,"character":8},"end":{"line":10,"character":14}}},{"uri":"file://$DIR/closures/main.sd","range":{"start":{"line":13,"character":23},"end":{"line":13,"character":29}}},{"uri":"file://$DIR/closures/main.sd","range":{"start":{"line":14,"character":26},"end":{"line":14,"character":32}}},{"uri":"file://$DIR/closures/main.sd","range":{"start":{"line":17,"character":19},"end":{"line":17,"character":25}}}]}
+== highlight closures/main.sd 17 19
+{"jsonrpc":"2.0","id":5,"result":[{"range":{"start":{"line":10,"character":8},"end":{"line":10,"character":14}}},{"range":{"start":{"line":13,"character":23},"end":{"line":13,"character":29}}},{"range":{"start":{"line":14,"character":26},"end":{"line":14,"character":32}}},{"range":{"start":{"line":17,"character":19},"end":{"line":17,"character":25}}}]}
+== completion closures/main.sd 14 8
+{"jsonrpc":"2.0","id":6,"result":{"isIncomplete":false,"items":[{"label":"args","kind":6,"detail":"[]string"},{"label":"offset","kind":6,"detail":"int"},{"label":"pts","kind":6,"detail":"[]Point"},{"label":"a","kind":6,"detail":"Point"},{"label":"b","kind":6,"detail":"Point"},{"label":"da","kind":6,"detail":"int"},{"label":"Point","kind":22,"detail":"type Point struct {\n    int x\n    int y\n}"},{"label":"main","kind":3,"detail":"fn main([]string args) error"},{"label":"fmt","kind":9,"detail":"import \"fmt\""},{"label":"assert","kind":14},{"label":"break","kind":14},{"label":"case","kind":14},{"label":"chan","kind":14},{"label":"const","kind":14},{"label":"continue","kind":14},{"label":"default","kind":14},{"label":"defer","kind":14},{"label":"else","kind":14},{"label":"enum","kind":14},{"label":"false","kind":14},{"label":"fn","kind":14},{"label":"for","kind":14},{"label":"group","kind":14},{"label":"if","kind":14},{"label":"implements","kind":14},{"label":"import","kind":14},{"label":"interface","kind":14},{"label":"is","kind":14},{"label":"map","kind":14},{"label":"mut","kind":14},{"label":"null","kind":14},{"label":"package","kind":14},{"label":"pub","kind":14},{"label":"return","kind":14},{"label":"select","kind":14},{"label":"spawn","kind":14},{"label":"struct","kind":14},{"label":"switch","kind":14},{"label":"test","kind":14},{"label":"true","kind":14},{"label":"try","kind":14},{"label":"type","kind":14},{"label":"bool","kind":7,"detail":"built-in type"},{"label":"byte","kind":7,"detail":"built-in type"},{"label":"error","kind":7,"detail":"built-in type"},{"label":"float","kind":7,"detail":"built-in type"},{"label":"int","kind":7,"detail":"built-in type"},{"label":"string","kind":7,"detail":"built-in type"}]}}
+== signature closures/main.sd 12 15
+{"jsonrpc":"2.0","id":7,"result":{"signatures":[{"label":"[]Point.sortBy(fn(Point, Point) bool less)","documentation":{"kind":"markdown","value":"built-in method (docs/builtins.md)"},"parameters":[{"label":[15,41]}]}],"activeSignature":0,"activeParameter":0}}
+== signature closures/main.sd 19 22
+{"jsonrpc":"2.0","id":8,"result":{"signatures":[{"label":"shift(int) int","documentation":{"kind":"markdown","value":"function value"},"parameters":[{"label":[6,9]}]}],"activeSignature":0,"activeParameter":0}}
+== signature closures/main.sd 14 8
+{"jsonrpc":"2.0","id":9,"result":null}
+== rename closures/main.sd 10 8 delta
+{"jsonrpc":"2.0","id":10,"result":{"changes":{"file://$DIR/closures/main.sd":[{"range":{"start":{"line":10,"character":8},"end":{"line":10,"character":14}},"newText":"delta"},{"range":{"start":{"line":13,"character":23},"end":{"line":13,"character":29}},"newText":"delta"},{"range":{"start":{"line":14,"character":26},"end":{"line":14,"character":32}},"newText":"delta"},{"range":{"start":{"line":17,"character":19},"end":{"line":17,"character":25}},"newText":"delta"}]}}}
+== shutdown
+{"jsonrpc":"2.0","id":11,"result":null}

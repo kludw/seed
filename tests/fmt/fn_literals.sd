@@ -1,0 +1,60 @@
+package main
+
+import "fmt"
+import "regex"
+
+type Shape enum {
+    Circle(float r)
+    Dot
+}
+
+type Op struct {
+    string name
+    fn(int, int) int apply
+}
+
+fn main([]string args) error {
+  int offset=10
+  // A literal as the last argument: its body is indented from the line
+  // where the call starts, and the call closes with the literal's brace.
+  []int xs = []int{3,1,2}
+  xs.sortBy(fn(int a,int b) bool {
+  return a+offset<b+offset
+  })
+  fn(int)int add=fn(int x)int{ return x+offset }
+  fn( ) string hello = fn() string {
+
+      return "hi"
+  }
+  // Arguments one per line, with a literal among them.
+  regex.Regex re = regex.mustCompile("[a-z]+")
+  string s = re.replaceWith(
+  "abc def",
+  fn(regex.Match m) string {
+  return m.text().toUpper()
+  },
+  )
+  // Literals in a list literal, a struct literal and a map literal.
+  []Op ops = []Op{Op{name: "add", apply: fn(int a, int b) int {
+      return a + b
+  }}}
+  map[string]fn(int) int byName = map[string]fn(int) int{
+    "double": fn(int v) int {
+        return v*2
+    },
+  }
+  []fn() int empty = []fn() int{}
+  // Called where it is written, and a literal returning a literal.
+  int n = fn(int v) int {
+      return v + 1
+  }(1)
+  fn(int) fn(int) int curry = fn(int a) fn(int) int {
+  return fn(int b) int {
+  return a+b
+  }
+  }
+  Shape sh = Shape.Dot
+  bool dot = sh   is   Shape.Dot&&!(sh is Shape.Circle)
+  fmt.println(add(1).string() + hello() + s + ops.len().string() + byName.len().string() + empty.len().string() + n.string() + curry(1)(2).string() + dot.string())
+  return null
+}

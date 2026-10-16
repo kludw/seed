@@ -1,0 +1,22 @@
+package main
+
+import "fmt"
+
+type Point struct {
+    int x
+    int y
+}
+
+fn main([]string args) error {
+    int offset = 10
+    []Point pts = []Point{Point{x: 1, y: 2}, Point{x: 0, y: 5}}
+    pts.sortBy(fn(Point a, Point b) bool {
+        int da = a.x + offset
+        return da < b.x + offset
+    })
+    fn(int) int shift = fn(int v) int {
+        return v + offset
+    }
+    fmt.println(shift(pts[0].y).string())
+    return null
+}

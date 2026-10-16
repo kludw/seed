@@ -1,0 +1,12 @@
+// expect-error: error: reason is already declared at the package level (fn reason at tests/full/errors/shadow_package_fn/helper.sd:6); shadowing is not allowed
+// A package-level name means one thing in the whole package, so a local
+// cannot take it, even in another file; the message says where it is.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    string reason = "timeout"
+    fmt.println(explain(reason))
+    return null
+}

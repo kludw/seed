@@ -78,7 +78,7 @@ for script in "$dir"/*.lsp; do
   pass=$((pass+1))
 done
 
-for f in proj/main.sd proj/shop/cart.sd proj/shop/item.sd proj/shop/tests/cart_test.sd defaults/main.sd; do
+for f in proj/main.sd proj/shop/cart.sd proj/shop/item.sd proj/shop/tests/cart_test.sd defaults/main.sd closures/main.sd; do
   run "fuzz $f" fuzz "$dir/$f" "$dir" 3 || continue
   if [ -s "$tmp/err" ]; then
     failed "fuzz $f" "stderr: $(head -c 500 "$tmp/err")"; continue

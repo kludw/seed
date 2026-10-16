@@ -124,7 +124,7 @@ const int maxUsers = 100
 
 - A declaration always writes the type first, then the name, then `= value`. There is no `var`, no `:=` and no type inference.
 - Every declaration must have a value, including nullable ones (`string? email = null`). There are no zero values.
-- Shadowing is a compile error. Declaring a name that already exists in an enclosing scope (a local, a parameter, a package-level name or an imported package) fails, and the error suggests assigning with `=` instead.
+- Shadowing is a compile error. Declaring a name that already exists in an enclosing scope (a local, a parameter, a package-level name or an imported package) fails, and the error suggests assigning with `=` instead. A local with the name of a package-level declaration is an error too (wherever it is in the package), with the declaration's place in the message.
 - With several return values, a name with a type in front of it is declared, and a name without one is an existing variable (or a field or element) being assigned (beside an error, a field or element can only receive a `T?`; see [Errors](#errors)). `_` discards a value:
 
 ```
@@ -143,6 +143,7 @@ string text, err = fs.read(other)     // text is new, err is reused
 | Joining    | `+`                           | `string`                         |
 | Bitwise    | `& \| ^ << >>`                | `int`, `byte`                    |
 | Comparison | `== !=`                       | Every type except channels and function values (and types that contain them). A `T?` is compared with `null` or with a `T`, not with another `T?` (see [Null](#null)). |
+| Enum case  | `is`                          | `v is Shape.Circle`: whether the enum value `v` (an `E`, or an `E?`: false when null) holds that case, whatever its data. |
 | Ordering   | `< <= > >=`                   | `int`, `float`, `string`, `byte` |
 | Logic      | `&& \|\| !`                   | `bool`                           |
 | Unary      | `-` (numbers), `!` (`bool`)   |                                  |
@@ -239,10 +240,30 @@ people.sortBy(olderThan)
 ```
 
 - A named function can be passed as a value. Its type is written `fn(Person, Person) bool`.
-- There are no anonymous functions and no closures, so a function value never carries hidden state.
 - A nullable function type needs parentheses: `(fn(int) int)?`, because `fn(int) int?` is a function that returns `int?`.
 - A struct field of function type is called directly: `op.apply(1, 2)`. A struct can't have a field and a method with the same name, so `op.apply` always means one thing.
-- Function values cannot be compared with `==`.
+- Function values cannot be compared with `==`, function literals included (two literals that do the same thing are not equal, and identity is not something Seed's values have).
+
+### Function literals
+
+```
+int minAge = 18
+people.sortBy(fn(Person a, Person b) bool {
+    return a.age > b.age
+})
+[]Person adults = filter(people, fn(Person p) bool {
+    return p.age >= minAge
+})
+```
+
+- A function literal is a function written where a value is needed: `fn`, the parameters (type first, named), the results, and a body, exactly as a declaration without a name. Its type is `fn(params) results`, here `fn(Person) bool`; it must be exactly the type expected, like any value.
+- A literal can use the variables around it (locals, parameters, the receiver, pattern bindings, and the variables of enclosing literals). It **captures them by value**: when the literal is evaluated, it takes a copy of the current value of each variable it uses (cheap: values are copy-on-write), and keeps it. Changing the variable afterwards does not change the literal's copy, and the literal never sees or changes the variable itself.
+- Captured variables are read-only inside the literal: assigning one, `++`/`--`, changing one of its fields or elements and calling a `mut` method on it are errors (`cannot assign to count: count is captured by the function literal, which has a read-only copy of its value`). To compute with a captured value, copy it into a local of the literal; to give a result back, return it. A function value therefore never shares mutable state with anything: calling it twice with the same arguments does the same thing, and goroutines stay share-nothing.
+- A literal evaluated in a loop captures the values of that iteration: `for (int i = 0; i < 3; i++) { fs.push(fn() int { return i }) }` makes functions that return 0, 1 and 2.
+- What the compiler knows about a captured variable where the literal is evaluated holds inside it: a `T?` narrowed to `T` there is a `T` in the literal. A variable that is guarded by an error that is not checked yet ([Errors](#errors)) cannot be captured.
+- A literal has its own parameters and locals, which follow the rules of every name (no shadowing of the variables around it), and its body is a function body of its own: `return` and `try` return from the literal (`try` needs the literal's last result to be `error`), `break` and `continue` need a loop inside the literal, `spawn` a group inside it, and `defer` runs when the literal returns.
+- A literal cannot refer to itself (the variable it is assigned to is declared after its value); recursion goes through a named function.
+- A function value holds its captures: sending it on a channel or passing it to `spawn` deep-copies them like any value. A constant or a default value of a field cannot be a literal (a named function can).
 
 ## Structs, enums, interfaces
 
@@ -269,6 +290,7 @@ pub type Named interface {
 - An enum case is always written with its type, both when creating a value and in a `switch`: `Shape.Circle(2.0)`, `case Shape.Circle(float r):`. A case without data has no parentheses, in its declaration (`Eof`, not `Eof()`) and as a value: `Token.Eof`.
 - A case pattern matches its enum case exactly: when the case carries data, the pattern binds every field with its type (`case Shape.Rect(float w, float h):`), using `_` as the name of a field it doesn't need (`case Shape.Rect(float w, float _):`); a case without data is written without parentheses (`case Token.Eof:`). A `case` with several labels can't bind names, so all its bindings are `_`: `case Shape.Circle(float _), Shape.Point:`.
 - An enum case can carry data, and a `switch` over an enum must cover every case.
+- `v is Shape.Circle` tests one case without a `switch`: true when `v` holds that case, whatever its data (the case is written without data or bindings, as in a pattern). On an `E?` it is false for null, and where it is true `v` is narrowed to `E`. To read the data, use a `switch`.
 - A struct or enum satisfies an interface only by declaring it with `implements` (several interfaces are separated by commas). The compiler then checks that every required method exists, with exactly the same signature (including `mut`). Methods cannot be declared on an interface type.
 - A value of such a type converts to the interface (or the nullable interface) automatically wherever the interface is expected. There is no way to get the original type back out of an interface value (no type switches or assertions).
 - An interface method can be `mut`. Like any `mut` method, it can only be called on a variable or a part of one, and it changes only that interface value.
@@ -403,7 +425,7 @@ if (err != null) {
 
 ### Spawn
 
-- `spawn` takes a call of a function, a method, a function value, an interface method or a package function, which must return `error` or nothing. Results come back on channels.
+- `spawn` takes a call of a function, a method, a function value (a function literal too: `spawn fn(int id) error { ... }(i)`), an interface method or a package function, which must return `error` or nothing. Results come back on channels.
 - The function value, the receiver and the arguments are evaluated when `spawn` runs and deep-copied for the new goroutine, so later changes on either side are not seen by the other (channels inside them are shared, as always).
 - A `mut` method cannot be spawned: the goroutine would only change its own copy of the receiver.
 
@@ -437,6 +459,7 @@ case time.after(5 * time.second).receive():
 - On a `chan error`, the received value is an error and must be handled like any other: `case ch.receive():` is an error; write `case error e = ch.receive():`, or `case _ = ch.receive():` to discard it.
 - The channels and the values to send of every case are evaluated first, in order, before `select` waits.
 - There is no `default` case, so `select` always waits.
+- A case can have a guard: `case jobs.send(queue[0]) if (queue.len() > 0):` takes part only when the condition is true. The guard is evaluated first, in the order of the cases, and only when it is true are the case's channel and value evaluated (so `queue[0]` is not read from an empty queue). The guard narrows like an `if` condition, in the case's value and body. When every case is disabled, `select` would wait forever: it crashes with `select: every case is disabled` instead.
 - `break` and `continue` inside a case apply to the enclosing loop.
 - Timeouts are ordinary channels, such as `time.after(...)`, which receives the time once and is then closed.
 
@@ -516,6 +539,7 @@ The compiler rejects:
 - an unchecked error, or an unused call result
 - a nullable value (or an error that may be null) used without a null check, or a value read before the error beside it was checked
 - a struct literal that leaves out a field without a default value, or a field's default value that is not computed like a constant or uses itself
+- a change of a variable captured by a function literal
 - an unused local variable (including a pattern binding) or import
 - shadowing
 - unreachable code

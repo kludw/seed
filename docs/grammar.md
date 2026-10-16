@@ -8,7 +8,7 @@ This is part of the language spec ([SPEC.md](../SPEC.md)). It uses EBNF: `{ x }`
 - Comments start with `//` and run to the end of the line. There are no block comments.
 - Identifiers: an ASCII letter (`a`–`z`, `A`–`Z`) or `_`, followed by ASCII letters, digits or `_`. `_` alone is the discard name. Outside strings, byte literals and comments, a source file is ASCII: any other character is an error (reported once, as the whole UTF-8 character).
 - Keywords:
-  `package import pub fn type struct enum interface implements const if else for switch case default break continue return defer try null true false mut test assert select spawn group chan map`
+  `package import pub fn type struct enum interface implements const if else for switch case default break continue return defer try null true false mut test assert select spawn group chan map is`
 - Built-in type names (`int float bool byte string error`) are not keywords but predeclared identifiers that refer to the built-in types. Like every name, they can't be declared again: a variable, parameter, field, function, type or constant can't be called `int` or `string`.
 - Literals are described in [SPEC.md](../SPEC.md#literals). A number never starts with `0` followed by a digit: `017` and `00` are errors (only `0` itself, `0.5` and the like, and `0x...` start with `0`).
 - Operators and punctuation:
@@ -114,7 +114,7 @@ CaseLabel   = Expr | EnumPattern .
 EnumPattern = TypeName "." Ident [ "(" Params ")" ] .
 
 Select      = "select" "{" NL { SelectClause } "}" .
-SelectClause = "case" ( VarDecl | Assign | Expr ) ":" NL { Stmt NL } .   // ch.send(v), ch.receive(), _ = ch.receive(), T? v = ch.receive() or v = ch.receive()
+SelectClause = "case" ( VarDecl | Assign | Expr ) [ "if" "(" Expr ")" ] ":" NL { Stmt NL } .   // ch.send(v), ch.receive(), _ = ch.receive(), T? v = ch.receive() or v = ch.receive(); the if is a guard
 
 Return      = "return" [ Expr { "," Expr } ] .
 Defer       = "defer" [ "_" "=" ] Expr .                   // a call; _ = discards its error
@@ -132,19 +132,20 @@ Binary operators, from lowest to highest precedence:
 |---|---|
 | 1 | `\|\|` |
 | 2 | `&&` |
-| 3 | `== != < <= > >=` |
+| 3 | `== != < <= > >= is` |
 | 4 | `+ - \| ^` |
 | 5 | `* / % << >> &` |
 
-All binary operators are left-associative. Comparison operators do not chain: `a < b < c` is a compile error.
+All binary operators are left-associative. Comparison operators (`is` among them) do not chain: `a < b < c` is a compile error.
 
 ```
-Expr        = UnaryExpr | Expr BinaryOp Expr .
+Expr        = UnaryExpr | Expr BinaryOp Expr | Expr "is" CaseName .
+CaseName    = TypeName "." Ident .                           // Shape.Circle, pkg.Shape.Circle: no data, no bindings
 UnaryExpr   = PostfixExpr | ( "-" | "!" ) UnaryExpr | "try" UnaryExpr .
 PostfixExpr = Primary { "." Ident | "[" Expr "]" | "(" [ Args ] ")" } .
 Args        = Expr { "," Expr } .
 Primary     = Literal | Ident | "(" Expr ")"
-            | ListLit | MapLit | StructLit | ChanMake | Group .
+            | ListLit | MapLit | StructLit | ChanMake | Group | FnLit .
 ListLit     = "[" "]" BaseType "{" [ Expr { "," Expr } [ "," ] ] "}" .
 MapLit      = "map" "[" Type "]" BaseType "{" [ Entry { "," Entry } [ "," ] ] "}" .
 Entry       = Expr ":" Expr .
@@ -152,6 +153,7 @@ StructLit   = TypeName "{" [ FieldInit { "," FieldInit } [ "," ] ] "}" .
 FieldInit   = Ident ":" Expr .
 ChanMake    = "chan" BaseType "(" Expr ")" .
 Group       = "group" Block .
+FnLit       = "fn" "(" [ Params ] ")" [ Result ] Block .   // a function literal
 ```
 
 - A conversion looks like a call to a type name: `int(x)`, `float(n)`, `byte(i)`, `string(bytes)`.
@@ -159,3 +161,5 @@ Group       = "group" Block .
 - Conditions in `if`, `for` and `switch` are always parenthesised, so `Name{` is always a struct literal. A `StructLit` may leave out the fields that have a default value.
 - Blocks and expressions nest at most 256 levels deep.
 - A `Group` is only used whole: as the value of an assignment (`error err = group {...}`, `err = ...`, `_ = ...`), of `return`, or after `try`.
+- A `FnLit` is written like a function declaration without a name: named parameters, then the results, then the body, whose statements are on lines of their own (`fn(int x) int {`, a line `return x + offset`, then `}`). A statement that starts with `fn` is a declaration of a variable of function type (`fn(int) int f = ...`), so a literal starts an expression only after another token (`=`, `(`, `,`, `return`, `defer`, `spawn`, ...). It can be called where it is written: `spawn fn() error { ... }()`.
+- `v is Type.Case` is true when the enum value `v` (an `E` or an `E?`, which is false when null) holds that case, whatever its data. The case is written as in a pattern without bindings: `Shape.Circle`, never `Shape.Circle(...)`.

@@ -84,6 +84,18 @@ fn lspSignatureHelp(LspJob job) (json.Value, error) {
     return json.Value.Object(help), null
 }
 
+// Whether the '{' at i opens a block rather than a literal: after ')' (a
+// function literal's parameters, a condition), else or group, or apart from
+// the token before it (`fn(int x) int {`, where a struct literal is
+// written `Name{`).
+fn lspOpensBlock([]Token toks, int i) bool {
+    Token prev = toks[i - 1]
+    if (prev.kind == Tok.RParen || prev.kind == Tok.KwElse || prev.kind == Tok.KwGroup) {
+        return true
+    }
+    return prev.pos.line == toks[i].pos.line && toks[i].pos.col > prev.pos.col + prev.raw.len()
+}
+
 fn lspCloser(Tok k) string {
     if (k == Tok.LBrace) {
         return "}"
@@ -125,6 +137,11 @@ fn lspCallSiteOf([]Token toks, int line) LspCallSite {
         if (depth > 0) {
             depth--
             continue
+        }
+        if (k == Tok.LBrace && i > 0 && lspOpensBlock(toks, i)) {
+            // The body of a function literal (or another block) around the
+            // cursor: the cursor is in no call of the code outside it.
+            return LspCallSite{callee: -1, active: 0, inner: []Tok{}}
         }
         if (k == Tok.LParen && i > 0 && toks[i - 1].kind == Tok.Ident) {
             if (i > 1) {
