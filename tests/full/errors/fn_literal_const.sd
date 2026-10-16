@@ -1,0 +1,12 @@
+// expect-error: fn_literal_const.sd:5:25: error: the value of the constant inc must be computable when the program is compiled, but it uses a function literal
+// A constant's value cannot be a function literal (a named function can).
+package main
+
+const fn(int) int inc = fn(int x) int {
+    return x + 1
+}
+
+fn main([]string args) error {
+    _ = inc(1)
+    return null
+}

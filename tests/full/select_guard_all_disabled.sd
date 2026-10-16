@@ -1,0 +1,25 @@
+// A select whose guards are all false would wait forever: it crashes, at
+// the select. What the cases evaluated so far is released.
+package main
+
+import "fmt"
+
+fn pick(chan string c, []string queue, bool open) string {
+    select {
+    case c.send(queue[0]) if (queue.len() > 0):
+        return "sent"
+    case string? s = c.receive() if (open):
+        if (s == null) {
+            return "closed"
+        }
+        return s
+    }
+}
+
+fn main([]string args) error {
+    chan string c = chan string(1)
+    fmt.println(pick(c, []string{"job"}, false))
+    fmt.println(pick(c, []string{}, true))
+    fmt.println(pick(c, []string{}, false))
+    return null
+}

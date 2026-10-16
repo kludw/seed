@@ -583,6 +583,9 @@ fn (Ast a) fullText(int e) string {
 
 // Like exprText, but never empty.
 fn (Ast a) describe(int e) string {
+    if (e >= 0 && a.exprs[e].kind == ExprKind.FnLit) {
+        return "the function literal"
+    }
     string t = a.exprText(e)
     if (t == "") {
         return "the value"

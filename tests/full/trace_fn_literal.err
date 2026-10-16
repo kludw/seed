@@ -1,0 +1,4 @@
+crash: index out of range: 2 with length 2
+    at sortByRank.<fn at line 16> (tests/full/trace_fn_literal.sd:18:16)
+    called from sortByRank (tests/full/trace_fn_literal.sd:16:9)
+    called from main (tests/full/trace_fn_literal.sd:32:17)

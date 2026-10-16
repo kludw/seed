@@ -1,0 +1,15 @@
+// expect-error: is_with_data.sd:12:25: error: is needs an enum case after it, such as Shape.Circle
+// is tests the case only, without its data or bindings.
+package main
+
+type Shape enum {
+    Circle(float r)
+    Dot
+}
+
+fn main([]string args) error {
+    Shape s = Shape.Dot
+    bool b = s is Shape.Circle(1.0)
+    _ = b
+    return null
+}

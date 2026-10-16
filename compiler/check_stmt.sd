@@ -623,7 +623,10 @@ fn (Checker c) mut checkAssign(int s) {
         case TargetKind.Decl:
             int t = c.resolve(tg.typeExpr)
             c.targetType[ti] = t
+            string savedDeclaring = c.declaring
+            c.declaring = tg.name
             c.checkExpr(st.expr)
+            c.declaring = savedDeclaring
             bool declNonNull = c.isNonNullValue(st.expr)
             c.coerce(st.expr, t, "to initialize " + tg.name)
             int v = c.declare(tg.name, t, VarKind.Local, tg.pos)

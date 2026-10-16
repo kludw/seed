@@ -1401,7 +1401,7 @@ fn (Gen g) mut genGuardedSelect(Stmt st) {
         }
         dests.push(d)
     }
-    g.emit("if (" + cnt + " == 0) sd_crash(\"select: every case is disabled\");")
+    g.emit("if (" + cnt + " == 0) sd_crash_at(" + g.siteAddr(st.pos) + ", \"select: every case is disabled\");")
     string k0 = g.newTmp()
     string k = g.newTmp()
     g.emit("int " + k0 + " = sd_select(" + cases + ", " + cnt + ");")

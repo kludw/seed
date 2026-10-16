@@ -1,0 +1,15 @@
+// expect-error: is_unknown_case.sd:12:25: error: enum Shape has no case Circel
+// An unknown case is reported with a suggestion.
+package main
+
+type Shape enum {
+    Circle(float r)
+    Dot
+}
+
+fn main([]string args) error {
+    Shape s = Shape.Dot
+    bool b = s is Shape.Circel
+    _ = b
+    return null
+}

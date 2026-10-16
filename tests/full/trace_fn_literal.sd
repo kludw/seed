@@ -1,0 +1,34 @@
+// A crash inside a function literal: the trace names it after the function
+// it is in and its line, and goes on through the calls that led to it
+// (here through sortBy). What the literal and its callers held is released
+// (make test-leaks).
+package main
+
+import "fmt"
+
+type Item struct {
+    string name
+    int rank
+}
+
+fn sortByRank([]Item items, []int weights) []Item {
+    []Item out = items
+    out.sortBy(fn(Item a, Item b) bool {
+        // weights is too short for the last item's rank.
+        return weights[a.rank] < weights[b.rank]
+    })
+    return out
+}
+
+fn main([]string args) error {
+    []string names = []string{"x", "y"}
+    fn(int) string label = fn(int i) string {
+        return names[i] + "!"
+    }
+    fmt.println(label(1))
+    []Item items = []Item{Item{name: "a", rank: 0}, Item{name: "b", rank: 1}, Item{name: "c", rank: 2}}
+    []Item sorted = sortByRank(items, []int{5, 3, 1, 0})
+    fmt.println(sorted[0].name)
+    fmt.println(sortByRank(items, []int{2, 1}).len().string())
+    return null
+}

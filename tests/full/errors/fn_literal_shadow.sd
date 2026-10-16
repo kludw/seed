@@ -1,0 +1,13 @@
+// expect-error: fn_literal_shadow.sd:8:28: error: x is already declared at line 7; shadowing is not allowed
+// A literal's parameters and locals follow the rule of every name: no
+// shadowing of the variables around it.
+package main
+
+fn main([]string args) error {
+    int x = 1
+    fn(int) int f = fn(int x) int {
+        return x * 2
+    }
+    _ = f(x)
+    return null
+}

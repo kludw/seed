@@ -1,0 +1,20 @@
+// expect-error: fn_literal_mut_receiver.sd:11:11: error: cannot assign to c.n: c is captured by the function literal, which has a read-only copy of its value
+// A mut method's receiver captured by a literal is a read-only copy too.
+package main
+
+type Counter struct {
+    int n
+}
+
+fn (Counter c) mut bumper() fn() {
+    return fn() {
+        c.n = c.n + 1
+    }
+}
+
+fn main([]string args) error {
+    Counter c = Counter{n: 0}
+    fn() b = c.bumper()
+    b()
+    return null
+}

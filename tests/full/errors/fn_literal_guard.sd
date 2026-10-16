@@ -1,0 +1,16 @@
+// expect-error: fn_literal_guard.sd:9:16: error: n is read before err is checked; when err is not null, n is null
+// Capturing reads the variable when the literal is evaluated: a value beside
+// an error that is not checked yet cannot be captured.
+package main
+
+fn main([]string args) error {
+    int n, error err = "12".toInt()
+    fn() int f = fn() int {
+        return n + 1
+    }
+    if (err != null) {
+        return err
+    }
+    _ = f()
+    return null
+}

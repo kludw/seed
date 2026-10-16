@@ -1,0 +1,13 @@
+// expect-error: fn_literal_missing_return.sd:10:5: error: missing return at the end of the function literal
+// A function literal with results must return on every path.
+package main
+
+fn main([]string args) error {
+    fn(int) int sign = fn(int x) int {
+        if (x < 0) {
+            return -1
+        }
+    }
+    _ = sign(1)
+    return null
+}

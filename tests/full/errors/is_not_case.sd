@@ -1,0 +1,15 @@
+// expect-error: is_not_case.sd:12:19: error: is needs an enum case after it, such as Shape.Circle
+// is takes an enum case, written with its type.
+package main
+
+type Shape enum {
+    Circle(float r)
+    Dot
+}
+
+fn main([]string args) error {
+    Shape s = Shape.Dot
+    bool b = s is Dot
+    _ = b
+    return null
+}

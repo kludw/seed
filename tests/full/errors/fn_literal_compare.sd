@@ -1,0 +1,15 @@
+// expect-error: fn_literal_compare.sd:13:20: error: values of type fn() int cannot be compared with ==
+// Function values, literals included, have no ==.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    int k = 1
+    fn() int a = fn() int {
+        return k
+    }
+    fn() int b = a
+    fmt.println((a == b).string())
+    return null
+}

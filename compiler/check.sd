@@ -253,6 +253,9 @@ type Checker struct {
     map[int][]int litCaps
     []int fnOuter
     map[int]bool litDone
+    // The name a one-target declaration is declaring while its value is
+    // checked (for the hint when a literal in it calls itself).
+    string declaring
     int curFn
     int loopDepth
     int groupDepth
@@ -318,6 +321,7 @@ fn newChecker(Ast ast, Diags diags, bool testMode) Checker {
         litCaps: map[int][]int{},
         fnOuter: []int{},
         litDone: map[int]bool{},
+        declaring: "",
         curFn: -1,
         loopDepth: 0,
         groupDepth: 0,

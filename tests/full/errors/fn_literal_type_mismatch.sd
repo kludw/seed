@@ -1,0 +1,12 @@
+// expect-error: fn_literal_type_mismatch.sd:7:21: error: cannot use the function literal (type fn(string) int) as fn(int) int to initialize f; there are no implicit conversions
+// A function literal has the type its parameters and results say; it must
+// match the type it is used as exactly.
+package main
+
+fn main([]string args) error {
+    fn(int) int f = fn(string s) int {
+        return s.len()
+    }
+    _ = f(1)
+    return null
+}

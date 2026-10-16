@@ -1,0 +1,12 @@
+// expect-error: fn_literal_unused_local.sd:7:13: error: unused is declared but never used
+// The pedantic checks apply inside a literal: an unused local.
+package main
+
+fn main([]string args) error {
+    fn() int f = fn() int {
+        int unused = 3
+        return 1
+    }
+    _ = f()
+    return null
+}

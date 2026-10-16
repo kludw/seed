@@ -1,0 +1,18 @@
+// expect-error: fn_literal_spawn.sd:13:13: error: spawn is only allowed inside a group block
+// spawn in a literal needs a group in the literal: the one around the
+// literal's code may be over when it is called.
+package main
+
+fn work() error {
+    return null
+}
+
+fn main([]string args) error {
+    try group {
+        fn() start = fn() {
+            spawn work()
+        }
+        start()
+    }
+    return null
+}

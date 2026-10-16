@@ -1,0 +1,16 @@
+// expect-error: fn_literal_self.sd:12:20: error: undefined function fact
+// A literal cannot call itself through the variable it is assigned to,
+// which is declared after its value: recursion goes through a named
+// function.
+package main
+
+fn main([]string args) error {
+    fn(int) int fact = fn(int n) int {
+        if (n < 2) {
+            return 1
+        }
+        return n * fact(n - 1)
+    }
+    _ = fact(5)
+    return null
+}

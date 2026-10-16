@@ -1,0 +1,3 @@
+crash: select: every case is disabled
+    at pick (tests/full/select_guard_all_disabled.sd:8:5)
+    called from main (tests/full/select_guard_all_disabled.sd:23:17)

@@ -1,0 +1,16 @@
+// expect-error: fn_literal_field_capture.sd:12:11: error: cannot assign to b.n: b is captured by the function literal, which has a read-only copy of its value
+// Nor can a field of a captured struct be assigned.
+package main
+
+type Box struct {
+    int n
+}
+
+fn main([]string args) error {
+    Box b = Box{n: 1}
+    fn() set = fn() {
+        b.n = 2
+    }
+    set()
+    return null
+}

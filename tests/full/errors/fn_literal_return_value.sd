@@ -1,0 +1,11 @@
+// expect-error: fn_literal_return_value.sd:7:16: error: cannot use "one" (type string) as int as the return value; there are no implicit conversions
+// return in a literal returns from the literal, with its result types.
+package main
+
+fn main([]string args) error {
+    fn() int f = fn() int {
+        return "one"
+    }
+    _ = f()
+    return null
+}

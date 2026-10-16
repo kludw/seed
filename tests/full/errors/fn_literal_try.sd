@@ -1,0 +1,11 @@
+// expect-error: fn_literal_try.sd:7:16: error: try can only be used in a function whose last result is error
+// try in a literal needs the literal's own last result to be error.
+package main
+
+fn main([]string args) error {
+    fn(string) int parse = fn(string s) int {
+        return try s.toInt()
+    }
+    _ = parse("1")
+    return null
+}

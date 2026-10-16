@@ -1,0 +1,13 @@
+// expect-error: fn_literal_break.sd:8:13: error: break outside of a loop
+// break inside a literal cannot leave a loop around the literal.
+package main
+
+fn main([]string args) error {
+    for (int i = 0; i < 3; i++) {
+        fn() f = fn() {
+            break
+        }
+        f()
+    }
+    return null
+}

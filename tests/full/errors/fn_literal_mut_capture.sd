@@ -1,0 +1,12 @@
+// expect-error: fn_literal_mut_capture.sd:8:9: error: cannot call the mut method push() on seen: seen is captured by the function literal, which has a read-only copy of its value
+// A mut method (here the built-in push) cannot change a captured list.
+package main
+
+fn main([]string args) error {
+    []string seen = []string{}
+    fn(string) add = fn(string s) {
+        seen.push(s)
+    }
+    add("a")
+    return null
+}

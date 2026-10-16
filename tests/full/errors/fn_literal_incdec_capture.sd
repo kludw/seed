@@ -1,0 +1,13 @@
+// expect-error: fn_literal_incdec_capture.sd:8:9: error: cannot assign to count: count is captured by the function literal, which has a read-only copy of its value
+// ++ on a captured variable is an assignment too.
+package main
+
+fn main([]string args) error {
+    int count = 0
+    fn() int next = fn() int {
+        count++
+        return count
+    }
+    _ = next()
+    return null
+}

@@ -99,6 +99,9 @@ fn (Checker c) mut checkNamedCall(int e, string n) {
         s.consider(c.vars[c.scope[k]].name)
     }
     string hint = goBuiltinHint(n)
+    if (n == c.declaring && c.litStack.len() > 0) {
+        hint = "a function literal cannot use the variable it is the value of (" + n + " is declared after its value); for recursion, call a named function"
+    }
     if (hint == "") {
         hint = s.hint()
     }

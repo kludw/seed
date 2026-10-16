@@ -1,0 +1,17 @@
+// expect-error: fn_literal_assign_capture.sd:12:9: error: cannot assign to count: count is captured by the function literal, which has a read-only copy of its value
+// A function literal has a read-only copy of the variables it uses from
+// around it: assigning one is an error that says so (it would change
+// nothing outside the literal).
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    int count = 0
+    fn() f = fn() {
+        count = count + 1
+    }
+    f()
+    fmt.println(count.string())
+    return null
+}

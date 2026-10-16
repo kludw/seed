@@ -1,0 +1,49 @@
+// v is Type.Case: whether an enum value is a given case, with or without
+// data, without a switch over every case. On a nullable enum it is false
+// for null, and true narrows the value.
+package main
+
+import "fmt"
+import "json"
+
+type Value enum {
+    Number(int n)
+    Text(string s)
+    Pair(Value a, Value b)
+    Nil
+}
+
+fn describe(Value v) string {
+    if (v is Value.Number || v is Value.Text) {
+        return "atom"
+    }
+    if (v is Value.Pair) {
+        return "pair"
+    }
+    return "nil"
+}
+
+// v is not null where v is Value.Text is true.
+fn textName(Value? v) string {
+    if (v is Value.Text) {
+        return v.name()
+    }
+    return "-"
+}
+
+fn main([]string args) error {
+    []Value vs = []Value{Value.Number(1), Value.Text("x"), Value.Pair(Value.Nil, Value.Number(2)), Value.Nil}
+    []string out = []string{}
+    for (int i = 0; i < vs.len(); i++) {
+        out.push(describe(vs[i]))
+    }
+    fmt.println(out.join(" "))
+    fmt.println((vs[2] is Value.Pair).string() + " " + (!(vs[3] is Value.Nil)).string())
+    Value? maybe = null
+    fmt.println((maybe is Value.Nil).string())
+    fmt.println(textName(Value.Text("hi")) + " " + textName(null) + " " + textName(Value.Nil))
+    // Another package's enum.
+    json.Value j = try json.parse("[1, 2]")
+    fmt.println((j is json.Value.Array).string() + " " + (j is json.Value.Object).string())
+    return null
+}

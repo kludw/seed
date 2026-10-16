@@ -1,0 +1,70 @@
+// select cases with a guard: `case ... if (cond):` takes part only when
+// cond is true, and then its channel and value are evaluated (in order,
+// after the guards and operands of the cases before it). A coordinator
+// sends jobs from a queue only while the queue is not empty, without the
+// two forms of select it needed before.
+package main
+
+import "fmt"
+
+fn worker(chan int jobs, chan int done) error {
+    for (int? j = jobs.receive(); j != null; j = jobs.receive()) {
+        done.send(j * j)
+    }
+    return null
+}
+
+fn main([]string args) error {
+    chan int jobs = chan int(0)
+    chan int done = chan int(0)
+    []int queue = []int{1, 2, 3, 4, 5}
+    int pending = queue.len()
+    int sum = 0
+    try group {
+        spawn worker(jobs, done)
+        spawn worker(jobs, done)
+        for (; pending > 0; ) {
+            select {
+            case jobs.send(queue[0]) if (queue.len() > 0):
+                queue.remove(0)
+            case int? r = done.receive():
+                if (r != null) {
+                    sum = sum + r
+                }
+                pending--
+            }
+        }
+        jobs.close()
+    }
+    fmt.println("sum of squares " + sum.string())
+
+    // The guard narrows: next is an int in the case.
+    chan int out = chan int(1)
+    int? next = 42
+    select {
+    case out.send(next) if (next != null):
+        fmt.println("sent " + next.string())
+    case _ = done.receive():
+        fmt.println("unexpected")
+    }
+    int? back = out.receive()
+    if (back != null) {
+        fmt.println("got " + back.string())
+    }
+
+    // Evaluation order: guard, then the channel and value of its case,
+    // case by case; a disabled case's operands are not evaluated.
+    []string log = []string{}
+    chan string a = chan string(1)
+    chan string b = chan string(1)
+    select {
+    case a.send("a" + log.len().string()) if (log.len() > 5):
+        fmt.println("a")
+    case b.send("b" + log.len().string()) if (log.len() == 0):
+        string? v = b.receive()
+        if (v != null) {
+            fmt.println("chose " + v)
+        }
+    }
+    return null
+}

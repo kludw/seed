@@ -1,0 +1,20 @@
+// expect-error: is_wrong_enum.sd:17:16: error: is compares s (type Shape) with a case of Color
+// The case must belong to the value's enum.
+package main
+
+type Shape enum {
+    Circle(float r)
+    Dot
+}
+
+type Color enum {
+    Red
+    Blue
+}
+
+fn main([]string args) error {
+    Shape s = Shape.Dot
+    bool b = s is Color.Red
+    _ = b
+    return null
+}
