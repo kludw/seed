@@ -67,9 +67,20 @@ fn (Gen g) sitePath(int file) string {
 }
 
 // The name of function f in a crash's trace: get, Cart.add, cart.newCart,
-// cart.Cart.add (the package's name outside package main), test "name".
+// cart.Cart.add (the package's name outside package main), test "name",
+// and for a function literal the function it is in and the literal's line:
+// main.<fn at line 12>.
 fn (Gen g) fnSiteLabel(int f) string {
     FnDecl fd = g.c.ast.fns[f]
+    if (fd.isLit) {
+        // A function literal: the function it is in, and its line.
+        string lit = "<fn at line " + fd.pos.line.string() + ">"
+        int outer = g.c.fnOuter[f]
+        if (outer < 0) {
+            return lit
+        }
+        return g.fnSiteLabel(outer) + "." + lit
+    }
     if (fd.isTest) {
         return "test " + cString(fd.name)
     }

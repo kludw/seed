@@ -1,0 +1,281 @@
+// Function literals: each kind of value captured (a copy taken when the
+// literal is evaluated), literals in literals, literals in loops, returned
+// literals, literals in structs, lists and maps, passed to sortBy and
+// regex.replaceWith, spawned and sent over channels.
+package main
+
+import "errors"
+import "fmt"
+import "regex"
+
+type Point struct {
+    int x
+    int y
+}
+
+type Shape enum {
+    Circle(float radius)
+    Square(float side)
+}
+
+type Named interface {
+    name() string
+}
+
+type Dog struct implements Named {
+    string label
+}
+
+fn (Dog d) name() string {
+    return "dog " + d.label
+}
+
+type Counter struct {
+    int n
+    []string log
+}
+
+// A mut method's receiver is captured as its value at that point.
+fn (Counter c) mut snapshot() fn() int {
+    c.n = c.n + 1
+    return fn() int {
+        return c.n * 100
+    }
+}
+
+type Op struct {
+    string name
+    fn(int, int) int apply
+}
+
+fn makeAdder(int n) fn(int) int {
+    return fn(int x) int {
+        return x + n
+    }
+}
+
+fn compose(fn(int) int f, fn(int) int g) fn(int) int {
+    return fn(int x) int {
+        return g(f(x))
+    }
+}
+
+fn twice(int x) int {
+    return x * 2
+}
+
+fn fib(int n) int {
+    if (n < 2) {
+        return n
+    }
+    return fib(n - 1) + fib(n - 2)
+}
+
+fn work(int id, chan string out) error {
+    out.send("worker " + id.string())
+    return null
+}
+
+fn main([]string args) error {
+    int small = 7
+    int big = 1 << 100
+    float f = 2.5
+    bool yes = true
+    byte b = 'z'
+    string s = "hello"
+    []int xs = []int{1, 2, 3}
+    map[string]int m = map[string]int{"a": 1}
+    Point p = Point{x: 1, y: 2}
+    Shape sh = Shape.Circle(1.5)
+    Named nm = Dog{label: "rex"}
+    error err = errors.new("boom")
+    chan int ch = chan int(1)
+    string? maybe = null
+    fn(int) int tw = twice
+    const int limit = 3
+    fn() string show = fn() string {
+        string shape = "?"
+        switch (sh) {
+        case Shape.Circle(float r):
+            shape = "circle " + r.string()
+        case Shape.Square(float side):
+            shape = "square " + side.string()
+        }
+        string e = "none"
+        if (err != null) {
+            e = err.message()
+        }
+        string mb = "null"
+        if (maybe != null) {
+            mb = maybe
+        }
+        return small.string() + " " + big.string() + " " + f.string() + " " + yes.string() + " " + b.string() + " " + s + " " + xs.len().string() + " " + m.getOr("a", 0).string() + " " + p.y.string() + " " + shape + " " + nm.name() + " " + e + " " + mb + " " + tw(limit).string()
+    }
+    // Changing the variables afterwards changes nothing in the literal.
+    small = 8
+    big = 0
+    s = "changed"
+    xs.push(4)
+    m["a"] = 2
+    p.y = 20
+    sh = Shape.Square(3.0)
+    maybe = "set"
+    err = null
+    fmt.println(show())
+    ch.send(5)
+    fn() int? take = fn() int? {
+        return ch.receive()
+    }
+    int? got = take()
+    if (got != null) {
+        fmt.println("received " + got.string())
+    }
+
+    // Narrowing at the literal holds inside it.
+    string? who = "ann"
+    if (who != null) {
+        fn() int len = fn() int {
+            return who.len()
+        }
+        fmt.println("len " + len().string())
+    }
+
+    // A literal in a literal captures through the outer one.
+    int base = 100
+    fn(int) fn(int) int outer = fn(int a) fn(int) int {
+        return fn(int c) int {
+            return base + a + c
+        }
+    }
+    fmt.println(outer(10)(1).string())
+
+    // Each evaluation in a loop captures the value of that iteration.
+    []fn() int fs = []fn() int{}
+    for (int i = 0; i < 3; i++) {
+        int sq = i * i
+        fs.push(fn() int {
+            return i * 10 + sq
+        })
+    }
+    []string outs = []string{}
+    for (int j = 0; j < fs.len(); j++) {
+        outs.push(fs[j]().string())
+    }
+    fmt.println(outs.join(" "))
+
+    // Returned literals, composition, named functions as values.
+    fn(int) int add5 = makeAdder(5)
+    fn(int) int both = compose(add5, twice)
+    fmt.println(add5(1).string() + " " + both(1).string() + " " + compose(twice, add5)(1).string())
+
+    // In structs, lists and maps.
+    int scale = 3
+    []Op ops = []Op{
+        Op{name: "add", apply: fn(int x, int y) int {
+            return x + y
+        }},
+        Op{name: "scaled", apply: fn(int x, int y) int {
+            return (x - y) * scale
+        }},
+    }
+    for (int k = 0; k < ops.len(); k++) {
+        Op op = ops[k]
+        fmt.println(op.name + " " + op.apply(7, 2).string())
+    }
+    map[string]fn(string) string fmts = map[string]fn(string) string{
+        "upper": fn(string t) string {
+            return t.toUpper()
+        },
+        "quote": fn(string t) string {
+            return "\"" + t + "\""
+        },
+    }
+    []string keys = fmts.keys()
+    for (int q = 0; q < keys.len(); q++) {
+        (fn(string) string)? fm = fmts[keys[q]]
+        if (fm != null) {
+            fmt.println(keys[q] + ": " + fm("hi"))
+        }
+    }
+
+    // sortBy with a comparator that needs a parameter.
+    Point origin = Point{x: 10, y: 10}
+    []Point pts = []Point{Point{x: 0, y: 0}, Point{x: 9, y: 9}, Point{x: 20, y: 11}}
+    pts.sortBy(fn(Point a, Point c) bool {
+        int da = (a.x - origin.x) * (a.x - origin.x) + (a.y - origin.y) * (a.y - origin.y)
+        int dc = (c.x - origin.x) * (c.x - origin.x) + (c.y - origin.y) * (c.y - origin.y)
+        return da < dc
+    })
+    []string ps = []string{}
+    for (int r = 0; r < pts.len(); r++) {
+        ps.push(pts[r].x.string())
+    }
+    fmt.println("nearest first: " + ps.join(" "))
+
+    // regex.replaceWith with state from around it.
+    map[string]string vars = map[string]string{"name": "Seed", "kind": "language"}
+    regex.Regex re = regex.mustCompile("\\$([a-z]+)")
+    string text = re.replaceWith("$name is a $kind, $other", fn(regex.Match mt) string {
+        string? key = mt.groupText(1)
+        if (key == null) {
+            return "?"
+        }
+        return vars.getOr(key, "?")
+    })
+    fmt.println(text)
+
+    // A mut method's receiver.
+    Counter cnt = Counter{n: 1, log: []string{}}
+    fn() int snap = cnt.snapshot()
+    cnt.n = 50
+    fmt.println("snapshot " + snap().string() + " now " + cnt.n.string())
+
+    // Spawned, and sent over a channel (a copy for the other goroutine).
+    chan string results = chan string(10)
+    string prefix = "from"
+    try group {
+        for (int w = 0; w < 2; w++) {
+            spawn fn(int id) error {
+                results.send(prefix + " literal " + id.string())
+                return null
+            }(w)
+        }
+        spawn work(9, results)
+    }
+    results.close()
+    []string got2 = []string{}
+    for (string? line = results.receive(); line != null; line = results.receive()) {
+        got2.push(line)
+    }
+    got2.sort()
+    fmt.println(got2.join("; "))
+    chan fn(int) int fnch = chan fn(int) int(1)
+    int k3 = 1000
+    try group {
+        spawn fn() error {
+            fnch.send(fn(int x) int {
+                return x + k3
+            })
+            return null
+        }()
+    }
+    (fn(int) int)? recv = fnch.receive()
+    if (recv != null) {
+        fmt.println("over a channel: " + recv(1).string())
+    }
+
+    // Recursion goes through a named function.
+    fn(int) int fibs = fn(int n) int {
+        return fib(n) + fib(n + 1)
+    }
+    fmt.println("fib " + fibs(10).string())
+
+    // defer of a literal call; the literal is evaluated at the defer.
+    string where = "first"
+    defer fn(string w) {
+        fmt.println("deferred " + w + " " + where)
+    }("arg")
+    where = "second"
+    fmt.println("where " + where)
+    return null
+}

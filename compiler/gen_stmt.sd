@@ -1271,6 +1271,12 @@ fn (Gen g) commExpr(int comm) int {
 //   int _tK = sd_select(_tC, 2);
 //   if (_tK == 0) { T? l_x = _tC[0].ok ? _tR : null; ... } else if (_tK == 1) { ... }
 fn (Gen g) mut genSelect(Stmt st) {
+    for (int c = 0; c < st.count; c++) {
+        if (g.c.ast.cases[g.c.ast.at(st.list, c)].guard >= 0) {
+            g.genGuardedSelect(st)
+            return
+        }
+    }
     int mark = g.slots.len()
     g.emit("{")
     g.indent++
@@ -1324,6 +1330,99 @@ fn (Gen g) mut genSelect(Stmt st) {
         g.indent--
     }
     if (st.count > 0) {
+        g.emit("}")
+    }
+    g.releaseTo(mark)
+    g.indent--
+    g.emit("}")
+}
+
+// A select with guards (case ... if (cond):). Case by case, in order: the
+// guard, and when it is true the channel and the value to send, kept in
+// owned temporaries declared before (null while the case is disabled);
+// the enabled cases go into the array, with their indexes in the select.
+// With every case disabled, select would wait forever: it crashes instead.
+//
+//   sd_select_case _tC[2]; int _tI[2]; int _tN = 0;
+//   sd_chan *_t1 = NULL; T _t2 = 0; bool _t3 = cond;
+//   if (_t3) { _t1 = ch; _t2 = v; _tC[_tN] = ...; _tI[_tN++] = 0; }
+//   ...
+//   int _tK = sd_select(_tC, _tN); int _tJ = _tI[_tK]; if (_tJ == 0) ...
+fn (Gen g) mut genGuardedSelect(Stmt st) {
+    int mark = g.slots.len()
+    g.emit("{")
+    g.indent++
+    int n = st.count
+    string cases = g.newTmp()
+    string idx = g.newTmp()
+    string cnt = g.newTmp()
+    g.emit("sd_select_case " + cases + "[" + n.string() + "]; int " + idx + "[" + n.string() + "]; int " + cnt + " = 0;")
+    []string dests = []string{}
+    for (int j = 0; j < n; j++) {
+        Case cj = g.c.ast.cases[g.c.ast.at(st.list, j)]
+        int ej = g.commExpr(cj.comm)
+        bool send = g.c.info[ej].builtin == Builtin.Send
+        int cht = g.typeOf(g.recvOf(ej))
+        string chv = g.temp(cht, "NULL")
+        string vv = ""
+        int vt = -1
+        if (send) {
+            vt = g.typeOf(g.arg(ej, 0))
+            vv = g.temp(vt, g.zeroOf(vt))
+        }
+        string d = ""
+        if (!send) {
+            d = g.newTmp()
+            g.emit(g.ctype(g.elemOf(cht)) + " " + d + ";")
+        }
+        if (cj.guard >= 0) {
+            int gm = g.slots.len()
+            string gv = g.newTmp()
+            string gc = g.gexpr(cj.guard)
+            g.emit("bool " + gv + " = " + gc + ";")
+            g.releaseTo(gm)
+            g.emit("if (" + gv + ") {")
+            g.indent++
+        }
+        int m2 = g.slots.len()
+        string c0 = g.gexpr(g.recvOf(ej))
+        g.emit(chv + " = " + g.ownVal(c0, cht) + ";")
+        string entry = "(sd_select_case){" + chv + ", SD_RECV, &" + d + ", false}"
+        if (send) {
+            string v0 = g.gexpr(g.arg(ej, 0))
+            g.emit(vv + " = " + g.ownVal(v0, vt) + ";")
+            entry = "(sd_select_case){" + chv + ", SD_SEND, (void *)&" + vv + ", false}"
+        }
+        g.releaseTo(m2)
+        g.emit(cases + "[" + cnt + "] = " + entry + "; " + idx + "[" + cnt + "++] = " + j.string() + ";")
+        if (cj.guard >= 0) {
+            g.indent--
+            g.emit("}")
+        }
+        dests.push(d)
+    }
+    g.emit("if (" + cnt + " == 0) sd_crash(\"select: every case is disabled\");")
+    string k0 = g.newTmp()
+    string k = g.newTmp()
+    g.emit("int " + k0 + " = sd_select(" + cases + ", " + cnt + ");")
+    g.emit("int " + k + " = " + idx + "[" + k0 + "];")
+    for (int m = 0; m < n; m++) {
+        Case cm = g.c.ast.cases[g.c.ast.at(st.list, m)]
+        if (m == 0) {
+            g.emit("if (" + k + " == 0) {")
+        } else {
+            g.emit("} else if (" + k + " == " + m.string() + ") {")
+        }
+        g.indent++
+        g.pushScope()
+        if (dests[m] != "") {
+            g.genReceived(cm.comm, cases + "[" + k0 + "].ok", dests[m])
+        }
+        g.genStmts(cm.body)
+        g.popScope(!g.c.blockExits(cm.body))
+        g.indent--
+    }
+    if (n > 0) {
         g.emit("}")
     }
     g.releaseTo(mark)

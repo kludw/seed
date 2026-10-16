@@ -972,10 +972,10 @@ fn (Parser p) mut parseBinary(int minPrec) int {
         if (t.kind == Tok.KwIs) {
             // v is Type.Case: whether v holds that case (the checker
             // checks that right names one).
-            Expr is = newExpr(ExprKind.Is, t.pos)
-            is.a = left
-            is.b = right
-            left = p.addExpr(is)
+            Expr ie = newExpr(ExprKind.Is, t.pos)
+            ie.a = left
+            ie.b = right
+            left = p.addExpr(ie)
             continue
         }
         Expr b = newExpr(ExprKind.Binary, t.pos)
