@@ -77,7 +77,7 @@ test "deep recursion is an error, not a crash" {
     assert(value(src + "(deep 2000)") == "2000")
     string err = value(src + "(deep 100000)")
     assert(err.startsWith("error: 1:"))
-    assert(err.endsWith("recursion too deep (more than 4000 nested calls)"))
+    assert(err.endsWith("recursion too deep (more than 2500 nested calls)"))
 }
 
 test "tail calls run in constant space" {

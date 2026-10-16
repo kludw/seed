@@ -6,7 +6,7 @@ import "os"
 // How deep evaluation may nest (calls that are not tail calls, nested
 // arguments). Beyond it, evaluation fails with an error instead of
 // overflowing the stack.
-pub const int maxDepth = 4000
+pub const int maxDepth = 2500
 
 // A frame of variables, and the index of the frame around it (-1 for the
 // global one).
