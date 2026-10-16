@@ -1,0 +1,13 @@
+// expect-error: fn_literal_capture_read_only.sd:9:9: error: cannot call the mut method push() on names: names is captured by the function literal, which has a read-only copy of its value
+// SPEC "Function literals": captured variables are read-only inside the literal.
+package main
+
+fn main([]string args) error {
+    []string names = []string{}
+    fn(string) add = fn(string n) {
+        // the copy of names cannot be changed
+        names.push(n)
+    }
+    add("x")
+    return null
+}

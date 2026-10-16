@@ -1,0 +1,21 @@
+// SPEC "Select": a guard is evaluated before its case's channel and value,
+// which are not evaluated when it is false (queue[0] of an empty queue).
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    chan int out = chan int(1)
+    chan int other = chan int(1)
+    other.send(7)
+    []int queue = []int{}
+    select {
+    case out.send(queue[0]) if (queue.len() > 0):
+        fmt.println("sent")
+    case int? v = other.receive():
+        if (v != null) {
+            fmt.println("received " + v.string())
+        }
+    }
+    return null
+}

@@ -154,7 +154,7 @@ The documentation:
 
 ## Status
 
-**What works:** the whole language as specified: enums with data and exhaustive `switch`, nullable types with flow-sensitive narrowing, errors with `try` and error guards, structs (with default values of fields), `mut` methods, interfaces with `implements`, function values, integers that grow without overflowing, goroutines with `group`, `spawn`, channels and `select`, `defer`, packages with `pub`, `test` blocks with `assert`, and the formatter. The standard library has all 15 planned packages (`errors fmt io os fs path strings math rand time encoding json crypto net http`). The compiler compiles itself to a fixed point and every test suite passes.
+**What works:** the whole language as specified: enums with data and exhaustive `switch`, nullable types with flow-sensitive narrowing, errors with `try` and error guards, structs (with default values of fields), `mut` methods, interfaces with `implements`, function values and function literals that capture by value, integers that grow without overflowing, goroutines with `group`, `spawn`, channels and `select` (with guarded cases), `defer`, packages with `pub`, `test` blocks with `assert`, and the formatter. The standard library has all 15 planned packages (`errors fmt io os fs path strings math rand time encoding json crypto net http`). The compiler compiles itself to a fixed point and every test suite passes.
 
 **Known limitations:**
 

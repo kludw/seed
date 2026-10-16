@@ -1,0 +1,23 @@
+// SPEC "Function literals": a literal copies the values of the variables
+// it uses when it is evaluated; a later change of the variable is not
+// seen, and a literal evaluated in a loop has that iteration's value.
+package main
+
+import "fmt"
+
+fn main([]string args) error {
+    int minAge = 18
+    fn(int) bool adult = fn(int age) bool {
+        return age >= minAge
+    }
+    minAge = 99
+    fmt.println(adult(20).string())
+    []fn() int fs = []fn() int{}
+    for (int i = 0; i < 3; i++) {
+        fs.push(fn() int {
+            return i
+        })
+    }
+    fmt.println(fs[0]().string() + fs[1]().string() + fs[2]().string())
+    return null
+}

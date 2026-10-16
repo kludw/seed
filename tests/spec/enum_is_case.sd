@@ -1,0 +1,17 @@
+// SPEC "Structs, enums, interfaces": v is Type.Case is true when v holds the
+// case, whatever its data; false for a null E?.
+package main
+
+import "fmt"
+
+type Shape enum {
+    Circle(float radius)
+    Dot
+}
+
+fn main([]string args) error {
+    Shape c = Shape.Circle(2.0)
+    Shape? none = null
+    fmt.println((c is Shape.Circle).string() + " " + (c is Shape.Dot).string() + " " + (none is Shape.Dot).string())
+    return null
+}

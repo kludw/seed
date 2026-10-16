@@ -303,6 +303,10 @@
           "match": "\\b(?:if|else|for|switch|case|default|break|continue|return|defer|try|select|spawn|group)\\b"
         },
         {
+          "name": "keyword.operator.word.seed",
+          "match": "\\bis\\b"
+        },
+        {
           "name": "keyword.control.import.seed",
           "match": "\\bimport\\b"
         },

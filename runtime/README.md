@@ -104,7 +104,7 @@ All names are C identifiers from `seed.h`.
 | enum `E` | recommended: `sd_box *` holding an enum struct (below) | `NULL` | yes |
 | interface `I` | `sd_iface {vt, obj}` | `vt == NULL` | `obj` is a box |
 | `error` | `sd_err` (= `sd_iface`) | `vt == NULL` (always nullable) | `obj` is a box |
-| `fn(A) R` | a C function pointer `R (*)(A)` | `NULL` | no |
+| `fn(A) R` | `sd_box *` holding the code and the captures (section 8) | `NULL` | yes |
 | several results | a generated struct, or out-parameters | | |
 
 Details:
@@ -141,7 +141,8 @@ Details:
   dynamic value; `obj->t` is its type. See section 8.
 - **chan T**: shared between goroutines, so its count is atomic. Elements are
   deep-copied on send (section 11).
-- **function values**: plain C function pointers; Seed has no closures.
+- **function values**: boxes whose payload starts with a code pointer,
+  followed by what a function literal captured (section 8).
 
 ## 3. Ownership rules
 
@@ -204,7 +205,7 @@ compare it. The runtime provides descriptors for the built-in types:
 | any `chan T` | `sd_type_chan` |
 | interfaces | `sd_type_iface` (equal: same dynamic type and equal values) |
 | `error` | `sd_type_err` (equal: both null, or same `message()`) |
-| any `fn(...)` | `sd_type_fn` |
+| any `fn(...)` | `sd_type_box` (a function value is a box); `sd_type_fn` describes the code pointer inside it, `sd_type_fnval` the payload of a named function's box |
 
 Generated code defines one descriptor per struct, per enum, and per
 spawn-argument struct, normally as a field table (no code needed):
@@ -426,10 +427,10 @@ function of unknown type:
 
 ```c
 static bool less_User(void *ctx, const void *a, const void *b) {   /* one per element type */
-  bool (*f)(S_User, S_User) = (bool (*)(S_User, S_User))ctx;
-  return f(*(const S_User *)a, *(const S_User *)b);
+  bool (*f)(const void *, S_User, S_User) = (bool (*)(const void *, S_User, S_User))SD_FN_CODE(ctx);
+  return f(SD_FN_ENV(ctx), *(const S_User *)a, *(const S_User *)b);
 }
-sd_list_sort_by(&l_people, less_User, (void *)l_f);   /* stable */
+sd_list_sort_by(&l_people, less_User, (void *)l_f);   /* l_f: the function value's box; stable */
 ```
 
 Maps: keys and values are passed by pointer.
@@ -483,7 +484,29 @@ sd_err_release(e);
 `==` on errors: `sd_err_equal` (both null, or the same message; this is seed0's
 rule).
 
-Function values are C function pointers. A list of them uses `sd_type_fn`.
+A function value (`fn(A) R`) is a box (`sd_box *`, so it is counted,
+copy-on-write, deep-copied by `spawn` and channels, and null is `NULL`)
+whose payload starts with the code (`sd_fnval`: an `sd_code`, a generic
+function pointer) and continues with the values a function literal
+captured. The code takes a pointer to the payload (its *environment*)
+before the parameters, `R code(const void *env, A a)`:
+
+```c
+typedef struct { sd_code code; sd_int c_offset; } E_add;               /* a literal that captured offset */
+static const sd_field F_add[] = {SD_FIELD(E_add, code, &sd_type_fn), SD_FIELD(E_add, c_offset, &sd_type_int)};
+static const sd_type T_add = SD_STRUCT_TYPE("fn", E_add, F_add);
+static sd_int add_code(const void *env, sd_int x) { return sd_int_add(x, ((const E_add *)env)->c_offset); }
+sd_box *f = sd_box_new(&T_add, &(E_add){(sd_code)add_code, sd_int_retain(offset)});   /* the literal */
+sd_int r = ((sd_int (*)(const void *, sd_int))SD_FN_CODE(f))(SD_FN_ENV(f), x);      /* f(x) */
+
+static sd_int double_w(const void *env, sd_int x) { (void)env; return double_(x); }
+SD_FN_STATIC(double_v, double_w);          /* a named function as a value: immortal, no captures */
+sd_box *g = SD_BOX_REF(double_v);
+```
+
+The environment is borrowed for the call (the caller holds the box).
+A box whose payload's first field is described by `sd_type_fn` is shown
+as `fn` by `sd_show`.
 
 ## 9. Crashes and defer
 
@@ -1005,7 +1028,10 @@ sd_chan_release(t_timer);
 performs it and returns its index; `ok` tells a receive whether a value
 arrived (false: closed). When several cases are ready, one is chosen
 uniformly at random. A send case on a closed channel crashes if chosen.
-Single `send`/`receive` are one-case selects.
+Single `send`/`receive` are one-case selects. A select with guards
+(`case ... if (cond):`) passes only the enabled cases, with an array of
+their indexes in the select; the generated code crashes before calling
+`sd_select` when none is enabled.
 
 **time.** `sd_time_after(ns)` returns a new `chan int` (owned) that receives
 the wall-clock time (Unix nanoseconds, `time.now()` in docs/stdlib.md) once,
@@ -1462,6 +1488,9 @@ Arguments are borrowed and results owned unless marked **consumes** or
 | `bool sd_map_equal(a, b)`, `sd_map *sd_map_clone_deep(m)` | |
 
 ### Boxes, interfaces, errors
+
+Function values: `sd_code`, `sd_fnval`, `sd_type_fnval`, `SD_FN_CODE(b)`,
+`SD_FN_ENV(b)`, `SD_FN_STATIC(name, code)` (section 8).
 
 | Function | Notes |
 |---|---|

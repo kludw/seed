@@ -1,0 +1,19 @@
+package main
+
+import "fmt"
+import "shapes"
+
+fn main([]string args) error {
+    []shapes.Scaler ss = []shapes.Scaler{shapes.by(2.0), shapes.Scaler{name: "double", apply: shapes.double}}
+    float base = 1.5
+    for (int i = 0; i < ss.len(); i++) {
+        shapes.Scaler s = ss[i]
+        fn() string show = fn() string {
+            return s.name + " " + s.apply(base).string()
+        }
+        fmt.println(show())
+    }
+    []float xs = shapes.nearest([]float{5.0, -1.0, 2.0}, 0.0)
+    fmt.println(xs[0].string())
+    return null
+}

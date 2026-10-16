@@ -1,0 +1,35 @@
+package shapes
+
+// A scale.
+pub type Scaler struct {
+    pub string name
+    pub fn(float) float apply
+}
+
+// A scaler by factor.
+pub fn by(float factor) Scaler {
+    return Scaler{name: "x" + factor.string(), apply: fn(float v) float {
+        return v * factor
+    }}
+}
+
+// Doubles.
+pub fn double(float v) float {
+    return v * 2.0
+}
+
+// Sorted by distance from origin.
+pub fn nearest([]float xs, float origin) []float {
+    []float out = xs
+    out.sortBy(fn(float a, float b) bool {
+        return abs(a - origin) < abs(b - origin)
+    })
+    return out
+}
+
+fn abs(float x) float {
+    if (x < 0.0) {
+        return -x
+    }
+    return x
+}

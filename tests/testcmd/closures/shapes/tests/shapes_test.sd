@@ -1,0 +1,15 @@
+package shapes
+
+test "a scaler multiplies" {
+    Scaler s = by(3.0)
+    assert(s.apply(2.0) == 6.0)
+    fn(float) float twice = fn(float v) float {
+        return s.apply(v) + double(v)
+    }
+    assert(twice(1.0) == 5.0)
+}
+
+test "nearest first" {
+    []float xs = nearest([]float{10.0, 1.0, 4.0}, 3.0)
+    assert(xs[0] == 4.0)
+}
