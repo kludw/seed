@@ -3432,6 +3432,72 @@ static void poll_fire(uint64_t token) {
   pthread_mutex_unlock(&poll_mu);
 }
 
+/* ------------------------------------------------------------ signals
+ *
+ * os.signals (sd_signal_watch): a caught signal's handler only notes it, in
+ * an atomic flag per signal number, and writes a byte to a pipe that the
+ * poller watches (both async-signal-safe). The poller drains the pipe and
+ * sends the signal's value on every channel registered for it without
+ * waiting: a channel whose buffer is full drops it (the signal is
+ * coalesced with the ones not received yet), a closed one is skipped. The
+ * handlers are installed with SA_RESTART, so most interrupted system calls
+ * continue; the runtime's waits that return EINTR anyway (poll, epoll_wait,
+ * kevent, nanosleep) retry or loop. Registrations last as long as the
+ * program: once a signal is caught, something outside the program can
+ * still wake a goroutine at any time, so the first one counts in
+ * sd_running for good, like a pending timer, and the deadlock check never
+ * fires after it. SIGURG (interrupting file I/O) and SIGSEGV/SIGBUS (the
+ * fault handler) are not among the signals os.signals offers. */
+
+#define SD_POLL_SIGNAL_TOKEN (UINT64_MAX - 1)
+#ifndef NSIG
+#define NSIG 65
+#endif
+
+typedef struct sig_watch {
+  int signo;
+  sd_chan *c;
+  void *val; /* the value to send, of the channel's element type */
+  struct sig_watch *next;
+} sig_watch;
+
+static pthread_mutex_t sig_mu = PTHREAD_MUTEX_INITIALIZER;
+static sig_watch *sig_watches;      /* sig_mu */
+static bool sig_installed[NSIG];    /* sig_mu */
+static atomic_int sig_pending[NSIG];
+static atomic_int sig_rd = -1, sig_wr = -1;
+
+static void sig_handler(int signo) {
+  int saved = errno;
+  if (signo > 0 && signo < NSIG) atomic_store(&sig_pending[signo], 1);
+  char b = 0;
+  ssize_t r = write(atomic_load(&sig_wr), &b, 1); /* a full pipe already has a wake-up pending */
+  (void)r;
+  errno = saved;
+}
+
+/* In the poller: sends the signals noted since the last call. The pipe is
+ * drained first: a signal whose byte was read has its flag set already,
+ * and one that comes later writes another byte. */
+static void signals_deliver(void) {
+  int rd = atomic_load(&sig_rd);
+  if (rd < 0) return;
+  char buf[64];
+  while (read(rd, buf, sizeof buf) > 0) {
+  }
+  for (int s = 1; s < NSIG; s++) {
+    if (!atomic_exchange(&sig_pending[s], 0)) continue;
+    pthread_mutex_lock(&sig_mu);
+    for (sig_watch *w = sig_watches; w; w = w->next) {
+      if (w->signo != s) continue;
+      pthread_mutex_lock(&w->c->mu);
+      (void)try_send(w->c, w->val); /* never waits: full or closed drops it */
+      pthread_mutex_unlock(&w->c->mu);
+    }
+    pthread_mutex_unlock(&sig_mu);
+  }
+}
+
 static void *poller_main(void *arg) {
   (void)arg;
 #if defined(SD_EPOLL)
@@ -3444,6 +3510,10 @@ static void *poller_main(void *arg) {
         uint64_t x;
         ssize_t r = read(timer_fd, &x, sizeof x);
         (void)r;
+        continue;
+      }
+      if (evs[i].data.u64 == SD_POLL_SIGNAL_TOKEN) {
+        signals_deliver();
         continue;
       }
       poll_fire(evs[i].data.u64);
@@ -3464,12 +3534,17 @@ static void *poller_main(void *arg) {
     int n = kevent(poll_fd, NULL, 0, evs, 64, tp);
     for (int i = 0; i < n; i++) {
       if (evs[i].filter == EVFILT_USER) continue;
+      if ((uint64_t)(uintptr_t)evs[i].udata == SD_POLL_SIGNAL_TOKEN) {
+        signals_deliver();
+        continue;
+      }
       poll_fire((uint64_t)(uintptr_t)evs[i].udata);
     }
   }
 #else
   /* No poller: timers only, on a condition variable-free sleep loop. */
   for (;;) {
+    signals_deliver();
     int64_t next = timers_run();
     int64_t d = next ? next - mono_ns() : 1000000;
     if (d > 1000000) d = 1000000;
@@ -3508,6 +3583,54 @@ static void poller_start(void) {
   pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
   if (pthread_create(&th, &attr, poller_main, NULL) != 0) sd_fatal("cannot start the timer thread");
   pthread_attr_destroy(&attr);
+}
+
+void sd_signal_watch(int signo, sd_chan *c, const void *val) {
+  if (signo <= 0 || signo >= NSIG) sd_crash("os.signals: signal %d cannot be caught", signo);
+  pthread_once(&poller_once, poller_start);
+  pthread_mutex_lock(&sig_mu);
+  if (atomic_load(&sig_rd) < 0) {
+    int fds[2];
+    if (pipe(fds) != 0) sd_fatal("cannot create the signal pipe");
+    for (int i = 0; i < 2; i++) {
+      fcntl(fds[i], F_SETFD, fcntl(fds[i], F_GETFD) | FD_CLOEXEC);
+      fcntl(fds[i], F_SETFL, fcntl(fds[i], F_GETFL) | O_NONBLOCK);
+    }
+    atomic_store(&sig_wr, fds[1]);
+    atomic_store(&sig_rd, fds[0]);
+#if defined(SD_EPOLL)
+    struct epoll_event ev;
+    memset(&ev, 0, sizeof ev);
+    ev.events = EPOLLIN; /* level-triggered: stays ready until drained */
+    ev.data.u64 = SD_POLL_SIGNAL_TOKEN;
+    if (epoll_ctl(poll_fd, EPOLL_CTL_ADD, fds[0], &ev) != 0) sd_fatal("cannot watch the signal pipe");
+#elif defined(SD_KQUEUE)
+    struct kevent kev;
+    EV_SET(&kev, fds[0], EVFILT_READ, EV_ADD, 0, 0, (void *)(uintptr_t)SD_POLL_SIGNAL_TOKEN);
+    if (kevent(poll_fd, &kev, 1, NULL, 0, NULL) != 0) sd_fatal("cannot watch the signal pipe");
+#endif
+    atomic_fetch_add(&sd_running, 1); /* a signal can wake someone at any time */
+  }
+  sig_watch *w = sd_alloc(sizeof *w);
+  w->signo = signo;
+  w->c = sd_chan_retain(c);
+  w->val = sd_alloc(c->et->size);
+  sd_clone_deep(c->et, w->val, val);
+  w->next = sig_watches;
+  sig_watches = w;
+  if (!sig_installed[signo]) {
+    struct sigaction sa;
+    memset(&sa, 0, sizeof sa);
+    sa.sa_handler = sig_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_RESTART;
+    if (sigaction(signo, &sa, NULL) != 0) {
+      pthread_mutex_unlock(&sig_mu);
+      sd_crash("os.signals: signal %d cannot be caught", signo);
+    }
+    sig_installed[signo] = true;
+  }
+  pthread_mutex_unlock(&sig_mu);
 }
 
 sd_chan *sd_time_after(sd_int ns) {

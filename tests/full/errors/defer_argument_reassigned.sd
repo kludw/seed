@@ -1,0 +1,44 @@
+// expect-error: defer_argument_reassigned.sd:29:9: error: done is assigned after the defer of r.finish() on line 27, but the deferred call uses the value done had when the defer ran
+// expect-errors: 3
+// The arguments of a deferred method call are kept too, and so is a
+// channel closed by defer ch.close(); a receive into the variable in a
+// select assigns it as well.
+package main
+
+import "fmt"
+
+type Report struct {
+    string name
+}
+
+fn (Report r) finish(int done) {
+    fmt.println(r.name + ": " + done.string())
+}
+
+fn (Report r) last(int? value) {
+    if (value != null) {
+        fmt.println(r.name + ": last " + value.string())
+    }
+}
+
+fn work(chan int results) {
+    Report r = Report{name: "work"}
+    int done = 0
+    defer r.finish(done)
+    for (int i = 0; i < 3; i++) {
+        done++
+    }
+    int? got = null
+    defer r.last(got)
+    select {
+    case got = results.receive():
+    }
+    chan int out = chan int(1)
+    defer out.close()
+    out = chan int(2)
+}
+
+fn main([]string args) error {
+    work(chan int(1))
+    return null
+}

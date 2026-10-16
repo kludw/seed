@@ -237,6 +237,7 @@ fn (Checker c) mut checkIncDec(Stmt st) {
         }
         c.error(st.pos, op + " needs an int or float, not " + c.typeName(t))
     }
+    c.checkDeferredChange(st.expr)
     c.assigned(c.pathKey(st.expr))
 }
 
@@ -643,6 +644,7 @@ fn (Checker c) mut checkAssign(int s) {
             bool nonNull = c.isNonNullValue(st.expr)
             c.coerce(st.expr, lt, "in the assignment to " + c.describe(tg.expr))
             string key = c.pathKey(tg.expr)
+            c.checkDeferredChange(tg.expr)
             c.assigned(key)
             // A T? path that was just given a T is not null until it may
             // become null again (assigned, a mut call, a loop).
@@ -718,6 +720,7 @@ fn (Checker c) mut checkAssign(int s) {
             }
             c.targetVar[ti3] = c.declare(tg3.name, c.targetType[ti3], VarKind.Local, tg3.pos)
         } else if (tg3.kind == TargetKind.Place) {
+            c.checkDeferredChange(tg3.expr)
             c.assigned(c.pathKey(tg3.expr))
         }
     }
@@ -1041,7 +1044,11 @@ fn (Checker c) mut checkDefer(Stmt st) {
         c.errorHint(x.pos, "defer cannot call the mut method " + c.describe(e), "the deferred call runs after the function's variables are gone; call it before returning instead")
         return
     }
-    if (i.res == Res.Builtin && i.builtin == Builtin.Close) {
+    bool isClose = i.res == Res.Builtin && i.builtin == Builtin.Close
+    if (i.res == Res.Method || i.res == Res.IfaceMethod || isClose) {
+        c.watchDefer(e)
+    }
+    if (isClose) {
         return
     }
     if (i.res != Res.Func && i.res != Res.Method && i.res != Res.ValueCall && i.res != Res.IfaceMethod) {
@@ -1058,6 +1065,52 @@ fn (Checker c) mut checkDefer(Stmt st) {
         c.errorHint(x.pos, "the error returned by " + c.describe(e) + " is not handled", "discard it explicitly: defer _ = " + c.describe(e))
     } else {
         c.checkUnusedResult(e)
+    }
+}
+
+// A deferred method call keeps the values its receiver and arguments had
+// when the defer ran (`defer f.close()` closes the file f held then). If
+// such a variable is assigned later in the function, the deferred call acts
+// on a value the variable no longer holds, which is how a replaced file
+// stays open: an error at the assignment. Only whole assignments of the
+// variable count (not a field, an element or a mut method), and only those
+// after the defer in the source: an assignment before a defer in a loop is
+// followed by the defer again, so each value gets its own deferred call.
+fn (Checker c) mut watchDefer(int e) {
+    Expr x = c.ast.exprs[e]
+    int line = x.pos.line
+    string call = c.describe(e)
+    Expr callee = c.ast.exprs[x.a]
+    if (callee.kind == ExprKind.Field) {
+        c.watchVar(callee.a, call, line)
+    }
+    for (int k = 0; k < x.count; k++) {
+        c.watchVar(c.ast.at(x.list, k), call, line)
+    }
+}
+
+fn (Checker c) mut watchVar(int e, string call, int line) {
+    if (e < 0 || c.ast.exprs[e].kind != ExprKind.Ident || c.info[e].res != Res.Local) {
+        return
+    }
+    c.deferWatch.push(DeferWatch{var: c.info[e].ref, call: call, line: line, reported: false})
+}
+
+// The place e (an assignment's target) is assigned: an error if it is a
+// variable that a deferred method call read (see watchDefer).
+fn (Checker c) mut checkDeferredChange(int e) {
+    if (e < 0 || c.deferWatch.len() == 0 || c.ast.exprs[e].kind != ExprKind.Ident || c.info[e].res != Res.Local) {
+        return
+    }
+    int v = c.info[e].ref
+    for (int i = 0; i < c.deferWatch.len(); i++) {
+        DeferWatch w = c.deferWatch[i]
+        if (w.var != v || w.reported) {
+            continue
+        }
+        c.deferWatch[i].reported = true
+        string name = c.vars[v].name
+        c.errorHint(c.ast.exprs[e].pos, name + " is assigned after the defer of " + w.call + " on line " + w.line.string() + ", but the deferred call uses the value " + name + " had when the defer ran", "call " + w.call + " before replacing " + name + " and before returning, instead of deferring it (or defer it on a copy that is not assigned again)")
     }
 }
 
@@ -1141,6 +1194,7 @@ fn (Checker c) mut checkSelectComm(int s) {
         if (lt != tyInvalid && rt != tyInvalid && lt != rt) {
             c.errorHint(tg.pos, "the received value has type " + c.typeName(rt) + ", which cannot be assigned to " + c.describe(tg.expr) + " (type " + c.typeName(lt) + ")", "receive into a variable of type " + c.typeName(rt) + ", such as a new one: case " + c.typeName(rt) + " v = ...:")
         }
+        c.checkDeferredChange(tg.expr)
         c.assigned(c.pathKey(tg.expr))
         return
     }

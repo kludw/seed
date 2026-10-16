@@ -106,6 +106,27 @@ test "parse errors" {
     assert(urlTestError("é:x") == "url.parse: é:x: first path segment contains ':' (write ./ before it)")
 }
 
+test "parse rejects characters RFC 3986 does not allow" {
+    // A quote would end up in an HTTP request line (docs/dogfood.md).
+    assert(urlTestError("/docs/deep/\"odd\".html") == "url.parse: /docs/deep/\"odd\".html: invalid character ('\"') at offset 11; percent-encode it")
+    assert(urlTestError("http://h/a<b") == "url.parse: http://h/a<b: invalid character ('<') at offset 10; percent-encode it")
+    assert(urlTestError("http://h/?q={x}") == "url.parse: http://h/?q={x}: invalid character ('{') at offset 12; percent-encode it")
+    assert(urlTestError("http://h/?a[]=1") == "url.parse: http://h/?a[]=1: invalid character ('[') at offset 11; percent-encode it")
+    assert(urlTestError("http://h/#a#b") == "url.parse: http://h/#a#b: invalid character ('#') at offset 11; percent-encode it")
+    assert(urlTestError("http://h/a\\b") == "url.parse: http://h/a\\b: invalid character ('\\') at offset 10; percent-encode it")
+    assert(urlTestError("http://h/a|b^c`d") == "url.parse: http://h/a|b^c`d: invalid character ('|') at offset 10; percent-encode it")
+    assert(urlTestError("http://h/caf\xc3\xa9") == "url.parse: http://h/caf\xc3\xa9: invalid character (byte 195) at offset 12; percent-encode it")
+    assert(urlTestError("http://h\r\nx/") == "url.parse: http://h\r\nx/: invalid character (byte 13) at offset 8; percent-encode it")
+    assert(urlTestError("http://a@b@h/") == "url.parse: http://a@b@h/: invalid character ('@') at offset 8; percent-encode it")
+    assert(urlTestError("http://h\"/") == "url.parse: http://h\"/: invalid character ('\"') at offset 8; percent-encode it")
+    // Everything RFC 3986 allows raw stays as written.
+    string ok = "http://us-er.x_~:pw!$&'()*+,;=@h-1.example_~!$&'()*+,;=:81/a/b:c@d-._~!$&'()*+,;=%2F?q=/?:@x#f/?:@"
+    assert(urlTestError(ok) == "no error")
+    assert(urlTestParse(ok).string() == ok)
+    assert(urlTestError("http://[fe80::1%25eth0]:80/") == "no error")
+    assert(urlTestError("http://[::1]/") == "no error")
+}
+
 test "string adjusts paths that would be misread" {
     Url u = Url{scheme: "http", userinfo: null, host: "h", port: null, path: "rel", query: null, fragment: null}
     assert(u.string() == "http://h/rel")

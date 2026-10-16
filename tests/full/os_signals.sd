@@ -1,0 +1,54 @@
+// os.signals: a caught signal arrives on the channel instead of ending the
+// program. The program signals itself through a shell whose parent it is
+// ($PPID). A goroutine that waits only for a signal is not a deadlock: the
+// last receive waits for a signal sent by a background shell after the
+// program is already blocked.
+package main
+
+import "errors"
+import "fmt"
+import "os"
+import "time"
+
+fn signal(string name) error {
+    int code = try os.run([]string{"sh", "-c", "kill -" + name + " $PPID"})
+    if (code != 0) {
+        return errors.new("kill -" + name + " exited with " + code.string())
+    }
+    return null
+}
+
+fn main([]string args) error {
+    chan os.Signal sigs = os.signals([]os.Signal{os.Signal.User1, os.Signal.Hangup, os.Signal.User1})
+    chan os.Signal other = os.signals([]os.Signal{os.Signal.User2})
+    try signal("USR1")
+    os.Signal? s = sigs.receive()
+    if (s != null) {
+        fmt.println("received " + s.name())
+    }
+    try signal("HUP")
+    s = sigs.receive()
+    if (s != null) {
+        fmt.println("received " + s.name())
+    }
+    // Nothing else is waiting.
+    select {
+    case os.Signal? x = sigs.receive():
+        fmt.println("unexpected " + (x == null).string())
+    case time.after(50 * time.millisecond).receive():
+        fmt.println("nothing more")
+    }
+    // A signal arrives on every channel that asked for it, here only one.
+    try signal("USR2")
+    os.Signal? u = other.receive()
+    if (u != null) {
+        fmt.println("other received " + u.name())
+    }
+    // Sent from the background once this goroutine is blocked: no deadlock.
+    _ = try os.run([]string{"sh", "-c", "(sleep 0.2; kill -USR2 $PPID) > /dev/null 2>&1 &"})
+    u = other.receive()
+    if (u != null) {
+        fmt.println("other received " + u.name() + " while blocked")
+    }
+    return null
+}

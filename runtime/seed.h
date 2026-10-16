@@ -179,6 +179,11 @@ struct sd_type {
   void (*release)(void *p);
   void (*clone_deep)(void *dst, const void *src);
   bool (*equal)(const void *a, const void *b);
+  /* For showing values (a failed assert): the Seed name of a struct or
+   * enum type ("Shape", "wire.Request") and a struct's field names, in
+   * the order of `fields`. Optional (NULL: the C name, fields by position). */
+  const char *show;
+  const char *const *field_names;
 };
 
 /* Descriptor initialisers for generated code. */
@@ -192,6 +197,20 @@ struct sd_type {
   { .name = NAME, .size = sizeof(CTYPE), .kind = SD_K_ENUM, \
     .variants = VARIANTS, .nvariants = (int32_t)(sizeof(VARIANTS) / sizeof((VARIANTS)[0])) }
 #define SD_FIELD(CTYPE, MEMBER, TYPE) { offsetof(CTYPE, MEMBER), TYPE }
+/* The same with the Seed names for showing values (SHOW: the type's name,
+ * NAMES: an array of the field names). */
+#define SD_STRUCT_TYPE_SHOW(NAME, CTYPE, FIELDS, SHOW, NAMES) \
+  { .name = NAME, .size = sizeof(CTYPE), .kind = SD_K_STRUCT, \
+    .fields = FIELDS, .nfields = (int32_t)(sizeof(FIELDS) / sizeof((FIELDS)[0])), \
+    .show = SHOW, .field_names = NAMES }
+#define SD_STRUCT_TYPE_TRIVIAL_SHOW(NAME, CTYPE, FIELDS, SHOW, NAMES) \
+  { .name = NAME, .size = sizeof(CTYPE), .kind = SD_K_STRUCT, .trivial = true, \
+    .fields = FIELDS, .nfields = (int32_t)(sizeof(FIELDS) / sizeof((FIELDS)[0])), \
+    .show = SHOW, .field_names = NAMES }
+#define SD_ENUM_TYPE_SHOW(NAME, CTYPE, VARIANTS, SHOW) \
+  { .name = NAME, .size = sizeof(CTYPE), .kind = SD_K_ENUM, \
+    .variants = VARIANTS, .nvariants = (int32_t)(sizeof(VARIANTS) / sizeof((VARIANTS)[0])), \
+    .show = SHOW }
 
 /* Built-in descriptors. */
 extern const sd_type sd_type_int, sd_type_float, sd_type_bool, sd_type_byte, sd_type_fn;
@@ -896,6 +915,11 @@ SD_CRASHES int sd_select(sd_select_case *cases, int n);
 
 /* ---- time ---- */
 sd_chan *sd_time_after(sd_int ns);  /* chan int receiving the wall-clock time once, after ns, then closed */
+/* os.signals: from now on, catch signal signo and send a copy of *val (of
+ * c's element type, borrowed) on c each time it arrives, without waiting
+ * (dropped when c is full, skipped once c is closed). For the life of the
+ * program; the deadlock check is off from the first call. */
+void sd_signal_watch(int signo, sd_chan *c, const void *val);
 void sd_time_sleep(sd_int ns);      /* a cancellation point, like a receive */
 sd_int sd_time_now(void);           /* monotonic nanoseconds */
 
@@ -1009,6 +1033,14 @@ sd_err sd_assert_error(sd_str msg); /* the error of a failed assert (msg borrowe
 bool sd_err_is_assert(sd_err e);
 sd_str sd_str_quote(sd_str s);      /* "text" with \n, \t, \", \\ and \xHH escapes */
 sd_str sd_err_show(sd_err e);       /* null, or the quoted message */
+/* A value of type t (*v, borrowed) as text for a failed assert: lists
+ * [1, 2], maps {"a": 1}, structs User{name: "x", age: 3}, enums
+ * Shape.Circle(2.0), strings quoted, null; cut after about 200 bytes. */
+sd_str sd_show(const sd_type *t, const void *v);
+/* " (A op B)" for a failed assert(a op b) on values of type t, with, for
+ * == on lists, maps and structs, where they first differ:
+ * " ([1, 2, 3] == [1, 5, 3], first difference at index 1: 2 vs 5)". */
+sd_str sd_assert_show(const sd_type *t, const void *a, const void *b, const char *op);
 
 /* ======================================================================
  * Core packages

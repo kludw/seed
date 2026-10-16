@@ -103,7 +103,7 @@ checks it).
 |---|---|---|
 | `errors` | everything: `new`, `wrap` | — |
 | `fmt` | everything: `print`, `println`, `eprint`, `eprintln`, `fixed` (natives) | — |
-| `os` | everything: `exit`, `crash`, `env`, `run`, `output`, `executable`, `cwd`, `hostname` (natives) | — |
+| `os` | everything: `exit`, `crash`, `env`, `run`, `output`, `executable`, `cwd`, `hostname` (natives); `Signal`, `signals` (Seed over the private native `watchSignal`) | — |
 | `fs` | everything: `read`, `write`, `append`, `exists`, `isDir`, `stat`, `list`, `mkdir`, `rename`, `remove`, `removeAll`, `makeTemp`, `open`, `create`, `File` with `readLine`, `read`, `write`, `close` (natives) | — |
 | `time` | everything: the duration constants, `now`, `monotonic`, `after`, `sleep` (natives); `Date`, `date`, `fromDate`, `format`, `parse` (Seed) | — |
 | `strings` | everything: `repeat`, `padLeft`, `padRight`, `lastIndex`, `fields`, `isDigit`, `isLetter`, `isSpace` | — |
@@ -140,6 +140,11 @@ and 100`.
   <reason>` when it cannot start (or reading or waiting fails); crash
   `os.output: argv is empty`.
 - `hostname` is `gethostname`; error `os.hostname: <reason>`.
+- `signals` drops repeated kinds, makes a `chan Signal` with room for one
+  of each, and calls the native `watchSignal` per kind, which maps the
+  enum's tag (its case index, in the order of os.sd) to the signal number
+  and calls the runtime's `sd_signal_watch` (runtime/README.md, section
+  11). Crash: `os.signals: no signals given`.
 - `run` and `output` reject an `argv` with a NUL byte in any argument
   before starting anything (a C string would end there and run a
   different command): `os.run: sh\x00-c: program name contains a NUL

@@ -203,7 +203,7 @@ pub fn links(string base, string html) []string {
         if (href == null) {
             continue
         }
-        url.Url? ref, _ = url.parse(unescape(href.trim()))
+        url.Url? ref, _ = url.parse(escapeInvalid(unescape(href.trim())))
         if (ref == null) {
             continue
         }
@@ -223,6 +223,27 @@ pub fn links(string base, string html) []string {
 // The few character references that show up in attribute values.
 fn unescape(string s) string {
     return s.replace("&quot;", "\"").replace("&#39;", "'").replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
+}
+
+// A link as browsers take it: the characters a URL cannot hold as they are
+// (a quote, a space, a byte outside ASCII, ...) percent-encoded, so that
+// url.parse, which follows RFC 3986 strictly, accepts it.
+fn escapeInvalid(string s) string {
+    string keep = "-._~!$&'()*+,;=:/?#[]@%"
+    string hex = "0123456789ABCDEF"
+    []byte out = []byte{}
+    for (int i = 0; i < s.len(); i++) {
+        byte b = s[i]
+        bool plain = (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9')
+        if (plain || (int(b) < 0x80 && keep.contains(string([]byte{b})))) {
+            out.push(b)
+        } else {
+            out.push('%')
+            out.push(hex[int(b) / 16])
+            out.push(hex[int(b) % 16])
+        }
+    }
+    return string(out)
 }
 
 // The outcome as text: "200", "404", or "error: timeout after 2 s".

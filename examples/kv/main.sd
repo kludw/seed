@@ -42,7 +42,10 @@ fn main([]string args) error {
     case "serve":
         log.Level level = try log.parseLevel(p.getString("log-level"))
         net.Listener ln = try net.listen(addr)
-        return server.serve(ln, server.Config{data: p.getString("data"), logger: log.new(level, log.Output.Stderr)})
+        // Ctrl-C and kill (SIGTERM) shut the server down in order, closing
+        // its log, instead of ending the program at once.
+        chan os.Signal signals = os.signals([]os.Signal{os.Signal.Interrupt, os.Signal.Terminate})
+        return server.serve(ln, server.Config{data: p.getString("data"), logger: log.new(level, log.Output.Stderr), signals: signals})
     case "bench":
         return bench(addr, p.getInt("clients"), p.getInt("requests"))
     case "demo":

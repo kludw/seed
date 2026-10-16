@@ -40,3 +40,51 @@ pub fn output([]string argv) (string, int, error)
 
 // The machine's host name.
 pub fn hostname() (string, error)
+
+// A signal that a program can catch with signals.
+pub type Signal enum {
+    // SIGINT: Ctrl-C in a terminal.
+    Interrupt
+    // SIGTERM: a request to end, from kill or a service manager.
+    Terminate
+    // SIGHUP: the terminal went away; daemons often take it to mean
+    // "reload the configuration".
+    Hangup
+    // SIGUSR1, for the program's own use.
+    User1
+    // SIGUSR2, for the program's own use.
+    User2
+}
+
+// Catches the signals in which: from now on, each time the program receives
+// one of them, the signal is sent on the returned channel instead of having
+// its default effect (for all of these, ending the program). Wait for it
+// with receive or in a select beside the program's other work, then shut
+// down in order: os.signals([]os.Signal{os.Signal.Interrupt,
+// os.Signal.Terminate}). The channel has room for one signal per kind in
+// which; a signal that arrives while it is full is dropped (it is not lost
+// in effect: one is still waiting to be received). Each call makes a new
+// channel, and every channel that asked for a signal receives it. A signal
+// stays caught for the rest of the program, and once one is caught the
+// program is never reported as deadlocked: a goroutine waiting for a signal
+// waits for something outside the program, like one reading a socket.
+// Crashes if which is empty.
+pub fn signals([]Signal which) chan Signal {
+    if (which.len() == 0) {
+        crash("os.signals: no signals given")
+    }
+    []Signal kinds = []Signal{}
+    for (int i = 0; i < which.len(); i++) {
+        if (!kinds.contains(which[i])) {
+            kinds.push(which[i])
+        }
+    }
+    chan Signal c = chan Signal(kinds.len())
+    for (int j = 0; j < kinds.len(); j++) {
+        watchSignal(kinds[j], c)
+    }
+    return c
+}
+
+// Catches s and sends it on c (runtime: sd_signal_watch).
+fn watchSignal(Signal s, chan Signal c)

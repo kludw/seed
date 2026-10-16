@@ -327,7 +327,38 @@ test "parse url errors" {
     assert(err.message() == "http.get: http://[::1/: missing ']' in host")
     _, err = parseUrl("http.get", "http://host/a b")
     assert(err != null)
-    assert(err.message() == "http.get: http://host/a b: invalid character in URL")
+    assert(err.message() == "http.get: http://host/a b: invalid character (space) in URL; percent-encode it")
+}
+
+test "a URL cannot put what it likes into the request" {
+    // CR and LF would end the request line and start a header of the URL's
+    // choosing; a quote and the other characters to escape are refused too.
+    _, error err = parseUrl("http.get", "http://host/a\r\nx-injected: 1")
+    assert(err != null)
+    assert(err.message() == "http.get: http://host/a\r\nx-injected: 1: invalid character (byte 13) in URL; percent-encode it")
+    _, err = parseUrl("http.get", "http://host/?q=\nx")
+    assert(err != null)
+    assert(err.message() == "http.get: http://host/?q=\nx: invalid character (byte 10) in URL; percent-encode it")
+    _, err = parseUrl("http.get", "http://host/docs/\"odd\".html")
+    assert(err != null)
+    assert(err.message() == "http.get: http://host/docs/\"odd\".html: invalid character ('\"') in URL; percent-encode it")
+    _, err = parseUrl("http.get", "http://host/a<b>")
+    assert(err != null)
+    assert(err.message() == "http.get: http://host/a<b>: invalid character ('<') in URL; percent-encode it")
+    _, err = parseUrl("http.get", "http://host/caf\xc3\xa9")
+    assert(err != null)
+    assert(err.message() == "http.get: http://host/caf\xc3\xa9: invalid character (byte 195) in URL; percent-encode it")
+    _, err = parseUrl("http.get", "http://host\r\nx-injected: 1/")
+    assert(err != null)
+    assert(err.message() == "http.get: http://host\r\nx-injected: 1/: invalid host")
+    _, err = parseUrl("http.get", "http://ho\"st/")
+    assert(err != null)
+    assert(err.message() == "http.get: http://ho\"st/: invalid host")
+    // What RFC 3986 allows goes through as written; the fragment is dropped.
+    HttpTarget t, error okErr = parseUrl("http.get", "http://[::1]:8080/a/b:c@d-._~!$&'()*+,;=%2F?q=/?:@x#frag")
+    assert(okErr == null)
+    assert(t.target == "/a/b:c@d-._~!$&'()*+,;=%2F?q=/?:@x")
+    assert(t.host == "[::1]:8080")
 }
 
 test "request bytes" {

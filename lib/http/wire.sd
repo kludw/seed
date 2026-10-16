@@ -759,6 +759,31 @@ type HttpTarget struct {
 
 // Parses a client URL, http://host[:port][/path][?query] (a #fragment is
 // dropped). Errors read "<fnName>: <url>: <reason>".
+// The first character of text that RFC 3986 does not allow raw in a part
+// of a URL that may hold the delimiters in extra ("space", "'\"'" or
+// "byte 13"), or "" if there is none. Letters, digits, "-._~", the
+// sub-delimiters "!$&'()*+,;=" and '%' are allowed everywhere.
+fn httpBadUrlChar(string text, string extra) string {
+    for (int i = 0; i < text.len(); i++) {
+        byte b = text[i]
+        if ((b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9')) {
+            continue
+        }
+        string c = string([]byte{b})
+        if (int(b) < 0x80 && ("-._~!$&'()*+,;=%".contains(c) || extra.contains(c))) {
+            continue
+        }
+        if (b == ' ') {
+            return "space"
+        }
+        if (b > ' ' && int(b) < 0x7f) {
+            return "'" + c + "'"
+        }
+        return "byte " + int(b).string()
+    }
+    return ""
+}
+
 fn parseUrl(string fnName, string url) (HttpTarget, error) {
     int? sep = url.index("://")
     if (sep == null) {
@@ -788,10 +813,12 @@ fn parseUrl(string fnName, string url) (HttpTarget, error) {
     if (target == "" || target[0] == '?') {
         target = "/" + target
     }
-    for (int i = 0; i < target.len(); i++) {
-        if (target[i] <= ' ' || target[i] == '\x7f') {
-            return null, errors.new(fnName + ": " + url + ": invalid character in URL")
-        }
+    // The target goes into the request line as it is, so it may hold only
+    // what RFC 3986 allows there: no CR or LF (which would start a header
+    // of the URL's choosing), space, quote or other character to escape.
+    string bad = httpBadUrlChar(target, ":@/?")
+    if (bad != "") {
+        return null, errors.new(fnName + ": " + url + ": invalid character (" + bad + ") in URL; percent-encode it")
     }
     if (authority.contains("@")) {
         return null, errors.new(fnName + ": " + url + ": user info in URLs is not supported")
@@ -821,10 +848,14 @@ fn parseUrl(string fnName, string url) (HttpTarget, error) {
     if (host == "" || host == "[]") {
         return null, errors.new(fnName + ": " + url + ": missing host")
     }
-    for (int i = 0; i < host.len(); i++) {
-        if (host[i] <= ' ' || host[i] == '\x7f' || host[i] == '/' || host[i] == '\\') {
-            return null, errors.new(fnName + ": " + url + ": invalid host")
-        }
+    // The host goes into the host header: a name or an address (an IPv6
+    // one in brackets).
+    string hostExtra = ""
+    if (host.startsWith("[")) {
+        hostExtra = ":[]"
+    }
+    if (httpBadUrlChar(host, hostExtra) != "") {
+        return null, errors.new(fnName + ": " + url + ": invalid host")
     }
     int portNum = 80
     if (port != "" || authority.endsWith(":")) {

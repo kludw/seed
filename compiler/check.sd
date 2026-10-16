@@ -183,6 +183,16 @@ type Impl struct {
     int iface
 }
 
+// A variable read by a deferred method call (its receiver or an argument),
+// whose value the call keeps from when the defer ran: assigning the
+// variable later in the function is an error (checkDeferredChange).
+type DeferWatch struct {
+    int var
+    string call
+    int line
+    bool reported
+}
+
 type Checker struct {
     Ast ast
     Diags diags
@@ -223,6 +233,7 @@ type Checker struct {
     []int contMarks
     []int loopScopes
     []Guard caseGuards
+    []DeferWatch deferWatch
     int curFn
     int loopDepth
     int groupDepth
@@ -282,6 +293,7 @@ fn newChecker(Ast ast, Diags diags, bool testMode) Checker {
         contMarks: []int{},
         loopScopes: []int{},
         caseGuards: []Guard{},
+        deferWatch: []DeferWatch{},
         curFn: -1,
         loopDepth: 0,
         groupDepth: 0,
@@ -1284,6 +1296,7 @@ fn (Checker c) mut checkFnBody(int f) {
     c.contMarks = []int{}
     c.loopScopes = []int{}
     c.caseGuards = []Guard{}
+    c.deferWatch = []DeferWatch{}
     c.loopDepth = 0
     c.groupDepth = 0
     c.groupLoop = -1

@@ -197,6 +197,33 @@ if (code != 0) {
 fmt.println("building " + rev.trim())
 ```
 
+### Signals
+
+| Name | Meaning |
+|---|---|
+| `os.Signal` | An enum of the signals a program can catch: `Interrupt` (SIGINT, Ctrl-C), `Terminate` (SIGTERM, `kill` or a service manager), `Hangup` (SIGHUP), `User1` and `User2` (SIGUSR1, SIGUSR2). |
+| `os.signals([]os.Signal which) chan os.Signal` | Catches the signals in `which`: from then on each one that arrives is sent on the returned channel instead of having its default effect (ending the program). |
+
+- Without a call, every signal keeps its default effect. A signal stays caught for the rest of the program; there is no way to give it back its default effect.
+- The channel has room for one signal per kind in `which`. A signal that arrives while the channel is full is dropped: one is still waiting to be received, so nothing is lost but the count (as in Go's `signal.Notify` with a buffered channel). A signal for a closed channel is dropped too.
+- Each call makes a new channel; every channel that asked for a signal receives it. Crashes if `which` is empty.
+- A goroutine waiting for a signal waits for something outside the program, like one reading a socket: once a signal is caught, the program is never reported as deadlocked.
+- The runtime's handler only records the signal; the poller thread sends it on the channels (runtime/README.md, section 11), so a signal never interrupts a goroutine in the middle of its work, and the goroutine that receives it decides what to do: typically stop accepting, close files and return, through the usual paths (closing a listener, failing a group).
+
+```
+chan os.Signal signals = os.signals([]os.Signal{os.Signal.Interrupt, os.Signal.Terminate})
+select {
+case os.Signal? sig = signals.receive():
+    if (sig != null) {
+        logger.with("signal", sig.name()).info("shutting down")
+        ln.close()
+    }
+case _ = done.receive():
+}
+```
+
+`examples/kv` shuts its server down this way: on SIGINT or SIGTERM it stops accepting, its store's owner finishes the request in hand, closes the log and fails the server's group, which stops the connections.
+
 ## fs
 
 Files and directories. Most programs only need the whole-file functions; `fs.File` is for files too large to read at once and for writing a file piece by piece.
@@ -755,6 +782,7 @@ Any other response is a struct literal: `http.Response{status: 302, headers: map
 | `http.sendWithin(Request req, int timeout) (Response, error)` | `http.send` of `req` with its `timeout` set to `timeout`, with errors that start with `http.sendWithin`. |
 
 - The URL must be `http://host[:port][/path][?query]`. Anything else is an error, including `https://`: `http.get: https://example.com/: https is not supported`.
+- The path and query go into the request line as they are, so they may hold only the characters RFC 3986 allows there (as `url.parse` checks them): a CR or LF, which would start a header of the URL's choosing, a space, a `"` or any other character to escape is an error, not sent: `http.get: http://host/a b: invalid character (space) in URL; percent-encode it`. A host with such a character is `invalid host`.
 - The library adds `host`, `content-length` (when the body is not empty, or the method is `POST`, `PUT` or `PATCH`) and `connection: close`. Each request uses a new connection.
 - **Any response is a success**, including `404` and `500`: check `resp.status`. The error is set only when no response arrived (connection refused, timeout, malformed response).
 - **Redirects are not followed**; a `3xx` response is returned as it is, with its `location` header.
@@ -965,7 +993,7 @@ A part that is absent is `null`, so `http://h/p?` (an empty query) and `http://h
 | `url.queryEncode(string text) string` | Encoding for a query key or value, as Go's `url.QueryEscape`: letters, digits and `-._~` stay, a space becomes `+`, everything else `%XX`. |
 | `url.queryDecode(string text) (string, error)` | `%XX` decoded, and `+` as a space. |
 
-Parse errors name the text and the problem: `url.parse: http://h:80x/: invalid port "80x"`, `port 70000 out of range`, `missing ']' in host`, `missing scheme before ':'`, `first path segment contains ':' (write ./ before it)`, `invalid character (space) at offset 8; percent-encode it` (spaces and control characters are rejected anywhere), `'%' at offset 10 must be followed by two hex digits`. The decoders fail on a bad `%` the same way: `url.pathDecode: offset 3: '%' must be followed by two hex digits`.
+Parse errors name the text and the problem: `url.parse: http://h:80x/: invalid port "80x"`, `port 70000 out of range`, `missing ']' in host`, `missing scheme before ':'`, `first path segment contains ':' (write ./ before it)`, `invalid character (space) at offset 8; percent-encode it` (only what RFC 3986 allows may appear as it is: letters, digits, `-._~`, the sub-delimiters `!$&'()*+,;=`, `%` before two hex digits, and the delimiters each part may hold, `:` in the user info, `:@/` in the path, `:@/?` in the query and the fragment, `:` and the brackets of an IPv6 host; so spaces, control characters, `"`, `<`, `>`, `\`, `^`, `` ` ``, `{`, `|`, `}`, a `[` outside the host, a second `#` and bytes outside ASCII are rejected, and must be percent-encoded), `'%' at offset 10 must be followed by two hex digits`. The decoders fail on a bad `%` the same way: `url.pathDecode: offset 3: '%' must be followed by two hex digits`.
 
 ### Url methods
 

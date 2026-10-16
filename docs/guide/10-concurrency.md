@@ -471,6 +471,62 @@ $ echo $?
 
 The `select` with the timer has to run in a spawned goroutine, as `collect` does. A `select` written in the group block itself does see the timeout, but the block can't stop the group's goroutines (only a failing goroutine stops them) and can't leave early, so the group still waits for the slow goroutine before it returns. For one HTTP request there is a shortcut: a request's `timeout` field (`http.Request{url: url, timeout: 2 * time.second}`), or `http.getWithin(url, timeout)`, limits the whole exchange ([stdlib.md](../stdlib.md#client)).
 
+### Shutting down on a signal
+
+By default, Ctrl-C (SIGINT) or `kill` (SIGTERM) ends a program at once. A server that wants to finish the request in hand and close its files first catches them with `os.signals`, which returns a channel that receives each such signal instead. The signal is then one more thing to wait for, and the goroutine that receives it stops the others through the usual paths: closing a channel or a listener, or failing the group.
+
+```seed
+// Shutting down on a signal. The worker runs until it is told to stop; the
+// watcher stops it when SIGINT (Ctrl-C) or SIGTERM arrives. To run on its
+// own, the example sends itself SIGTERM, as `kill <pid>` would.
+package main
+
+import "fmt"
+import "os"
+import "time"
+
+fn work(chan bool stop) error {
+    for (;;) {
+        select {
+        case _ = stop.receive():
+            fmt.println("saving state and stopping")
+            return null
+        case time.after(50 * time.millisecond).receive():
+            // one unit of work
+        }
+    }
+}
+
+fn watch(chan os.Signal signals, chan bool stop) {
+    os.Signal? sig = signals.receive()
+    if (sig != null) {
+        fmt.println("got " + sig.name())
+    }
+    stop.close()
+}
+
+fn main([]string args) error {
+    chan os.Signal signals = os.signals([]os.Signal{os.Signal.Interrupt, os.Signal.Terminate})
+    chan bool stop = chan bool(1)
+    _ = try os.run([]string{"sh", "-c", "(sleep 0.2; kill -TERM $PPID) &"})
+    try group {
+        spawn work(stop)
+        spawn watch(signals, stop)
+    }
+    fmt.println("stopped cleanly")
+    return null
+}
+```
+
+```
+$ seed run 10_signals.sd
+got Terminate
+saving state and stopping
+stopped cleanly
+```
+
+Only the signals you name are caught, and they stay caught for the rest of the program. Waiting for a signal is waiting for the world outside, like reading a socket, so a program that catches signals is never reported as deadlocked. The key-value server of `examples/kv` shuts down this way: on a signal it closes its listener, and the goroutine that owns the data closes its log and fails the group, which stops the connections ([stdlib.md](../stdlib.md#signals)).
+
 ## Compared with Go
 
 | Go | Seed |
@@ -484,5 +540,6 @@ The `select` with the timer has to run in a spawned goroutine, as `collect` does
 | `context.Context` for cancellation | The group stops its goroutines at stop points |
 | `v, ok := <-ch` | `T? v = ch.receive()` |
 | `select` with `default` | No `default`; use a timer channel |
+| `signal.Notify(c, os.Interrupt)` | `chan os.Signal c = os.signals([]os.Signal{os.Signal.Interrupt})` |
 
 Next: [Packages and visibility](11-packages.md).

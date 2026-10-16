@@ -1,0 +1,40 @@
+// Shutting down on a signal. The worker runs until it is told to stop; the
+// watcher stops it when SIGINT (Ctrl-C) or SIGTERM arrives. To run on its
+// own, the example sends itself SIGTERM, as `kill <pid>` would.
+package main
+
+import "fmt"
+import "os"
+import "time"
+
+fn work(chan bool stop) error {
+    for (;;) {
+        select {
+        case _ = stop.receive():
+            fmt.println("saving state and stopping")
+            return null
+        case time.after(50 * time.millisecond).receive():
+            // one unit of work
+        }
+    }
+}
+
+fn watch(chan os.Signal signals, chan bool stop) {
+    os.Signal? sig = signals.receive()
+    if (sig != null) {
+        fmt.println("got " + sig.name())
+    }
+    stop.close()
+}
+
+fn main([]string args) error {
+    chan os.Signal signals = os.signals([]os.Signal{os.Signal.Interrupt, os.Signal.Terminate})
+    chan bool stop = chan bool(1)
+    _ = try os.run([]string{"sh", "-c", "(sleep 0.2; kill -TERM $PPID) &"})
+    try group {
+        spawn work(stop)
+        spawn watch(signals, stop)
+    }
+    fmt.println("stopped cleanly")
+    return null
+}

@@ -1,0 +1,21 @@
+// expect-error: defer_receiver_reassigned_loop.sd:14:9: error: f is assigned after the defer of f.close() on line 13, but the deferred call uses the value f had when the defer ran
+// expect-errors: 1
+// In a loop, an assignment after the defer replaces the value that the
+// iteration's deferred call holds before the next iteration defers again,
+// so the last file opened is never closed.
+package main
+
+import "fs"
+
+fn readAll([]string paths) error {
+    fs.File f = try fs.open(paths[0])
+    for (int i = 1; i < paths.len(); i++) {
+        defer _ = f.close()
+        f = try fs.open(paths[i])
+    }
+    return null
+}
+
+fn main([]string args) error {
+    return readAll(args)
+}

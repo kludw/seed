@@ -5,6 +5,7 @@ import "errors"
 import "fs"
 import "log"
 import "net"
+import "os"
 import "strings"
 import "time"
 import "wire"
@@ -134,4 +135,57 @@ test "an idle connection is closed" {
     assert(got != null)
     assert(got.startsWith("_\n-ERR net.Conn.read: 127.0.0.1:"))
     assert(got.endsWith(": timeout\n"))
+}
+
+// Sets a key over a connection it keeps open, then signals the server and
+// reads until the server closes the connection.
+fn signalWhileConnected(net.Listener ln, chan os.Signal signals, chan string out) error {
+    net.Conn c = try net.dial(ln.addr(), time.second)
+    defer c.close()
+    try c.write("SET a 1\nx\n")
+    []string got = []string{}
+    string? first = try c.read(4096)
+    if (first != null) {
+        got.push(first)
+    }
+    signals.send(os.Signal.Terminate)
+    for (;;) {
+        string? data = try c.read(4096)
+        if (data == null) {
+            break
+        }
+        got.push(data)
+    }
+    out.send(got.join(""))
+    return null
+}
+
+test "a signal shuts the server down, closing idle connections and the log" {
+    string dir = try fs.makeTemp("kv-server-")
+    defer _ = fs.removeAll(dir)
+    string path = dir + "/kv.log"
+    net.Listener ln = try net.listen("127.0.0.1:0")
+    chan string out = chan string(1)
+    chan os.Signal signals = chan os.Signal(1)
+    Config cfg = quiet(path)
+    cfg.signals = signals
+    int start = time.monotonic()
+    // serve returns null: a shutdown is not an error.
+    try group {
+        spawn serve(ln, cfg)
+        spawn signalWhileConnected(ln, signals, out)
+    }
+    // The idle connection did not hold the server up until its timeout.
+    assert(time.monotonic() - start < 2 * time.second)
+    assert(out.receive() == "+OK\n")
+    // The listener is closed, and the data is back after a restart.
+    assert(ln.addr() == "")
+    net.Listener ln2 = try net.listen("127.0.0.1:0")
+    chan []string keys = chan []string(3)
+    try group {
+        spawn serve(ln2, quiet(path))
+        spawn check(ln2, keys)
+    }
+    assert(keys.receive() == []string{})
+    assert(keys.receive() == []string{"keys 1", "log_bytes 9", "compactions 0"})
 }
