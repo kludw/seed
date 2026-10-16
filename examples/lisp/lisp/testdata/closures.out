@@ -1,0 +1,9 @@
+(3 2)
+120
+7
+(2 5 10)
+10
+(local global)
+(#t #t)
+#<lambda make-counter>
+#t

@@ -156,7 +156,9 @@ fn (Parser p) mut expect(Tok k, string context) {
         return
     }
     Token t = p.toks[p.pos]
-    if (k == Tok.Newline) {
+    if (p.keywordAsName()) {
+        p.keywordNameError(t)
+    } else if (k == Tok.Newline) {
         p.errorHint(t.pos, "expected the end of the statement" + context + ", found " + tokenDesc(t), "put one statement per line")
     } else {
         p.errorAt(t.pos, "expected '" + k.text() + "'" + context + ", found " + tokenDesc(t))
@@ -176,9 +178,31 @@ fn (Parser p) mut expectIdent(string context) string {
     }
     if (!p.failed) {
         Token t = p.toks[p.pos]
-        p.errorAt(t.pos, "expected a name " + context + ", found " + tokenDesc(t))
+        if (isKeyword(t.kind)) {
+            p.keywordNameError(t)
+        } else {
+            p.errorAt(t.pos, "expected a name " + context + ", found " + tokenDesc(t))
+        }
     }
     return ""
+}
+
+// Whether the current token is a keyword written where a declaration puts
+// its name: after a type (int test = 1, string select, chan int group)
+// and before what follows a name there.
+fn (Parser p) keywordAsName() bool {
+    if (!isKeyword(p.kind()) || p.pos == 0) {
+        return false
+    }
+    Tok before = p.kindAt(p.pos - 1)
+    Tok after = p.peek(1)
+    bool typeBefore = before == Tok.Ident || before == Tok.RBrack || before == Tok.Question || before == Tok.RParen
+    bool nameAfter = after == Tok.Assign || after == Tok.Comma || after == Tok.RParen || after == Tok.Newline || after == Tok.Semi
+    return typeBefore && nameAfter
+}
+
+fn (Parser p) mut keywordNameError(Token t) {
+    p.errorHint(t.pos, tokenDesc(t) + " is a keyword, so it cannot be used as a name", "choose another name, such as " + t.kind.text() + "Value")
 }
 
 // After a syntax error inside a block: skip to the end of the statement (a

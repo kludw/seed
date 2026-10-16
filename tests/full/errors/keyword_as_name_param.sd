@@ -1,0 +1,11 @@
+// expect-error: keyword_as_name_param.sd:5:14: error: 'group' is a keyword, so it cannot be used as a name
+// A keyword as a parameter's name.
+package main
+
+fn count(int group) int {
+    return 1
+}
+
+fn main([]string args) error {
+    return null
+}

@@ -1,0 +1,3 @@
+--- stderr
+error: crawl: https://example.com/: only http:// URLs can be crawled
+--- exit 1

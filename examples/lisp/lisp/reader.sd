@@ -1,0 +1,205 @@
+package lisp
+
+import "strings"
+
+// Reader turns source text into values, one top-level form at a time.
+pub type Reader struct {
+    string src
+    int at
+    int line
+    int col
+    int formStart = 0
+    Pos formPos = Pos{line: 1, col: 1}
+}
+
+pub fn reader(string src) Reader {
+    return readerAt(src, Pos{line: 1, col: 1})
+}
+
+// A reader of text that starts at pos of a longer input (a REPL's line).
+pub fn readerAt(string src, Pos pos) Reader {
+    return Reader{src: src, at: 0, line: pos.line, col: pos.col}
+}
+
+// The result of reading: a form, the end of the text, or the end of the
+// text in the middle of a form (which a REPL answers by reading more).
+pub type Read enum {
+    Form(Value v)
+    End
+    Incomplete
+}
+
+fn (Reader r) pos() Pos {
+    return Pos{line: r.line, col: r.col}
+}
+
+fn (Reader r) mut advance() {
+    if (r.src[r.at] == '\n') {
+        r.line++
+        r.col = 1
+    } else {
+        r.col++
+    }
+    r.at++
+}
+
+fn (Reader r) mut skipSpace() {
+    for (; r.at < r.src.len(); ) {
+        byte c = r.src[r.at]
+        if (c == ';') {
+            for (; r.at < r.src.len() && r.src[r.at] != '\n'; ) {
+                r.advance()
+            }
+        } else if (strings.isSpace(c)) {
+            r.advance()
+        } else {
+            return
+        }
+    }
+}
+
+fn isDelimiter(byte c) bool {
+    return strings.isSpace(c) || c == '(' || c == ')' || c == '"' || c == ';' || c == '\''
+}
+
+// Reads the next form.
+pub fn (Reader r) mut next() (Read, error) {
+    r.skipSpace()
+    r.formStart = r.at
+    r.formPos = r.pos()
+    if (r.at >= r.src.len()) {
+        return Read.End, null
+    }
+    return r.form()
+}
+
+// The text from the start of the last form next() began to read: after
+// Incomplete, what to read again once more text has come.
+pub fn (Reader r) rest() string {
+    return r.src.slice(r.formStart, r.src.len())
+}
+
+// Where rest() starts.
+pub fn (Reader r) restPos() Pos {
+    return r.formPos
+}
+
+fn (Reader r) mut form() (Read, error) {
+    r.skipSpace()
+    if (r.at >= r.src.len()) {
+        return Read.Incomplete, null
+    }
+    Pos start = r.pos()
+    byte c = r.src[r.at]
+    if (c == ')') {
+        return null, fail(start, "unexpected )")
+    }
+    if (c == '\'') {
+        r.advance()
+        Read quoted = try r.form()
+        switch (quoted) {
+        case Read.Form(Value v):
+            return Read.Form(Value.List([]Value{Value.Sym("quote", start), v}, start)), null
+        case Read.End, Read.Incomplete:
+            return Read.Incomplete, null
+        }
+    }
+    if (c == '(') {
+        r.advance()
+        []Value items = []Value{}
+        for (;;) {
+            r.skipSpace()
+            if (r.at >= r.src.len()) {
+                return Read.Incomplete, null
+            }
+            if (r.src[r.at] == ')') {
+                r.advance()
+                return Read.Form(makeList(items, start)), null
+            }
+            Read item = try r.form()
+            switch (item) {
+            case Read.Form(Value v):
+                items.push(v)
+            case Read.End, Read.Incomplete:
+                return Read.Incomplete, null
+            }
+        }
+    }
+    if (c == '"') {
+        return r.str(start)
+    }
+    int from = r.at
+    for (; r.at < r.src.len() && !isDelimiter(r.src[r.at]); ) {
+        r.advance()
+    }
+    return Read.Form(atom(r.src.slice(from, r.at), start)), null
+}
+
+fn (Reader r) mut str(Pos start) (Read, error) {
+    r.advance()
+    []string parts = []string{}
+    for (;;) {
+        if (r.at >= r.src.len()) {
+            return Read.Incomplete, null
+        }
+        byte c = r.src[r.at]
+        if (c == '"') {
+            r.advance()
+            return Read.Form(Value.Str(parts.join(""))), null
+        }
+        if (c == '\\') {
+            Pos esc = r.pos()
+            r.advance()
+            if (r.at >= r.src.len()) {
+                return Read.Incomplete, null
+            }
+            byte e = r.src[r.at]
+            switch (e) {
+            case 'n':
+                parts.push("\n")
+            case 't':
+                parts.push("\t")
+            case '\\', '"':
+                parts.push(string([]byte{e}))
+            default:
+                return null, fail(esc, "unknown escape \\" + string([]byte{e}) + " in a string")
+            }
+            r.advance()
+            continue
+        }
+        parts.push(string([]byte{c}))
+        r.advance()
+    }
+}
+
+fn atom(string text, Pos pos) Value {
+    switch (text) {
+    case "#t":
+        return Value.Bool(true)
+    case "#f":
+        return Value.Bool(false)
+    default:
+        int? n, _ = text.toInt()
+        if (n != null) {
+            return Value.Int(n)
+        }
+        return Value.Sym(text, pos)
+    }
+}
+
+// Every form of a complete text. An unfinished form at the end is an error.
+pub fn readAll(string src) ([]Value, error) {
+    Reader r = reader(src)
+    []Value out = []Value{}
+    for (;;) {
+        Read item = try r.next()
+        switch (item) {
+        case Read.Form(Value v):
+            out.push(v)
+        case Read.End:
+            return out, null
+        case Read.Incomplete:
+            return null, fail(r.formPos, "unexpected end of input: the form that starts here is not closed")
+        }
+    }
+}

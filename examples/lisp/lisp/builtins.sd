@@ -1,0 +1,276 @@
+package lisp
+
+// The functions written in Seed.
+const []string builtins = []string{
+    "+",
+    "-",
+    "*",
+    "quotient",
+    "remainder",
+    "modulo",
+    "=",
+    "<",
+    ">",
+    "<=",
+    ">=",
+    "not",
+    "eq?",
+    "equal?",
+    "cons",
+    "car",
+    "cdr",
+    "list",
+    "length",
+    "append",
+    "reverse",
+    "list-ref",
+    "null?",
+    "pair?",
+    "list?",
+    "number?",
+    "string?",
+    "symbol?",
+    "procedure?",
+    "boolean?",
+    "display",
+    "newline",
+    "number->string",
+    "string->number",
+    "string-append",
+    "string-length",
+    "symbol->string",
+    "error",
+    "apply",
+}
+
+// The functions written in Lisp, defined when an interpreter starts.
+const []string prelude = []string{
+    "(define (map f xs) (if (null? xs) '() (cons (f (car xs)) (map f (cdr xs)))))",
+    "(define (filter keep xs) (cond ((null? xs) '()) ((keep (car xs)) (cons (car xs) (filter keep (cdr xs)))) (else (filter keep (cdr xs)))))",
+    "(define (fold f acc xs) (if (null? xs) acc (fold f (f acc (car xs)) (cdr xs))))",
+    "(define (for-each f xs) (unless (null? xs) (f (car xs)) (for-each f (cdr xs))))",
+    "(define (abs n) (if (< n 0) (- n) n))",
+}
+
+fn ints(string name, []Value args, Pos pos) ([]int, error) {
+    []int out = []int{}
+    for (int i = 0; i < args.len(); i++) {
+        switch (args[i]) {
+        case Value.Int(int n):
+            out.push(n)
+        case Value.Nil, Value.Bool(bool _), Value.Str(string _), Value.Sym(string _, Pos _), Value.List([]Value _, Pos _), Value.Closure(Lambda _), Value.Prim(string _):
+            return null, fail(pos, name + ": argument " + (i + 1).string() + " is not a number: " + args[i].string())
+        }
+    }
+    return out, null
+}
+
+fn count(string name, []Value args, int n, Pos pos) error {
+    if (args.len() != n) {
+        return fail(pos, name + " takes " + n.string() + " argument(s), got " + args.len().string())
+    }
+    return null
+}
+
+fn listArg(string name, Value v, Pos pos) ([]Value, error) {
+    []Value? items = listItems(v)
+    if (items == null) {
+        return null, fail(pos, name + ": not a list: " + v.string())
+    }
+    return items, null
+}
+
+fn stringArg(string name, Value v, Pos pos) (string, error) {
+    switch (v) {
+    case Value.Str(string s):
+        return s, null
+    case Value.Nil, Value.Bool(bool _), Value.Int(int _), Value.Sym(string _, Pos _), Value.List([]Value _, Pos _), Value.Closure(Lambda _), Value.Prim(string _):
+        return null, fail(pos, name + ": not a string: " + v.string())
+    }
+}
+
+fn isKind(Value v, string kind) bool {
+    return v.name() == kind
+}
+
+fn (Interp in) mut builtin(string name, []Value args, Pos pos, int depth) (Value, error) {
+    switch (name) {
+    case "+", "*":
+        []int ns = try ints(name, args, pos)
+        int acc = 0
+        if (name == "*") {
+            acc = 1
+        }
+        for (int i = 0; i < ns.len(); i++) {
+            if (name == "+") {
+                acc = acc + ns[i]
+            } else {
+                acc = acc * ns[i]
+            }
+        }
+        return Value.Int(acc), null
+    case "-":
+        []int ns = try ints(name, args, pos)
+        if (ns.len() == 0) {
+            return null, fail(pos, "- takes at least 1 argument")
+        }
+        if (ns.len() == 1) {
+            return Value.Int(-ns[0]), null
+        }
+        int acc = ns[0]
+        for (int i = 1; i < ns.len(); i++) {
+            acc = acc - ns[i]
+        }
+        return Value.Int(acc), null
+    case "quotient", "remainder", "modulo":
+        try count(name, args, 2, pos)
+        []int ns = try ints(name, args, pos)
+        if (ns[1] == 0) {
+            return null, fail(pos, name + ": division by zero")
+        }
+        int q = ns[0] / ns[1]
+        int r = ns[0] % ns[1]
+        if (name == "quotient") {
+            return Value.Int(q), null
+        }
+        if (name == "modulo" && r != 0 && (r < 0) != (ns[1] < 0)) {
+            r = r + ns[1]
+        }
+        return Value.Int(r), null
+    case "=", "<", ">", "<=", ">=":
+        []int ns = try ints(name, args, pos)
+        for (int i = 1; i < ns.len(); i++) {
+            int a = ns[i - 1]
+            int b = ns[i]
+            bool ok = (name == "=" && a == b) || (name == "<" && a < b) || (name == ">" && a > b) || (name == "<=" && a <= b) || (name == ">=" && a >= b)
+            if (!ok) {
+                return Value.Bool(false), null
+            }
+        }
+        return Value.Bool(true), null
+    case "not":
+        try count(name, args, 1, pos)
+        return Value.Bool(!truthy(args[0])), null
+    case "eq?", "equal?":
+        try count(name, args, 2, pos)
+        return Value.Bool(equal(args[0], args[1])), null
+    case "cons":
+        try count(name, args, 2, pos)
+        []Value? rest = listItems(args[1])
+        if (rest == null) {
+            return null, fail(pos, "cons: the second argument must be a list (there are no improper lists)")
+        }
+        []Value items = []Value{args[0]}
+        for (int i = 0; i < rest.len(); i++) {
+            items.push(rest[i])
+        }
+        return Value.List(items, pos), null
+    case "car", "cdr":
+        try count(name, args, 1, pos)
+        []Value items = try listArg(name, args[0], pos)
+        if (items.len() == 0) {
+            return null, fail(pos, name + ": the list is empty")
+        }
+        if (name == "car") {
+            return items[0], null
+        }
+        return makeList(items.slice(1, items.len()), posOf(args[0])), null
+    case "list":
+        return makeList(args, pos), null
+    case "length":
+        try count(name, args, 1, pos)
+        []Value items = try listArg(name, args[0], pos)
+        return Value.Int(items.len()), null
+    case "append":
+        []Value out = []Value{}
+        for (int i = 0; i < args.len(); i++) {
+            []Value items = try listArg(name, args[i], pos)
+            for (int j = 0; j < items.len(); j++) {
+                out.push(items[j])
+            }
+        }
+        return makeList(out, pos), null
+    case "reverse":
+        try count(name, args, 1, pos)
+        []Value items = try listArg(name, args[0], pos)
+        items.reverse()
+        return makeList(items, pos), null
+    case "list-ref":
+        try count(name, args, 2, pos)
+        []Value items = try listArg(name, args[0], pos)
+        []int ns = try ints(name, args.slice(1, 2), pos)
+        if (ns[0] < 0 || ns[0] >= items.len()) {
+            return null, fail(pos, "list-ref: index " + ns[0].string() + " out of range for a list of " + items.len().string())
+        }
+        return items[ns[0]], null
+    case "null?":
+        try count(name, args, 1, pos)
+        return Value.Bool(args[0] == Value.Nil), null
+    case "pair?":
+        try count(name, args, 1, pos)
+        return Value.Bool(isKind(args[0], "List")), null
+    case "list?":
+        try count(name, args, 1, pos)
+        return Value.Bool(listItems(args[0]) != null), null
+    case "number?":
+        try count(name, args, 1, pos)
+        return Value.Bool(isKind(args[0], "Int")), null
+    case "string?":
+        try count(name, args, 1, pos)
+        return Value.Bool(isKind(args[0], "Str")), null
+    case "symbol?":
+        try count(name, args, 1, pos)
+        return Value.Bool(isKind(args[0], "Sym")), null
+    case "boolean?":
+        try count(name, args, 1, pos)
+        return Value.Bool(isKind(args[0], "Bool")), null
+    case "procedure?":
+        try count(name, args, 1, pos)
+        return Value.Bool(isKind(args[0], "Closure") || isKind(args[0], "Prim")), null
+    case "display":
+        try count(name, args, 1, pos)
+        in.write(args[0].display())
+        return Value.Nil, null
+    case "newline":
+        try count(name, args, 0, pos)
+        in.write("\n")
+        return Value.Nil, null
+    case "number->string":
+        try count(name, args, 1, pos)
+        []int ns = try ints(name, args, pos)
+        return Value.Str(ns[0].string()), null
+    case "string->number":
+        try count(name, args, 1, pos)
+        string s = try stringArg(name, args[0], pos)
+        int? n, _ = s.toInt()
+        if (n == null) {
+            return Value.Bool(false), null
+        }
+        return Value.Int(n), null
+    case "string-append":
+        []string parts = []string{}
+        for (int i = 0; i < args.len(); i++) {
+            parts.push(try stringArg(name, args[i], pos))
+        }
+        return Value.Str(parts.join("")), null
+    case "string-length":
+        try count(name, args, 1, pos)
+        string s = try stringArg(name, args[0], pos)
+        return Value.Int(s.len()), null
+    case "symbol->string":
+        try count(name, args, 1, pos)
+        string? s = symName(args[0])
+        if (s == null) {
+            return null, fail(pos, "symbol->string: not a symbol: " + args[0].string())
+        }
+        return Value.Str(s), null
+    case "error":
+        []string parts = []string{}
+        for (int i = 0; i < args.len(); i++) {
+            parts.push(args[i].display())
+        }
+        return null, fail(pos, parts.join(" "))
+    default:
+        return null, fail(pos, "unknown built-in " + name)
+    }
+}

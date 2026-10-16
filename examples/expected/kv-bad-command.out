@@ -1,0 +1,3 @@
+--- stderr
+error: unknown command frobnicate; run 'kv --help' for usage
+--- exit 1

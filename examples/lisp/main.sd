@@ -1,0 +1,88 @@
+// lisp is a small Scheme interpreter.
+//
+//     lisp FILE...      runs the files, then exits
+//     lisp              a REPL on stdin: each value is printed, an error
+//                       says where it happened, and the session goes on
+package main
+
+import "fmt"
+import "fs"
+import "io"
+import "lisp"
+import "os"
+
+fn main([]string args) error {
+    lisp.Interp in = lisp.newInterp()
+    if (args.len() > 1) {
+        for (int i = 1; i < args.len(); i++) {
+            string src = try fs.read(args[i])
+            _, error err = in.run(src)
+            if (err != null) {
+                fmt.eprintln(args[i] + ":" + err.message())
+                os.exit(1)
+            }
+        }
+        return null
+    }
+    return repl(in)
+}
+
+// Reads forms from stdin, a line at a time; a form may span lines.
+fn repl(lisp.Interp start) error {
+    lisp.Interp in = start
+    string pending = ""
+    // where pending starts in the session, for error positions
+    lisp.Pos at = lisp.Pos{line: 1, col: 1}
+    int lineNo = 0
+    fmt.print("> ")
+    for (;;) {
+        string? line = try io.readLine()
+        if (line == null) {
+            if (pending.trim() != "") {
+                fmt.println("error: " + at.string() + ": unexpected end of input: the form that starts here is not closed")
+            }
+            fmt.println("")
+            return null
+        }
+        lineNo++
+        if (pending == "") {
+            at = lisp.Pos{line: lineNo, col: 1}
+        }
+        pending = pending + line + "\n"
+        lisp.Reader r = lisp.readerAt(pending, at)
+        bool incomplete = false
+        for (bool more = true; more; ) {
+            lisp.Read item, error err = r.next()
+            if (err != null) {
+                fmt.println("error: " + err.message())
+                more = false
+                break
+            }
+            switch (item) {
+            case lisp.Read.Form(lisp.Value form):
+                lisp.Value v, error everr = in.eval(form, 0, 0)
+                if (everr != null) {
+                    fmt.println("error: " + everr.message())
+                } else if (v != lisp.Value.Nil) {
+                    fmt.println(v.string())
+                }
+            case lisp.Read.End:
+                more = false
+            case lisp.Read.Incomplete:
+                incomplete = true
+                more = false
+            }
+        }
+        if (incomplete) {
+            // Read the whole text again with the next line. A form that
+            // is complete was already evaluated, so keep only from the
+            // unfinished one on.
+            pending = r.rest()
+            at = r.restPos()
+            fmt.print(". ")
+        } else {
+            pending = ""
+            fmt.print("> ")
+        }
+    }
+}

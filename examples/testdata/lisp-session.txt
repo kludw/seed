@@ -1,0 +1,12 @@
+(define (square x) (* x x))
+(square 12)
+(define (fact n)
+  (if (= n 0)
+      1
+      (* n (fact (- n 1)))))
+(fact 25)
+(map square '(1 2 3)) "two forms on a line"
+(car '())
+(undefined-name 1)
+(let ((x 1))
+  (+ x

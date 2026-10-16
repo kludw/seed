@@ -114,6 +114,14 @@ check csvgrep-count csvgrep -n o testdata/people.csv
 check csvgrep-help csvgrep --help
 check csvgrep-bad-flag csvgrep --colum x
 check csvgrep-bad-pattern csvgrep 'a(' testdata/people.csv
+check kv-demo kv demo
+check kv-help kv --help
+check kv-bad-command kv frobnicate
+check mdhtml mdhtml testdata/notes.md
+check mdhtml-standalone "<testdata/notes.md" mdhtml -s
+check crawl-demo crawl --demo
+check crawl-bad-url crawl https://example.com/
+check lisp "<testdata/lisp-session.txt" lisp
 check links links --base https://example.com/docs/harbour/ testdata/page.html
 check links-external links -e -b https://weather.example.org/x testdata/page.html
 

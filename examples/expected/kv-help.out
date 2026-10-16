@@ -1,0 +1,11 @@
+usage: kv [flags] COMMAND [ARGS...]
+
+A key-value store server and its client. Commands: serve, set, get, del, keys, compact, stats, bench, demo.
+
+flags:
+  -a, --addr string        the server's address (default "127.0.0.1:7070")
+  -d, --data string        serve: the log file (default "kv.log")
+      --log-level string   serve: debug, info, warn or error (default "info")
+  -c, --clients int        bench: concurrent clients (default 8)
+  -n, --requests int       bench: requests per client (default 2000)
+  -h, --help               show this help and exit

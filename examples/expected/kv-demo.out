@@ -1,0 +1,15 @@
+first run:
+  SET lang 4 -> OK
+  SET greeting 11 -> OK
+  SET lang 4 -> OK
+  GET lang -> Seed
+  DEL greeting -> OK
+  GET greeting -> (missing)
+  SET count 1 -> OK
+  KEYS -> count, lang
+second run, after a torn write:
+  KEYS -> count, lang
+  GET lang -> Seed
+  STATS -> keys 2, log_bytes 28, compactions 0
+  COMPACT -> 28
+  STATS -> keys 2, log_bytes 28, compactions 1

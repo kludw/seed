@@ -1,0 +1,100 @@
+package lisp
+
+import "fs"
+
+// Runs a program with its output captured; an error ends the output with
+// "error: " and its message.
+fn runCaptured(string src) string {
+    Interp in = newInterp()
+    in.capture = true
+    _, error err = in.run(src)
+    string out = in.output.join("")
+    if (err != null) {
+        out = out + "error: " + err.message() + "\n"
+    }
+    return out
+}
+
+// The value of the last form of src, as the REPL prints it, or the error.
+fn value(string src) string {
+    Interp in = newInterp()
+    Value v, error err = in.run(src)
+    if (err != null) {
+        return "error: " + err.message()
+    }
+    return v.string()
+}
+
+test "the programs in testdata print what their .out files say" {
+    []string names = try fs.list("testdata")
+    int checked = 0
+    for (int i = 0; i < names.len(); i++) {
+        if (!names[i].endsWith(".scm")) {
+            continue
+        }
+        string stem = names[i].slice(0, names[i].len() - 4)
+        string got = runCaptured(try fs.read("testdata/" + names[i]))
+        string want = try fs.read("testdata/" + stem + ".out")
+        assert(stem + ": " + got == stem + ": " + want)
+        checked++
+    }
+    assert(checked == 4)
+}
+
+test "the reader" {
+    []Value forms = try readAll("(a (b \"c\\n\") 'd) ; comment\n#t -12 x-y")
+    assert(forms.len() == 4)
+    assert(forms[0].string() == "(a (b \"c\\n\") 'd)")
+    assert(forms[1] == Value.Bool(true))
+    assert(forms[2] == Value.Int(-12))
+    assert(symName(forms[3]) == "x-y")
+    _, error err = readAll("(a\n  (b c)")
+    assert(err != null)
+    assert(err.message() == "1:1: unexpected end of input: the form that starts here is not closed")
+    _, error err2 = readAll("(a))")
+    assert(err2 != null)
+    assert(err2.message() == "1:4: unexpected )")
+    _, error err3 = readAll("\"bad \\q\"")
+    assert(err3 != null)
+    assert(err3.message() == "1:6: unknown escape \\q in a string")
+}
+
+test "errors say where they happened" {
+    assert(value("(define x 1)\n(+ x\n   (car '()))") == "error: 3:4: car: the list is empty")
+    assert(value("(foo)") == "error: 1:2: undefined variable foo")
+    assert(value("((lambda (a b) a) 1)") == "error: 1:1: lambda takes 2 argument(s), got 1")
+    assert(value("(define (f x) x)\n(f 1 2)") == "error: 2:1: f takes 1 argument(s), got 2")
+    assert(value("(+ 1 \"2\")") == "error: 1:1: +: argument 2 is not a number: \"2\"")
+    assert(value("(5 6)") == "error: 1:1: cannot call 5, which is not a function")
+    assert(value("(cons 1 2)") == "error: 1:1: cons: the second argument must be a list (there are no improper lists)")
+    assert(value("(set! nope 1)") == "error: 1:7: set!: undefined variable nope")
+    assert(value("(quotient 1 0)") == "error: 1:1: quotient: division by zero")
+    assert(value("(if)") == "error: 1:1: if: too few arguments")
+}
+
+test "deep recursion is an error, not a crash" {
+    string src = "(define (deep n) (if (= n 0) 0 (+ 1 (deep (- n 1)))))\n"
+    assert(value(src + "(deep 2000)") == "2000")
+    string err = value(src + "(deep 100000)")
+    assert(err.startsWith("error: 1:"))
+    assert(err.endsWith("recursion too deep (more than 4000 nested calls)"))
+}
+
+test "tail calls run in constant space" {
+    Interp in = newInterp()
+    _ = try in.run("(define (loop i) (if (= i 0) 'done (loop (- i 1))))")
+    int before = in.frameCount()
+    Value v = try in.run("(loop 100000)")
+    assert(v.string() == "done")
+    assert(in.frameCount() - before < 5)
+    // let and cond in tail position too
+    _ = try in.run("(define (loop2 i) (let ((j (- i 1))) (cond ((< j 0) 'done) (else (loop2 j)))))")
+    before = in.frameCount()
+    assert((try in.run("(loop2 100000)")).string() == "done")
+    assert(in.frameCount() - before < 5)
+}
+
+test "closures share the variables they captured" {
+    assert(value("(define (counter) (let ((n 0)) (lambda () (set! n (+ n 1)) n)))\n(define c (counter))\n(c)\n(c)\n(c)") == "3")
+    assert(value("(define (adder n) (lambda (x) (+ x n)))\n(map (adder 10) '(1 2))") == "(11 12)")
+}

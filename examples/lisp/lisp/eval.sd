@@ -1,0 +1,461 @@
+package lisp
+
+import "fmt"
+import "os"
+
+// How deep evaluation may nest (calls that are not tail calls, nested
+// arguments). Beyond it, evaluation fails with an error instead of
+// overflowing the stack.
+pub const int maxDepth = 4000
+
+// A frame of variables, and the index of the frame around it (-1 for the
+// global one).
+type Frame struct {
+    map[string]Value vars
+    int parent
+    // set when a closure may refer to the frame, which then lives forever
+    bool captured
+}
+
+// Interp is an interpreter: the arena of frames, and what display wrote
+// when output is captured.
+pub type Interp struct {
+    []Frame frames
+    // frames that can be reused
+    []int free
+    // frames made by evaluations in progress (see eval)
+    []int pending = []int{}
+    pub bool capture = false
+    pub []string output = []string{}
+}
+
+// A new interpreter with the built-ins and the prelude defined.
+pub fn newInterp() Interp {
+    Interp in = Interp{frames: []Frame{Frame{vars: map[string]Value{}, parent: -1, captured: true}}, free: []int{}}
+    for (int i = 0; i < builtins.len(); i++) {
+        in.frames[0].vars[builtins[i]] = Value.Prim(builtins[i])
+    }
+    []Value forms, error err = readAll(prelude.join("\n"))
+    if (err != null) {
+        os.crash("lisp: the prelude does not read: " + err.message())
+    }
+    for (int i = 0; i < forms.len(); i++) {
+        _, error e = in.eval(forms[i], 0, 0)
+        if (e != null) {
+            os.crash("lisp: the prelude fails: " + e.message())
+        }
+    }
+    return in
+}
+
+// The number of frames in the arena, for tests of tail calls.
+pub fn (Interp in) frameCount() int {
+    return in.frames.len()
+}
+
+// Runs a whole program and returns the value of its last form.
+pub fn (Interp in) mut run(string src) (Value, error) {
+    []Value forms = try readAll(src)
+    Value last = Value.Nil
+    for (int i = 0; i < forms.len(); i++) {
+        last = try in.eval(forms[i], 0, 0)
+    }
+    return last, null
+}
+
+fn (Interp in) mut write(string text) {
+    if (in.capture) {
+        in.output.push(text)
+    } else {
+        fmt.print(text)
+    }
+}
+
+fn (Interp in) mut newFrame(int parent) int {
+    int? id = in.free.pop()
+    if (id != null) {
+        in.frames[id].parent = parent
+        return id
+    }
+    in.frames.push(Frame{vars: map[string]Value{}, parent: parent, captured: false})
+    return in.frames.len() - 1
+}
+
+// Gives back the frames that no closure can refer to.
+fn (Interp in) mut release([]int owned) {
+    for (int i = 0; i < owned.len(); i++) {
+        int id = owned[i]
+        if (!in.frames[id].captured) {
+            in.frames[id].vars = map[string]Value{}
+            in.free.push(id)
+        }
+    }
+}
+
+fn (Interp in) mut markCaptured(int env) {
+    for (int e = env; e >= 0 && !in.frames[e].captured; e = in.frames[e].parent) {
+        in.frames[e].captured = true
+    }
+}
+
+fn (Interp in) lookup(string name, int env, Pos pos) (Value, error) {
+    for (int e = env; e >= 0; e = in.frames[e].parent) {
+        Value? v = in.frames[e].vars[name]
+        if (v != null) {
+            return v, null
+        }
+    }
+    return null, fail(pos, "undefined variable " + name)
+}
+
+fn (Interp in) mut assign(string name, Value v, int env, Pos pos) error {
+    for (int e = env; e >= 0; e = in.frames[e].parent) {
+        if (in.frames[e].vars[name] != null) {
+            in.frames[e].vars[name] = v
+            return null
+        }
+    }
+    return fail(pos, "set!: undefined variable " + name)
+}
+
+// Evaluates x in the frame env, at the given nesting depth.
+pub fn (Interp in) mut eval(Value x, int env, int depth) (Value, error) {
+    if (depth > maxDepth) {
+        return null, fail(posOf(x), "recursion too deep (more than " + maxDepth.string() + " nested calls)")
+    }
+    // The frames this evaluation makes are pushed on in.pending above mark,
+    // and given back when it ends, however it ends. (Not with a defer: a
+    // mut method cannot be deferred, and evalLoop can't return the frames
+    // beside an error.)
+    int mark = in.pending.len()
+    Value v, error err = in.evalLoop(x, env, depth, mark)
+    in.releaseFrom(mark)
+    if (err != null) {
+        return null, err
+    }
+    return v, null
+}
+
+// Gives back the frames pending above mark.
+fn (Interp in) mut releaseFrom(int mark) {
+    in.release(in.pending.slice(mark, in.pending.len()))
+    for (; in.pending.len() > mark; ) {
+        _ = in.pending.pop()
+    }
+}
+
+fn (Interp in) mut evalLoop(Value start, int startEnv, int depth, int mark) (Value, error) {
+    Value x = start
+    int env = startEnv
+    for (;;) {
+        Pos pos = posOf(x)
+        string? name = symName(x)
+        if (name != null) {
+            return in.lookup(name, env, pos)
+        }
+        []Value? items = listItems(x)
+        if (items == null || items.len() == 0) {
+            // numbers, strings, booleans and () evaluate to themselves
+            return x, null
+        }
+        string? head = symName(items[0])
+        // Special forms are recognised by name; their names cannot be
+        // redefined as variables.
+        if (head != null) {
+            switch (head) {
+            case "quote":
+                try arity(items, 1, 1, pos)
+                return items[1], null
+            case "if":
+                try arity(items, 2, 3, pos)
+                Value cond = try in.eval(items[1], env, depth + 1)
+                if (truthy(cond)) {
+                    x = items[2]
+                } else if (items.len() == 4) {
+                    x = items[3]
+                } else {
+                    return Value.Nil, null
+                }
+                continue
+            case "define":
+                try arity(items, 1, -1, pos)
+                []Value? sig = listItems(items[1])
+                if (sig != null && sig.len() > 0) {
+                    // (define (name params...) body...)
+                    string? fname = symName(sig[0])
+                    if (fname == null) {
+                        return null, fail(pos, "define: the function's name must be a symbol")
+                    }
+                    Lambda f = try in.lambda(sig.slice(1, sig.len()), items.slice(2, items.len()), env, pos)
+                    f.name = fname
+                    in.frames[env].vars[fname] = Value.Closure(f)
+                    return Value.Sym(fname, pos), null
+                }
+                string? vname = symName(items[1])
+                if (vname == null || items.len() != 3) {
+                    return null, fail(pos, "define takes a name and a value, or (name params...) and a body")
+                }
+                Value val = try in.eval(items[2], env, depth + 1)
+                in.frames[env].vars[vname] = named(val, vname)
+                return Value.Sym(vname, pos), null
+            case "set!":
+                try arity(items, 2, 2, pos)
+                string? vname = symName(items[1])
+                if (vname == null) {
+                    return null, fail(pos, "set! takes a variable name")
+                }
+                Value val = try in.eval(items[2], env, depth + 1)
+                try in.assign(vname, val, env, posOf(items[1]))
+                return Value.Nil, null
+            case "lambda":
+                try arity(items, 2, -1, pos)
+                []Value? params = listItems(items[1])
+                string? restOnly = symName(items[1])
+                if (restOnly != null) {
+                    // (lambda args body...): every argument in one list
+                    Lambda f = try in.lambda([]Value{Value.Sym(".", pos), items[1]}, items.slice(2, items.len()), env, pos)
+                    return Value.Closure(f), null
+                }
+                if (params == null) {
+                    return null, fail(pos, "lambda: the parameters must be a list")
+                }
+                return Value.Closure(try in.lambda(params, items.slice(2, items.len()), env, pos)), null
+            case "begin":
+                if (items.len() == 1) {
+                    return Value.Nil, null
+                }
+                for (int i = 1; i < items.len() - 1; i++) {
+                    _ = try in.eval(items[i], env, depth + 1)
+                }
+                x = items[items.len() - 1]
+                continue
+            case "let", "let*", "letrec":
+                try arity(items, 2, -1, pos)
+                []Value? bindings = listItems(items[1])
+                if (bindings == null) {
+                    return null, fail(pos, head + ": the bindings must be a list")
+                }
+                int frame = in.newFrame(env)
+                in.pending.push(frame)
+                for (int i = 0; i < bindings.len(); i++) {
+                    []Value? b = listItems(bindings[i])
+                    if (b == null || b.len() != 2 || symName(b[0]) == null) {
+                        return null, fail(posOf(bindings[i]), head + ": each binding is (name value)")
+                    }
+                    string? bname = symName(b[0])
+                    if (bname == null) {
+                        return null, fail(posOf(bindings[i]), head + ": each binding is (name value)")
+                    }
+                    // let evaluates the values outside the new frame; let*
+                    // and letrec inside it, so they see the earlier ones.
+                    int scope = frame
+                    if (head == "let") {
+                        scope = env
+                    }
+                    Value val = try in.eval(b[1], scope, depth + 1)
+                    in.frames[frame].vars[bname] = named(val, bname)
+                }
+                env = frame
+                x = body(items.slice(2, items.len()), pos)
+                continue
+            case "cond":
+                Value? chosen = null
+                for (int i = 1; i < items.len() && chosen == null; i++) {
+                    []Value? clause = listItems(items[i])
+                    if (clause == null || clause.len() == 0) {
+                        return null, fail(posOf(items[i]), "cond: each clause is (test body...)")
+                    }
+                    bool hit = symName(clause[0]) == "else"
+                    if (!hit) {
+                        hit = truthy(try in.eval(clause[0], env, depth + 1))
+                    }
+                    if (hit) {
+                        chosen = body(clause.slice(1, clause.len()), posOf(items[i]))
+                    }
+                }
+                if (chosen == null) {
+                    return Value.Nil, null
+                }
+                x = chosen
+                continue
+            case "and", "or":
+                if (items.len() == 1) {
+                    return Value.Bool(head == "and"), null
+                }
+                bool done = false
+                for (int i = 1; i < items.len() - 1 && !done; i++) {
+                    Value val = try in.eval(items[i], env, depth + 1)
+                    if (truthy(val) == (head == "or")) {
+                        return val, null
+                    }
+                }
+                x = items[items.len() - 1]
+                continue
+            case "when", "unless":
+                try arity(items, 1, -1, pos)
+                bool holds = truthy(try in.eval(items[1], env, depth + 1))
+                if (holds != (head == "when")) {
+                    return Value.Nil, null
+                }
+                x = body(items.slice(2, items.len()), pos)
+                continue
+            default:
+            }
+        }
+        // An application: evaluate the function and the arguments.
+        Value f = try in.eval(items[0], env, depth + 1)
+        []Value args = []Value{}
+        for (int i = 1; i < items.len(); i++) {
+            args.push(try in.eval(items[i], env, depth + 1))
+        }
+        switch (f) {
+        case Value.Prim(string prim):
+            if (prim == "apply") {
+                // (apply f args): a tail call of f
+                if (args.len() != 2) {
+                    return null, fail(pos, "apply takes a function and a list")
+                }
+                []Value? spread = listItems(args[1])
+                if (spread == null) {
+                    return null, fail(pos, "apply: the last argument must be a list")
+                }
+                return in.call(args[0], spread, pos, depth + 1)
+            }
+            return in.builtin(prim, args, pos, depth)
+        case Value.Closure(Lambda lam):
+            int frame = try in.bind(lam, args, pos)
+            // A tail call: the frames of this loop are done with (the new
+            // frame hangs off the closure's environment, not off them), so
+            // a loop written as recursion runs in constant space.
+            in.releaseFrom(mark)
+            in.pending.push(frame)
+            env = frame
+            x = body(lam.body, pos)
+            continue
+        case Value.Nil, Value.Bool(bool _), Value.Int(int _), Value.Str(string _), Value.Sym(string _, Pos _), Value.List([]Value _, Pos _):
+            return null, fail(pos, "cannot call " + f.string() + ", which is not a function")
+        }
+    }
+}
+
+// A body of several forms as one: (begin forms...).
+fn body([]Value forms, Pos pos) Value {
+    if (forms.len() == 1) {
+        return forms[0]
+    }
+    []Value items = []Value{Value.Sym("begin", pos)}
+    for (int i = 0; i < forms.len(); i++) {
+        items.push(forms[i])
+    }
+    return Value.List(items, pos)
+}
+
+// A closure bound to a name takes the name, for messages.
+fn named(Value v, string name) Value {
+    switch (v) {
+    case Value.Closure(Lambda f):
+        if (f.name == "") {
+            Lambda g = f
+            g.name = name
+            return Value.Closure(g)
+        }
+        return v
+    case Value.Nil, Value.Bool(bool _), Value.Int(int _), Value.Str(string _), Value.Sym(string _, Pos _), Value.List([]Value _, Pos _), Value.Prim(string _):
+        return v
+    }
+}
+
+// Checks that a special form has between min and max arguments (max -1:
+// no limit).
+fn arity([]Value items, int min, int max, Pos pos) error {
+    int n = items.len() - 1
+    string? form = symName(items[0])
+    if (form == null) {
+        form = "?"
+    }
+    if (n < min) {
+        return fail(pos, form + ": too few arguments")
+    }
+    if (max >= 0 && n > max) {
+        return fail(pos, form + ": too many arguments")
+    }
+    return null
+}
+
+// Makes a closure from a parameter list and a body. A parameter list
+// (a b . rest) collects the remaining arguments in rest.
+fn (Interp in) mut lambda([]Value params, []Value forms, int env, Pos pos) (Lambda, error) {
+    if (forms.len() == 0) {
+        return null, fail(pos, "lambda: the body is empty")
+    }
+    []string names = []string{}
+    string? rest = null
+    for (int i = 0; i < params.len(); i++) {
+        string? p = symName(params[i])
+        if (p == null) {
+            return null, fail(posOf(params[i]), "lambda: parameters must be symbols")
+        }
+        if (p == ".") {
+            if (i != params.len() - 2) {
+                return null, fail(posOf(params[i]), "lambda: . must come before the last parameter")
+            }
+            rest = symName(params[i + 1])
+            break
+        }
+        if (names.contains(p)) {
+            return null, fail(posOf(params[i]), "lambda: parameter " + p + " is repeated")
+        }
+        names.push(p)
+    }
+    in.markCaptured(env)
+    return Lambda{name: "", params: names, rest: rest, body: forms, env: env}, null
+}
+
+// A new frame for a call of f with args.
+fn (Interp in) mut bind(Lambda f, []Value args, Pos pos) (int, error) {
+    string who = f.name
+    if (who == "") {
+        who = "lambda"
+    }
+    if (args.len() < f.params.len() || (f.rest == null && args.len() > f.params.len())) {
+        string want = f.params.len().string()
+        if (f.rest != null) {
+            want = "at least " + want
+        }
+        return null, fail(pos, who + " takes " + want + " argument(s), got " + args.len().string())
+    }
+    int frame = in.newFrame(f.env)
+    for (int i = 0; i < f.params.len(); i++) {
+        in.frames[frame].vars[f.params[i]] = args[i]
+    }
+    if (f.rest != null) {
+        in.frames[frame].vars[f.rest] = makeList(args.slice(f.params.len(), args.len()), pos)
+    }
+    return frame, null
+}
+
+// Calls a function value with arguments (for built-ins such as map).
+fn (Interp in) mut call(Value f, []Value args, Pos pos, int depth) (Value, error) {
+    switch (f) {
+    case Value.Prim(string prim):
+        return in.builtin(prim, args, pos, depth)
+    case Value.Closure(Lambda lam):
+        int frame = try in.bind(lam, args, pos)
+        []Value forms = lam.body
+        Value? result = null
+        error err = null
+        for (int i = 0; i < forms.len() && err == null; i++) {
+            result, err = in.eval(forms[i], frame, depth + 1)
+        }
+        in.release([]int{frame})
+        if (err != null) {
+            return null, err
+        }
+        if (result == null) {
+            return Value.Nil, null
+        }
+        return result, null
+    case Value.Nil, Value.Bool(bool _), Value.Int(int _), Value.Str(string _), Value.Sym(string _, Pos _), Value.List([]Value _, Pos _):
+        return null, fail(pos, "cannot call " + f.string() + ", which is not a function")
+    }
+}

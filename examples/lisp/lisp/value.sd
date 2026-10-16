@@ -1,0 +1,172 @@
+// Package lisp is a small Scheme: integers of any size, strings, symbols,
+// lists, closures with lexical scope, tail calls in constant space, and
+// errors that say where they happened.
+//
+// Lists are Seed lists, not pairs, so there are no improper lists: (cons 1
+// 2) is an error. Environments live in an arena owned by the interpreter
+// and are referred to by index, since Seed has no pointers.
+package lisp
+
+// Where something is in the source: line and column, from 1.
+pub type Pos struct {
+    pub int line
+    pub int col
+}
+
+pub fn (Pos p) string() string {
+    return p.line.string() + ":" + p.col.string()
+}
+
+// A function written in Lisp: its parameters, the parameter that takes the
+// rest of the arguments (if any), its body, and the environment it was made
+// in.
+pub type Lambda struct {
+    pub string name
+    []string params
+    string? rest
+    []Value body
+    int env
+}
+
+// A Lisp value.
+pub type Value enum {
+    Nil
+    Bool(bool b)
+    Int(int n)
+    Str(string s)
+    Sym(string name, Pos pos)
+    List([]Value items, Pos pos)
+    Closure(Lambda f)
+    Prim(string name)
+}
+
+// An error with the place in the source it is about.
+pub type LispError struct implements error {
+    pub Pos pos
+    pub string text
+}
+
+pub fn (LispError e) message() string {
+    return e.pos.string() + ": " + e.text
+}
+
+fn fail(Pos pos, string text) error {
+    return LispError{pos: pos, text: text}
+}
+
+// The position of a value from the source, or 0:0.
+fn posOf(Value v) Pos {
+    switch (v) {
+    case Value.Sym(string _, Pos pos):
+        return pos
+    case Value.List([]Value _, Pos pos):
+        return pos
+    case Value.Nil, Value.Bool(bool _), Value.Int(int _), Value.Str(string _), Value.Closure(Lambda _), Value.Prim(string _):
+        return Pos{line: 0, col: 0}
+    }
+}
+
+// The name of a symbol, or null for any other value.
+fn symName(Value v) string? {
+    switch (v) {
+    case Value.Sym(string name, Pos _):
+        return name
+    case Value.Nil, Value.Bool(bool _), Value.Int(int _), Value.Str(string _), Value.List([]Value _, Pos _), Value.Closure(Lambda _), Value.Prim(string _):
+        return null
+    }
+}
+
+// The elements of a list (() is the empty one), or null for any other value.
+fn listItems(Value v) []Value? {
+    switch (v) {
+    case Value.Nil:
+        return []Value{}
+    case Value.List([]Value items, Pos _):
+        return items
+    case Value.Bool(bool _), Value.Int(int _), Value.Str(string _), Value.Sym(string _, Pos _), Value.Closure(Lambda _), Value.Prim(string _):
+        return null
+    }
+}
+
+// A list value: () when empty.
+fn makeList([]Value items, Pos pos) Value {
+    if (items.len() == 0) {
+        return Value.Nil
+    }
+    return Value.List(items, pos)
+}
+
+// Everything is true but #f.
+fn truthy(Value v) bool {
+    return v != Value.Bool(false)
+}
+
+// Whether two values are the same, ignoring where they came from.
+fn equal(Value a, Value b) bool {
+    []Value? xs = listItems(a)
+    []Value? ys = listItems(b)
+    if (xs != null && ys != null) {
+        if (xs.len() != ys.len()) {
+            return false
+        }
+        for (int i = 0; i < xs.len(); i++) {
+            if (!equal(xs[i], ys[i])) {
+                return false
+            }
+        }
+        return true
+    }
+    string? s = symName(a)
+    string? t = symName(b)
+    if (s != null && t != null) {
+        return s == t
+    }
+    return a == b
+}
+
+// The value as the REPL shows it: strings quoted.
+pub fn (Value v) string() string {
+    return show(v, true)
+}
+
+// The value as display writes it: strings as they are.
+pub fn (Value v) display() string {
+    return show(v, false)
+}
+
+fn show(Value v, bool quoted) string {
+    switch (v) {
+    case Value.Nil:
+        return "()"
+    case Value.Bool(bool b):
+        if (b) {
+            return "#t"
+        }
+        return "#f"
+    case Value.Int(int n):
+        return n.string()
+    case Value.Str(string s):
+        if (!quoted) {
+            return s
+        }
+        return "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n") + "\""
+    case Value.Sym(string name, Pos _):
+        return name
+    case Value.List([]Value items, Pos _):
+        if (items.len() == 2 && symName(items[0]) == "quote") {
+            return "'" + show(items[1], quoted)
+        }
+        []string parts = []string{}
+        for (int i = 0; i < items.len(); i++) {
+            parts.push(show(items[i], quoted))
+        }
+        return "(" + parts.join(" ") + ")"
+    case Value.Closure(Lambda f):
+        if (f.name == "") {
+            return "#<lambda>"
+        }
+        return "#<lambda " + f.name + ">"
+    case Value.Prim(string name):
+        return "#<builtin " + name + ">"
+    }
+}

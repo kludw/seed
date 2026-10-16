@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Release notes</title>
+</head>
+<body>
+<h1>Release notes</h1>
+<p>Seed <strong>0.9</strong> adds <code>seed doc</code> and a <a href="docs/lsp.md">language server</a>.</p>
+<h2>Fixed</h2>
+<ul>
+<li><code>m[k]++</code> on a map entry is rejected</li>
+<li>crashes in goroutines show <em>where</em> they were spawned
+<ol>
+<li>with the file</li>
+<li>and the line</li>
+</ol>
+</li>
+</ul>
+<blockquote>
+<p>Upgrade with <code>make install</code>.</p>
+</blockquote>
+<pre><code class="language-sh">make &amp;&amp; make install
+</code></pre>
+</body>
+</html>

@@ -1,0 +1,10 @@
+// expect-error: keyword_as_name.sd:8:9: error: 'test' is a keyword, so it cannot be used as a name
+// expect-errors: 1
+// A keyword where a declaration puts its name says so (it was "expected the
+// end of the statement, found 'test'" with the hint "put one statement per line").
+package main
+
+fn main([]string args) error {
+    int test = 1
+    return null
+}

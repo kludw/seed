@@ -1,0 +1,10 @@
+> square
+> 144
+> . . . fact
+> 15511210043330985984000000
+> (1 4 9)
+"two forms on a line"
+> error: 9:1: car: the list is empty
+> error: 10:2: undefined variable undefined-name
+> . . error: 11:1: unexpected end of input: the form that starts here is not closed
+
