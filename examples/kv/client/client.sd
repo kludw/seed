@@ -1,0 +1,80 @@
+// Package client talks to a kv server.
+package client
+
+import "errors"
+import "net"
+import "time"
+import "wire"
+
+// Client is one connection to a server. Requests on it are answered in
+// order, one at a time.
+pub type Client struct {
+    net.Conn conn
+    wire.Reader r
+}
+
+// Connects to the server at addr ("host:port").
+pub fn dial(string addr) (Client, error) {
+    net.Conn conn = try net.dial(addr, 5 * time.second)
+    conn.setTimeout(30 * time.second)
+    return Client{conn: conn, r: wire.reader(conn)}, null
+}
+
+// Sends a request and waits for its reply. A reply that says the request
+// failed is a reply, not an error; the error is for the connection failing.
+pub fn (Client c) mut call(wire.Request req) (wire.Reply, error) {
+    try c.conn.write(req.encode())
+    return c.r.readReply()
+}
+
+// The value of key, or null when it has none.
+pub fn (Client c) mut get(string key) (string?, error) {
+    wire.Reply reply = try c.call(wire.Request.Get(key))
+    switch (reply) {
+    case wire.Reply.Value(string v):
+        return v, null
+    case wire.Reply.Missing:
+        return null, null
+    case wire.Reply.Ok, wire.Reply.Number(int _), wire.Reply.List([]string _), wire.Reply.Fail(string _):
+        return null, unexpected("GET", reply)
+    }
+}
+
+pub fn (Client c) mut set(string key, string value) error {
+    wire.Reply reply = try c.call(wire.Request.Set(key, value))
+    if (reply != wire.Reply.Ok) {
+        return unexpected("SET", reply)
+    }
+    return null
+}
+
+// Deletes key; false when it was not there.
+pub fn (Client c) mut delete(string key) (bool, error) {
+    wire.Reply reply = try c.call(wire.Request.Del(key))
+    if (reply == wire.Reply.Ok) {
+        return true, null
+    }
+    if (reply == wire.Reply.Missing) {
+        return false, null
+    }
+    return false, unexpected("DEL", reply)
+}
+
+// The keys that start with prefix, sorted.
+pub fn (Client c) mut keys(string prefix) ([]string, error) {
+    wire.Reply reply = try c.call(wire.Request.Keys(prefix))
+    switch (reply) {
+    case wire.Reply.List([]string items):
+        return items, null
+    case wire.Reply.Ok, wire.Reply.Value(string _), wire.Reply.Missing, wire.Reply.Number(int _), wire.Reply.Fail(string _):
+        return null, unexpected("KEYS", reply)
+    }
+}
+
+fn unexpected(string what, wire.Reply reply) error {
+    return errors.new("client: " + what + ": unexpected reply: " + reply.string())
+}
+
+pub fn (Client c) close() {
+    c.conn.close()
+}

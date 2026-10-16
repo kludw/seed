@@ -1,0 +1,92 @@
+package wire
+
+import "net"
+
+// Writes text to a connection in pieces of the given size, then closes it.
+fn feed(net.Listener ln, string text, int piece) error {
+    net.Conn c = try ln.accept()
+    defer c.close()
+    for (int i = 0; i < text.len(); i = i + piece) {
+        int end = i + piece
+        if (end > text.len()) {
+            end = text.len()
+        }
+        try c.write(text.slice(i, end))
+    }
+    return null
+}
+
+// Reads every request from a connection to ln.
+fn readAll(net.Listener ln, chan []Request out) error {
+    net.Conn c = try net.dial(ln.addr(), 0)
+    defer c.close()
+    Reader r = reader(c)
+    []Request got = []Request{}
+    for (;;) {
+        Request? req = try r.readRequest()
+        if (req == null) {
+            break
+        }
+        got.push(req)
+    }
+    out.send(got)
+    return null
+}
+
+fn parseAll(string text, int piece) ([]Request, error) {
+    net.Listener ln = try net.listen("127.0.0.1:0")
+    defer ln.close()
+    chan []Request out = chan []Request(1)
+    try group {
+        spawn feed(ln, text, piece)
+        spawn readAll(ln, out)
+    }
+    []Request? got = out.receive()
+    if (got == null) {
+        return []Request{}, null
+    }
+    return got, null
+}
+
+test "requests survive the trip, whatever the pieces they arrive in" {
+    []Request reqs = []Request{
+        Request.Set("a", "line one\nline two"),
+        Request.Get("a"),
+        Request.Set("empty", ""),
+        Request.Del("a"),
+        Request.Keys(""),
+        Request.Keys("user:"),
+        Request.Compact,
+        Request.Stats,
+    }
+    []string parts = []string{}
+    for (int i = 0; i < reqs.len(); i++) {
+        parts.push(reqs[i].encode())
+    }
+    string text = parts.join("")
+    []int pieces = []int{1, 3, 7, text.len()}
+    for (int i = 0; i < pieces.len(); i++) {
+        []Request got = try parseAll(text, pieces[i])
+        assert(got == reqs)
+    }
+}
+
+test "commands are case-insensitive and CRLF is accepted" {
+    []Request got = try parseAll("get k\r\nKeys\r\n", 4)
+    assert(got == []Request{Request.Get("k"), Request.Keys("")})
+}
+
+test "replies encode as documented" {
+    assert(Reply.Ok.encode() == "+OK\n")
+    assert(Reply.Value("hi").encode() == "$2\nhi\n")
+    assert(Reply.List([]string{"a", "b"}).encode() == "*2\na\nb\n")
+    assert(Reply.Fail("bad\nthing").encode() == "-ERR bad thing\n")
+    assert(Reply.Number(-3).encode() == ":-3\n")
+}
+
+test "valid keys" {
+    assert(validKey("user:42"))
+    assert(!validKey(""))
+    assert(!validKey("two words"))
+    assert(!validKey("tab\there"))
+}

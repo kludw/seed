@@ -1,0 +1,137 @@
+package server
+
+import "client"
+import "errors"
+import "fs"
+import "log"
+import "net"
+import "strings"
+import "time"
+import "wire"
+
+fn quiet(string path) Config {
+    return Config{data: path, logger: log.new(log.Level.Error, log.Output.Stderr)}
+}
+
+// One client: writes its own keys, reads them back, deletes every other one.
+fn worker(string addr, int id, int n) error {
+    client.Client c = try client.dial(addr)
+    defer c.close()
+    for (int i = 0; i < n; i++) {
+        try c.set("w" + id.string() + ":" + i.string(), id.string() + "/" + i.string())
+    }
+    for (int i = 0; i < n; i++) {
+        string? v = try c.get("w" + id.string() + ":" + i.string())
+        if (v != id.string() + "/" + i.string()) {
+            return errors.new("worker " + id.string() + ": key " + i.string() + " reads back wrong")
+        }
+        if (i % 2 == 1) {
+            bool found = try c.delete("w" + id.string() + ":" + i.string())
+            if (!found) {
+                return errors.new("worker " + id.string() + ": delete found nothing")
+            }
+        }
+    }
+    return null
+}
+
+// Runs the workers concurrently, then closes the listener, which stops the
+// server once their connections are gone.
+fn drive(net.Listener ln, int workers, int n) error {
+    defer ln.close()
+    try group {
+        for (int i = 0; i < workers; i++) {
+            spawn worker(ln.addr(), i, n)
+        }
+    }
+    return null
+}
+
+fn check(net.Listener ln, chan []string out) error {
+    defer ln.close()
+    client.Client c = try client.dial(ln.addr())
+    defer c.close()
+    out.send(try c.keys("w3:"))
+    wire.Reply stats = try c.call(wire.Request.Stats)
+    out.send(stats.string().split("\n"))
+    wire.Reply bad = try c.call(wire.Request.Set(strings.repeat("k", 300), "x"))
+    out.send([]string{bad.string()})
+    return null
+}
+
+test "concurrent clients, then a restart from the log" {
+    string dir = try fs.makeTemp("kv-server-")
+    defer _ = fs.removeAll(dir)
+    string path = dir + "/kv.log"
+
+    net.Listener ln = try net.listen("127.0.0.1:0")
+    try group {
+        spawn serve(ln, quiet(path))
+        spawn drive(ln, 8, 50)
+    }
+
+    // Restart on a new port: everything written is back.
+    net.Listener ln2 = try net.listen("127.0.0.1:0")
+    chan []string out = chan []string(3)
+    try group {
+        spawn serve(ln2, quiet(path))
+        spawn check(ln2, out)
+    }
+    []string? keys = out.receive()
+    assert(keys != null)
+    assert(keys.len() == 25)
+    assert(keys[0] == "w3:0")
+    assert(keys[1] == "w3:10")
+    []string? stats = out.receive()
+    assert(stats != null)
+    assert(stats[0] == "keys 200")
+    []string? bad = out.receive()
+    assert(bad == []string{"error: invalid key"})
+}
+
+// Sends raw bytes and returns what the server answered before closing.
+fn raw(net.Listener ln, string text, chan string out) error {
+    defer ln.close()
+    net.Conn c = try net.dial(ln.addr(), time.second)
+    defer c.close()
+    try c.write(text)
+    []string got = []string{}
+    for (;;) {
+        string? data = try c.read(4096)
+        if (data == null) {
+            break
+        }
+        got.push(data)
+    }
+    out.send(got.join(""))
+    return null
+}
+
+test "a malformed request gets an error and the connection is closed" {
+    string dir = try fs.makeTemp("kv-server-")
+    defer _ = fs.removeAll(dir)
+    net.Listener ln = try net.listen("127.0.0.1:0")
+    chan string out = chan string(1)
+    try group {
+        spawn serve(ln, quiet(dir + "/kv.log"))
+        spawn raw(ln, "SET a 1\nx\nGET a\nFROB\nGET a\n", out)
+    }
+    assert(out.receive() == "+OK\n$1\nx\n-ERR wire: unknown command FROB\n")
+}
+
+test "an idle connection is closed" {
+    string dir = try fs.makeTemp("kv-server-")
+    defer _ = fs.removeAll(dir)
+    net.Listener ln = try net.listen("127.0.0.1:0")
+    chan string out = chan string(1)
+    Config cfg = quiet(dir + "/kv.log")
+    cfg.idle = 100 * time.millisecond
+    try group {
+        spawn serve(ln, cfg)
+        spawn raw(ln, "GET a\n", out)
+    }
+    string? got = out.receive()
+    assert(got != null)
+    assert(got.startsWith("_\n-ERR net.Conn.read: 127.0.0.1:"))
+    assert(got.endsWith(": timeout\n"))
+}

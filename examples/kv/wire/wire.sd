@@ -1,0 +1,291 @@
+// Package wire is the kv protocol: requests and replies as values, how they
+// are written as bytes, and a buffered reader that reads them back from a
+// connection.
+//
+// A request is one line of words, and a value travels after its line with
+// its length in bytes, so values may hold any bytes, newlines included:
+//
+//     GET key\n
+//     SET key 5\nhello\n
+//     DEL key\n
+//     KEYS prefix\n         (KEYS alone lists every key)
+//     COMPACT\n
+//     STATS\n
+//
+// A reply starts with one byte that says what follows:
+//
+//     +OK\n                 done
+//     $5\nhello\n           a value
+//     _\n                   no such key
+//     :3\n                  a number
+//     *2\nalpha\nbeta\n     a list of keys
+//     -ERR message\n        the request failed
+package wire
+
+import "errors"
+import "net"
+import "strings"
+
+// The longest line, and the largest value, the protocol accepts.
+pub const int maxLine = 64 * 1024
+pub const int maxValue = 1024 * 1024
+
+// A request from a client.
+pub type Request enum {
+    Get(string key)
+    Set(string key, string value)
+    Del(string key)
+    Keys(string prefix)
+    Compact
+    Stats
+}
+
+// A reply from the server.
+pub type Reply enum {
+    Ok
+    Value(string value)
+    Missing
+    Number(int n)
+    List([]string items)
+    Fail(string message)
+}
+
+// The request as the bytes a client sends.
+pub fn (Request r) encode() string {
+    switch (r) {
+    case Request.Get(string key):
+        return "GET " + key + "\n"
+    case Request.Set(string key, string value):
+        return "SET " + key + " " + value.len().string() + "\n" + value + "\n"
+    case Request.Del(string key):
+        return "DEL " + key + "\n"
+    case Request.Keys(string prefix):
+        if (prefix == "") {
+            return "KEYS\n"
+        }
+        return "KEYS " + prefix + "\n"
+    case Request.Compact:
+        return "COMPACT\n"
+    case Request.Stats:
+        return "STATS\n"
+    }
+}
+
+// The reply as the bytes the server sends.
+pub fn (Reply r) encode() string {
+    switch (r) {
+    case Reply.Ok:
+        return "+OK\n"
+    case Reply.Value(string value):
+        return "$" + value.len().string() + "\n" + value + "\n"
+    case Reply.Missing:
+        return "_\n"
+    case Reply.Number(int n):
+        return ":" + n.string() + "\n"
+    case Reply.List([]string items):
+        []string parts = []string{"*" + items.len().string() + "\n"}
+        for (int i = 0; i < items.len(); i++) {
+            parts.push(items[i] + "\n")
+        }
+        return parts.join("")
+    case Reply.Fail(string message):
+        return "-ERR " + message.replace("\n", " ") + "\n"
+    }
+}
+
+// A short text form of a reply, for the command line and for tests.
+pub fn (Reply r) string() string {
+    switch (r) {
+    case Reply.Ok:
+        return "OK"
+    case Reply.Value(string value):
+        return value
+    case Reply.Missing:
+        return "(missing)"
+    case Reply.Number(int n):
+        return n.string()
+    case Reply.List([]string items):
+        return items.join("\n")
+    case Reply.Fail(string message):
+        return "error: " + message
+    }
+}
+
+// Whether a key can travel in a request line: not empty, at most 256 bytes,
+// and without spaces or control characters.
+pub fn validKey(string key) bool {
+    if (key.len() == 0 || key.len() > 256) {
+        return false
+    }
+    for (int i = 0; i < key.len(); i++) {
+        if (key[i] <= ' ' || key[i] == '\x7f') {
+            return false
+        }
+    }
+    return true
+}
+
+// Reader reads lines and counted blocks of bytes from a connection, keeping
+// what it has read beyond them for the next call.
+pub type Reader struct {
+    net.Conn conn
+    string buf
+    int pos
+}
+
+pub fn reader(net.Conn conn) Reader {
+    return Reader{conn: conn, buf: "", pos: 0}
+}
+
+// Reads more bytes into the buffer; false at the end of the stream.
+fn (Reader r) mut fill() (bool, error) {
+    string? data = try r.conn.read(64 * 1024)
+    if (data == null) {
+        return false, null
+    }
+    if (r.pos > 0) {
+        r.buf = r.buf.slice(r.pos, r.buf.len())
+        r.pos = 0
+    }
+    r.buf = r.buf + data
+    return true, null
+}
+
+// The next line without its "\n" (and a "\r" before it), or null when the
+// other side closed the connection between lines.
+pub fn (Reader r) mut readLine() (string?, error) {
+    for (;;) {
+        int? nl = indexFrom(r.buf, '\n', r.pos)
+        if (nl != null) {
+            int end = nl
+            if (end > r.pos && r.buf[end - 1] == '\r') {
+                end--
+            }
+            string line = r.buf.slice(r.pos, end)
+            r.pos = nl + 1
+            return line, null
+        }
+        if (r.buf.len() - r.pos > maxLine) {
+            return null, errors.new("wire: line longer than " + maxLine.string() + " bytes")
+        }
+        bool more = try r.fill()
+        if (!more) {
+            if (r.pos < r.buf.len()) {
+                return null, errors.new("wire: connection closed in the middle of a line")
+            }
+            return null, null
+        }
+    }
+}
+
+// Exactly n bytes followed by "\n".
+pub fn (Reader r) mut readBlock(int n) (string, error) {
+    for (; r.buf.len() - r.pos < n + 1; ) {
+        bool more = try r.fill()
+        if (!more) {
+            return null, errors.new("wire: connection closed in the middle of a value")
+        }
+    }
+    string block = r.buf.slice(r.pos, r.pos + n)
+    if (r.buf[r.pos + n] != '\n') {
+        return null, errors.new("wire: value of " + n.string() + " bytes not followed by a newline")
+    }
+    r.pos = r.pos + n + 1
+    return block, null
+}
+
+fn indexFrom(string s, byte b, int from) int? {
+    for (int i = from; i < s.len(); i++) {
+        if (s[i] == b) {
+            return i
+        }
+    }
+    return null
+}
+
+// Reads the next request, or null when the client has gone. A malformed
+// request is an error, after which the connection should be closed.
+pub fn (Reader r) mut readRequest() (Request?, error) {
+    string? line = try r.readLine()
+    if (line == null) {
+        return null, null
+    }
+    []string words = strings.fields(line)
+    if (words.len() == 0) {
+        return null, errors.new("wire: empty request")
+    }
+    string cmd = words[0].toUpper()
+    switch (cmd) {
+    case "GET", "DEL":
+        if (words.len() != 2) {
+            return null, errors.new("wire: " + cmd + " takes one key")
+        }
+        if (cmd == "GET") {
+            return Request.Get(words[1]), null
+        }
+        return Request.Del(words[1]), null
+    case "SET":
+        if (words.len() != 3) {
+            return null, errors.new("wire: SET takes a key and a length")
+        }
+        int n, error err = words[2].toInt()
+        if (err != null || n < 0 || n > maxValue) {
+            return null, errors.new("wire: SET: bad length " + words[2])
+        }
+        string value = try r.readBlock(n)
+        return Request.Set(words[1], value), null
+    case "KEYS":
+        if (words.len() > 2) {
+            return null, errors.new("wire: KEYS takes at most one prefix")
+        }
+        if (words.len() == 2) {
+            return Request.Keys(words[1]), null
+        }
+        return Request.Keys(""), null
+    case "COMPACT":
+        return Request.Compact, null
+    case "STATS":
+        return Request.Stats, null
+    default:
+        return null, errors.new("wire: unknown command " + words[0])
+    }
+}
+
+// Reads the next reply. The end of the stream is an error here: a client
+// that sent a request expects an answer.
+pub fn (Reader r) mut readReply() (Reply, error) {
+    string? line = try r.readLine()
+    if (line == null || line == "") {
+        return null, errors.new("wire: connection closed before the reply")
+    }
+    string rest = line.slice(1, line.len())
+    switch (line[0]) {
+    case '+':
+        return Reply.Ok, null
+    case '_':
+        return Reply.Missing, null
+    case '-':
+        if (rest.startsWith("ERR ")) {
+            rest = rest.slice(4, rest.len())
+        }
+        return Reply.Fail(rest), null
+    case ':':
+        return Reply.Number(try rest.toInt()), null
+    case '$':
+        int n = try rest.toInt()
+        return Reply.Value(try r.readBlock(n)), null
+    case '*':
+        int n = try rest.toInt()
+        []string items = []string{}
+        for (int i = 0; i < n; i++) {
+            string? item = try r.readLine()
+            if (item == null) {
+                return null, errors.new("wire: connection closed in the middle of a list")
+            }
+            items.push(item)
+        }
+        return Reply.List(items), null
+    default:
+        return null, errors.new("wire: bad reply line " + line)
+    }
+}

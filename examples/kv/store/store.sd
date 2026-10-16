@@ -1,0 +1,222 @@
+// Package store keeps the key-value data in memory and every change in an
+// append-only log file, which it replays when it opens.
+//
+// The log is a sequence of records:
+//
+//     S <key bytes> <value bytes>\n<key><value>\n     a key set to a value
+//     D <key bytes>\n<key>\n                          a key deleted
+//
+// A record cut short at the end of the file (the process died while writing
+// it) is dropped when the log is opened; damage anywhere else is an error.
+// Compaction writes the live entries to a new log and renames it over the
+// old one, so a crash during compaction leaves the old log in place.
+package store
+
+import "errors"
+import "fs"
+
+// Store is the data and its open log. It is meant to be owned by one
+// goroutine; the server sends that goroutine its requests.
+pub type Store struct {
+    string path
+    map[string]string data
+    fs.File log
+    // the size of the log file, and of the log compaction would write
+    int logBytes
+    int liveBytes
+    pub int compactions = 0
+    // set when the last open dropped a torn record at the end of the log
+    pub bool repaired = false
+}
+
+// Opens the log at path, creating it if it does not exist, and replays it.
+// The log is rewritten compacted as it opens, which also drops a torn tail.
+pub fn open(string path) (Store, error) {
+    map[string]string data = map[string]string{}
+    bool torn = false
+    if (fs.exists(path)) {
+        string text = try fs.read(path)
+        data, torn = try replay(path, text)
+    }
+    fs.File log, int size = try writeLog(path, data)
+    return Store{path: path, data: data, log: log, logBytes: size, liveBytes: size, repaired: torn}, null
+}
+
+// Replays the records of a log; the bool says whether a torn record was
+// dropped at the end.
+fn replay(string path, string text) (map[string]string, bool, error) {
+    map[string]string data = map[string]string{}
+    int at = 0
+    for (; at < text.len(); ) {
+        int? nl = indexFrom(text, '\n', at)
+        if (nl == null) {
+            return data, true, null
+        }
+        string header = text.slice(at, nl)
+        []string f = header.split(" ")
+        int body = nl + 1
+        if (f[0] == "S" && f.len() == 3) {
+            int klen, error kerr = f[1].toInt()
+            int vlen, error verr = f[2].toInt()
+            if (kerr != null || verr != null) {
+                return null, false, corrupt(path, at, "bad lengths in " + header)
+            }
+            if (body + klen + vlen + 1 > text.len()) {
+                return data, true, null
+            }
+            if (text[body + klen + vlen] != '\n') {
+                return null, false, corrupt(path, at, "record not followed by a newline")
+            }
+            data[text.slice(body, body + klen)] = text.slice(body + klen, body + klen + vlen)
+            at = body + klen + vlen + 1
+        } else if (f[0] == "D" && f.len() == 2) {
+            int klen, error kerr = f[1].toInt()
+            if (kerr != null) {
+                return null, false, corrupt(path, at, "bad length in " + header)
+            }
+            if (body + klen + 1 > text.len()) {
+                return data, true, null
+            }
+            data.delete(text.slice(body, body + klen))
+            at = body + klen + 1
+        } else {
+            return null, false, corrupt(path, at, "unknown record " + header)
+        }
+    }
+    return data, false, null
+}
+
+fn corrupt(string path, int offset, string reason) error {
+    return errors.new("store: " + path + ": offset " + offset.string() + ": " + reason)
+}
+
+fn indexFrom(string s, byte b, int from) int? {
+    for (int i = from; i < s.len(); i++) {
+        if (s[i] == b) {
+            return i
+        }
+    }
+    return null
+}
+
+fn setRecord(string key, string value) string {
+    return "S " + key.len().string() + " " + value.len().string() + "\n" + key + value + "\n"
+}
+
+fn delRecord(string key) string {
+    return "D " + key.len().string() + "\n" + key + "\n"
+}
+
+// The value of key, or null.
+pub fn (Store s) get(string key) string? {
+    return s.data[key]
+}
+
+// The keys that start with prefix, sorted.
+pub fn (Store s) keys(string prefix) []string {
+    []string all = s.data.keys()
+    []string out = []string{}
+    for (int i = 0; i < all.len(); i++) {
+        if (all[i].startsWith(prefix)) {
+            out.push(all[i])
+        }
+    }
+    out.sort()
+    return out
+}
+
+// The number of keys.
+pub fn (Store s) len() int {
+    return s.data.len()
+}
+
+// The size of the log file in bytes.
+pub fn (Store s) logSize() int {
+    return s.logBytes
+}
+
+// Sets key to value, writing the change to the log first.
+pub fn (Store s) mut set(string key, string value) error {
+    string record = setRecord(key, value)
+    try s.log.write(record)
+    s.logBytes = s.logBytes + record.len()
+    string? old = s.data[key]
+    if (old != null) {
+        s.liveBytes = s.liveBytes - setRecord(key, old).len()
+    }
+    s.liveBytes = s.liveBytes + record.len()
+    s.data[key] = value
+    return null
+}
+
+// Deletes key; false if it was not there (and nothing is written).
+pub fn (Store s) mut delete(string key) (bool, error) {
+    string? old = s.data[key]
+    if (old == null) {
+        return false, null
+    }
+    string record = delRecord(key)
+    try s.log.write(record)
+    s.logBytes = s.logBytes + record.len()
+    s.liveBytes = s.liveBytes - setRecord(key, old).len()
+    s.data.delete(key)
+    return true, null
+}
+
+// Whether the log has grown to more than twice what compaction would leave,
+// and is worth compacting.
+pub fn (Store s) needsCompaction() bool {
+    return s.logBytes > 64 * 1024 && s.logBytes > 2 * s.liveBytes
+}
+
+// Rewrites the log with only the live entries.
+pub fn (Store s) mut compact() error {
+    fs.File log, int size = try writeLog(s.path, s.data)
+    s.log.close()
+    s.log = log
+    s.logBytes = size
+    s.liveBytes = size
+    s.compactions++
+    return null
+}
+
+// Writes the entries of data as a new log next to path, renames it over
+// path and returns it open for appending, with its size.
+fn writeLog(string path, map[string]string data) (fs.File, int, error) {
+    string tmp = path + ".new"
+    fs.File f = try fs.create(tmp)
+    []string keys = data.keys()
+    []string chunk = []string{}
+    int size = 0
+    int written = 0
+    for (int i = 0; i < keys.len(); i++) {
+        string? v = data[keys[i]]
+        if (v != null) {
+            string record = setRecord(keys[i], v)
+            chunk.push(record)
+            size = size + record.len()
+        }
+        if (size >= 256 * 1024 || i == keys.len() - 1) {
+            error err = f.write(chunk.join(""))
+            if (err != null) {
+                f.close()
+                _ = fs.remove(tmp)
+                return null, null, err
+            }
+            written = written + size
+            chunk = []string{}
+            size = 0
+        }
+    }
+    error err = fs.rename(tmp, path)
+    if (err != null) {
+        f.close()
+        return null, null, err
+    }
+    return f, written, null
+}
+
+// Closes the log. The store must not be changed afterwards.
+pub fn (Store s) close() {
+    s.log.close()
+}

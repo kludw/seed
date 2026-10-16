@@ -1,0 +1,152 @@
+// Package server serves a store over TCP with the wire protocol.
+//
+// One goroutine owns the store and applies the requests one at a time, so
+// they never interleave; every client connection has a goroutine of its own
+// that reads requests, sends each one to the owner with a channel for the
+// reply, and writes the reply back.
+package server
+
+import "log"
+import "net"
+import "store"
+import "time"
+import "wire"
+
+// Config says where the data lives and where the log lines go.
+pub type Config struct {
+    pub string data
+    pub log.Logger logger
+    // a connection that sends nothing for this long is closed (0: never)
+    pub int idle = 5 * time.minute
+}
+
+// A request on its way to the owner, with the channel for its reply.
+type Call struct {
+    wire.Request req
+    chan wire.Reply reply
+}
+
+// Opens the store and serves on ln until ln is closed (by any copy) and
+// every client has disconnected. Only failing to open the store, or to
+// write its log, is an error: a client's mistakes end its connection.
+pub fn serve(net.Listener ln, Config cfg) error {
+    store.Store st = try store.open(cfg.data)
+    if (st.repaired) {
+        cfg.logger.with("path", cfg.data).warn("dropped a torn record at the end of the log")
+    }
+    cfg.logger.with("addr", ln.addr()).with("keys", st.len().string()).info("serving")
+    chan Call calls = chan Call(256)
+    return group {
+        spawn own(st, calls, cfg.logger)
+        spawn acceptAll(ln, calls, cfg)
+    }
+}
+
+// Applies the calls to the store until calls is closed.
+fn own(store.Store initial, chan Call calls, log.Logger logger) error {
+    // Not "defer st.close()": a deferred call takes its receiver when the
+    // defer statement runs, and compaction replaces the store's open log.
+    store.Store st = initial
+    for (;;) {
+        Call? call = calls.receive()
+        if (call == null) {
+            st.close()
+            return null
+        }
+        wire.Reply reply = wire.Reply.Ok
+        // A failed write to the log fails the server: carrying on would
+        // lose data the clients were told was saved.
+        error err = null
+        switch (call.req) {
+        case wire.Request.Get(string key):
+            string? v = st.get(key)
+            if (v != null) {
+                reply = wire.Reply.Value(v)
+            } else {
+                reply = wire.Reply.Missing
+            }
+        case wire.Request.Set(string key, string value):
+            if (!wire.validKey(key)) {
+                reply = wire.Reply.Fail("invalid key")
+            } else {
+                err = st.set(key, value)
+            }
+        case wire.Request.Del(string key):
+            bool? found, err = st.delete(key)
+            if (found == false) {
+                reply = wire.Reply.Missing
+            }
+        case wire.Request.Keys(string prefix):
+            reply = wire.Reply.List(st.keys(prefix))
+        case wire.Request.Compact:
+            int before = st.logSize()
+            err = st.compact()
+            logger.with("before", before.string()).with("after", st.logSize().string()).info("compacted")
+            reply = wire.Reply.Number(st.logSize())
+        case wire.Request.Stats:
+            reply = wire.Reply.List([]string{"keys " + st.len().string(), "log_bytes " + st.logSize().string(), "compactions " + st.compactions.string()})
+        }
+        if (err == null && st.needsCompaction()) {
+            int before = st.logSize()
+            err = st.compact()
+            logger.with("before", before.string()).with("after", st.logSize().string()).info("compacted automatically")
+        }
+        if (err != null) {
+            st.close()
+            return err
+        }
+        call.reply.send(reply)
+    }
+}
+
+// Accepts connections until the listener is closed, then waits for the
+// connections to end and closes calls, which stops the owner.
+fn acceptAll(net.Listener ln, chan Call calls, Config cfg) error {
+    error err = group {
+        for (;;) {
+            net.Conn conn, error aerr = ln.accept()
+            if (aerr != null) {
+                if (ln.addr() != "") {
+                    cfg.logger.with("error", aerr.message()).error("accept failed")
+                }
+                break
+            }
+            spawn session(conn, calls, cfg)
+        }
+    }
+    calls.close()
+    return err
+}
+
+// Serves one connection. It never returns an error, so that one client
+// cannot stop the server's group.
+fn session(net.Conn conn, chan Call calls, Config cfg) error {
+    defer conn.close()
+    conn.setTimeout(cfg.idle)
+    log.Logger logger = cfg.logger.with("client", conn.remoteAddr())
+    logger.debug("connected")
+    wire.Reader r = wire.reader(conn)
+    chan wire.Reply replies = chan wire.Reply(1)
+    for (;;) {
+        wire.Request? req, error err = r.readRequest()
+        if (err != null) {
+            logger.with("error", err.message()).warn("closing connection")
+            _ = conn.write(wire.Reply.Fail(err.message()).encode())
+            return null
+        }
+        if (req == null) {
+            logger.debug("disconnected")
+            return null
+        }
+        calls.send(Call{req: req, reply: replies})
+        wire.Reply? reply = replies.receive()
+        if (reply == null) {
+            return null
+        }
+        error werr = conn.write(reply.encode())
+        if (werr != null) {
+            logger.with("error", werr.message()).warn("closing connection")
+            return null
+        }
+    }
+}

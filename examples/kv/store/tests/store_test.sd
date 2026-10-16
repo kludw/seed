@@ -1,0 +1,74 @@
+package store
+
+import "fs"
+
+test "changes survive a reopen" {
+    string dir = try fs.makeTemp("kv-store-")
+    defer _ = fs.removeAll(dir)
+    string path = dir + "/kv.log"
+    Store s = try open(path)
+    try s.set("a", "1")
+    try s.set("b", "two\nlines")
+    try s.set("a", "3")
+    bool found = try s.delete("b")
+    assert(found)
+    found = try s.delete("missing")
+    assert(!found)
+    try s.set("", "empty key and value are fine in the log")
+    s.close()
+
+    Store again = try open(path)
+    defer again.close()
+    assert(again.len() == 2)
+    assert(again.get("a") == "3")
+    assert(again.get("b") == null)
+    assert(again.keys("") == []string{"", "a"})
+    assert(!again.repaired)
+}
+
+test "a torn record at the end is dropped, and the log repaired" {
+    string dir = try fs.makeTemp("kv-store-")
+    defer _ = fs.removeAll(dir)
+    string path = dir + "/kv.log"
+    Store s = try open(path)
+    try s.set("keep", "yes")
+    s.close()
+    try fs.append(path, "S 4 100\nlost")
+    Store again = try open(path)
+    again.close()
+    assert(again.repaired)
+    assert(again.keys("") == []string{"keep"})
+    string text = try fs.read(path)
+    assert(text == "S 4 3\nkeepyes\n")
+}
+
+test "damage in the middle is an error" {
+    string dir = try fs.makeTemp("kv-store-")
+    defer _ = fs.removeAll(dir)
+    string path = dir + "/kv.log"
+    try fs.write(path, "S 1 1\nab\nX 1\nc\nS 1 1\nde\n")
+    _, error err = open(path)
+    assert(err != null)
+    assert(err.message() == "store: " + path + ": offset 9: unknown record X 1")
+}
+
+test "compaction keeps only live entries" {
+    string dir = try fs.makeTemp("kv-store-")
+    defer _ = fs.removeAll(dir)
+    string path = dir + "/kv.log"
+    Store s = try open(path)
+    for (int i = 0; i < 4000; i++) {
+        try s.set("k" + (i % 10).string(), "value number " + i.string())
+    }
+    // 4000 writes to 10 keys: automatic compaction would have fired
+    assert(s.needsCompaction())
+    int before = s.logSize()
+    try s.compact()
+    assert(s.logSize() < before / 100)
+    assert(!s.needsCompaction())
+    assert(s.get("k3") == "value number 3993")
+    string text = try fs.read(path)
+    assert(text.len() == s.logSize())
+    // not deferred: compact() replaced the open log
+    s.close()
+}

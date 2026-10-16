@@ -1,0 +1,185 @@
+// kv is a key-value store server with an append-only log, and its client.
+//
+//     kv serve [--addr :7070] [--data kv.log]     runs the server
+//     kv set KEY VALUE | get KEY | del KEY | keys [PREFIX] | compact | stats
+//     kv bench [--clients 8] [--requests 2000]    measures a running server
+//     kv demo                                     a scripted session
+//
+// The client commands talk to the server at --addr. demo starts a server of
+// its own on a free port, with its log in a temporary directory, talks to it,
+// restarts it from the log, and prints what happened.
+package main
+
+import "client"
+import "errors"
+import "flags"
+import "fmt"
+import "fs"
+import "log"
+import "net"
+import "os"
+import "server"
+import "time"
+import "wire"
+
+fn main([]string args) error {
+    flags.Spec spec = flags.spec("kv", "COMMAND [ARGS...]", "A key-value store server and its client. Commands: serve, set, get, del, keys, compact, stats, bench, demo.")
+    spec.addString("addr", 'a', "127.0.0.1:7070", "the server's address")
+    spec.addString("data", 'd', "kv.log", "serve: the log file")
+    spec.addString("log-level", null, "info", "serve: debug, info, warn or error")
+    spec.addInt("clients", 'c', 8, "bench: concurrent clients")
+    spec.addInt("requests", 'n', 2000, "bench: requests per client")
+    flags.Parsed p = spec.parseOrExit(args)
+    []string rest = p.args()
+    if (rest.len() == 0) {
+        fmt.eprintln("kv: missing command; run 'kv --help' for usage")
+        os.exit(2)
+    }
+    string addr = p.getString("addr")
+    string command = rest[0]
+    rest = rest.slice(1, rest.len())
+    switch (command) {
+    case "serve":
+        log.Level level = try log.parseLevel(p.getString("log-level"))
+        net.Listener ln = try net.listen(addr)
+        return server.serve(ln, server.Config{data: p.getString("data"), logger: log.new(level, log.Output.Stderr)})
+    case "bench":
+        return bench(addr, p.getInt("clients"), p.getInt("requests"))
+    case "demo":
+        return demo()
+    default:
+        wire.Request req = try request(command, rest)
+        client.Client c = try client.dial(addr)
+        defer c.close()
+        wire.Reply reply = try c.call(req)
+        fmt.println(reply.string())
+        switch (reply) {
+        case wire.Reply.Fail(string _):
+            os.exit(1)
+        case wire.Reply.Missing:
+            os.exit(1)
+        case wire.Reply.Ok, wire.Reply.Value(string _), wire.Reply.Number(int _), wire.Reply.List([]string _):
+        }
+        return null
+    }
+}
+
+// The request a client command stands for.
+fn request(string command, []string rest) (wire.Request, error) {
+    switch (command) {
+    case "get", "del":
+        if (rest.len() != 1) {
+            return null, errors.new(command + " takes one key")
+        }
+        if (command == "get") {
+            return wire.Request.Get(rest[0]), null
+        }
+        return wire.Request.Del(rest[0]), null
+    case "set":
+        if (rest.len() != 2) {
+            return null, errors.new("set takes a key and a value")
+        }
+        return wire.Request.Set(rest[0], rest[1]), null
+    case "keys":
+        if (rest.len() > 1) {
+            return null, errors.new("keys takes at most one prefix")
+        }
+        if (rest.len() == 1) {
+            return wire.Request.Keys(rest[0]), null
+        }
+        return wire.Request.Keys(""), null
+    case "compact":
+        return wire.Request.Compact, null
+    case "stats":
+        return wire.Request.Stats, null
+    default:
+        return null, errors.new("unknown command " + command + "; run 'kv --help' for usage")
+    }
+}
+
+// One benchmark client: n SETs and n GETs of its own keys.
+fn benchClient(string addr, int id, int n, chan int done) error {
+    client.Client c = try client.dial(addr)
+    defer c.close()
+    for (int i = 0; i < n; i++) {
+        string key = "bench-" + id.string() + "-" + i.string()
+        try c.set(key, "value " + i.string())
+        string? v = try c.get(key)
+        if (v != "value " + i.string()) {
+            return errors.new("bench: " + key + ": read back a different value")
+        }
+    }
+    done.send(2 * n)
+    return null
+}
+
+fn bench(string addr, int clients, int n) error {
+    chan int done = chan int(clients)
+    int start = time.monotonic()
+    try group {
+        for (int i = 0; i < clients; i++) {
+            spawn benchClient(addr, i, n, done)
+        }
+    }
+    int elapsed = time.monotonic() - start
+    int total = 0
+    for (int i = 0; i < clients; i++) {
+        int? k = done.receive()
+        if (k != null) {
+            total = total + k
+        }
+    }
+    float seconds = float(elapsed) / float(time.second)
+    fmt.println(total.string() + " requests from " + clients.string() + " clients in " + fmt.fixed(seconds, 2) + " s: " + fmt.fixed(float(total) / seconds, 0) + " requests/s")
+    return null
+}
+
+// Runs a script of client calls against a server on ln, then closes ln.
+fn script(net.Listener ln, []wire.Request reqs, chan string out) error {
+    defer ln.close()
+    client.Client c = try client.dial(ln.addr())
+    defer c.close()
+    for (int i = 0; i < reqs.len(); i++) {
+        wire.Reply reply = try c.call(reqs[i])
+        out.send(reqs[i].encode().split("\n")[0] + " -> " + reply.string().replace("\n", ", "))
+    }
+    return null
+}
+
+// Serves the log at path on a free port while the script runs.
+fn session(string path, []wire.Request reqs) error {
+    net.Listener ln = try net.listen("127.0.0.1:0")
+    chan string out = chan string(reqs.len())
+    server.Config cfg = server.Config{data: path, logger: log.new(log.Level.Error, log.Output.Stderr)}
+    try group {
+        spawn server.serve(ln, cfg)
+        spawn script(ln, reqs, out)
+    }
+    out.close()
+    for (string? line = out.receive(); line != null; line = out.receive()) {
+        fmt.println("  " + line)
+    }
+    return null
+}
+
+fn demo() error {
+    string dir = try fs.makeTemp("kv-demo-")
+    defer _ = fs.removeAll(dir)
+    string path = dir + "/kv.log"
+    fmt.println("first run:")
+    try session(path, []wire.Request{
+        wire.Request.Set("lang", "seed"),
+        wire.Request.Set("greeting", "hello\nworld"),
+        wire.Request.Set("lang", "Seed"),
+        wire.Request.Get("lang"),
+        wire.Request.Del("greeting"),
+        wire.Request.Get("greeting"),
+        wire.Request.Set("count", "3"),
+        wire.Request.Keys(""),
+    })
+    // Simulate a crash in the middle of a write: a torn record at the end.
+    try fs.append(path, "S 3 10\nabc12")
+    fmt.println("second run, after a torn write:")
+    try session(path, []wire.Request{wire.Request.Keys(""), wire.Request.Get("lang"), wire.Request.Stats, wire.Request.Compact, wire.Request.Stats})
+    return null
+}
