@@ -338,7 +338,7 @@ defer f.close()
 - A `switch` over an `int`, `byte`, `string` or `bool` must end with `default`: it is the last case, after every `case`. One case can list several values.
 - Variables bound in a `case` also write their type, like every other declaration.
 - `break` and `continue` work in loops. There are no labels and no `goto`. `break` and `continue` inside a `switch` or `select` apply to the enclosing loop.
-- `defer` runs when the enclosing function returns (or its goroutine crashes or is stopped). Several defers run in reverse order (last first). The call's arguments are evaluated when the `defer` statement runs. `os.exit` does not run defers.
+- `defer` runs when the enclosing function returns (or its goroutine crashes or is stopped). Several defers run in reverse order (last first). The call's arguments, and the receiver of a method call (a copy of it), are evaluated when the `defer` statement runs. `os.exit` does not run defers.
 - `defer` takes a call of a function, method, function value, interface method or package function, or `ch.close()`, but not of a `mut` method: the variable it would change is gone when the call runs.
 - A deferred call that returns an error must discard it explicitly: `defer _ = f.close()`.
 

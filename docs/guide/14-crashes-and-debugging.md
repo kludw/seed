@@ -71,6 +71,8 @@ crash: stack overflow or invalid memory access
     called from main (main.sd:17:17)
 ```
 
+Stacks do not grow, unlike Go's: a spawned goroutine (and every test) has 8 MB, and `main` has the shell's stack limit (`ulimit -s`: usually 8 MB; raise it for a deeper `main`, up to 1 GB). A recursion that is deep but finite fits as long as its frames do: a few hundred thousand calls of a small function, but only some thousands of a big one with many locals (an interpreter's `eval`, say, with a large `switch`). A program whose depth comes from its input (a parser of nested data, an interpreter) should count its depth and fail with an error past a limit it has measured, as `json.parse` does at 512 levels, or keep its own stack in a list.
+
 The trace goes with the error of a crashed goroutine, not into its message: `err.message()` is still `crash: division by zero`, so comparing errors and printing them is unchanged. Only `main` returning that very error, or `seed test` reporting a test that crashed, prints the trace.
 
 **Inlined functions.** The C compiler copies small functions into their callers (inlining), and a copied function leaves no trace of the call: the crash's own position is always shown, but the line of the caller that it was copied into may be missing. Programs built for a debugger are not inlined, so `seed run -g` shows every call.
