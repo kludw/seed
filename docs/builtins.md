@@ -118,7 +118,7 @@ Every enum has `name()`, so an enum cannot declare a method of its own called `n
 | `ch.receive()` | The next value as `T?`, waiting until there is one; `null` once the channel is closed and empty. For `chan error` the result is `error` (null when closed), which must be handled like any other error, also in a `select` case (`case error e = ch.receive():` or `case _ = ch.receive():`). |
 | `ch.close()` | Closes the channel: buffered values can still be received. Crashes if it is already closed (`close of closed channel`). |
 
-`send`, `receive` and `select` are stop points, where a goroutine whose group has failed stops (so are `time.sleep` and the standard library's blocking calls, such as reading stdin or an `fs.File`, listed in [SPEC.md](../SPEC.md#concurrency)); `close` is not.
+`send`, `receive` and `select` are stop points, where a goroutine whose group has failed stops (so are `time.sleep` and the standard library's blocking calls, such as reading stdin or an `fs.File` or opening a FIFO, listed in [SPEC.md](../SPEC.md#concurrency)); `close` is not.
 
 ## Core packages
 

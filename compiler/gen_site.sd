@@ -103,7 +103,7 @@ fn (Gen g) mut siteEnd() {
 // reach).
 fn siteSafeSet() map[string]bool {
     map[string]bool m = map[string]bool{}
-    []string names = []string{"if", "for", "while", "switch", "return", "sizeof", "__typeof__", "SD_LF_LEAVE", "SD_LF_ENTER", "SD_UNLIKELY", "SD_SA", "SD_SAV", "SD_SA_FN", "SD_LIST_GET", "SD_LIST_GET_AT", "sd_str_at_s", "sd_int_div_at", "sd_int_mod_at", "sd_int_shl_at", "sd_int_shr_at", "sd_crash_at", "sd_int_index_at", "sd_crash_site_"}
+    []string names = []string{"if", "for", "while", "switch", "return", "sizeof", "__typeof__", "SD_LF_LEAVE", "SD_LF_ENTER", "SD_UNLIKELY", "SD_SA", "SD_SAV", "SD_SA_FN", "SD_LIST_GET", "SD_LIST_GET_AT", "sd_str_at_s", "SD_LIST_TAKE_AT", "sd_str_at_take", "sd_int_index_take_at", "sd_int_div_at", "sd_int_mod_at", "sd_int_shl_at", "sd_int_shr_at", "sd_crash_at", "sd_int_index_at", "sd_crash_site_"}
     for (int i = 0; i < names.len(); i++) {
         m[names[i]] = true
     }

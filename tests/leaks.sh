@@ -19,6 +19,10 @@ tmp=$(mktemp -d "${TMPDIR:-/tmp}/seedleaks.XXXXXX")
 # allocator would hide them; runtime/README.md, section 15).
 if [ "$(uname)" = Darwin ]; then checker=leaks; sanflags=-DSD_PLAIN_MALLOC; else checker=lsan; sanflags="-fsanitize=leak -DSD_LEAK_CHECK"; fi
 trap 'rm -rf "$tmp"' EXIT
+# LeakSanitizer's own bookkeeping of a thread that starts while it checks
+# (glibc's pthread_getattr_np, called by LeakSanitizer as the thread
+# starts) is not the program's.
+printf 'leak:*pthread_getattr_np*\n' > "$tmp/lsan.supp"
 clean=0; leaky=0; expected=0
 for dir in "$@"; do
   for src in "$dir"/*.sd "$dir"/*/; do
@@ -34,7 +38,11 @@ for dir in "$@"; do
       MallocStackLogging=1 leaks --atExit -- "$tmp/t" < "$input" > "$tmp/report" 2>&1
       summary=$(grep -E 'leaks? for' "$tmp/report")
     else
-      LSAN_OPTIONS=exitcode=0 "$tmp/t" < "$input" > "$tmp/report" 2>&1
+      # fast_unwind_on_malloc=0: the fast unwinder follows frame pointers
+      # only within the thread's own stack, so it records an empty stack
+      # for whatever a goroutine (on a stack of its own) allocates, and
+      # LeakSanitizer does not report leaks with an empty stack.
+      LSAN_OPTIONS=exitcode=0:fast_unwind_on_malloc=0:suppressions="$tmp/lsan.supp" "$tmp/t" < "$input" > "$tmp/report" 2>&1
       # A leak report, or LeakSanitizer itself failing (it needs ptrace).
       summary=$(grep -E 'LeakSanitizer' "$tmp/report" | tail -1)
       [ -z "$summary" ] && summary=" 0 leaks for $src"

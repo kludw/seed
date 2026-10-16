@@ -283,6 +283,7 @@ typedef struct sd_site {
 extern const sd_site sd_site_fn_start_;
 SD_NORETURN void sd_crash_at(const sd_site *s, const char *fmt, ...) SD_PRINTF(2, 3);
 SD_NORETURN void sd_crash_index_at(sd_int i, int64_t len, const sd_site *s);
+SD_NORETURN void sd_crash_index_take_at(sd_int i, int64_t len, const sd_site *s); /* releases i */
 /* Before a call of os.crash: the site of the crash that follows. */
 void sd_crash_site_(const sd_site *s);
 
@@ -460,6 +461,13 @@ SD_INLINE int64_t sd_int_index_at(sd_int i, int64_t len, const sd_site *s) {
   if (SD_LIKELY((i.w & 1) == 0) && (uint64_t)(i.w >> 1) < (uint64_t)len) return i.w >> 1;
   sd_crash_index_at(i, len, s);
 }
+/* The same for an index that the caller hands over (an owned temporary of
+ * the generated code, compiler/README.md "Cleanup frames"): a crash
+ * releases it first; in range, it is small and owns nothing. */
+SD_INLINE int64_t sd_int_index_take_at(sd_int i, int64_t len, const sd_site *s) {
+  if (SD_LIKELY((i.w & 1) == 0) && (uint64_t)(i.w >> 1) < (uint64_t)len) return i.w >> 1;
+  sd_crash_index_take_at(i, len, s);
+}
 /* The slow paths of the operations that may crash, for generated code: a
  * crash in them reports the site s (sd_int_div_at, ...). */
 sd_int sd_int_div_slow_at(sd_int a, sd_int b, const sd_site *s);
@@ -545,6 +553,9 @@ SD_INLINE uint8_t sd_str_at(sd_str s, sd_int i) { return (uint8_t)s->data[sd_int
 SD_INLINE uint8_t sd_str_at_s(sd_str s, sd_int i, const sd_site *site) {
   return (uint8_t)s->data[sd_int_index_at(i, s->len, site)];
 }
+SD_INLINE uint8_t sd_str_at_take(sd_str s, sd_int i, const sd_site *site) {
+  return (uint8_t)s->data[sd_int_index_take_at(i, s->len, site)];
+}
 sd_str sd_str_concat(sd_str a, sd_str b);
 sd_str sd_str_concat_n(const sd_str *parts, int n); /* a + b + c + ... in one allocation */
 /* A part of a concatenation: the string s, or (s == NULL) the decimal text
@@ -627,6 +638,8 @@ struct sd_list {
 #define SD_LIST_GET(l, T, i) (((T *)sd_list_data(l))[sd_int_index((i), (l)->len)])
 /* The same, for generated code: a crash reports the site s. */
 #define SD_LIST_GET_AT(l, T, i, s) (((T *)sd_list_data(l))[sd_int_index_at((i), (l)->len, (s))])
+/* The same with an index handed over (sd_int_index_take_at). */
+#define SD_LIST_TAKE_AT(l, T, i, s) (((T *)sd_list_data(l))[sd_int_index_take_at((i), (l)->len, (s))])
 
 void sd_list_free_(sd_list *l);
 SD_INLINE sd_list *sd_list_retain(sd_list *l) {
@@ -834,6 +847,18 @@ void *sd_goroutine_local(int *key, size_t size);
  * keeps errno. Sections nest. */
 void sd_block_begin(void);
 void sd_block_end(void);
+/* An interruptible block section, for a call that may block for ever and
+ * cannot wait through sd_wait_fd (opening a FIFO, writing to one): while
+ * the goroutine is in it, stopping the goroutine interrupts the call with a
+ * signal (SIGURG, handled without SA_RESTART), so that it fails with EINTR
+ * (or a write returns short). On EINTR, the native checks sd_stopping():
+ * if true, it releases what it holds and calls sd_stop() (which ends the
+ * sections); otherwise it makes the call again. A goroutine already
+ * stopped when the section begins is interrupted too, when a call blocks
+ * (a call on a regular file is never interrupted). Not nested in another
+ * interruptible section; no Seed code and no parking in between. */
+void sd_block_begin_intr(void);
+void sd_block_end_intr(void);
 
 /* Preemption points (runtime/README.md, "The scheduler"): the compiler puts
  * SD_PREEMPT() at the top of every loop iteration and before every call
