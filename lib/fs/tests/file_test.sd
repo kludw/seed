@@ -219,6 +219,31 @@ test "create empties an existing file" {
     e.close()
 }
 
+test "openAppend creates a file or writes at its end" {
+    string dir = fsTestDir()
+    defer _ = removeAll(dir)
+    string p = dir + "/log"
+    File a = try openAppend(p)
+    try a.write("one\n")
+    a.close()
+    File b = try openAppend(p)
+    try append(p, "two\n")
+    try b.write("three\n")
+    b.close()
+    assert(try read(p) == "one\ntwo\nthree\n")
+    File r = try openAppend(p)
+    defer r.close()
+    _, error err = r.readLine()
+    assert(err != null)
+    assert(err.message() == "fs.File.readLine: " + p + ": file is open for writing only")
+    _, error e2 = openAppend(dir)
+    assert(e2 != null)
+    assert(e2.message() == "fs.openAppend: " + dir + ": is a directory")
+    _, error e3 = openAppend(dir + "/no/such/file")
+    assert(e3 != null)
+    assert(e3.message() == "fs.openAppend: " + dir + "/no/such/file: no such file or directory")
+}
+
 test "read and readLine share a buffer" {
     string dir = fsTestDir()
     defer _ = removeAll(dir)

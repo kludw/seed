@@ -236,6 +236,7 @@ pub type File struct {
 | `fs.makeTemp(string prefix) (string, error)` | Creates a new, empty directory in `$TMPDIR` (or `/tmp` when it is unset or empty), named `prefix` followed by six random characters, and returns its path. The caller removes it with `fs.removeAll`. |
 | `fs.open(string path) (File, error)` | Opens an existing file for reading. Fails on a directory with `is a directory`. |
 | `fs.create(string path) (File, error)` | Creates a file, or empties an existing one, and opens it for writing. New files get mode `0644`. |
+| `fs.openAppend(string path) (File, error)` | Opens a file for writing at its end, creating it (mode `0644`) if it does not exist: for logs and other files that only grow. Every write goes to the end, even when another process wrote there meanwhile. Fails on a directory with `is a directory`. |
 
 ### File methods
 
@@ -246,13 +247,13 @@ pub type File struct {
 | `f.write(string data) error` | Writes all of `data`. Writes are not buffered, so once `write` returns, the data is with the OS. |
 | `f.close()` | Closes the file. Closing again does nothing. |
 
-- Reading a file opened with `fs.create`, or writing one opened with `fs.open`, returns an error: `fs.File.write: notes.txt: file is open for reading only`.
+- Reading a file opened with `fs.create` or `fs.openAppend`, or writing one opened with `fs.open`, returns an error: `fs.File.write: notes.txt: file is open for reading only`.
 - `readLine` and `read` share a buffer, so they can be mixed.
 - Reading a file opened with `fs.create` gives `fs.File.read: notes.txt: file is open for writing only` (or `fs.File.readLine: ...`).
 - Every operation after `close()` returns an error ending in `file is closed`: `fs.File.readLine: notes.txt: file is closed`.
 - `f.read(0)` crashes with `fs.File.read: max (0) must be at least 1`.
 - Paths are passed to the OS unchanged. Relative paths are relative to the current directory. A path that contains a NUL byte is an error, since the OS would only see the part before it: `fs.write: a.txt\x00.png: path contains a NUL byte` (each NUL is shown as `\x00`); `fs.exists` and `fs.isDir` return `false` for it.
-- Reading an `fs.File` (`readLine`, `read`) is a stop point, because it can wait for ever on a FIFO or a device: a goroutine whose group is stopped while it waits there stops. The other file operations that can wait (`fs.open`, `fs.create`, `fs.read`, `fs.write`, `fs.append`, `f.write`: opening a FIFO waits for the other end, reading or writing one for data or room) are stopped while they wait. On a regular file they don't wait, so a goroutine whose group is stopped still completes them (its `defer`s can write files) and stops at its next channel operation or blocking call instead.
+- Reading an `fs.File` (`readLine`, `read`) is a stop point, because it can wait for ever on a FIFO or a device: a goroutine whose group is stopped while it waits there stops. The other file operations that can wait (`fs.open`, `fs.create`, `fs.openAppend`, `fs.read`, `fs.write`, `fs.append`, `f.write`: opening a FIFO waits for the other end, reading or writing one for data or room) are stopped while they wait. On a regular file they don't wait, so a goroutine whose group is stopped still completes them (its `defer`s can write files) and stops at its next channel operation or blocking call instead.
 
 ```
 fs.File f = try fs.open("access.log")
@@ -1192,7 +1193,7 @@ pub fn (Conn c) read(int max) (string?, error)
 | `fmt` | `print`, `println`, `eprint`, `eprintln` (each one locked write, so it stays atomic), `fixed` (correct rounding needs the C library) | — |
 | `io` | `readLine`, `readAll` (they share the stdin buffer) | — |
 | `os` | `exit`, `crash`, `env`, `run`, `output`, `executable`, `cwd`, `hostname` | — |
-| `fs` | `read`, `write`, `append`, `exists`, `isDir`, `stat`, `list`, `mkdir`, `rename`, `remove`, `removeAll` (needs `lstat` to avoid following links), `makeTemp`, `open`, `create`, and the four `File` methods | — |
+| `fs` | `read`, `write`, `append`, `exists`, `isDir`, `stat`, `list`, `mkdir`, `rename`, `remove`, `removeAll` (needs `lstat` to avoid following links), `makeTemp`, `open`, `create`, `openAppend`, and the four `File` methods | — |
 | `path` | — | all |
 | `strings` | — | all |
 | `math` | `powFloat`, `sqrt`, `floor`, `ceil`, `round`, `trunc`, the six trigonometric functions, `atan2`, `exp`, `log`, `log2`, `log10` | `pi`, `e`, the `Int` functions, `absFloat`, `minFloat`, `maxFloat`, `isNan` (`x != x`), `isInf`, `inf` (`1.0 / 0.0`) |

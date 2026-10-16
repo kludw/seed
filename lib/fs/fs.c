@@ -342,6 +342,10 @@ sd_err sd_lib_fs_create(sd_str path, sd_S_fs_File *out) {
   return fs_open_file("create", path, O_WRONLY | O_CREAT | O_TRUNC, true, out);
 }
 
+sd_err sd_lib_fs_openAppend(sd_str path, sd_S_fs_File *out) {
+  return fs_open_file("openAppend", path, O_WRONLY | O_CREAT | O_APPEND, true, out);
+}
+
 /* The handle of f, acquired (released with sd_handle_release) and open for
  * reading (want_write false) or writing; otherwise NULL with *err set. */
 static sd_handle *fs_handle_use(sd_S_fs_File f, const char *method, bool want_write, sd_err *err) {

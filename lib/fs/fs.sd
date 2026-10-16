@@ -82,6 +82,11 @@ pub fn open(string path) (File, error)
 // files get mode 0644.
 pub fn create(string path) (File, error)
 
+// Opens a file for writing at its end, creating it (with mode 0644) if it
+// does not exist: for logs and other files that only grow. Each write goes
+// to the end of the file, even if another program wrote there meanwhile.
+pub fn openAppend(string path) (File, error)
+
 // The next line without its line ending, or null at the end. A line ends at
 // "\n"; a "\r" directly before it is removed too. The last line is returned
 // even if it has no "\n". readLine and read share a buffer, so they can be
