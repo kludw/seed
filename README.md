@@ -141,7 +141,7 @@ The Makefile has the development targets:
 | [lib/](lib/README.md) | The standard library: one directory per package, in Seed with native functions in C. |
 | `bootstrap/` | `seed.c`, the C snapshot of the compiler that `make` starts from, and `inputs.sha256`, the files it was made from. |
 | [tests/](tests/README.md) | Conformance tests: programs with their expected output, and programs the compiler must reject. |
-| [examples/](examples/README.md) | Eighteen example programs, from `wordcount` to an expression language, a concurrent prime sieve, a key-value store, a JSON HTTP API and a CSV filter, with a checked runner. |
+| [examples/](examples/README.md) | Twenty-two example programs, from `wordcount` to an expression language, a concurrent prime sieve, a key-value server with an append-only log, a JSON HTTP API, a CSV filter, a Markdown converter, a web crawler and a Lisp interpreter, with a checked runner. |
 | [editors/vscode/](editors/vscode/README.md) | Syntax highlighting for VS Code, and a client for the language server. |
 
 The documentation:
@@ -150,6 +150,7 @@ The documentation:
 - [SPEC.md](SPEC.md), [docs/grammar.md](docs/grammar.md), [docs/builtins.md](docs/builtins.md), [docs/stdlib.md](docs/stdlib.md) and [docs/formatting.md](docs/formatting.md) are the reference.
 - [compiler/README.md](compiler/README.md), [runtime/README.md](runtime/README.md) and [lib/README.md](lib/README.md) describe the implementation.
 - [docs/first-impressions.md](docs/first-impressions.md) is the friction log of a Go programmer learning Seed from these documents, with what was fixed and what remains.
+- [docs/dogfood.md](docs/dogfood.md) is the friction log of four realistic programs written the same way, with build times, binary sizes and a throughput comparison with Go.
 
 ## Status
 
