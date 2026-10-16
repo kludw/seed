@@ -1,0 +1,167 @@
+// More function literals: captures of loop variables, pattern bindings,
+// select variables and narrowed fields; a literal in a loop that also
+// accumulates; a literal in a literal that captures the outer literal's
+// local; values moved into a literal on their last use; a guarded value
+// captured after its error was checked; deferred literals.
+package main
+
+import "fmt"
+
+type User struct {
+    string name
+    string? email
+}
+
+type Event enum {
+    Click(int x, int y)
+    Key(string name)
+}
+
+fn parse(string s) (int, error) {
+    return s.toInt()
+}
+
+fn apply([]fn() string fs) string {
+    []string out = []string{}
+    for (int i = 0; i < fs.len(); i++) {
+        out.push(fs[i]())
+    }
+    return out.join(",")
+}
+
+fn main([]string args) error {
+    // A loop that sums and captures the running sum.
+    []fn() int sums = []fn() int{}
+    int sum = 0
+    for (int i = 0; i < 5; i++) {
+        sums.push(fn() int {
+            return sum
+        })
+        sum = sum + i
+    }
+    []string ss = []string{}
+    for (int j = 0; j < sums.len(); j++) {
+        ss.push(sums[j]().string())
+    }
+    fmt.println("sums " + ss.join(" ") + " final " + sum.string())
+
+    // Pattern bindings.
+    []Event evs = []Event{Event.Click(1, 2), Event.Key("q")}
+    []fn() string descs = []fn() string{}
+    for (int k = 0; k < evs.len(); k++) {
+        switch (evs[k]) {
+        case Event.Click(int x, int y):
+            descs.push(fn() string {
+                return "click " + x.string() + "," + y.string()
+            })
+        case Event.Key(string name):
+            descs.push(fn() string {
+                return "key " + name
+            })
+        }
+    }
+    fmt.println(apply(descs))
+
+    // A select's variable.
+    chan string ch = chan string(1)
+    ch.send("msg")
+    fn() string got = fn() string {
+        return "none"
+    }
+    select {
+    case string? m = ch.receive():
+        got = fn() string {
+            if (m == null) {
+                return "closed"
+            }
+            return "got " + m
+        }
+    }
+    fmt.println(got())
+
+    // A narrowed field of a captured struct stays narrowed.
+    User u = User{name: "ann", email: "ann@example.com"}
+    if (u.email != null) {
+        fn() int at = fn() int {
+            int? i = u.email.index("@")
+            if (i == null) {
+                return -1
+            }
+            return i
+        }
+        u.email = null
+        fmt.println("at " + at().string())
+    }
+
+    // A value read beside an error, captured once the error is checked.
+    int n, error err = parse("41")
+    if (err != null) {
+        return err
+    }
+    fn() int next = fn() int {
+        return n + 1
+    }
+    fmt.println("next " + next().string())
+
+    // A literal in a literal using the outer literal's own local.
+    fn(int) []string build = fn(int count) []string {
+        string label = "item"
+        []fn() string makers = []fn() string{}
+        for (int q = 0; q < count; q++) {
+            makers.push(fn() string {
+                return label + q.string()
+            })
+        }
+        []string out = []string{}
+        for (int r = 0; r < makers.len(); r++) {
+            out.push(makers[r]())
+        }
+        return out
+    }
+    fmt.println(build(3).join(" "))
+
+    // The literal is the list's last use: the list moves into it, uncopied.
+    []int big = []int{}
+    for (int b = 0; b < 1000; b++) {
+        big.push(b)
+    }
+    fn() int total = fn() int {
+        int t = 0
+        for (int z = 0; z < big.len(); z++) {
+            t = t + big[z]
+        }
+        return t
+    }
+    fmt.println("total " + total().string())
+
+    // A literal that returns an error, used with try, and one that crashes
+    // inside a group.
+    fn(string) (int, error) toNum = fn(string s) (int, error) {
+        int v = try s.toInt()
+        return v * 2, null
+    }
+    int doubled = try toNum("21")
+    fmt.println("doubled " + doubled.string())
+    int? bad, error perr = toNum("x")
+    if (perr != null && bad == null) {
+        fmt.println("error " + perr.message())
+    }
+    []int empty = []int{}
+    error gerr = group {
+        spawn fn() error {
+            fmt.println("never " + empty[3].string())
+            return null
+        }()
+    }
+    if (gerr != null) {
+        fmt.println("group: " + gerr.message())
+    }
+
+    // Deferred literals run last first, with their captured values.
+    for (int d = 0; d < 3; d++) {
+        defer fn() {
+            fmt.println("deferred " + d.string())
+        }()
+    }
+    return null
+}
