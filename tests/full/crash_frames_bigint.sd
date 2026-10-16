@@ -1,0 +1,191 @@
+// Crashes and stops in goroutines release the big integers that the
+// unwound frames held: in int and int? locals, in owned parameters, in
+// temporaries, in structs of ints, in the values of a multiple
+// assignment, in a loop accumulator, in an index, and in the general
+// version of a pure int function. Each goroutine crashes (or is stopped)
+// inside a group and the program goes on; tests/leaks.sh checks that
+// nothing leaks, and the address sanitizer that nothing is released twice.
+package main
+
+import "errors"
+import "fmt"
+
+type Pair struct {
+    int a
+    int b
+}
+
+fn big(int k) int {
+    return (1 << 100) + k
+}
+
+fn pick([]int xs, int i) int {
+    return xs[i]
+}
+
+fn localCrash() error {
+    int x = big(1)
+    int? y = big(2)
+    int z = x * x
+    []int xs = []int{1, 2}
+    fmt.println((x + z + pick(xs, 5)).string())
+    if (y != null) {
+        fmt.println(y.string())
+    }
+    return null
+}
+
+fn divide(int a, int b) int {
+    return a / b
+}
+
+fn temporaryCrash() error {
+    int x = big(3)
+    // The product is a temporary that owns a big int while divide crashes.
+    fmt.println((x * x + divide(x, 0)).string())
+    return null
+}
+
+fn paramCrash(int n) error {
+    n = n * n
+    []int xs = []int{}
+    fmt.println((n + xs[0]).string())
+    return null
+}
+
+fn twoBig() (int, int) {
+    return big(6), big(7)
+}
+
+fn structCrash() error {
+    Pair p = Pair{a: big(4), b: big(5)}
+    int u, int v = twoBig()
+    []Pair ps = []Pair{p}
+    fmt.println((ps[3].a + u + v).string())
+    return null
+}
+
+fn accumulatorCrash() error {
+    int sum = big(8)
+    []int xs = []int{1, 2, 3}
+    for (int i = 0; i < 10; i++) {
+        sum = sum + xs[i]
+    }
+    fmt.println(sum.string())
+    return null
+}
+
+// A pure int function: its fast version gives up on big arguments, and its
+// general version crashes with the big ints in its locals.
+fn pureCrash(int a, int b) int {
+    int c = a * a + b
+    int d = c * 3
+    return d / (b - b)
+}
+
+fn pureCaller() error {
+    fmt.println(pureCrash(big(9), big(10)).string())
+    return null
+}
+
+fn convCrash() error {
+    int x = big(11)
+    float f = 1.0 / 0.0
+    int y = x + int(f)
+    fmt.println(y.string())
+    return null
+}
+
+fn deferredCrash() error {
+    int held = big(12)
+    defer fmt.println("deferred " + (held - held).string())
+    int other = held + 1
+    []int xs = []int{other}
+    fmt.println(xs[2].string())
+    return null
+}
+
+// A big index in a temporary: the index check takes it over (and releases
+// it when it crashes), or, with two on one line, the temporaries are kept
+// in the frame.
+fn indexCrash() error {
+    []int xs = []int{1, 2}
+    int k = 1
+    fmt.println(xs[k + (1 << 70)].string())
+    return null
+}
+
+fn stringIndexCrash() error {
+    string s = "abc"
+    int k = 2
+    fmt.println(s[k * (1 << 70)].string())
+    return null
+}
+
+fn twoIndexCrash() error {
+    []int xs = []int{1, 2}
+    int k = 0
+    fmt.println((xs[k + 1] + xs[k - (1 << 70)]).string())
+    return null
+}
+
+fn receiver(chan int ch) error {
+    int held = big(13)
+    int? opt = big(14)
+    Pair p = Pair{a: big(15), b: 1}
+    int? got = ch.receive()
+    if (got != null && opt != null) {
+        fmt.println((got + held + opt + p.a).string())
+    }
+    return null
+}
+
+fn sender(chan int ch) error {
+    int held = big(16)
+    for (int i = 0; ; i++) {
+        ch.send(held + i)
+    }
+}
+
+fn failer() error {
+    return errors.new("failer failed")
+}
+
+fn run(string name, fn() error f) {
+    error err = group {
+        spawn f()
+    }
+    if (err != null) {
+        fmt.println(name + ": " + err.message())
+    }
+}
+
+fn main([]string args) error {
+    run("local", localCrash)
+    run("temporary", temporaryCrash)
+    error err = group {
+        spawn paramCrash(big(17))
+    }
+    if (err != null) {
+        fmt.println("param: " + err.message())
+    }
+    run("struct", structCrash)
+    run("accumulator", accumulatorCrash)
+    run("pure", pureCaller)
+    run("conv", convCrash)
+    run("deferred", deferredCrash)
+    run("index", indexCrash)
+    run("string index", stringIndexCrash)
+    run("two indexes", twoIndexCrash)
+    chan int blocked = chan int(0)
+    chan int busy = chan int(0)
+    err = group {
+        spawn receiver(blocked)
+        spawn sender(busy)
+        spawn failer()
+    }
+    if (err != null) {
+        fmt.println("stopped: " + err.message())
+    }
+    return null
+}

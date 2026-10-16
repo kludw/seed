@@ -1,0 +1,13 @@
+local: crash: index out of range: 5 with length 2
+temporary: crash: division by zero
+param: crash: index out of range: 0 with length 0
+struct: crash: index out of range: 3 with length 1
+accumulator: crash: index out of range: 3 with length 3
+pure: crash: division by zero
+conv: crash: cannot convert float inf to int
+deferred 0
+deferred: crash: index out of range: 2 with length 1
+index: crash: index out of range: 1180591620717411303425 with length 2
+string index: crash: index out of range: 2361183241434822606848 with length 3
+two indexes: crash: index out of range: -1180591620717411303424 with length 2
+stopped: failer failed

@@ -257,6 +257,7 @@ fn (Gen g) mut genProgram(string natives) string {
     g.findFastFns()
     g.findPreemptFns()
     g.genProtos()
+    g.markLiteralConsts()
     g.genConsts(-1)
     g.genFns(-1)
     g.curFn = -1
@@ -336,7 +337,8 @@ fn (Gen g) testMain() string {
 // the temporaries that the line moved out of the frame (ownVal, consume)
 // are set to null right after it, so that a crash later on does not
 // release them a second time.
-fn (Gen g) mut emit(string line) {
+fn (Gen g) mut emit(string raw) {
+    string line = g.resolveTake(raw)
     string pad = ""
     if (g.indent > 0) {
         pad = spaces(g.indent * 2)
@@ -370,12 +372,200 @@ fn (Gen g) mut emit(string line) {
     }
 }
 
+// ---- indexes that take their temporary ----
+//
+// An index into a list or a string that is an owned int temporary (xs[i +
+// 1], xs[f()]) is generated with a mark (takeMark) that emit resolves when
+// the line is complete. When nothing on the line can crash before the
+// index is checked (every other call that may crash encloses the check, so
+// it runs after it) and nothing could crash since the temporary got its
+// value, the check *takes* the temporary (SD_LIST_TAKE_AT, sd_str_at_take):
+// out of range, it releases the index before crashing; in range, the index
+// is small and owns nothing. The temporary's ownership ends there, so it
+// needs no field in the cleanup frame for a crash (a big int would
+// otherwise have to be kept in the frame across the check). Otherwise the
+// mark is dropped: the usual check, and the temporary is released as
+// before.
+
+// The mark after the name of an index check whose index is v: a mark when v
+// is an owned int temporary.
+fn (Gen g) takeMark(string v) string {
+    if (!g.frameOn) {
+        return ""
+    }
+    int s = g.findTemp(v)
+    if (s < 0 || g.kindOf(g.slots[s].ty) != Kind.Int) {
+        return ""
+    }
+    return "\x03"
+}
+
+// The position after the parenthesis that closes the one at open, skipping
+// string and character literals; -1 if there is none.
+fn closeParen(string line, int open) int {
+    int depth = 0
+    for (int i = open; i < line.len(); i++) {
+        byte c = line[i]
+        if (c == '"' || c == '\'') {
+            i++
+            for (; i < line.len() && line[i] != c; i++) {
+                if (line[i] == '\\') {
+                    i++
+                }
+            }
+            continue
+        }
+        if (c == '(') {
+            depth++
+        } else if (c == ')') {
+            depth--
+            if (depth == 0) {
+                return i + 1
+            }
+        }
+    }
+    return -1
+}
+
+// The arguments of the call whose parenthesis is at open, trimmed.
+fn callArgs(string line, int open, int close) []string {
+    []string args = []string{}
+    int depth = 0
+    int from = open + 1
+    for (int i = open + 1; i < close - 1; i++) {
+        byte c = line[i]
+        if (c == '"' || c == '\'') {
+            i++
+            for (; i < close - 1 && line[i] != c; i++) {
+                if (line[i] == '\\') {
+                    i++
+                }
+            }
+            continue
+        }
+        if (c == '(' || c == '[' || c == '{') {
+            depth++
+        } else if (c == ')' || c == ']' || c == '}') {
+            depth--
+        } else if (c == ',' && depth == 0) {
+            args.push(line.slice(from, i).trim())
+            from = i + 1
+        }
+    }
+    args.push(line.slice(from, close - 1).trim())
+    return args
+}
+
+// Whether every call on the line that may crash, other than the one from
+// `from` to `to`, encloses it (so that it runs after it). Calls through an
+// expression count as crashing; string literals are skipped.
+fn (Gen g) crashesEnclose(string line, int from, int to) bool {
+    for (int i = 0; i < line.len(); i++) {
+        byte c = line[i]
+        if (c == '"' || c == '\'') {
+            i++
+            for (; i < line.len() && line[i] != c; i++) {
+                if (line[i] == '\\') {
+                    i++
+                }
+            }
+            continue
+        }
+        if (c != '(') {
+            continue
+        }
+        int j = i
+        for (; j > 0 && isIdentByte(line[j - 1]); ) {
+            j--
+        }
+        if (j == from) {
+            continue
+        }
+        bool crashes = false
+        if (j == i) {
+            crashes = i > 0 && line[i - 1] == ')'
+        } else {
+            string id = line.slice(j, i)
+            crashes = !id.startsWith("sd_rt_") && !id.startsWith("sd_rl_") && g.safeCalls[id] == null
+        }
+        if (crashes) {
+            int end = closeParen(line, i)
+            if (end < 0 || j > from || end < to) {
+                return false
+            }
+        }
+    }
+    return true
+}
+
+// Whether everything on the C line runs whenever the line does: one
+// statement without a condition (&&, ||, ?:, if, a loop, a block).
+fn unconditional(string line) bool {
+    string t = line.trim()
+    if (t.contains("&&") || t.contains("||") || t.contains("?") || t.contains("{") || t.contains("}")) {
+        return false
+    }
+    []string heads = []string{"if", "else", "for", "while", "do", "switch", "case", "default", "goto", "break", "continue"}
+    for (int i = 0; i < heads.len(); i++) {
+        if (t.startsWith(heads[i] + " ") || t.startsWith(heads[i] + "(") || t == heads[i] + ";") {
+            return false
+        }
+    }
+    return t.endsWith(";")
+}
+
+// The line with its index marks resolved (see takeMark).
+fn (Gen g) mut resolveTake(string line) string {
+    if (!line.contains("\x03")) {
+        return line
+    }
+    int at = -1
+    int marks = 0
+    for (int i = 0; i < line.len(); i++) {
+        if (line[i] == byte(3)) {
+            at = i
+            marks++
+        }
+    }
+    string plain = line.replace("\x03", "")
+    if (!g.frameOn || marks != 1 || at + 1 >= line.len() || line[at + 1] != '(' || !unconditional(line)) {
+        return plain
+    }
+    int start = at
+    for (; start > 0 && isIdentByte(line[start - 1]); ) {
+        start--
+    }
+    string name = line.slice(start, at)
+    int close = closeParen(line, at + 1)
+    if (close < 0 || (name != "SD_LIST_GET_AT" && name != "sd_str_at_s")) {
+        return plain
+    }
+    []string args = callArgs(line, at + 1, close)
+    string index = ""
+    if (name == "sd_str_at_s" && args.len() == 3) {
+        index = args[1]
+    } else if (name == "SD_LIST_GET_AT" && args.len() == 4) {
+        index = args[2]
+    }
+    int s = g.findTemp(index)
+    if (s < 0 || g.slots[s].seq != g.crashSeq || !g.crashesEnclose(line, start, close)) {
+        return plain
+    }
+    g.slotEnd(g.slots[s])
+    g.slots[s].live = false
+    string take = "SD_LIST_TAKE_AT"
+    if (name == "sd_str_at_s") {
+        take = "sd_str_at_take"
+    }
+    return line.slice(0, start) + take + line.slice(at + 1, line.len())
+}
+
 // The C functions and macros that never crash nor stop the goroutine (nor
 // run Seed code): a value held only by a C local across them cannot be
 // leaked by a crash. Everything else that is called may crash.
 fn safeCallSet() map[string]bool {
     map[string]bool m = map[string]bool{}
-    []string names = []string{"sd_int_retain", "sd_int_release", "sd_str_retain", "sd_str_release", "sd_list_retain", "sd_list_release", "sd_map_retain", "sd_map_release", "sd_box_retain", "sd_box_release", "sd_iface_retain", "sd_iface_release", "sd_chan_retain", "sd_chan_release", "sd_list_new", "sd_map_new", "sd_box_new", "sd_iface_new", "SD_LIST_PUSH", "sd_str_concat", "sd_str_concat_n", "sd_str_concat_parts", "sd_str_append", "sd_str_append_parts", "sd_int_to_str", "sd_float_to_str", "sd_bool_to_str", "sd_byte_to_str", "sd_str_from_bytes", "SD_INT", "SD_INT_S", "SD_SMALL", "SD_STR_LIT", "SD_BOX_REF", "SD_BOX_GET", "sd_err_is_null", "sd_iface_is_null", "sd_int_is_null", "sd_str_len", "sd_list_len", "sd_map_len", "sd_str_eq", "sd_str_cmp", "sd_int_eq", "sd_int_lt", "sd_int_le", "sd_int_gt", "sd_int_ge", "sd_int_add", "sd_int_sub", "sd_int_mul", "sd_int_neg", "sd_int_and", "sd_int_or", "sd_int_xor", "sd_byte_to_int", "sd_int_to_float", "sd_iface_self", "sd_str_contains", "sd_str_starts_with", "sd_str_ends_with", "sd_defer_mark", "sd_group_begin", "sd_int_add_slow", "sd_int_sub_slow", "SD_LIKELY", "__builtin_add_overflow", "__builtin_sub_overflow", "SD_PREEMPT", "__volatile__"}
+    []string names = []string{"sd_int_retain", "sd_int_release", "sd_str_retain", "sd_str_release", "sd_list_retain", "sd_list_release", "sd_map_retain", "sd_map_release", "sd_box_retain", "sd_box_release", "sd_iface_retain", "sd_iface_release", "sd_chan_retain", "sd_chan_release", "sd_list_new", "sd_map_new", "sd_box_new", "sd_iface_new", "SD_LIST_PUSH", "sd_str_concat", "sd_str_concat_n", "sd_str_concat_parts", "sd_str_append", "sd_str_append_parts", "sd_int_to_str", "sd_float_to_str", "sd_bool_to_str", "sd_byte_to_str", "sd_str_from_bytes", "SD_INT", "SD_INT_S", "SD_SMALL", "SD_STR_LIT", "SD_BOX_REF", "SD_BOX_GET", "sd_err_is_null", "sd_iface_is_null", "sd_int_is_null", "sd_str_len", "sd_list_len", "sd_map_len", "sd_str_eq", "sd_str_cmp", "sd_int_eq", "sd_int_lt", "sd_int_le", "sd_int_gt", "sd_int_ge", "sd_int_add", "sd_int_sub", "sd_int_mul", "sd_int_neg", "sd_int_and", "sd_int_or", "sd_int_xor", "sd_byte_to_int", "sd_int_to_float", "sd_iface_self", "sd_str_contains", "sd_str_starts_with", "sd_str_ends_with", "sd_defer_mark", "sd_group_begin", "sd_int_add_slow", "sd_int_sub_slow", "SD_LIKELY", "__builtin_add_overflow", "__builtin_sub_overflow", "SD_PREEMPT", "__volatile__", "SD_LF_LEAVE"}
     for (int i = 0; i < names.len(); i++) {
         m[names[i]] = true
     }
@@ -555,10 +745,10 @@ fn (Gen g) mut counted(int t) bool {
 }
 
 // Whether values of type t live in the cleanup frame of a function (see
-// genFn): counted types, except int (and int?, and structs and tuples whose
-// only counted parts are ints) and enums whose cases have no data (every
-// value is an immortal static box). A crash therefore still leaks a big
-// integer held by a local; small ints, the common case, own nothing.
+// genFn): counted types, int included (a big integer owns memory; a small
+// one owns nothing, so a field holding it costs only its stores and
+// loads), except enums whose cases have no data (every value is an
+// immortal static box). Unboxed int locals (gen_int.sd) are not slots.
 fn (Gen g) mut frameCounted(int t) bool {
     switch (g.kindOf(t)) {
     case Kind.Enum:
@@ -569,9 +759,9 @@ fn (Gen g) mut frameCounted(int t) bool {
             }
         }
         return false
-    case Kind.String, Kind.Error, Kind.List, Kind.Map, Kind.Chan, Kind.Interface:
+    case Kind.String, Kind.Error, Kind.List, Kind.Map, Kind.Chan, Kind.Interface, Kind.Int:
         return true
-    case Kind.Int, Kind.Void, Kind.Float, Kind.Bool, Kind.Byte, Kind.Null, Kind.Invalid, Kind.Func:
+    case Kind.Void, Kind.Float, Kind.Bool, Kind.Byte, Kind.Null, Kind.Invalid, Kind.Func:
         return false
     case Kind.Opt:
         if (g.isBoxOpt(t)) {
@@ -1418,6 +1608,17 @@ fn isLiteralKind(ExprKind k) bool {
     return k == ExprKind.IntLit || k == ExprKind.FloatLit || k == ExprKind.ByteLit || k == ExprKind.StringLit || k == ExprKind.BoolLit
 }
 
+// A constant whose value is a literal is a function that returns it
+// (genConsts): calling it cannot crash, so it is a safe call
+// (lineMayCrash).
+fn (Gen g) mut markLiteralConsts() {
+    for (int i = 0; i < g.c.ast.consts.len(); i++) {
+        if (isLiteralKind(g.c.ast.exprs[g.c.ast.consts[i].expr].kind)) {
+            g.safeCalls[g.constCName(i)] = true
+        }
+    }
+}
+
 // Constants are functions that return a borrowed value. A literal is
 // returned directly; anything else is computed on first use (per thread)
 // and kept for the rest of the program. With a unit (a package, >= 0),
@@ -1610,12 +1811,12 @@ fn (Gen g) mut genNative(int f) {
 // it when the function has no frame.
 const string leaveFrame = "SD_LF_LEAVE(L);"
 
-// A function's counted locals and temporaries (except ints, see
-// frameCounted) that own a value across a point where the goroutine may
-// crash or be stopped live in the fields of one struct L, its *cleanup
-// frame*, which is linked into the thread's chain on entry and unlinked
-// before every return (runtime/README.md, section 9). When the goroutine
-// crashes or is stopped, the runtime releases what the frames hold. The
+// A function's counted locals and temporaries (see frameCounted) that own
+// a value across a point where the goroutine may crash or be stopped live
+// in the fields of one struct L, its *cleanup frame*, which is linked into
+// the thread's chain on entry and unlinked before every return
+// (runtime/README.md, section 9). When the goroutine crashes or is
+// stopped, the runtime releases what the frames hold. The
 // generator keeps every field null or owning: L starts zeroed, a released
 // slot's field is set to null (releaseSlot), and so is a moved temporary's
 // after the line that consumed it (emit). A return leaves the frame first

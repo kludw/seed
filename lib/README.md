@@ -183,8 +183,11 @@ and 100`.
   file is open for reading only` / `writing only` / `file is closed`; crash
   `fs.File.read: max (0) must be at least 1`.
 - Reads poll before they read, so they are stop points (a FIFO nobody
-  writes to can block for ever; tests/full/fs_file_stop.sd). `open` itself
-  (which blocks on a FIFO until a writer opens it) and writes are not.
+  writes to can block for ever; tests/full/fs_file_stop.sd). `open`
+  (which blocks on a FIFO until the other end opens it), writes and the
+  whole-file functions make their system calls in interruptible block
+  sections (runtime/README.md, section 13): a stop interrupts them while
+  they wait (tests/full/fs_fifo_stop.sd); on a regular file they complete.
 
 ### time
 

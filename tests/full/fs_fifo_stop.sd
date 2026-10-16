@@ -1,0 +1,173 @@
+// File I/O that blocks is a stop point: goroutines blocked opening a FIFO
+// (for reading or writing, by fs.open, fs.create, fs.read, fs.write and
+// fs.append), reading one that nobody writes to (fs.read), or writing to a
+// full one that nobody reads (fs.File.write, fs.write) are stopped when
+// their group fails, and so are a stopped goroutine's deferred call that
+// blocks opening a FIFO and a goroutine waiting for the append lock that a
+// blocked append holds. Regular files still work in a stopped goroutine's
+// defers.
+package main
+
+import "errors"
+import "fmt"
+import "fs"
+import "os"
+import "time"
+
+fn makeFifo(string dir, string name) (string, error) {
+    string path = dir + "/" + name
+    int code = try os.run([]string{"mkfifo", path})
+    if (code != 0) {
+        return null, errors.new("mkfifo failed")
+    }
+    return path, null
+}
+
+// Opens a FIFO (for writing when `write`, else for reading), so that the
+// other end's open returns, and keeps it open without using it (a stopped
+// goroutine does not close its files).
+fn hold(string fifo, bool write, chan int never) error {
+    if (write) {
+        _ = try fs.create(fifo)
+    } else {
+        _ = try fs.open(fifo)
+    }
+    _ = never.receive()
+    return null
+}
+
+fn openForReading(string fifo) error {
+    fs.File f = try fs.open(fifo)
+    f.close()
+    return errors.new("fs.open returned")
+}
+
+fn openForWriting(string fifo) error {
+    fs.File f = try fs.create(fifo)
+    f.close()
+    return errors.new("fs.create returned")
+}
+
+fn readWhole(string fifo) error {
+    string text = try fs.read(fifo)
+    return errors.new("fs.read returned " + text)
+}
+
+fn writeWhole(string fifo) error {
+    try fs.write(fifo, "data")
+    return errors.new("fs.write returned")
+}
+
+fn appendWhole(string fifo) error {
+    try fs.append(fifo, "data")
+    return errors.new("fs.append returned")
+}
+
+fn chunk() string {
+    string s = "0123456789abcdef"
+    for (int i = 0; i < 16; i++) {
+        s = s + s
+    }
+    return s // 1 MB, more than a FIFO holds
+}
+
+fn fileWrite(string fifo) error {
+    fs.File f = try fs.create(fifo)
+    defer f.close()
+    try f.write(chunk())
+    return errors.new("fs.File.write returned")
+}
+
+fn bigWrite(string fifo) error {
+    try fs.write(fifo, chunk())
+    return errors.new("fs.write returned")
+}
+
+fn deferredOpen(string fifo, string log, chan int never) error {
+    defer _ = fs.append(log, "deferred append ran\n")
+    defer _ = openForReading(fifo)
+    _ = never.receive()
+    return null
+}
+
+fn appendBig(string fifo, chan int ready) error {
+    ready.send(1)
+    try fs.append(fifo, chunk())
+    return errors.new("fs.append returned")
+}
+
+// Waits for the append lock that appendBig holds (appends are one at a time
+// in the program) until its group fails.
+fn appendLog(string log, chan int ready) error {
+    _ = ready.receive()
+    time.sleep(20 * time.millisecond)
+    try fs.append(log, "appendLog ran\n")
+    return errors.new("appendLog returned")
+}
+
+fn lockedOut(string log, chan int ready) error {
+    error err = group {
+        spawn appendLog(log, ready)
+        spawn failSoon()
+    }
+    if (err != null) {
+        fmt.println("lock: " + err.message())
+    }
+    return errors.new("done")
+}
+
+fn failSoon() error {
+    time.sleep(100 * time.millisecond)
+    return errors.new("enough")
+}
+
+fn main([]string args) error {
+    string dir = try fs.makeTemp("seed-fifo-stop-")
+    []string names = []string{"open", "create", "read", "write", "append", "readHeld", "fileWrite", "bigWrite", "deferred", "appendBig"}
+    []string fifos = []string{}
+    for (int i = 0; i < names.len(); i++) {
+        fifos.push(try makeFifo(dir, names[i]))
+    }
+    string log = dir + "/log"
+    chan int never = chan int(0)
+    int start = time.monotonic()
+    error err = group {
+        spawn openForReading(fifos[0])
+        spawn openForWriting(fifos[1])
+        spawn readWhole(fifos[2])
+        spawn writeWhole(fifos[3])
+        spawn appendWhole(fifos[4])
+        spawn hold(fifos[5], true, never)
+        spawn readWhole(fifos[5])
+        spawn hold(fifos[6], false, never)
+        spawn fileWrite(fifos[6])
+        spawn hold(fifos[7], false, never)
+        spawn bigWrite(fifos[7])
+        spawn deferredOpen(fifos[8], log, never)
+        spawn failSoon()
+    }
+    if (err != null) {
+        fmt.println(err.message())
+    }
+    // A goroutine waiting for the append lock, which a goroutine of another
+    // group holds while it writes to a full FIFO, is stopped with its group.
+    chan int ready = chan int(1)
+    err = group {
+        spawn hold(fifos[9], false, never)
+        spawn appendBig(fifos[9], ready)
+        spawn lockedOut(dir + "/log2", ready)
+    }
+    if (err != null) {
+        fmt.println(err.message())
+    }
+    int took = time.monotonic() - start
+    fmt.println((took < 10 * time.second).string())
+    fmt.print(try fs.read(log))
+    string log2 = ""
+    if (fs.exists(dir + "/log2")) {
+        log2 = try fs.read(dir + "/log2")
+    }
+    fmt.println("appendLog wrote " + log2.len().string() + " bytes")
+    try fs.removeAll(dir)
+    return null
+}

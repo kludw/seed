@@ -10,8 +10,9 @@ memory never freed) with:
 - goroutines scheduled M:N (user-space context switches onto one worker
   thread per CPU, with work stealing), channels, `select`, groups with
   Erlang-style failure, timers and a poller (epoll or kqueue),
-- blocking calls that are stop points (`sd_wait_fd`, `sd_wait_child`) and
-  the process-wide handle table that `io`, `net` and `fs` use,
+- blocking calls that are stop points (`sd_wait_fd`, `sd_wait_child`,
+  interruptible block sections) and the process-wide handle table that
+  `io`, `net` and `fs` use,
 - per-goroutine crash handling and a defer stack,
 - interface values, `error`, the OS side of the core packages `fmt`, `os`,
   `fs`, `errors` and `time` (the packages themselves are in `lib/`, with
@@ -537,11 +538,15 @@ while those C frames are still on the stack; each frame is unlinked before
 its release runs. Then the defers run as before. A protected frame
 (`sd_frame`) records the chain's top when it is entered, so a crash that a
 deferred call or `sd_catch` contains releases only the frames above it.
-Values that are not in a frame are not released by a crash: big integers
-held by `int` locals (the compiler leaves ints out; small ints own nothing)
-and the C locals of native functions (which release what they hold before
-`sd_stop`, see section 13). The compiler's side is in compiler/README.md
-("Memory management").
+Ints are in frames too (a small int owns nothing, but a big integer
+does). An index that the generated code hands over (an owned temporary,
+`xs[i + 1]`) is checked by `sd_int_index_take_at` (`SD_LIST_TAKE_AT`,
+`sd_str_at_take`), which releases it before crashing when it is out of
+range; in range it is small, so it needs no frame field. Values that are
+not in a frame are not released by a crash: the C locals of native
+functions (which release what they hold before `sd_stop`, see section
+13). The compiler's side is in compiler/README.md ("Memory
+management").
 
 **Crash traces.** A crash also shows where it happened in the Seed source
 and the calls that led there (the format is in DECISIONS.md):
@@ -700,7 +705,8 @@ sd_err l_err;
   the first error and cancels every other goroutine in it. A cancelled
   goroutine stops at its next **stop point** (a channel send, receive or
   select, `time.sleep`, or a blocking call of section 13: reading,
-  accepting, connecting, waiting for a child), or immediately if it is
+  accepting, connecting, waiting for a child, or a file operation while it
+  waits in an interruptible block section), or immediately if it is
   blocked in one; its defers run.
   `close` is not a stopping point (so `defer out.close()` works in a stopped
   goroutine). A `spawn` executed after the group has failed doesn't start the
@@ -863,7 +869,9 @@ most that many run at once.
   in the same block section since its last look is handed to another M, so
   however many goroutines block in the OS, the others keep running. When
   the call returns, the goroutine takes its P back, or an idle one, or
-  queues itself.
+  queues itself. sysmon also signals again the stopped goroutines still in
+  an interruptible block section (section 13), every millisecond, and
+  stays awake while there are any.
 - **Preemption** is cooperative: the compiler puts a *preemption point*,
   `SD_PREEMPT()` (seed.h), at the top of every loop iteration (every
   1024th in a counted loop of pure small-int code) and before every call
@@ -934,7 +942,8 @@ rule:
    redefines `errno` to go through a noinline function (`sd_errno_loc_`),
    so any code that includes seed.h reads the current thread's. Other
    functions that glibc declares `const` and that depend on the thread
-   (`pthread_self`) must not be used in goroutine code.
+   (`pthread_self`) must not be used in goroutine code, except through a
+   noinline function (`thread_self` in `seed_task.c`).
 5. The generated code follows the rule: cleanup frames are linked into the
    goroutine's chain (`sd_lf_top_()`, section 9), package constants are
    cached in goroutine-local storage (section 12), and preemption points
@@ -1145,8 +1154,10 @@ parks the goroutine (and is a **stop point**: SPEC.md, DECISIONS.md,
 "Concurrency": a goroutine whose group fails must stop there too), or, for
 a call that cannot wait that way (a file, `waitpid`, a FIFO's `open`),
 makes it inside a block section (`sd_block_begin` / `sd_block_end`,
-section 10), which is not a stop point. The code between those two must
-not park. The waits:
+section 10), which is not a stop point, or, for a call that may wait for
+ever (opening a FIFO, which waits for its other end; writing to a full
+one), inside an *interruptible* block section, below. The code between
+those two must not park. The waits:
 
 ```c
 int sd_wait_fd(int fd, bool for_write, int64_t timeout_ns);  /* <= 0: no limit */
@@ -1190,6 +1201,62 @@ int w = sd_wait_fd(fd, false, timeout_ns);
 if (w == SD_WAIT_STOP) { free(buf); close(fd); sd_stop(); }   /* never returns */
 if (w == SD_WAIT_TIMEOUT) return sd_errorf("net.dial: %s: timeout", addr->data);
 ```
+
+**Interruptible block sections.** A call that the poller cannot wait for
+but that may block for ever (`open` of a FIFO waits for the other end,
+`write` to a FIFO or pipe waits for room) is made between
+`sd_block_begin_intr()` and `sd_block_end_intr()`: a block section in
+which stopping the goroutine interrupts the call. The stop (`task_cancel`,
+through `wait_wake_locked` with the wait mode `SD_WM_INTR`) sends the
+goroutine's thread `SIGURG` with `pthread_kill`; the runtime's handler for
+it does nothing and is installed (on the first such signal) without
+`SA_RESTART`, so the system call fails with `EINTR` (or a write returns
+short). The native then sees `sd_stopping()`, releases what it holds and
+calls `sd_stop()`, which also ends the sections (`protect` ends an
+interruptible section and the block section of a goroutine that unwinds
+out of them). Otherwise (a signal that was not a stop) it makes the call
+again.
+
+```c
+sd_block_begin_intr();
+int fd;
+for (;;) {
+  fd = open(path, O_RDONLY | O_CLOEXEC);          /* a FIFO: waits for a writer */
+  if (fd >= 0 || errno != EINTR) break;
+  if (sd_stopping()) { free(buf); sd_stop(); }     /* never returns */
+}
+sd_block_end_intr();
+```
+
+- **The race.** The signal can arrive after the native last looked at
+  `sd_stopping()` and before the call starts, and then the call blocks
+  after all. So a stopped goroutine in an interruptible section is kept
+  in a list (`intr_list`) until it leaves the section, and sysmon signals
+  it again every `SD_INTR_RESEND_NS` (1 ms). Entering a section and
+  stopping the goroutine both take the goroutine's `mu`, so either the
+  stop sees the section (and signals) or the goroutine sees the stop when
+  it enters.
+- **Already stopped.** A goroutine that enters a section already stopped
+  (a deferred call of a stopped goroutine) is listed at once, so that a
+  call that blocks is interrupted at sysmon's next look. A call on a
+  regular file is never interrupted by a signal (the kernel does not wait
+  interruptibly for a disk), so a stopped goroutine's defers still read
+  and write their files; only a call that waits stops.
+- **No stray signals.** Leaving the section takes the goroutine out of
+  the list under the locks the senders hold, and then, if it was ever
+  signalled, waits until no `SIGURG` is pending for the thread
+  (`sigpending`; a system call returns through the delivery), so no
+  signal reaches a call outside a section. Once the handler is installed,
+  a `SIGURG` from outside the program (sent by the system only for a
+  socket's out-of-band data to the socket's owner, which Seed never sets)
+  makes one system call of some thread fail with `EINTR`: the runtime's
+  waits retry, but a write of `fmt` to a full pipe would fail.
+- **Users.** `fs.open`, `fs.create`, `fs.read`, `fs.write`, `fs.append`
+  and `fs.File.write` (`sd_handle_write` on a blocking descriptor); waiting
+  for another goroutine's `fs.append` (one at a time in the process)
+  notices a stop too, after 10 ms (a short wait, for an append to a
+  regular file, does not stop a goroutine whose defers append to a log). `fmt` output to stdout and stderr is not
+  interruptible: stdio's buffer would be left half written.
 
 **Handles.** Open descriptors that Seed code refers to (connections,
 listeners, files, stdin) live in one process-wide table; the Seed handle
@@ -1399,6 +1466,7 @@ Arguments are borrowed and results owned unless marked **consumes** or
 | `void *sd_goroutine_local(int *key, size_t size)` | the goroutine's zeroed block for `key` (a static int, 0 before first use); freed when it ends |
 | `sd_lframe **sd_lf_top_(void)` | the goroutine's cleanup-frame chain (used by `SD_LF_ENTER`) |
 | `void sd_block_begin(void)`, `void sd_block_end(void)` | around a call that may block in the OS; no parking in between; `sd_block_end` keeps `errno` |
+| `void sd_block_begin_intr(void)`, `void sd_block_end_intr(void)` | the same, and a stop interrupts the call (`EINTR`; section 13) |
 | `sd_chan *sd_chan_new(const sd_type *et, sd_int cap)` | crashes if `cap < 0` |
 | `sd_chan_retain`, `sd_chan_release` | atomic; NULL-safe (a null `(chan T)?`) |
 | `void sd_chan_send(c, const void *val)` | val borrowed |
@@ -1478,7 +1546,7 @@ runtime/tests/run.sh asan     # or tsan, plain, bench
 | `test_str.c` | every string method, `chars` on UTF-8 and invalid UTF-8, float formatting (20,000 random doubles compared with seed0's formatter, kept in `ref_float.c`) |
 | `test_mem.c` | lists, maps, boxes, enums, struct descriptors, copy-on-write through nested places, stable `sortBy`, interfaces and user error types, deep copies share nothing, cleanup frames released by a crash (nested, and a crash contained by an inner `sd_catch`), a `sortBy` whose `less` crashes leaving the list unchanged, no leaks (live object count), and a stress test: 2M rounds / 54M allocations freed with flat resident memory; objects of every size class allocated on one thread and checked and freed on another, by threads that then end (300 rounds, 6M objects, flat resident memory) |
 | `test_pkg.c` | `os.env`, `os.run` (exit codes, program not found), `fs.*` |
-| `test_block.c` | blocking calls as stop points: cancelling goroutines blocked in `time.sleep`, in `sd_wait_fd` on a pipe, in a handle read on a non-blocking and on a blocking descriptor, in accept, in `os.run` (a `sleep 30` child is killed), and one waiting for another goroutine's operation lock; close waking a reader; read timeouts; line reading (CRLF, empty lines, a last line without newline, a 200 KB line); 3 MB over a socket pair; 20,000 goroutines spawned one after another in one group (freed while it runs) |
+| `test_block.c` | blocking calls as stop points: cancelling goroutines blocked in `time.sleep`, in `sd_wait_fd` on a pipe, in a handle read on a non-blocking and on a blocking descriptor, in accept, in `os.run` (a `sleep 30` child is killed), and one waiting for another goroutine's operation lock; close waking a reader; read timeouts; line reading (CRLF, empty lines, a last line without newline, a 200 KB line); 3 MB over a socket pair; 20,000 goroutines spawned one after another in one group (freed while it runs); interruptible block sections: cancelling goroutines blocked opening a FIFO, in `sd_fs_read` of a FIFO, in a handle write to a full pipe, and a stopped goroutine's deferred call that then blocks opening a FIFO (interrupted by sysmon's repeated signal) |
 | `test_conc.c` | buffered/unbuffered channels, copy semantics, ping-pong, 1000 goroutines in a group with deep-copied arguments, group error and crash with cancellation and defers (order checked), nested group cancellation, crash inside defers, select fairness (100,000 selects within 45-55%), select send/receive/closed/timeout, cancelling goroutines blocked in select, a 50-stage pipeline, the parallel word count |
 | `test_exit.c` + `test_exit.sh` | exit codes and messages: crash in main (defers run), error from main, `os.exit` flushing, deadlock (2 kinds, with the report of the blocked goroutines), crash in a group block, stderr/stdout ordering, timers, stack overflow in main and in a goroutine |
 | `example.c` | the hand-lowered program from sections 3-11; output must equal `example.out` and it checks it leaks nothing |
@@ -1644,7 +1712,16 @@ So with `SD_PLAIN_MALLOC` the `sd_mem_*` functions are plain
 memory_sanitizer)`) and with `SD_LEAK_CHECK`. `tests/leaks.sh` defines
 `SD_LEAK_CHECK` for LeakSanitizer and `SD_PLAIN_MALLOC` for `leaks` on
 macOS. A deliberate leak and a deliberate use-after-free were checked to
-be reported under these builds. GCC's `-fsanitize=leak` alone defines no
+be reported under these builds. LeakSanitizer must record allocation
+stacks with its slow unwinder (`fast_unwind_on_malloc=0`, which
+`tests/leaks.sh` sets): the fast one follows frame pointers only within
+the thread's own stack, so what a goroutine allocates gets an empty stack,
+and LeakSanitizer does not report leaks with an empty stack. Under
+`SD_LEAK_CHECK`, `sd_exit_process` also registers the live part of the
+exiting goroutine's stack as a root region (LeakSanitizer does not scan
+goroutine stacks), so what `os.exit`'s caller holds is not a leak, and
+the main goroutine releases its arguments and its error or crash message
+before exiting. GCC's `-fsanitize=leak` alone defines no
 macro, so a build that uses it without `SD_LEAK_CHECK` (or
 `SD_PLAIN_MALLOC`) sees no leaks. `SD_COUNT_OBJECTS` counts in
 `sd_obj_alloc`/`sd_obj_free` and works with either allocator.
@@ -1774,10 +1851,13 @@ Decisions made while writing the runtime (nobody was available to ask):
 Limitations and things left for later:
 
 - A crash or cancellation releases what the generated frames held (cleanup
-  frames, section 9), except big integers held by `int` locals and what a
-  native function holds in its own C locals when it crashes (natives free
-  what they hold before `sd_stop`, but an `sd_crash` from inside a native
-  leaks its locals). Section 17 has the history of the design.
+  frames, section 9), except what a native function holds in its own C
+  locals when it crashes (natives free what they hold before `sd_stop`,
+  but an `sd_crash` from inside a native leaks its locals). Section 17 has
+  the history of the design.
+- Writing to stdout or stderr (`fmt`) is a block section, not an
+  interruptible one: a goroutine blocked writing to a full pipe there is
+  stopped only when the write returns.
 - Big integer multiplication is Karatsuba at most (no Toom-Cook or FFT), so
   products of millions of digits take seconds: 3^2,000,000 (954,243 digits)
   takes about 0.15 s to compute and 0.4 s to print (section 5).
@@ -1876,8 +1956,10 @@ the defers that run reuse the unwound stack), and they form a chain of
 their own (through a thread-local pointer then; through the goroutine
 since the scheduler, section 10). The compiler keeps a value in
 the frame only when it owns it across a call that may crash or stop
-(other slots stay plain C locals), and leaves out ints and enums whose
-cases have no data (their values never own memory, except big integers).
+(other slots stay plain C locals), and leaves out enums whose cases have
+no data (their values never own memory). Ints were left out at first too,
+so a big integer held by an `int` local leaked; they are in frames now
+(compiler/README.md, "Cleanup frames").
 `sortBy` sorts a copy and writes it back, so a `less` that crashes halfway
 cannot leave the list with an element duplicated.
 

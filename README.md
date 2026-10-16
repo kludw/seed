@@ -157,11 +157,10 @@ The documentation:
 
 **Known limitations:**
 
-- A crash, or a goroutine stopped by its group, releases what the unwound frames held, except big integers held by `int` locals.
 - Goroutines are scheduled M:N (one worker thread per CPU) and preempted cooperatively: one that computes for 10 ms while others wait yields at its next loop iteration or recursive call, but not inside a long runtime operation (sorting a huge list, multiplying huge integers) or a native call. Past about 24,000 simultaneous goroutines on Linux (the default `vm.max_map_count`), new goroutine stacks have no guard page, so their stack overflow is not detected (runtime/README.md, section 10).
 - Deadlock detection is global: it fires only when every goroutine is blocked. A goroutine stuck while others keep running waits forever, and defers do not run on a deadlock.
 - When a group fails, the code of the group block itself is not stopped, only the goroutines it started.
-- File I/O other than reading an `fs.File` is not a stop point, so a goroutine blocked in it (opening or writing a FIFO, for example) is stopped only when the call returns.
+- Writing to stdout or stderr (`fmt`) is not a stop point, so a goroutine blocked writing to a full pipe there is stopped only when the write returns. File I/O that waits (opening or writing a FIFO, for example) is stopped.
 - Tested on macOS (arm64) and Linux (x86_64, glibc). Other POSIX systems are untested.
 - The parser reports one syntax error per statement (or member of a type); an error in an expression that spans lines may hide a second error on the next line.
 - A crash shows where it happened and the calls that led there, but not the calls of functions that the C compiler inlined (`seed run -g` shows them). There is no debugger of Seed's own: `seed build -g` makes gdb and lldb follow the Seed source, with Seed's variables under their C names (`l_x`).

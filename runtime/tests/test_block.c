@@ -3,7 +3,10 @@
  * blocking descriptors), in accept, waiting for a child process and waiting
  * for another goroutine's operation on the same handle; close waking a
  * waiter; timeouts; buffered line reading; a large transfer over a socket
- * pair; finished goroutines freed while their group runs.
+ * pair; finished goroutines freed while their group runs. Interruptible
+ * block sections: cancelling goroutines blocked opening a FIFO, reading
+ * one (sd_fs_read) and writing to a full pipe through a handle, and a
+ * stopped goroutine's deferred call that then blocks opening a FIFO.
  * Run under -fsanitize=thread as well as address,undefined. */
 #include "check.h"
 
@@ -14,6 +17,7 @@
 #include <pthread.h>
 #include <stdatomic.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -204,6 +208,127 @@ static sd_err waits_for_lock(void *p) {
   if (h) sd_handle_release(h);
   atomic_store(&reached_after_wait, 1);
   return SD_ERR_NULL;
+}
+
+/* ---- interruptible block sections ---- */
+
+static char fifo_dir[64];
+static int fifo_seq;
+
+/* A new FIFO; its path in a static buffer of the caller's. */
+static void make_fifo(char *path, size_t n) {
+  if (!fifo_dir[0]) {
+    snprintf(fifo_dir, sizeof fifo_dir, "%s", "/tmp/seed-test-block-XXXXXX");
+    if (!mkdtemp(fifo_dir)) {
+      perror("mkdtemp");
+      exit(1);
+    }
+  }
+  snprintf(path, n, "%s/fifo%d", fifo_dir, ++fifo_seq);
+  if (mkfifo(path, 0600) != 0) {
+    perror("mkfifo");
+    exit(1);
+  }
+}
+
+static char fifo_path[128];
+
+/* Opens fifo_path for reading in an interruptible section, as fs.open
+ * does: nobody opens it for writing. */
+static sd_err blocked_fifo_open(void *p) {
+  sd_defer_push(count_defer, NULL, 0);
+  sd_block_begin_intr();
+  int fd;
+  for (;;) {
+    fd = open(fifo_path, O_RDONLY);
+    if (fd >= 0 || errno != EINTR) break;
+    if (sd_stopping()) sd_stop(); /* ends the sections */
+  }
+  sd_block_end_intr();
+  if (fd >= 0) close(fd);
+  atomic_store(&reached_after_wait, 1);
+  return SD_ERR_NULL;
+}
+
+typedef struct { sd_lframe h; sd_str path; } L_path;
+static void lr_path(sd_lframe *p) { sd_str_release(((L_path *)p)->path); }
+
+static sd_err blocked_fs_read(void *p) {
+  sd_defer_push(count_defer, NULL, 0);
+  L_path L = {{0}};
+  SD_LF_ENTER(L, lr_path);
+  L.path = sd_str_from_cstr(fifo_path);
+  sd_str out = NULL;
+  sd_err e = sd_fs_read(L.path, &out); /* stops; the frame releases path */
+  SD_LF_LEAVE(L);
+  sd_err_release(e);
+  sd_str_release(out);
+  sd_str_release(L.path);
+  atomic_store(&reached_after_wait, 1);
+  return SD_ERR_NULL;
+}
+
+/* Writes 1 MB through handle n (a FILE handle on a blocking pipe that
+ * nobody reads). */
+static sd_err blocked_handle_write(void *p) {
+  sd_defer_push(count_defer, NULL, 0);
+  sd_handle *h = sd_handle_acquire(arg_i64(p), SD_HANDLE_FILE);
+  if (!h) return sd_errorf("no handle");
+  static char big[1 << 20];
+  int err = 0;
+  sd_handle_write(h, big, (int64_t)sizeof big, &err); /* stops, releasing h */
+  sd_handle_release(h);
+  atomic_store(&reached_after_wait, 1);
+  return SD_ERR_NULL;
+}
+
+/* A deferred call of a stopped goroutine that blocks opening a FIFO: the
+ * goroutine is already stopped when the section begins, so only sysmon's
+ * signals (sent again until it leaves) can interrupt it. */
+static atomic_int deferred_open_stopped;
+
+static void deferred_fifo_open(void *env) {
+  sd_block_begin_intr();
+  int fd;
+  for (;;) {
+    fd = open(fifo_path, O_RDONLY);
+    if (fd >= 0 || errno != EINTR) break;
+    if (sd_stopping()) {
+      atomic_store(&deferred_open_stopped, 1);
+      sd_stop();
+    }
+  }
+  sd_block_end_intr();
+  if (fd >= 0) close(fd);
+}
+
+static sd_err blocked_sleep_then_fifo(void *p) {
+  sd_defer_push(count_defer, NULL, 0);
+  sd_defer_push(deferred_fifo_open, NULL, 0);
+  sd_time_sleep(SD_INT(30000000000));
+  atomic_store(&reached_after_wait, 1);
+  return SD_ERR_NULL;
+}
+
+static void test_cancel_interruptible(void) {
+  make_fifo(fifo_path, sizeof fifo_path);
+  run_cancel("opening a FIFO", blocked_fifo_open, 0);
+  run_cancel("sd_fs_read of a FIFO", blocked_fs_read, 0);
+  atomic_store(&deferred_open_stopped, 0);
+  run_cancel("a deferred open of a FIFO", blocked_sleep_then_fifo, 0);
+  CHECK(atomic_load(&deferred_open_stopped) == 1);
+  unlink(fifo_path);
+
+  int p[2];
+  if (pipe(p) != 0) {
+    perror("pipe");
+    exit(1);
+  }
+  int64_t id = sd_handle_new(SD_HANDLE_FILE, p[1], "pipe");
+  run_cancel("a handle write to a full pipe", blocked_handle_write, id);
+  CHECK(sd_handle_close(id));
+  close(p[0]);
+  rmdir(fifo_dir);
 }
 
 static void make_pipe(int p[2], bool nonblock) {
@@ -507,6 +632,7 @@ static void test_reap(int n) {
 int main(int argc, char **argv) {
   int n = argc > 1 ? atoi(argv[1]) : 2000;
   test_cancel_blocked();
+  test_cancel_interruptible();
   test_close_and_timeout();
   test_lines();
   test_transfer();

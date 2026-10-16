@@ -25,6 +25,7 @@
  *     -> task->mu
  *   group->mu -> task->mu -> (that task's waiting group)->mu -> ...  (down the tree)
  *   handle->mu -> task->mu (close waking a waiter)
+ *   task->mu -> intr_mu -> sysmon_mu (stopping a goroutine in an interruptible section)
  *   timer_mu, poll_mu: never held while taking another of the locks above.
  * unpark (readying a goroutine) takes only sched.mu, an M's mu and a
  * foreign task's pmu, which are taken last, so it may be called anywhere.
@@ -167,9 +168,10 @@ enum { SD_STACK_NONE = 0, SD_STACK_GUARDED, SD_STACK_SLAB };
 enum { SD_PS_RUNNING = 0, SD_PS_NOTIFIED, SD_PS_PARKED, SD_PS_PARKED_COUNTED };
 
 /* How a stop request or a handle close reaches a waiting goroutine
- * (sd_task.wait_mode): by claiming wait_res and unparking it, or through its
- * wake-up pipe (a wait polling in the OS). */
-enum { SD_WM_NONE = 0, SD_WM_PARK, SD_WM_PIPE };
+ * (sd_task.wait_mode): by claiming wait_res and unparking it, through its
+ * wake-up pipe (a wait polling in the OS), or, for a stop, by a signal to
+ * its thread (an interruptible block section, sd_block_begin_intr). */
+enum { SD_WM_NONE = 0, SD_WM_PARK, SD_WM_PIPE, SD_WM_INTR };
 enum { SD_WR_PENDING = 0, SD_WR_READY, SD_WR_TIMEOUT, SD_WR_STOP, SD_WR_WOKEN };
 
 /* A goroutine. Its fields are grouped by cache line, by who uses them: a
@@ -248,6 +250,15 @@ struct sd_task {
   const sd_site *site;
   void *site_ret;
   bool site_note;
+  /* An interruptible block section (wait_mode SD_WM_INTR): the thread that
+   * makes the call, to be interrupted by a signal when the goroutine is
+   * stopped; whether it is in the list that sysmon signals again
+   * (intr_list), and when sysmon last did. Under mu (the links and
+   * intr_sent under intr_mu). */
+  pthread_t intr_thread;
+  bool intr_listed;
+  int64_t intr_sent;
+  sd_task *intr_next, *intr_prev;
 };
 
 enum { SD_BLOCK_NONE = 0, SD_BLOCK_RECV, SD_BLOCK_SEND, SD_BLOCK_SELECT, SD_BLOCK_GROUP };
@@ -1853,6 +1864,113 @@ static void *m_main(void *arg) {
  * the wake-up queue) is asked to yield (preempt_request). It runs from the
  * first spawn, and sleeps while every P is idle. */
 
+/* ------------------------------------------- interruptible block sections
+ *
+ * A call that blocks in the OS and cannot wait through the poller (opening
+ * a FIFO, which waits for the other end; writing to a full FIFO) is made in
+ * an interruptible block section (sd_block_begin_intr). Stopping the
+ * goroutine meanwhile (task_cancel, through wait_wake_locked) sends its
+ * thread SD_SIG_INTR, whose handler does nothing and is installed without
+ * SA_RESTART, so the call fails with EINTR (or returns short); the native
+ * sees sd_stopping() and stops. The signal can arrive just before the call
+ * starts (after the native last looked at sd_stopping), and then the call
+ * blocks after all: so a stopped goroutine stays in intr_list until it
+ * leaves the section, and sysmon signals it again every SD_INTR_RESEND_NS.
+ * A goroutine that enters a section already stopped is listed at once (a
+ * call on a regular file is not interrupted, so a stopped goroutine's
+ * defers can still write their files). Leaving the section takes the
+ * goroutine out of the list under the same locks the senders hold, and
+ * then lets a signal still pending for its thread be delivered there
+ * (intr_drain), so no signal reaches a call outside a section. */
+
+#define SD_SIG_INTR SIGURG               /* ignored by default; Go uses it to preempt */
+#define SD_INTR_RESEND_NS 1000000
+
+static pthread_once_t intr_once = PTHREAD_ONCE_INIT;
+static pthread_mutex_t intr_mu = PTHREAD_MUTEX_INITIALIZER;
+static sd_task *intr_list;  /* stopped goroutines in an interruptible section */
+static atomic_int intr_count;
+
+static void intr_handler(int sig) { (void)sig; }
+
+static void intr_install(void) {
+  struct sigaction sa;
+  memset(&sa, 0, sizeof sa);
+  sa.sa_handler = intr_handler;
+  sigemptyset(&sa.sa_mask);
+  sa.sa_flags = 0; /* no SA_RESTART: the interrupted call fails with EINTR */
+  sigaction(SD_SIG_INTR, &sa, NULL);
+}
+
+/* pthread_self is declared const: never let the C compiler reuse its value
+ * across a park (runtime/README.md, "Thread-local storage"). */
+static SD_NOINLINE pthread_t thread_self(void) { return pthread_self(); }
+
+/* With intr_mu held: signals t's thread (t is listed, so in its section). */
+static void intr_send_locked(sd_task *t, int64_t now) {
+  pthread_once(&intr_once, intr_install);
+  t->intr_sent = now;
+  pthread_kill(t->intr_thread, SD_SIG_INTR);
+}
+
+/* With t->mu held, t in an interruptible section and stopped: lists it for
+ * sysmon, and signals it now (now != 0) or at sysmon's next look. */
+static void intr_list_locked(sd_task *t, bool now) {
+  pthread_mutex_lock(&intr_mu);
+  if (!t->intr_listed) {
+    t->intr_listed = true;
+    t->intr_prev = NULL;
+    t->intr_next = intr_list;
+    if (intr_list) intr_list->intr_prev = t;
+    intr_list = t;
+    atomic_fetch_add(&intr_count, 1);
+    t->intr_sent = 0;
+  }
+  if (now) intr_send_locked(t, mono_ns());
+  pthread_mutex_unlock(&intr_mu);
+  if (atomic_load(&sysmon_idle)) sysmon_wake();
+}
+
+/* sysmon: signals again the listed goroutines not signalled for a while. */
+static void intr_resend(int64_t now) {
+  pthread_mutex_lock(&intr_mu);
+  for (sd_task *t = intr_list; t; t = t->intr_next)
+    if (now - t->intr_sent >= SD_INTR_RESEND_NS) intr_send_locked(t, now);
+  pthread_mutex_unlock(&intr_mu);
+}
+
+/* A signal sent to this thread before the goroutine left the list is
+ * pending or delivered: a system call returns through the delivery, so
+ * this waits (briefly) until none is pending. */
+static void intr_drain(void) {
+  for (int i = 0; i < 1000; i++) {
+    sigset_t set;
+    sigemptyset(&set);
+    if (sigpending(&set) != 0 || !sigismember(&set, SD_SIG_INTR)) return;
+    sched_yield();
+  }
+}
+
+static void intr_end(sd_task *t) {
+  int saved = errno;
+  pthread_mutex_lock(&t->mu);
+  t->wait_mode = SD_WM_NONE;
+  bool listed = t->intr_listed;
+  if (listed) {
+    pthread_mutex_lock(&intr_mu);
+    if (t->intr_prev) t->intr_prev->intr_next = t->intr_next;
+    else intr_list = t->intr_next;
+    if (t->intr_next) t->intr_next->intr_prev = t->intr_prev;
+    t->intr_next = t->intr_prev = NULL;
+    t->intr_listed = false;
+    atomic_fetch_sub(&intr_count, 1);
+    pthread_mutex_unlock(&intr_mu);
+  }
+  pthread_mutex_unlock(&t->mu);
+  if (listed) intr_drain();
+  errno = saved;
+}
+
 static pthread_once_t sysmon_once = PTHREAD_ONCE_INIT;
 static pthread_mutex_t sysmon_mu = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t sysmon_cv = PTHREAD_COND_INITIALIZER;
@@ -1873,6 +1991,11 @@ static void *sysmon_main(void *arg) {
     nanosleep(&ts, NULL);
     int64_t now = mono_ns();
     bool insys = false, took = false, busy = false;
+    if (atomic_load(&intr_count) > 0) {
+      intr_resend(now);
+      busy = true;
+      if (delay > SD_INTR_RESEND_NS) delay = SD_INTR_RESEND_NS;
+    }
     bool waiting = atomic_load_explicit(&sched.runq_size, memory_order_relaxed) > 0;
     for (int i = 0; i < sched.nprocs; i++) {
       sd_p *p = &sched.allp[i];
@@ -1922,6 +2045,7 @@ static void *sysmon_main(void *arg) {
       atomic_store(&sysmon_idle, 1);
       bool any = false;
       for (int i = 0; i < sched.nprocs && !any; i++) any = atomic_load(&sched.allp[i].status) != SD_P_IDLE;
+      if (atomic_load(&intr_count) > 0) any = true; /* intr_list_locked reads sysmon_idle after counting */
       while (!any && atomic_load(&sysmon_idle)) pthread_cond_wait(&sysmon_cv, &sysmon_mu);
       atomic_store(&sysmon_idle, 0);
       pthread_mutex_unlock(&sysmon_mu);
@@ -1995,6 +2119,23 @@ void sd_block_end(void) {
   int saved = errno;
   block_end_now(t);
   errno = saved;
+}
+
+void sd_block_begin_intr(void) {
+  sd_block_begin();
+  pthread_once(&sysmon_once, sysmon_start); /* it signals again (intr_resend) */
+  sd_task *t = task_current();
+  pthread_mutex_lock(&t->mu);
+  t->intr_thread = thread_self();
+  t->wait_mode = SD_WM_INTR;
+  if (atomic_load(&t->cancelled)) intr_list_locked(t, false);
+  pthread_mutex_unlock(&t->mu);
+}
+
+void sd_block_end_intr(void) {
+  sd_task *t = task_current();
+  if (t->wait_mode == SD_WM_INTR) intr_end(t);
+  sd_block_end();
 }
 
 /* ------------------------------------------------- sanity of the scheduler */
@@ -2386,6 +2527,14 @@ SD_NOINLINE void sd_crash_index_at(sd_int i, int64_t len, const sd_site *s) {
   crash_at(s, __builtin_return_address(0), m);
 }
 
+SD_NOINLINE void sd_crash_index_take_at(sd_int i, int64_t len, const sd_site *s) {
+  char *v = sd_int_to_cstr(i);
+  sd_int_release(i);
+  char *m = sd_fmt("index out of range: %s with length %lld", v, (long long)len);
+  free(v);
+  crash_at(s, __builtin_return_address(0), m);
+}
+
 SD_NOINLINE sd_int sd_int_div_slow_at(sd_int a, sd_int b, const sd_site *s) {
   if (b.w == SD_INT(0).w) crash_at(s, __builtin_return_address(0), sd_fmt("division by zero"));
   return sd_int_div_slow(a, b);
@@ -2440,6 +2589,7 @@ SD_NOINLINE static int protect(sd_task *t, void (*fn)(void *), void *arg) {
   /* A crash may have cut short a free in progress on this thread (its queue
    * is the thread's), or a block section. */
   sd_free_queue_reset_();
+  if (t->wait_mode == SD_WM_INTR) intr_end(t);
   if (t->blockdepth > 0) {
     t->blockdepth = 1;
     sd_block_end();
@@ -3414,6 +3564,8 @@ static void wait_wake_locked(sd_task *m, int res) {
     char c = 1;
     ssize_t r = write(m->wake_w, &c, 1); /* a full pipe already has a wake-up pending */
     (void)r;
+  } else if (m->wait_mode == SD_WM_INTR && res == SD_WR_STOP) {
+    intr_list_locked(m, true);
   }
 }
 
@@ -4053,15 +4205,22 @@ int sd_handle_read_all(sd_handle *h, sd_str *out, int *err) {
 int sd_handle_write(sd_handle *h, const char *data, int64_t len, int *err) {
   size_t off = 0, n = (size_t)len;
   while (off < n) {
-    if (!h->nonblock) sd_block_begin(); /* a file, or a pipe that may be full */
+    /* A file, or a FIFO that may be full (and stay full): interruptible. */
+    if (!h->nonblock) sd_block_begin_intr();
     ssize_t r = h->kind == SD_HANDLE_CONN ? send(h->fd, data + off, n - off, SD_MSG_NOSIGNAL) : write(h->fd, data + off, n - off);
     int e = errno;
-    if (!h->nonblock) sd_block_end();
+    if (!h->nonblock) sd_block_end_intr();
     if (r > 0) {
       off += (size_t)r;
       continue;
     }
-    if (r < 0 && e == EINTR) continue;
+    if (r < 0 && e == EINTR) {
+      if (!h->nonblock && sd_stopping()) {
+        sd_handle_release(h);
+        sd_stop();
+      }
+      continue;
+    }
     if (r < 0 && e != EAGAIN && e != EWOULDBLOCK) {
       *err = e;
       return SD_IO_ERROR;
@@ -4099,12 +4258,25 @@ sd_err sd_handle_error(const char *fn, const sd_handle *h, int kind, int result,
 /* -fsanitize=leak (tests/leaks.sh on Linux): _exit skips LeakSanitizer's
  * own check at exit, so it runs here. */
 void __lsan_do_leak_check(void);
+void __lsan_register_root_region(const void *p, size_t size);
+
+/* LeakSanitizer does not scan goroutine stacks. What the goroutine that
+ * ends the program (os.exit) holds in its frames is not leaked: its stack
+ * is scanned too. */
+static SD_NOINLINE void leak_check_roots(void) {
+  sd_m *m = tls_m();
+  sd_task *t = m ? m->curg : NULL;
+  char here;
+  char *sp = &here - 256;
+  if (t && t->stk.lo && sp >= t->stk.lo && sp < t->stk.hi) __lsan_register_root_region(sp, (size_t)(t->stk.hi - sp));
+}
 #endif
 
 void sd_exit_process(int code) {
   fflush(stdout);
   fflush(stderr);
 #if defined(SD_LEAK_CHECK)
+  leak_check_roots();
   __lsan_do_leak_check();
 #endif
   _exit(code);
@@ -4224,6 +4396,9 @@ static SD_NORETURN void main_goroutine(sd_task *t) {
   for (int i = 0; i < main_args.argc; i++) SD_LIST_PUSH(&args, sd_str, sd_str_from_cstr(main_args.argv[i]));
   main_call mc = {main_args.fn, args, SD_ERR_NULL};
   int r = protect(t, run_main, &mc);
+  /* What is left is released before exiting, so that a leak checker sees
+   * only real leaks. */
+  sd_list_release(args);
   if (r != SD_RAISE_NONE) {
     char *msg;
     take_raise(t, &msg);
@@ -4231,9 +4406,10 @@ static SD_NORETURN void main_goroutine(sd_task *t) {
     fflush(stdout);
     fprintf(stderr, "crash: %s\n", msg);
     if (trace) fputs(trace, stderr);
+    free(msg);
+    free(trace);
     sd_exit_process(2);
   }
-  sd_list_release(args);
   if (!sd_err_is_null(mc.result)) {
     sd_str m = sd_err_message(mc.result);
     fflush(stdout);
@@ -4243,6 +4419,8 @@ static SD_NORETURN void main_goroutine(sd_task *t) {
     /* A goroutine's crash that main returned: where it happened. */
     const char *trace = sd_err_trace(mc.result);
     if (trace) fputs(trace, stderr);
+    sd_str_release(m);
+    sd_err_release(mc.result);
     sd_exit_process(1);
   }
   sd_exit_process(0);

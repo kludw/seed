@@ -154,7 +154,11 @@ Three proposals of the runtime work were implemented in the compiler
 3. **Cleanup frames**, so that a crash or a stopped goroutine releases what
    the unwound frames held (runtime/README.md, sections 9 and 17). Only
    values that live across a call that may crash are kept in a frame, and
-   ints and data-less enums never are; no benchmark changed measurably. The
+   data-less enums never are; no benchmark changed measurably. (Ints were
+   left out too at first; they are in frames now, so that a crash does not
+   leak a big integer: the compiler compiling itself executes 2.8% more
+   instructions, the benchmarks less than 1% more, `spawn` 2.1%;
+   compiler/README.md, "Decisions".) The
    compiler compiling itself, which copies many structs with strings into
    locals across calls, is about 7% slower (112 ms to 120 ms): a thread-local
    access per call of a function with a frame (about 1%), its values kept in

@@ -37,6 +37,7 @@ fn (Gen g) mut genUnits([]string natives) []Unit {
     g.findFastFns()
     g.findPreemptFns()
     g.genProtos()
+    g.markLiteralConsts()
     []Unit out = []Unit{}
     for (int p = 1; p < g.c.ast.pkgs.len(); p++) {
         out.push(Unit{path: g.c.ast.pkgs[p].path, root: false, text: g.genUnit(p, natives[p])})

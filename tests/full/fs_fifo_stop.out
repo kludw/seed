@@ -1,0 +1,6 @@
+enough
+lock: enough
+done
+true
+deferred append ran
+appendLog wrote 0 bytes

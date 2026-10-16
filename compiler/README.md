@@ -711,8 +711,8 @@ with `siglongjmp`, so the generated releases do not run; what the locals
 and temporaries own is released through the function's frame instead
 (`genFn`):
 
-- A slot whose type lives in frames (`frameCounted`: counted types except
-  `int`, and except enums whose cases have no data, whose values are all
+- A slot whose type lives in frames (`frameCounted`: counted types, `int`
+  included, except enums whose cases have no data, whose values are all
   immortal) is a field of the function's struct `L` (`frameField`):
   `L.l_name`, `L._t3`. Locals of one name and type in sibling blocks share a
   field.
@@ -733,14 +733,30 @@ and temporaries own is released through the function's frame instead
   function and any unit.
 - A return computes its result, leaves the frame (`SD_LF_LEAVE`), and then
   releases without nulling.
-- Only the fields that need it are kept: while the body is generated, frame
-  slots have placeholder names, `emit` counts the lines that may crash
-  (`lineMayCrash`: any call other than the retains, releases, constructors
-  and other runtime calls of `safeCallSet` that cannot crash), and
-  `slotEnd` marks the field of a slot that owned its value while such a
-  line was emitted. The other placeholders become plain C locals
-  (`expandFrame`), and a function without needed fields has no frame (most
-  temporaries live from one call to the next statement).
+- Only the fields that need it are kept: while the body is generated,
+  frame slots have placeholder names, `emit` counts the lines that may
+  crash (`lineMayCrash`: any call other than the retains, releases,
+  constructors and other runtime calls of `safeCallSet` that cannot
+  crash, `SD_LF_LEAVE` and the constants whose value is a literal,
+  `markLiteralConsts`), and `slotEnd` marks the field of a slot that owned
+  its value while such a line was emitted. The other placeholders become
+  plain C locals (`expandFrame`), and a function without needed fields has
+  no frame (most temporaries live from one call to the next statement).
+- Ints are in frames because a big integer owns memory; a small one owns
+  nothing, so a field costs only its stores and loads. The most common
+  int temporary that lives across a crash point is an index computed for
+  one check (`a.lists[start + i]`, `xs[f(x)]`): the check itself is the
+  crash point. `gindex` marks such a check (`takeMark`, a `\x03` after its
+  name) when the index is an owned int temporary, and `emit` resolves the
+  mark when the line is complete (`resolveTake`): if nothing could crash
+  since the temporary got its value, the line runs unconditionally (no
+  `&&`, `||`, `?:`, block or `if`), and every other call on it that may
+  crash encloses the check (so it runs after it), the check *takes* the
+  temporary (`SD_LIST_TAKE_AT`, `sd_str_at_take`: out of range, the
+  runtime releases the index before crashing; in range, it is small) and
+  the temporary's ownership ends there, without a field. Otherwise the
+  mark is dropped and the temporary is released as before. Ast.at, the
+  compiler's hottest small function, so has no frame.
 
 *Crash sites* (gen_site.sd; runtime/README.md, "Crash traces"): every
 unit has a table of sites (`sd_sites_root`, `sd_sites_<cprefix>`, or
@@ -1445,6 +1461,19 @@ forward one release at a time.
   compiler compiling itself 13%; keeping only the fields that need it, and
   leaving out enums without data, brought that to 7%. The bench programs
   did not change measurably either way.
+- **Ints are in cleanup frames,** so that a crash or a stop does not leak
+  a big integer held by an `int` local or temporary. Unboxed locals (the
+  interval analysis) are plain `int64_t` and never in frames. The rest
+  cost the compiler compiling itself 2.8% more instructions (6.3% before
+  index checks took their temporaries, `resolveTake`, and `SD_LF_LEAVE`
+  and literal constants stopped counting as crash points); the bench
+  programs' instruction counts changed by less than 1% (`fib`,
+  `intloop`, `sort`, `strings` and `bigint` by less than 0.001%, `json`
+  0.4% fewer), except `spawn`'s, 2.1% more (`square`'s temporaries live
+  across the send). A cheaper frame would have
+  needed another way to find the frames at a crash (scanning the stack
+  for marked frames) or to link them lazily; neither was worth its
+  risk.
 - **Small ints are found by a flow-insensitive interval analysis** over the
   whole function: simple, and enough for loop counters, lengths and
   constants. Lengths are bounded only by the small range (the runtime's own
@@ -1486,10 +1515,9 @@ forward one release at a time.
 
 ## Known limitations
 
-- A crash or a stopped goroutine still leaks a big integer held by an `int`
-  local (ints are not in cleanup frames), and what a native function holds
+- A crash or a stopped goroutine still leaks what a native function holds
   in its C locals when it crashes; everything else the unwound frames held
-  is released.
+  is released, big integers included.
 - When a group fails, only its goroutines are stopped, not the code of the
   group block (it is not a goroutine of the group). A block that waits on a
   channel only the stopped goroutines would have served ends in the

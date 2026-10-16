@@ -8,11 +8,13 @@
 #include <fcntl.h>
 #include <limits.h>
 #include <pthread.h>
+#include <sched.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <time.h>
 #include <unistd.h>
 
 static sd_err fs_errorf(const char *fn, const char *path, int e) { return sd_errorf("fs.%s: %s: %s", fn, path, sd_strerror(e)); }
@@ -49,34 +51,56 @@ static sd_err fs_nul_error(const char *fn, sd_str path) {
     if (fs_has_nul(path)) return fs_nul_error(fn, path); \
   } while (0)
 
-/* Writes all n bytes to fd, retrying after signals and short writes.
- * Returns 0 or the errno. */
+/* Opening a FIFO waits for its other end, and writing to one waits while
+ * it is full, for ever if nobody reads: both are made in interruptible
+ * block sections (seed.h), so that stopping the goroutine interrupts them
+ * (EINTR). FS_STOPPED: the goroutine was stopped; the caller releases what
+ * it holds and calls sd_stop(). On a regular file nothing is interrupted. */
+#define FS_STOPPED (-1000)
+
+/* Writes all n bytes to fd, retrying after short writes. Returns 0, the
+ * errno, or FS_STOPPED. */
 static int fs_write_all(int fd, const char *p, size_t n) {
+  int e = 0;
+  sd_block_begin_intr();
   while (n > 0) {
     ssize_t w = write(fd, p, n);
-    if (w < 0 && errno == EINTR) continue;
-    if (w < 0) return errno;
-    if (w == 0) return EIO;
+    if (w < 0 && errno == EINTR) {
+      if (sd_stopping()) {
+        e = FS_STOPPED;
+        break;
+      }
+      continue;
+    }
+    if (w < 0) {
+      e = errno;
+      break;
+    }
+    if (w == 0) {
+      e = EIO;
+      break;
+    }
     p += w;
     n -= (size_t)w;
   }
-  return 0;
+  sd_block_end_intr();
+  return e;
 }
 
-static int fs_open_retry_blocking(const char *path, int flags, mode_t mode);
-
-/* open() may block (a FIFO waits for its other end): in a block section. */
+/* open(), in an interruptible block section (a FIFO waits for its other
+ * end). Returns the descriptor, -1 with errno set, or FS_STOPPED. */
 static int fs_open_retry(const char *path, int flags, mode_t mode) {
-  sd_block_begin();
-  int fd = fs_open_retry_blocking(path, flags, mode);
-  sd_block_end();
-  return fd;
-}
-
-static int fs_open_retry_blocking(const char *path, int flags, mode_t mode) {
   int fd;
-  do fd = open(path, flags | O_CLOEXEC, mode);
-  while (fd < 0 && errno == EINTR);
+  sd_block_begin_intr();
+  for (;;) {
+    fd = open(path, flags | O_CLOEXEC, mode);
+    if (fd >= 0 || errno != EINTR) break;
+    if (sd_stopping()) {
+      fd = FS_STOPPED;
+      break;
+    }
+  }
+  sd_block_end_intr();
   return fd;
 }
 
@@ -90,9 +114,11 @@ sd_err sd_lib_fs_read(sd_str path, sd_str *out) {
 static sd_err fs_write_blocking(sd_str path, sd_str data) {
   FS_CHECK_PATH("write", path);
   int fd = fs_open_retry(path->data, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+  if (fd == FS_STOPPED) sd_stop();
   if (fd < 0) return fs_errorf("write", path->data, errno);
   int e = fs_write_all(fd, data->data, (size_t)data->len);
   if (close(fd) != 0 && e == 0 && errno != EINTR) e = errno;
+  if (e == FS_STOPPED) sd_stop();
   if (e) return fs_errorf("write", path->data, e);
   return SD_ERR_NULL;
 }
@@ -102,14 +128,38 @@ static sd_err fs_write_blocking(sd_str path, sd_str data) {
  * writes from different processes apart on a local file system. */
 static pthread_mutex_t fs_append_mu = PTHREAD_MUTEX_INITIALIZER;
 
+/* Takes fs_append_mu. Another goroutine's append may hold it for long (to
+ * a full FIFO), so a stopped goroutine gives up after waiting 10 ms
+ * (false). A short wait, for an append to a regular file, does not stop
+ * it: its defers may append to a log. */
+static bool fs_append_lock(void) {
+  long waited = 0;
+  for (long ns = 1000;; ns = ns < 1000000 ? ns * 2 : ns) {
+    if (pthread_mutex_trylock(&fs_append_mu) == 0) return true;
+    if (waited >= 10000000 && sd_stopping()) return false;
+    waited += ns;
+    if (ns < 16000) {
+      sched_yield();
+      continue;
+    }
+    struct timespec ts = {0, ns};
+    nanosleep(&ts, NULL);
+  }
+}
+
 static sd_err fs_append_blocking(sd_str path, sd_str data) {
   FS_CHECK_PATH("append", path);
   int fd = fs_open_retry(path->data, O_WRONLY | O_CREAT | O_APPEND, 0644);
+  if (fd == FS_STOPPED) sd_stop();
   if (fd < 0) return fs_errorf("append", path->data, errno);
-  pthread_mutex_lock(&fs_append_mu);
+  if (!fs_append_lock()) {
+    close(fd);
+    sd_stop();
+  }
   int e = fs_write_all(fd, data->data, (size_t)data->len);
   pthread_mutex_unlock(&fs_append_mu);
   if (close(fd) != 0 && e == 0 && errno != EINTR) e = errno;
+  if (e == FS_STOPPED) sd_stop();
   if (e) return fs_errorf("append", path->data, e);
   return SD_ERR_NULL;
 }
@@ -271,6 +321,7 @@ static sd_err fs_makeTemp_blocking(sd_str prefix, sd_str *out) {
 static sd_err fs_open_file(const char *fn, sd_str path, int flags, bool writing, sd_S_fs_File *out) {
   FS_CHECK_PATH(fn, path);
   int fd = fs_open_retry(path->data, flags, 0644);
+  if (fd == FS_STOPPED) sd_stop();
   if (fd < 0) return fs_errorf(fn, path->data, errno);
   if (!writing) {
     struct stat st;

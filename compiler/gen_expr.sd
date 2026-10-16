@@ -750,13 +750,13 @@ fn (Gen g) mut gindex(int e) string {
     ExprInfo i = g.c.info[e]
     []string vals = g.operands([]int{x.a, x.b})
     if (i.res == Res.StringIndex) {
-        return "sd_str_at_s(" + vals[0] + ", " + vals[1] + ", " + g.siteAddr(g.c.ast.exprs[x.a].pos) + ")"
+        return "sd_str_at_s" + g.takeMark(vals[1]) + "(" + vals[0] + ", " + vals[1] + ", " + g.siteAddr(g.c.ast.exprs[x.a].pos) + ")"
     }
     if (i.res == Res.ListIndex) {
         // The list's own element type: the expression's type may be the
         // T? it was widened to (return xs[i] from a function returning T?).
         int el = g.elemOf(g.typeOf(x.a))
-        string v = "SD_LIST_GET_AT(" + vals[0] + ", " + g.ctype(el) + ", " + vals[1] + ", " + g.siteAddr(g.c.ast.exprs[x.a].pos) + ")"
+        string v = "SD_LIST_GET_AT" + g.takeMark(vals[1]) + "(" + vals[0] + ", " + g.ctype(el) + ", " + vals[1] + ", " + g.siteAddr(g.c.ast.exprs[x.a].pos) + ")"
         if (i.narrowed) {
             return g.unwrapVal(el, v)
         }

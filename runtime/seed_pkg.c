@@ -5,6 +5,7 @@
 #include "seed_internal.h"
 
 #include <dirent.h>
+#include <fcntl.h>
 #include <limits.h>
 #include <spawn.h>
 #include <sys/stat.h>
@@ -146,26 +147,49 @@ sd_err sd_os_run(const sd_list *argv, sd_int *code) {
 
 static sd_err fs_err(const char *fn, sd_str path, int e) { return sd_errorf("fs.%s: %s: %s", fn, path->data, sd_strerror(e)); }
 
-static sd_err sd_fs_read_blocking_(sd_str path, sd_str *out) {
+/* The whole file, in an interruptible block section (seed.h): a FIFO's
+ * open waits for a writer, and its reads for data. Stopped: the goroutine
+ * was stopped meanwhile (*stopped is set, nothing is held). */
+static sd_err sd_fs_read_blocking_(sd_str path, sd_str *out, bool *stopped) {
   *out = NULL;
-  FILE *f = fopen(path->data, "rb");
-  if (!f) return fs_err("read", path, errno);
+  int fd;
+  for (;;) {
+    fd = open(path->data, O_RDONLY | O_CLOEXEC);
+    if (fd >= 0 || errno != EINTR) break;
+    if (sd_stopping()) {
+      *stopped = true;
+      return SD_ERR_NULL;
+    }
+  }
+  if (fd < 0) return fs_err("read", path, errno);
+  struct stat st;
   int64_t cap = 4096, n = 0;
+  if (fstat(fd, &st) == 0 && S_ISREG(st.st_mode) && st.st_size > 0 && st.st_size < INT64_MAX / 2) cap = (int64_t)st.st_size + 1;
   char *buf = sd_alloc((size_t)cap);
+  int bad = 0;
   for (;;) {
     if (n == cap) {
       cap *= 2;
       buf = sd_realloc(buf, (size_t)cap);
     }
-    size_t r = fread(buf + n, 1, (size_t)(cap - n), f);
-    n += (int64_t)r;
+    ssize_t r = read(fd, buf + n, (size_t)(cap - n));
+    if (r > 0) {
+      n += (int64_t)r;
+      continue;
+    }
     if (r == 0) break;
+    if (errno == EINTR) {
+      if (!sd_stopping()) continue;
+      *stopped = true;
+      break;
+    }
+    bad = errno;
+    break;
   }
-  int bad = ferror(f) ? (errno ? errno : EIO) : 0;
-  fclose(f);
-  if (bad) {
+  close(fd);
+  if (bad || *stopped) {
     free(buf);
-    return fs_err("read", path, bad);
+    return bad ? fs_err("read", path, bad) : SD_ERR_NULL;
   }
   *out = sd_str_new(buf, n);
   free(buf);
@@ -236,9 +260,11 @@ static sd_err sd_fs_remove_blocking_(sd_str path) {
 }
 
 sd_err sd_fs_read(sd_str path, sd_str *out) {
-  sd_block_begin();
-  sd_err r = sd_fs_read_blocking_(path, out);
-  sd_block_end();
+  bool stopped = false;
+  sd_block_begin_intr();
+  sd_err r = sd_fs_read_blocking_(path, out, &stopped);
+  sd_block_end_intr();
+  if (stopped) sd_stop();
   return r;
 }
 
